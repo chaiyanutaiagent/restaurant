@@ -198,7 +198,6 @@ class DiningTable(UUIDMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     zone: Mapped[str] = mapped_column(String(100), nullable=False, server_default=text("'โซนทั่วไป'"))
     capacity: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("4"))
-    qr_token: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True, server_default=text("gen_random_uuid()"))
     table_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'dine_in'"))
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'available'"))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))

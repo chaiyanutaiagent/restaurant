@@ -88,7 +88,7 @@ export default function RestaurantIndexPage(): JSX.Element {
       permission: "fb.settings.manage",
       icon: <QrCode className="h-7 w-7" />,
       title: "QR รับออเดอร์",
-      desc: hasTables ? "จัดการ QR ประจำโต๊ะและ QR สั่งกลับบ้าน" : "สร้าง QR สำหรับสั่งกลับบ้านและรับเลขคิว",
+      desc: hasTables ? "จัดการ QR ต่อรอบเปิดโต๊ะและ QR สั่งกลับบ้าน" : "สร้าง QR สำหรับสั่งกลับบ้านและรับเลขคิว",
       color: "bg-slate-600",
     },
     {

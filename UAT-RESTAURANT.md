@@ -37,9 +37,11 @@ source project.
 |---|---|---|---|---|
 | 01.1 | Open `/restaurant/tables` | Table Map loads and shows table summary | | |
 | 01.2 | Create a new table | Table appears with status `ว่าง` | | |
-| 01.3 | Open QR dialog for a table | QR and customer URL are visible | | |
-| 01.4 | Copy QR link | Link copies successfully | | |
-| 01.5 | Open copied link in browser/mobile | Customer menu loads without login | | |
+| 01.3 | Try QR on an available table | QR action is disabled until the table is opened | | |
+| 01.4 | Open the table | A new session QR is created and print dialog opens automatically | | |
+| 01.5 | Copy/open the current session QR | Customer menu loads without login | | |
+| 01.6 | Close the table and open the old QR | Old QR reports expired/not found | | |
+| 01.7 | Reopen the same table | New QR differs from the previous session QR | | |
 
 ## TC-FB-02 Dine-In Customer Ordering
 
@@ -52,6 +54,8 @@ source project.
 | 02.5 | Submit order | Cart clears and order status appears | | |
 | 02.6 | Refresh customer page | Order status remains visible | | |
 | 02.7 | Add another order from same QR | Order is added to same session | | |
+| 02.8 | Review order history | Every order round, item status, and estimated total are visible | | |
+| 02.9 | Request bill when enabled | Table becomes bill requested and customer cannot order more | | |
 
 ## TC-FB-03 Quick Service Customer Ordering
 

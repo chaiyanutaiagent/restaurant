@@ -240,7 +240,6 @@ class TableRead(BaseSchema):
     name: str
     zone: str
     capacity: int
-    qr_token: uuid.UUID
     session_qr_token: uuid.UUID | None = None
     table_type: str
     status: str
@@ -322,13 +321,13 @@ class SessionRead(BaseSchema):
 
 class OrderItemCreate(BaseSchema):
     product_id: uuid.UUID
-    qty: int = 1
-    special_request: str | None = None
+    qty: int = Field(default=1, ge=1, le=99)
+    special_request: str | None = Field(default=None, max_length=500)
 
 
 class PlaceOrderRequest(BaseSchema):
-    items: list[OrderItemCreate]
-    note: str | None = None
+    items: list[OrderItemCreate] = Field(min_length=1, max_length=50)
+    note: str | None = Field(default=None, max_length=1000)
 
 
 class CancelRequest(BaseSchema):
@@ -624,14 +623,26 @@ class PublicMenuProduct(BaseSchema):
 
 
 class PublicMenuResponse(BaseSchema):
-    session_id: uuid.UUID | None
+    session_id: uuid.UUID
     queue_number: int | None
     table_name: str | None
     branch_name: str
     fb_service_mode: str
     categories: list[dict]
     products: list[PublicMenuProduct]
-    session_status: str | None = None
+    session_status: str
+    opened_at: str
+    bill_at_table_enabled: bool = False
+
+
+class PublicOrderHistory(BaseSchema):
+    id: uuid.UUID
+    order_number: str
+    status: str
+    note: str | None
+    created_at: str
+    subtotal: Decimal
+    items: list[DiningOrderItemRead]
 
 
 class PublicOrderStatus(BaseSchema):
@@ -639,6 +650,9 @@ class PublicOrderStatus(BaseSchema):
     queue_number: int | None
     session_status: str
     items: list[DiningOrderItemRead]
+    orders: list[PublicOrderHistory]
+    total_item_count: int
+    total_amount: Decimal
 
 
 # ── Ingredient Usage Report ───────────────────────────────────────────────────

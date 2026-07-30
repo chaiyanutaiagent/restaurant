@@ -4,6 +4,7 @@ import {
   ChefHat,
   ChevronRight,
   Clock3,
+  History,
   Loader2,
   ReceiptText,
   Utensils
@@ -28,23 +29,38 @@ import {
 type MenuItem = MobileMenuItem;
 
 type MenuResponse = {
-  session_id: string | null;
+  session_id: string;
   queue_number: number | null;
   table_name: string | null;
   branch_name: string;
   fb_service_mode: string;
   categories: { id: string; name: string }[];
   products: MenuItem[];
-  session_status: string | null;
+  session_status: string;
+  opened_at: string;
+  bill_at_table_enabled: boolean;
 };
 
 type CartItem = MobileCartItem<MenuItem>;
+
+type OrderHistory = {
+  id: string;
+  order_number: string;
+  status: string;
+  note: string | null;
+  created_at: string;
+  subtotal: number;
+  items: { id: string; product_name: string; qty: number; unit_price: number; status: string; special_request?: string | null }[];
+};
 
 type OrderStatus = {
   session_id: string;
   queue_number: number | null;
   session_status: string;
-  items: { id: string; product_name: string; qty: number; status: string; special_request?: string | null }[];
+  items: { id: string; product_name: string; qty: number; unit_price: number; status: string; special_request?: string | null }[];
+  orders: OrderHistory[];
+  total_item_count: number;
+  total_amount: number;
 };
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
@@ -64,6 +80,10 @@ function getErrorMessage(error: unknown): string | null {
   return error instanceof Error ? error.message : "ทำรายการไม่สำเร็จ";
 }
 
+function isNotFoundError(error: unknown): boolean {
+  return axios.isAxiosError(error) && error.response?.status === 404;
+}
+
 function readCartCache(token?: string): CartItem[] {
   if (!token) return [];
   const raw = localStorage.getItem(`dining-cart-${token}`);
@@ -77,6 +97,13 @@ function readCartCache(token?: string): CartItem[] {
   }
 }
 
+function formatOrderTime(value: string): string {
+  return new Intl.DateTimeFormat("th-TH", {
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
 export default function CustomerMenuPage(): JSX.Element {
   const { token } = useParams<{ token: string }>();
   const queryClient = useQueryClient();
@@ -84,7 +111,6 @@ export default function CustomerMenuPage(): JSX.Element {
   const [cartOpen, setCartOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(true);
   const [note, setNote] = useState("");
   const [customProduct, setCustomProduct] = useState<MenuItem | null>(null);
@@ -110,25 +136,17 @@ export default function CustomerMenuPage(): JSX.Element {
     }
   }, [cart, token]);
 
-  useEffect(() => {
-    const stored = localStorage.getItem(`dining-session-${token}`);
-    if (stored) setSessionId(stored);
-    if (menu?.session_id && !sessionId) {
-      setSessionId(menu.session_id);
-      localStorage.setItem(`dining-session-${token}`, menu.session_id);
-    }
-  }, [menu?.session_id, sessionId, token]);
-
   const statusQuery = useQuery({
-    queryKey: ["order-status", sessionId],
+    queryKey: ["order-status", token],
     queryFn: async () =>
-      (await axios.get(`/api/public/menu/${token}/status?session_id=${sessionId}`)).data.data as OrderStatus,
-    enabled: Boolean(sessionId),
-    refetchInterval: 8_000
+      (await axios.get(`/api/public/menu/${token}/status`)).data.data as OrderStatus,
+    enabled: Boolean(token && menu?.session_id),
+    refetchInterval: 8_000,
+    retry: false
   });
 
   useEffect(() => {
-    const items = statusQuery.data?.items ?? [];
+    const items = (statusQuery.data?.items ?? []).filter((item) => item.status !== "cancelled");
     const allDone = items.length > 0 && items.every((item) => item.status === "done" || item.status === "served");
     if (!allDone) return;
     if (statusQuery.data?.session_id === notifiedDoneSessionRef.current) return;
@@ -159,9 +177,7 @@ export default function CustomerMenuPage(): JSX.Element {
       });
       return res.data.data as { session_id: string; queue_number: number | null };
     },
-    onSuccess: (data) => {
-      setSessionId(data.session_id);
-      localStorage.setItem(`dining-session-${token}`, data.session_id);
+    onSuccess: () => {
       setCart([]);
       setCartOpen(false);
       setShowMenu(false);
@@ -171,7 +187,7 @@ export default function CustomerMenuPage(): JSX.Element {
   });
 
   const billMutation = useMutation({
-    mutationFn: async () => axios.post(`/api/public/menu/${token}/bill?session_id=${sessionId}`),
+    mutationFn: async () => axios.post(`/api/public/menu/${token}/bill`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["order-status"] })
   });
 
@@ -222,11 +238,20 @@ export default function CustomerMenuPage(): JSX.Element {
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
   const orderStatus = statusQuery.data;
   const queueNum = orderStatus?.queue_number ?? menuQuery.data?.queue_number;
-  const hasOrderItems = (orderStatus?.items ?? []).length > 0;
-  const allDone = hasOrderItems && (orderStatus?.items ?? []).every((item) => item.status === "done" || item.status === "served");
-  const canOrder = !orderStatus || orderStatus.session_status === "open";
+  const activeOrderItems = (orderStatus?.items ?? []).filter((item) => item.status !== "cancelled");
+  const hasOrderItems = activeOrderItems.length > 0;
+  const allDone = hasOrderItems && activeOrderItems.every((item) => item.status === "done" || item.status === "served");
+  const canOrder = (orderStatus?.session_status ?? menu?.session_status) === "open";
   const orderError = getErrorMessage(orderMutation.error);
   const billError = getErrorMessage(billMutation.error);
+  const sessionExpired = isNotFoundError(statusQuery.error);
+
+  useEffect(() => {
+    const currentStatus = statusQuery.data?.session_status ?? menu?.session_status;
+    if (currentStatus && currentStatus !== "open") {
+      setCartOpen(false);
+    }
+  }, [menu?.session_status, statusQuery.data?.session_status]);
 
   if (menuQuery.isLoading) {
     return (
@@ -236,12 +261,14 @@ export default function CustomerMenuPage(): JSX.Element {
     );
   }
 
-  if (!menu) {
+  if (!menu || sessionExpired) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 text-center">
         <div>
-          <p className="text-2xl font-bold text-slate-800">ไม่พบเมนูนี้</p>
-          <p className="mt-2 text-slate-500">QR อาจหมดอายุหรือไม่ถูกต้อง</p>
+          <p className="text-2xl font-bold text-slate-800">{sessionExpired ? "QR รอบนี้หมดอายุแล้ว" : "ไม่พบเมนูนี้"}</p>
+          <p className="mt-2 text-slate-500">
+            {sessionExpired ? "โต๊ะถูกปิดแล้ว กรุณาติดต่อพนักงานหากต้องการความช่วยเหลือ" : "QR อาจหมดอายุหรือไม่ถูกต้อง"}
+          </p>
         </div>
       </div>
     );
@@ -291,7 +318,7 @@ export default function CustomerMenuPage(): JSX.Element {
           </section>
         ) : null}
 
-        {sessionId && !orderStatus && statusQuery.isLoading ? (
+        {menu.session_id && !orderStatus && statusQuery.isLoading ? (
           <section className="mx-4 mt-4 rounded-2xl border border-sky-200 bg-sky-50 p-4 shadow-sm">
             <div className="flex items-center gap-3 text-sky-800">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -303,7 +330,7 @@ export default function CustomerMenuPage(): JSX.Element {
           </section>
         ) : null}
 
-        {orderStatus ? (
+        {orderStatus && (hasOrderItems || orderStatus.session_status === "bill_requested") ? (
           <section className={`mx-4 mt-4 rounded-2xl border p-4 shadow-sm ${allDone ? "border-emerald-200 bg-emerald-50" : "border-sky-200 bg-sky-50"}`}>
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -314,7 +341,7 @@ export default function CustomerMenuPage(): JSX.Element {
                   อัปเดตอัตโนมัติทุก 8 วินาที
                 </p>
               </div>
-              {orderStatus.session_status === "open" ? (
+              {orderStatus.session_status === "open" && menu.bill_at_table_enabled ? (
                 <button
                   type="button"
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-slate-950 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
@@ -326,7 +353,16 @@ export default function CustomerMenuPage(): JSX.Element {
                 </button>
               ) : null}
             </div>
-            <StatusList items={orderStatus.items} labels={STATUS_LABEL} />
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-xl bg-white px-3 py-2">
+                <p className="text-xs text-slate-500">จำนวนที่สั่ง</p>
+                <p className="font-bold text-slate-950">{orderStatus.total_item_count} รายการ</p>
+              </div>
+              <div className="rounded-xl bg-white px-3 py-2 text-right">
+                <p className="text-xs text-slate-500">ยอดรวมโดยประมาณ</p>
+                <p className="font-bold text-emerald-700">{formatCurrency(Number(orderStatus.total_amount))}</p>
+              </div>
+            </div>
             {allDone ? (
               <div className="mt-3 flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-emerald-800">
                 <CheckCircle2 className="h-5 w-5" />
@@ -350,6 +386,40 @@ export default function CustomerMenuPage(): JSX.Element {
           </section>
         ) : null}
 
+        {orderStatus?.orders.length ? (
+          <section className="mx-4 mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-2">
+              <History className="h-5 w-5 text-slate-700" />
+              <div>
+                <p className="font-bold text-slate-950">รายการที่สั่งในรอบนี้</p>
+                <p className="text-xs text-slate-500">รวมทุกครั้งที่สั่งจาก QR ใบนี้</p>
+              </div>
+            </div>
+            <div className="mt-4 space-y-4">
+              {orderStatus.orders.map((order, index) => (
+                <div key={order.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-950 text-xs font-bold text-white">
+                        {index + 1}
+                      </span>
+                      <div>
+                        <p className="text-sm font-bold text-slate-950">สั่งเวลา {formatOrderTime(order.created_at)} น.</p>
+                        <p className="text-[11px] text-slate-500">{order.order_number}</p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-bold text-emerald-700">{formatCurrency(Number(order.subtotal))}</span>
+                  </div>
+                  {order.note ? (
+                    <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">หมายเหตุ: {order.note}</div>
+                  ) : null}
+                  <StatusList items={order.items} labels={STATUS_LABEL} />
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         {showMenu && canOrder ? (
           <>
             <MenuSearch value={searchTerm} onChange={setSearchTerm} />
@@ -363,7 +433,7 @@ export default function CustomerMenuPage(): JSX.Element {
         ) : null}
       </main>
 
-      {!cartOpen ? <CartBar count={cartCount} total={cartTotal} onOpen={() => setCartOpen(true)} /> : null}
+      {!cartOpen && canOrder ? <CartBar count={cartCount} total={cartTotal} onOpen={() => setCartOpen(true)} /> : null}
       <CartSheet
         open={cartOpen}
         title="ตรวจสอบออเดอร์"
@@ -372,13 +442,13 @@ export default function CustomerMenuPage(): JSX.Element {
         note={note}
         notePlaceholder="หมายเหตุรวมสำหรับออเดอร์นี้"
         submitLabel="สั่งอาหาร"
-        isSubmitting={orderMutation.isPending}
+        isSubmitting={orderMutation.isPending || !canOrder}
         onClose={() => setCartOpen(false)}
         onRemove={removeFromCart}
         onQtyChange={updateQty}
         onItemNoteChange={updateItemNote}
         onNoteChange={setNote}
-        onSubmit={() => orderMutation.mutate()}
+        onSubmit={() => canOrder && orderMutation.mutate()}
       />
       <ItemDetailSheet
         product={customProduct}

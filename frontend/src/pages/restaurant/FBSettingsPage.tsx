@@ -117,7 +117,7 @@ export default function FBSettingsPage(): JSX.Element {
 
         {hasTables && (
           <Section title="บริการที่โต๊ะ">
-            <Toggle label="QR ประจำโต๊ะ" desc="ลูกค้าสแกน QR บนโต๊ะเพื่อสั่งอาหาร" checked={tableQr} onChange={setTableQr} />
+            <Toggle label="QR ต่อรอบเปิดโต๊ะ" desc="สร้างและพิมพ์ QR ใหม่เมื่อเปิดโต๊ะ และหมดอายุเมื่อปิดโต๊ะ" checked={tableQr} onChange={setTableQr} />
             <Toggle label="ลูกค้าขอบิลจาก QR ได้" desc="ปุ่ม 'เรียกบิล' บนหน้าเมนูลูกค้า" checked={billAtTable} onChange={setBillAtTable} />
           </Section>
         )}

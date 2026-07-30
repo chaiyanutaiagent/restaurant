@@ -139,13 +139,13 @@ export default function QRManagerPage(): JSX.Element {
                 <h4 className="font-semibold text-amber-800 mb-2">ข้อแตกต่างกับ QR โต๊ะ</h4>
                 <div className="text-sm text-amber-700 space-y-1">
                   <p>• <strong>QR กลับบ้าน:</strong> ลูกค้าแต่ละคนได้ออเดอร์และคิวของตัวเอง</p>
-                  <p>• <strong>QR โต๊ะ:</strong> ลูกค้าที่โต๊ะเดียวกันใช้ออเดอร์ร่วมกัน</p>
+                  <p>• <strong>QR โต๊ะ:</strong> ลูกค้าในรอบเปิดโต๊ะเดียวกันใช้ออเดอร์ร่วมกัน และ QR หมดอายุเมื่อปิดโต๊ะ</p>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                <h4 className="font-semibold text-slate-700 mb-2">QR ประจำโต๊ะ</h4>
-                <p className="text-sm text-slate-500">สร้าง QR ประจำแต่ละโต๊ะได้ที่</p>
+                <h4 className="font-semibold text-slate-700 mb-2">QR ต่อรอบเปิดโต๊ะ</h4>
+                <p className="text-sm text-slate-500">เปิดโต๊ะเพื่อสร้างและพิมพ์ QR ที่ใช้ได้เฉพาะรอบนั้น</p>
                 <Button variant="outline" className="mt-2 w-full" asChild>
                   <Link to="/restaurant/tables">แผนที่โต๊ะ →</Link>
                 </Button>

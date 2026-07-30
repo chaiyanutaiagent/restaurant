@@ -1391,7 +1391,6 @@ async def create_table(
     return ok(
         {
             "id": str(table.id),
-            "qr_token": str(table.qr_token),
             "name": table.name,
             "zone": table.zone,
         }
@@ -1552,7 +1551,11 @@ async def open_session(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ok({
         "id": str(session.id),
-        "qr_token": str(session.qr_token),
+        "qr_token": (
+            str(session.qr_token)
+            if branch_settings and branch_settings.fb_table_qr_enabled
+            else None
+        ),
         "queue_number": session.queue_number,
     })
 
@@ -1640,7 +1643,10 @@ async def place_order(
     branch_settings = await db.scalar(
         select(BranchSettings).where(BranchSettings.branch_id == session.branch_id)
     )
-    order = await svc.place_order(current.company_id, session.branch_id, session, payload, "staff", branch_settings)
+    try:
+        order = await svc.place_order(current.company_id, session.branch_id, session, payload, "staff", branch_settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ok({"id": str(order.id), "order_number": order.order_number})
 
 
@@ -5425,9 +5431,12 @@ async def public_place_order(
         select(BranchSettings).where(BranchSettings.branch_id == table.branch_id)
     )
 
-    order = await svc.place_order(
-        table.company_id, table.branch_id, session, payload, "qr_self", branch_settings,
-    )
+    try:
+        order = await svc.place_order(
+            table.company_id, table.branch_id, session, payload, "qr_self", branch_settings,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ok({
         "order_id": str(order.id),
         "order_number": order.order_number,
@@ -5439,16 +5448,16 @@ async def public_place_order(
 @public_router.get("/{qr_token}/status")
 async def public_order_status(
     qr_token: uuid.UUID,
-    session_id: uuid.UUID = Query(...),
+    session_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
     if not session:
         raise HTTPException(status_code=404, detail="ไม่พบ QR นี้")
-    if session.id != session_id:
+    if session_id is not None and session.id != session_id:
         raise HTTPException(status_code=404, detail="ไม่พบ session")
-    result = await svc.get_public_order_status(session_id)
+    result = await svc.get_public_order_status(session.id)
     if not result:
         raise HTTPException(status_code=404, detail="ไม่พบ session")
     return ok(result.model_dump())
@@ -5457,15 +5466,20 @@ async def public_order_status(
 @public_router.post("/{qr_token}/bill")
 async def public_request_bill(
     qr_token: uuid.UUID,
-    session_id: uuid.UUID = Query(...),
+    session_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
     if not session:
         raise HTTPException(status_code=404, detail="ไม่พบ QR นี้")
-    if session.id != session_id:
+    if session_id is not None and session.id != session_id:
         raise HTTPException(status_code=404, detail="ไม่พบ session")
+    settings = await db.scalar(
+        select(BranchSettings).where(BranchSettings.branch_id == session.branch_id)
+    )
+    if not settings or not settings.fb_bill_at_table:
+        raise HTTPException(status_code=403, detail="สาขานี้ยังไม่เปิดบริการเรียกบิลจาก QR")
     updated = await svc.request_bill(session)
     return ok({"status": updated.status})
 
@@ -5574,9 +5588,12 @@ async def qs_place_order(
         settings=settings,
     )
 
-    order = await svc.place_order(
-        branch.company_id, settings.branch_id, session, payload, "qr_self", settings,
-    )
+    try:
+        order = await svc.place_order(
+            branch.company_id, settings.branch_id, session, payload, "qr_self", settings,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     prefix = settings.fb_queue_prefix or ""
     return ok({

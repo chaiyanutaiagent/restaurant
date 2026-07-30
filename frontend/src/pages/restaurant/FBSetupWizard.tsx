@@ -499,8 +499,8 @@ export default function FBSetupWizard(): JSX.Element {
                   <div className="font-semibold text-orange-900">บริการที่โต๊ะ</div>
                   <div className="mt-4 space-y-3">
                     <SetupToggle
-                      label="QR ประจำโต๊ะ"
-                      description="ลูกค้าสแกน QR เพื่อดูเมนูและสั่งอาหาร"
+                      label="QR ต่อรอบเปิดโต๊ะ"
+                      description="สร้าง QR ใหม่เมื่อเปิดโต๊ะและหมดอายุเมื่อปิดโต๊ะ"
                       checked={form.table_qr_enabled}
                       onChange={(value) => set("table_qr_enabled", value)}
                     />
@@ -586,7 +586,7 @@ export default function FBSetupWizard(): JSX.Element {
                         value={`${zone.table_count} โต๊ะ · ${zone.table_capacity} ที่นั่งต่อโต๊ะ · ${zone.table_name_prefix.trim() || "โต๊ะ"} 1–${zone.table_count}`}
                       />
                     ))}
-                    <SummaryRow label="QR ประจำโต๊ะ" value={form.table_qr_enabled ? "เปิด" : "ปิด"} />
+                    <SummaryRow label="QR ต่อรอบเปิดโต๊ะ" value={form.table_qr_enabled ? "เปิด" : "ปิด"} />
                   </>
                 ) : null}
                 <SummaryRow

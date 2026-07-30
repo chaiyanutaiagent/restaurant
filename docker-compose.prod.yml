@@ -1,0 +1,157 @@
+# Runnable production deployment layer for Restaurant POS.
+# Create .env.production from .env.production.example before starting this stack.
+
+name: restaurant-pos-prod
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    env_file:
+      - ${PRODUCTION_ENV_FILE:-.env.production}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - restaurant_pos_prod
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - restaurant_pos_prod
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ${BACKEND_IMAGE:-restaurant-pos-backend:${RELEASE_VERSION:-local}}
+    restart: unless-stopped
+    env_file:
+      - ${PRODUCTION_ENV_FILE:-.env.production}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5).read()\""
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    expose:
+      - "8000"
+    networks:
+      - restaurant_pos_prod
+
+  migrate:
+    profiles:
+      - tools
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ${BACKEND_IMAGE:-restaurant-pos-backend:${RELEASE_VERSION:-local}}
+    env_file:
+      - ${PRODUCTION_ENV_FILE:-.env.production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    networks:
+      - restaurant_pos_prod
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ${FRONTEND_IMAGE:-restaurant-pos-frontend:${RELEASE_VERSION:-local}}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    expose:
+      - "80"
+    networks:
+      - restaurant_pos_prod
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile.prod
+      args:
+        NGINX_PROD_CONF: ${NGINX_PROD_CONF:-default.prod.conf}
+    image: ${NGINX_IMAGE:-restaurant-pos-nginx:${RELEASE_VERSION:-local}}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    ports:
+      - "${NGINX_BIND_ADDRESS:-127.0.0.1}:${RESTAURANT_HTTP_PORT:-8081}:80"
+      - "${NGINX_BIND_ADDRESS:-127.0.0.1}:${RESTAURANT_HTTPS_PORT:-8444}:443"
+    volumes:
+      # Mount host-managed certificates here for HTTPS mode, for example:
+      # /etc/letsencrypt:/etc/letsencrypt:ro
+      - ${LETSENCRYPT_HOST_PATH:-letsencrypt_certs}:/etc/letsencrypt:ro
+      - nginx_logs:/var/log/nginx
+    networks:
+      - restaurant_pos_prod
+
+  cloudflared:
+    profiles:
+      - cloudflare
+    image: cloudflare/cloudflared:2026.7.0
+    restart: unless-stopped
+    user: "${CLOUDFLARED_UID:-1000}:${CLOUDFLARED_GID:-1000}"
+    command:
+      [
+        "tunnel",
+        "--no-autoupdate",
+        "run",
+        "--token-file",
+        "/run/secrets/cloudflare-tunnel-token"
+      ]
+    volumes:
+      - ${CLOUDFLARE_TUNNEL_TOKEN_FILE:-./.secrets/cloudflare-tunnel-token}:/run/secrets/cloudflare-tunnel-token:ro
+    depends_on:
+      nginx:
+        condition: service_started
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - restaurant_pos_prod
+
+networks:
+  restaurant_pos_prod:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:
+  letsencrypt_certs:
+  nginx_logs:

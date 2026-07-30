@@ -1,0 +1,9 @@
+FROM nginx:1.27-alpine
+
+ARG NGINX_PROD_CONF=default.prod.conf
+
+RUN mkdir -p /etc/nginx/tls-templates
+
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY conf.d/${NGINX_PROD_CONF} /etc/nginx/conf.d/default.conf
+COPY conf.d/default.prod.https.template.conf /etc/nginx/tls-templates/default.prod.https.template.conf

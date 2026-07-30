@@ -1,0 +1,43 @@
+name: CI
+
+"on":
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  production-readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate shell scripts
+        run: sh -n scripts/*.sh
+
+      - name: Run Git safety check
+        run: ./scripts/pre-git-safety-check.sh
+
+      - name: Validate production compose config
+        env:
+          COMPOSE_PROFILES: cloudflare
+          CLOUDFLARE_TUNNEL_TOKEN_FILE: /tmp/cloudflare-tunnel-token
+          NGINX_BIND_ADDRESS: 127.0.0.1
+          NGINX_PROD_CONF: default.prod.cloudflare.conf
+          PRODUCTION_ENV_FILE: .env.production.example
+          RELEASE_VERSION: ci
+        run: docker compose -f docker-compose.prod.yml config
+
+      - name: Build backend production image
+        run: docker build -f backend/Dockerfile -t restaurant-pos-backend:ci ./backend
+
+      - name: Build frontend production image
+        run: docker build -f frontend/Dockerfile -t restaurant-pos-frontend:ci ./frontend
+
+      - name: Build nginx production image
+        run: docker build -f nginx/Dockerfile.prod -t restaurant-pos-nginx:ci ./nginx
+
+      - name: Build Cloudflare nginx production image
+        run: docker build -f nginx/Dockerfile.prod --build-arg NGINX_PROD_CONF=default.prod.cloudflare.conf -t restaurant-pos-nginx-cloudflare:ci ./nginx

@@ -1,0 +1,66 @@
+name: restaurant-pos-dev
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - restaurant_network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - restaurant_network
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${RESTAURANT_API_PORT:-8001}:8000"
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      - postgres
+      - redis
+    # FIX S3-D-verify: avoid macOS Docker file-sharing failures when the repo lives under Google Drive
+    networks:
+      - restaurant_network
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    # FIX S3-D-verify: frontend is served through nginx, so skip publishing 3000 to avoid local port conflicts
+    depends_on:
+      - backend
+    # FIX S3-D-verify: run from the built source image instead of bind mounts that break on unshared cloud paths
+    networks:
+      - restaurant_network
+
+  nginx:
+    build: ./nginx
+    restart: unless-stopped
+    ports:
+      - "${RESTAURANT_HTTP_PORT:-8081}:80"
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - restaurant_network
+
+networks:
+  restaurant_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:

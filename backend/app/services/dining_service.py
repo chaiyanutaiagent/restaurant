@@ -21,7 +21,7 @@ from app.services.notification_service import NotificationService
 from app.schemas.pos import CartItem, CreateSaleRequest, PaymentCreateRequest
 from app.schemas.restaurant import (
     DiningOrderItemRead, DiningOrderRead, KitchenTicketRead,
-    PlaceOrderRequest, PublicMenuProduct, PublicMenuResponse,
+    PlaceOrderRequest, PublicMenuProduct, PublicMenuResponse, PublicOrderHistory,
     PublicOrderStatus, SessionCheckoutRequest, SessionCheckoutResult,
     SessionOpen, SessionRead, TableRead, WapOrderItemRead, WapOrderRead,
     WapPaidOrderRequest,
@@ -60,6 +60,10 @@ class DiningService:
     # ── Tables ────────────────────────────────────────────────────────────────
 
     async def list_tables(self, company_id: uuid.UUID, branch_id: uuid.UUID) -> list[TableRead]:
+        settings = await self.db.scalar(
+            select(BranchSettings).where(BranchSettings.branch_id == branch_id)
+        )
+        qr_enabled = bool(settings and settings.fb_table_qr_enabled)
         rows = (await self.db.scalars(
             select(DiningTable)
             .where(DiningTable.company_id == company_id, DiningTable.branch_id == branch_id, DiningTable.is_active.is_(True))
@@ -89,8 +93,7 @@ class DiningService:
             result.append(TableRead(
                 id=t.id, branch_id=t.branch_id, name=t.name, zone=t.zone,
                 capacity=t.capacity,
-                qr_token=t.qr_token,
-                session_qr_token=active_session.qr_token if active_session else None,
+                session_qr_token=active_session.qr_token if active_session and qr_enabled else None,
                 table_type=t.table_type, status=t.status,
                 sort_order=t.sort_order, is_active=t.is_active,
                 active_session_id=active_session.id if active_session else None,
@@ -103,16 +106,16 @@ class DiningService:
             ))
         return result
 
-    async def get_table_by_token(self, qr_token: uuid.UUID) -> DiningTable | None:
-        return await self.db.scalar(
-            select(DiningTable).where(DiningTable.qr_token == qr_token, DiningTable.is_active.is_(True))
-        )
-
     async def get_session_by_token(self, qr_token: uuid.UUID) -> DiningSession | None:
         return await self.db.scalar(
             select(DiningSession)
+            .join(BranchSettings, BranchSettings.branch_id == DiningSession.branch_id)
             .options(selectinload(DiningSession.orders).selectinload(DiningOrder.items))
-            .where(DiningSession.qr_token == qr_token, DiningSession.status.in_(["open", "bill_requested"]))
+            .where(
+                DiningSession.qr_token == qr_token,
+                DiningSession.status.in_(["open", "bill_requested"]),
+                BranchSettings.fb_table_qr_enabled.is_(True),
+            )
         )
 
     async def create_table(
@@ -253,6 +256,22 @@ class DiningService:
     async def _get_product(self, product_id: uuid.UUID) -> Product | None:
         return await self.db.get(Product, product_id)
 
+    async def _get_orderable_product(
+        self,
+        company_id: uuid.UUID,
+        product_id: uuid.UUID,
+    ) -> Product | None:
+        return await self.db.scalar(
+            select(Product).where(
+                Product.id == product_id,
+                Product.company_id == company_id,
+                Product.product_type == "menu_item",
+                Product.is_active.is_(True),
+                Product.is_for_sale.is_(True),
+                Product.deleted_at.is_(None),
+            )
+        )
+
     async def _resolve_station(self, product: Product, settings: BranchSettings | None) -> str | None:
         stations = settings.fb_kitchen_stations if settings and settings.fb_kitchen_stations else []
         if not stations:
@@ -280,6 +299,12 @@ class DiningService:
         from app.models.branch import Branch as BranchModel
         branch = await self.db.get(BranchModel, branch_id)
         table = await self.db.get(DiningTable, session.table_id) if session.table_id else None
+        products_by_id: dict[uuid.UUID, Product] = {}
+        for item_data in payload.items:
+            product = await self._get_orderable_product(company_id, item_data.product_id)
+            if not product:
+                raise ValueError("มีเมนูที่ไม่พร้อมขาย กรุณาโหลดเมนูใหม่แล้วลองอีกครั้ง")
+            products_by_id[item_data.product_id] = product
 
         ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         order_number = f"DO-{ts[-8:]}-{str(session.id)[:4].upper()}"
@@ -293,9 +318,7 @@ class DiningService:
         await self.db.flush()
 
         for item_data in payload.items:
-            product = await self._get_product(item_data.product_id)
-            if not product:
-                continue
+            product = products_by_id[item_data.product_id]
             station = await self._resolve_station(product, settings)
             item = DiningOrderItem(
                 order_id=order.id,
@@ -896,6 +919,8 @@ class DiningService:
         settings = await self.db.scalar(
             select(BranchSettings).where(BranchSettings.branch_id == table.branch_id)
         )
+        if not settings or not settings.fb_table_qr_enabled:
+            return None
 
         products_rows = (await self.db.scalars(
             select(Product)
@@ -930,14 +955,16 @@ class DiningService:
         ]
 
         return PublicMenuResponse(
-            session_id=active_session.id if active_session else None,
-            queue_number=active_session.queue_number if active_session else None,
+            session_id=active_session.id,
+            queue_number=active_session.queue_number,
             table_name=table.name,
             branch_name=branch.name,
-            fb_service_mode=settings.fb_service_mode if settings else "dine_in",
+            fb_service_mode=settings.fb_service_mode,
             categories=categories,
             products=products,
-            session_status=active_session.status if active_session else None,
+            session_status=active_session.status,
+            opened_at=active_session.opened_at.isoformat(),
+            bill_at_table_enabled=settings.fb_bill_at_table,
         )
 
     async def _resolve_shift_and_location(
@@ -1170,9 +1197,14 @@ class DiningService:
         if not session:
             return None
         items: list[DiningOrderItemRead] = []
-        for order in session.orders:
+        orders: list[PublicOrderHistory] = []
+        total_item_count = 0
+        total_amount = Decimal("0")
+        for order in sorted(session.orders, key=lambda row: row.created_at):
+            order_items: list[DiningOrderItemRead] = []
+            subtotal = Decimal("0")
             for item in order.items:
-                items.append(DiningOrderItemRead(
+                item_read = DiningOrderItemRead(
                     id=item.id,
                     product_id=item.product_id,
                     product_name=item.product_name,
@@ -1180,10 +1212,29 @@ class DiningService:
                     unit_price=item.unit_price,
                     special_request=item.special_request,
                     status=item.status,
-                ))
+                )
+                items.append(item_read)
+                order_items.append(item_read)
+                if order.status != "cancelled" and item.status != "cancelled":
+                    total_item_count += item.qty
+                    line_total = item.unit_price * item.qty
+                    subtotal += line_total
+                    total_amount += line_total
+            orders.append(PublicOrderHistory(
+                id=order.id,
+                order_number=order.order_number,
+                status=order.status,
+                note=order.note,
+                created_at=order.created_at.isoformat(),
+                subtotal=subtotal,
+                items=order_items,
+            ))
         return PublicOrderStatus(
             session_id=session.id,
             queue_number=session.queue_number,
             session_status=session.status,
             items=items,
+            orders=orders,
+            total_item_count=total_item_count,
+            total_amount=total_amount,
         )

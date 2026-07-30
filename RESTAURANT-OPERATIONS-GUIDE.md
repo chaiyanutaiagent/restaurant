@@ -12,7 +12,8 @@ curl -s http://localhost/health
 ```
 
 2. Login as staff with branch context.
-3. Open `/restaurant/tables` and confirm tables, QR links, and table status.
+3. Open `/restaurant/tables` and confirm tables and table status. Dine-in QR is
+   created only after a table is opened.
 4. For demo/testing only, seed sample menu, raw materials, and recipes.
 
 ```bash
@@ -22,11 +23,16 @@ docker compose exec backend python -m app.utils.seed_fnb_demo
 ## Dine-In Flow
 
 1. Staff opens a table from `/restaurant/tables`.
-2. Customer scans the table QR and orders from `/menu/:qr_token`.
-3. Kitchen works tickets from `/restaurant/kitchen`.
-4. Staff marks ready items as served from Session Detail or Kitchen Display.
-5. Customer requests bill from mobile, or staff opens checkout.
-6. Staff takes payment, enters payment reference when needed, and prints receipt.
+2. The system creates a new one-session QR, opens the print dialog, and staff
+   gives the printed QR to the customer.
+3. Customer scans `/menu/:session_qr_token`, orders, checks all order rounds and
+   live item statuses, and requests the bill when that service is enabled.
+4. Kitchen works tickets from `/restaurant/kitchen`.
+5. Staff marks ready items as served from Session Detail or Kitchen Display.
+6. Customer requests bill from mobile, or staff opens checkout.
+7. Staff takes payment, enters payment reference when needed, and prints receipt.
+8. Closing or checking out the table invalidates that QR permanently. Reopening
+   the same table creates a different QR.
 
 ## Quick Service Flow
 

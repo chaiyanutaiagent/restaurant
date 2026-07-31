@@ -14,7 +14,9 @@ require_cmd() {
 }
 
 psql_at() {
-  docker compose exec -T postgres psql -U erp_user -d erp_pos_db -Atc "$1" | sed '/^[A-Z][A-Z ]* [0-9][0-9]*$/d'
+  docker compose exec -T postgres sh -c \
+    'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"' sh "$1" \
+    | sed '/^[A-Z][A-Z ]* [0-9][0-9]*$/d'
 }
 
 http_get() {
@@ -77,14 +79,10 @@ if [[ -z "$ACCESS_TOKEN" ]]; then
   exit 1
 fi
 
-QS_TOKEN="$(psql_at "select fb_qs_qr_token from branch_settings where branch_id='$BRANCH_ID' and fb_qs_qr_token is not null limit 1;")"
-if [[ -z "$QS_TOKEN" ]]; then
-  QS_TOKEN="$(psql_at "update branch_settings set fb_qs_qr_token = gen_random_uuid() where branch_id='$BRANCH_ID' returning fb_qs_qr_token;")"
-fi
-if [[ -z "$QS_TOKEN" ]]; then
-  echo "No Quick Service token found and could not create one." >&2
-  exit 1
-fi
+echo "== F&B smoke: configure restaurant workspace"
+http_auth_json POST "$INTERNAL_BASE_URL/api/v1/restaurant/setup" "$ACCESS_TOKEN" \
+  '{"has_tables":true,"table_zones":[{"zone_name":"Smoke Zone","table_count":1,"table_name_prefix":"AUTO","table_capacity":2}],"table_qr_enabled":true,"bill_at_table":true,"queue_reset":"daily","queue_prefix":"S","pickup_display_enabled":true,"kitchen_stations":["ครัวหลัก"]}' \
+  >/dev/null
 
 PRODUCT_ID="$(psql_at "select id from products where sku='FNB-DEMO-001' and product_type='menu_item' and is_active=true limit 1;")"
 if [[ -z "$PRODUCT_ID" ]]; then
@@ -92,21 +90,36 @@ if [[ -z "$PRODUCT_ID" ]]; then
   exit 1
 fi
 
-echo "== F&B smoke: public quick-service menu"
-MENU_JSON="$(http_get "$INTERNAL_BASE_URL/api/public/qs/$QS_TOKEN")"
+echo "== F&B smoke: counter opens takeaway session and per-order QR"
+TAKEAWAY_SESSION_JSON="$(http_auth_json POST "$INTERNAL_BASE_URL/api/v1/restaurant/sessions" "$ACCESS_TOKEN" '{"table_id":null,"guest_count":1,"customer_name":"Smoke Test","customer_phone":"0800000000"}')"
+SESSION_ID="$(printf '%s' "$TAKEAWAY_SESSION_JSON" | json_get data.id)"
+TAKEAWAY_QR_TOKEN="$(printf '%s' "$TAKEAWAY_SESSION_JSON" | json_get data.qr_token)"
+QUEUE_NUMBER="$(printf '%s' "$TAKEAWAY_SESSION_JSON" | json_get data.queue_number)"
+QUEUE_DISPLAY="S$(printf '%03d' "$QUEUE_NUMBER")"
+
+echo "== F&B smoke: public takeaway menu"
+MENU_JSON="$(http_get "$INTERNAL_BASE_URL/api/public/menu/$TAKEAWAY_QR_TOKEN")"
 PRODUCT_COUNT="$(printf '%s' "$MENU_JSON" | json_get data.products.length)"
 if [[ "$PRODUCT_COUNT" -lt 12 ]]; then
-  echo "Expected at least 12 demo products, got $PRODUCT_COUNT" >&2
+  echo "Expected at least 12 takeaway menu products, got $PRODUCT_COUNT" >&2
+  exit 1
+fi
+MENU_SOURCE="$(printf '%s' "$MENU_JSON" | json_get data.source_type)"
+if [[ "$MENU_SOURCE" != "quick_service" ]]; then
+  echo "Expected takeaway menu source quick_service, got $MENU_SOURCE" >&2
   exit 1
 fi
 
-echo "== F&B smoke: place quick-service order"
-ORDER_JSON="$(http_post_json "$INTERNAL_BASE_URL/api/public/qs/$QS_TOKEN/orders?customer_name=Smoke%20Test&customer_phone=0800000000" "{\"items\":[{\"product_id\":\"$PRODUCT_ID\",\"qty\":1,\"special_request\":\"smoke test\"}],\"note\":\"smoke script\"}")"
-SESSION_ID="$(printf '%s' "$ORDER_JSON" | json_get data.session_id)"
-QUEUE_DISPLAY="$(printf '%s' "$ORDER_JSON" | json_get data.queue_display)"
+echo "== F&B smoke: place takeaway order from per-order QR"
+ORDER_JSON="$(http_post_json "$INTERNAL_BASE_URL/api/public/menu/$TAKEAWAY_QR_TOKEN/orders" "{\"items\":[{\"product_id\":\"$PRODUCT_ID\",\"qty\":1,\"special_request\":\"smoke test\"}],\"note\":\"takeaway smoke script\"}")"
+ORDER_SESSION_ID="$(printf '%s' "$ORDER_JSON" | json_get data.session_id)"
+if [[ "$ORDER_SESSION_ID" != "$SESSION_ID" ]]; then
+  echo "Expected takeaway order to use session $SESSION_ID, got $ORDER_SESSION_ID" >&2
+  exit 1
+fi
 
 echo "== F&B smoke: public status"
-STATUS_JSON="$(http_get "$INTERNAL_BASE_URL/api/public/qs/$QS_TOKEN/status?session_id=$SESSION_ID")"
+STATUS_JSON="$(http_get "$INTERNAL_BASE_URL/api/public/menu/$TAKEAWAY_QR_TOKEN/status?session_id=$SESSION_ID")"
 ITEM_STATUS="$(printf '%s' "$STATUS_JSON" | json_get data.items.0.status)"
 if [[ "$ITEM_STATUS" != "pending" ]]; then
   echo "Expected initial item status pending, got $ITEM_STATUS" >&2
@@ -122,7 +135,7 @@ fi
 
 echo "== F&B smoke: advance kitchen ticket pending -> cooking -> done"
 psql_at "update kitchen_tickets set status='cooking' where id='$TICKET_ID'; update dining_order_items set status='cooking' where id='$ORDER_ITEM_ID';" >/dev/null
-STATUS_JSON="$(http_get "$INTERNAL_BASE_URL/api/public/qs/$QS_TOKEN/status?session_id=$SESSION_ID")"
+STATUS_JSON="$(http_get "$INTERNAL_BASE_URL/api/public/menu/$TAKEAWAY_QR_TOKEN/status?session_id=$SESSION_ID")"
 ITEM_STATUS="$(printf '%s' "$STATUS_JSON" | json_get data.items.0.status)"
 if [[ "$ITEM_STATUS" != "cooking" ]]; then
   echo "Expected item status cooking, got $ITEM_STATUS" >&2
@@ -130,7 +143,7 @@ if [[ "$ITEM_STATUS" != "cooking" ]]; then
 fi
 
 psql_at "update kitchen_tickets set status='done', done_at=now() where id='$TICKET_ID'; update dining_order_items set status='done' where id='$ORDER_ITEM_ID';" >/dev/null
-STATUS_JSON="$(http_get "$INTERNAL_BASE_URL/api/public/qs/$QS_TOKEN/status?session_id=$SESSION_ID")"
+STATUS_JSON="$(http_get "$INTERNAL_BASE_URL/api/public/menu/$TAKEAWAY_QR_TOKEN/status?session_id=$SESSION_ID")"
 ITEM_STATUS="$(printf '%s' "$STATUS_JSON" | json_get data.items.0.status)"
 if [[ "$ITEM_STATUS" != "done" ]]; then
   echo "Expected item status done, got $ITEM_STATUS" >&2
@@ -211,4 +224,4 @@ if [[ "$CHECKOUT_SOURCE" != "dine_in" || "$CHECKOUT_TOTAL" != "$DINE_TOTAL" ]]; 
   exit 1
 fi
 
-echo "PASS: F&B smoke OK qs_session=$SESSION_ID queue=$QUEUE_DISPLAY qs_ticket=$TICKET_ID dine_session=$DINE_SESSION_ID dine_ticket=$DINE_TICKET_ID sale_total=$CHECKOUT_TOTAL"
+echo "PASS: F&B smoke OK takeaway_session=$SESSION_ID queue=$QUEUE_DISPLAY takeaway_ticket=$TICKET_ID dine_session=$DINE_SESSION_ID dine_ticket=$DINE_TICKET_ID sale_total=$CHECKOUT_TOTAL"

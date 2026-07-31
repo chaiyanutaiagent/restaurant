@@ -626,6 +626,7 @@ class PublicMenuResponse(BaseSchema):
     session_id: uuid.UUID
     queue_number: int | None
     table_name: str | None
+    source_type: str = "dine_in"
     branch_name: str
     fb_service_mode: str
     categories: list[dict]

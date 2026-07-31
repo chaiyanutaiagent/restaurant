@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import unittest
+import uuid
 
+from app.schemas.user_mgmt import BranchSettingsRead, BranchSettingsUpdate
 from app.services.fb_setup import (
     DiningTableZonePlan,
     normalize_table_prefix,
@@ -13,6 +15,29 @@ from app.services.fb_setup import (
 
 
 class FBSetupTests(unittest.TestCase):
+    def test_branch_settings_accept_quick_service_uuid_token(self) -> None:
+        token = uuid.uuid4()
+        settings = BranchSettingsRead(
+            id=uuid.uuid4(),
+            branch_id=uuid.uuid4(),
+            pos_require_customer=False,
+            pos_allow_discount=True,
+            pos_max_discount_pct=10,
+            public_storefront_enabled=False,
+            allow_negative_stock=False,
+            low_stock_alert_enabled=True,
+            receipt_show_tax_id=True,
+            receipt_show_logo=False,
+            receipt_copies=1,
+            fb_qs_qr_token=token,
+        )
+
+        self.assertEqual(settings.fb_qs_qr_token, token)
+        self.assertEqual(
+            BranchSettingsUpdate(fb_qs_qr_token=str(token)).fb_qs_qr_token,
+            token,
+        )
+
     def test_store_with_tables_maps_to_both_for_legacy_compatibility(self) -> None:
         self.assertEqual(service_mode_for(True), "both")
 

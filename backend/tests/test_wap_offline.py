@@ -4,6 +4,7 @@ from decimal import Decimal
 import unittest
 from unittest.mock import AsyncMock
 import uuid
+from types import SimpleNamespace
 
 from pydantic import ValidationError
 
@@ -59,6 +60,21 @@ class WapOfflineSchemaTests(unittest.TestCase):
 
 
 class WapOfflineIdempotencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_kitchen_slip_requires_customer_slip_first(self) -> None:
+        db = AsyncMock()
+        company_id = uuid.uuid4()
+        service = DiningService(db)
+        service.get_session = AsyncMock(return_value=SimpleNamespace(
+            company_id=company_id,
+            sale_order_id=uuid.uuid4(),
+            customer_slip_printed_at=None,
+        ))
+
+        with self.assertRaisesRegex(ValueError, "สลิปลูกค้า"):
+            await service.mark_kitchen_slip_printed(uuid.uuid4(), company_id)
+
+        db.scalar.assert_not_awaited()
+
     async def test_existing_order_is_returned_before_new_session_is_opened(self) -> None:
         service = DiningService(AsyncMock())
         existing = _wap_order()

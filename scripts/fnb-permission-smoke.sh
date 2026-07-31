@@ -15,7 +15,8 @@ require_cmd() {
 }
 
 psql_at() {
-  docker compose exec -T postgres psql -U erp_user -d erp_pos_db -Atc "$1"
+  docker compose exec -T postgres sh -c \
+    'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"' sh "$1"
 }
 
 json_get() {
@@ -199,9 +200,12 @@ KITCHEN_TOKEN="$(login_as fnb_smoke_kitchen "$COMPANY_ID" "$BRANCH_ID")"
 RECIPE_TOKEN="$(login_as fnb_smoke_recipe "$COMPANY_ID" "$BRANCH_ID")"
 MANAGER_TOKEN="$(login_as fnb_smoke_manager "$COMPANY_ID" "$BRANCH_ID")"
 
+http_auth_expect PATCH "$INTERNAL_BASE_URL/api/v1/restaurant/settings" "$MANAGER_TOKEN" 200 '{"has_tables":true,"table_qr_enabled":true}' >/dev/null
+
 echo "== F&B permission smoke: cashier"
 http_auth_expect GET "$INTERNAL_BASE_URL/api/v1/restaurant/tables" "$CASHIER_TOKEN" 200 >/dev/null
 http_auth_expect POST "$INTERNAL_BASE_URL/api/v1/restaurant/tables" "$CASHIER_TOKEN" 201 "{\"name\":\"PERM-CASHIER-$(date +%H%M%S)\",\"capacity\":2,\"table_type\":\"dine_in\"}" >/dev/null
+http_auth_expect POST "$INTERNAL_BASE_URL/api/v1/restaurant/sessions" "$CASHIER_TOKEN" 201 '{"table_id":null,"guest_count":1,"customer_name":"Permission Takeaway"}' >/dev/null
 http_auth_expect GET "$INTERNAL_BASE_URL/api/v1/restaurant/kitchen" "$CASHIER_TOKEN" 403 >/dev/null
 http_auth_expect POST "$INTERNAL_BASE_URL/api/v1/restaurant/raw-materials" "$CASHIER_TOKEN" 403 '{"sku":"PERM-CASHIER-DENY","name":"Denied Material","cost_price":1,"unit":"g"}' >/dev/null
 http_auth_expect POST "$INTERNAL_BASE_URL/api/v1/restaurant/qs-qr/generate" "$CASHIER_TOKEN" 403 '{}' >/dev/null
@@ -221,7 +225,7 @@ http_auth_expect POST "$INTERNAL_BASE_URL/api/v1/restaurant/tables" "$RECIPE_TOK
 
 echo "== F&B permission smoke: manager"
 http_auth_expect GET "$INTERNAL_BASE_URL/api/v1/restaurant/kitchen" "$MANAGER_TOKEN" 200 >/dev/null
-http_auth_expect POST "$INTERNAL_BASE_URL/api/v1/restaurant/qs-qr/generate" "$MANAGER_TOKEN" 200 '{}' >/dev/null
+http_auth_expect POST "$INTERNAL_BASE_URL/api/v1/restaurant/qs-qr/generate" "$MANAGER_TOKEN" 400 '{}' >/dev/null
 http_auth_expect GET "$INTERNAL_BASE_URL/api/v1/restaurant/reports/ingredients?branch_id=$BRANCH_ID&date_from=$TODAY&date_to=$TODAY" "$MANAGER_TOKEN" 200 >/dev/null
 
 echo "PASS: F&B permission smoke OK company=$COMPANY_ID branch=$BRANCH_ID raw_sku=$RAW_SKU"

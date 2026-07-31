@@ -301,6 +301,10 @@ export async function markRestaurantLocalSlip(
 ): Promise<WapOrder> {
   const row = await db.restaurantPendingOrders.get(clientOrderId);
   if (!row) throw new Error("ไม่พบออเดอร์ออฟไลน์ในเครื่อง");
+  const effectiveOrder = row.server_order ?? row.local_order;
+  if (type === "kitchen" && !effectiveOrder.customer_slip_printed_at) {
+    throw new Error("กรุณาพิมพ์สลิปลูกค้าก่อนส่งออเดอร์เข้าครัว");
+  }
   if (row.status === "synced" && row.server_order && await isNetworkConnected()) {
     try {
       const serverOrder = type === "customer"

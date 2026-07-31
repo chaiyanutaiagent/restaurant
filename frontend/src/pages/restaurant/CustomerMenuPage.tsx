@@ -7,6 +7,7 @@ import {
   History,
   Loader2,
   ReceiptText,
+  ShoppingBag,
   Utensils
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -20,8 +21,10 @@ import {
   MenuList,
   MenuSearch,
   StatusList,
+  createMobileCartLineId,
   filterMenuProducts,
   formatCurrency,
+  normalizeMobileCartItems,
   type MobileCartItem,
   type MobileMenuItem
 } from "@/pages/restaurant/components/MobileOrdering";
@@ -32,6 +35,7 @@ type MenuResponse = {
   session_id: string;
   queue_number: number | null;
   table_name: string | null;
+  source_type: "dine_in" | "quick_service";
   branch_name: string;
   fb_service_mode: string;
   categories: { id: string; name: string }[];
@@ -90,7 +94,7 @@ function readCartCache(token?: string): CartItem[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as CartItem[];
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? normalizeMobileCartItems(parsed) : [];
   } catch {
     localStorage.removeItem(`dining-cart-${token}`);
     return [];
@@ -126,6 +130,10 @@ export default function CustomerMenuPage(): JSX.Element {
   });
 
   const menu = menuQuery.data;
+  const isTakeaway = menu?.source_type === "quick_service";
+  const statusLabels = isTakeaway
+    ? { ...STATUS_LABEL, done: { label: "พร้อมรับ", color: "bg-emerald-100 text-emerald-800" }, served: { label: "รับแล้ว", color: "bg-slate-100 text-slate-600" } }
+    : STATUS_LABEL;
 
   useEffect(() => {
     if (!token) return;
@@ -196,32 +204,41 @@ export default function CustomerMenuPage(): JSX.Element {
   }
 
   function addToCart(product: MenuItem, specialRequest = ""): void {
+    const normalizedRequest = specialRequest.trim();
     setCart((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id);
+      const existing = prev.find(
+        (item) =>
+          item.product.id === product.id &&
+          item.special_request.trim() === normalizedRequest
+      );
       if (existing) {
-        return prev.map((item) => item.product.id === product.id ? {
+        return prev.map((item) => item.line_id === existing.line_id ? {
           ...item,
-          qty: item.qty + 1,
-          special_request: specialRequest || item.special_request
+          qty: item.qty + 1
         } : item);
       }
-      return [...prev, { product, qty: 1, special_request: specialRequest }];
+      return [...prev, {
+        line_id: createMobileCartLineId(product.id),
+        product,
+        qty: 1,
+        special_request: normalizedRequest
+      }];
     });
   }
 
-  function removeFromCart(productId: string): void {
-    setCart((prev) => prev.filter((item) => item.product.id !== productId));
+  function removeFromCart(lineId: string): void {
+    setCart((prev) => prev.filter((item) => item.line_id !== lineId));
   }
 
-  function updateItemNote(productId: string, value: string): void {
-    setCart((prev) => prev.map((item) => item.product.id === productId ? { ...item, special_request: value } : item));
+  function updateItemNote(lineId: string, value: string): void {
+    setCart((prev) => prev.map((item) => item.line_id === lineId ? { ...item, special_request: value } : item));
   }
 
-  function updateQty(productId: string, delta: number): void {
+  function updateQty(lineId: string, delta: number): void {
     setCart((prev) =>
       prev
         .map((item) => {
-          if (item.product.id !== productId) return item;
+          if (item.line_id !== lineId) return item;
           const next = item.qty + delta;
           return next <= 0 ? null : { ...item, qty: next };
         })
@@ -245,6 +262,8 @@ export default function CustomerMenuPage(): JSX.Element {
   const orderError = getErrorMessage(orderMutation.error);
   const billError = getErrorMessage(billMutation.error);
   const sessionExpired = isNotFoundError(statusQuery.error);
+  const statusError = sessionExpired ? null : getErrorMessage(statusQuery.error);
+  const menuError = getErrorMessage(menuQuery.error);
 
   useEffect(() => {
     const currentStatus = statusQuery.data?.session_status ?? menu?.session_status;
@@ -265,10 +284,29 @@ export default function CustomerMenuPage(): JSX.Element {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 text-center">
         <div>
-          <p className="text-2xl font-bold text-slate-800">{sessionExpired ? "QR รอบนี้หมดอายุแล้ว" : "ไม่พบเมนูนี้"}</p>
-          <p className="mt-2 text-slate-500">
-            {sessionExpired ? "โต๊ะถูกปิดแล้ว กรุณาติดต่อพนักงานหากต้องการความช่วยเหลือ" : "QR อาจหมดอายุหรือไม่ถูกต้อง"}
+          <p className="text-2xl font-bold text-slate-800">
+            {sessionExpired
+              ? "QR รอบนี้หมดอายุแล้ว"
+              : menuQuery.isError
+                ? "โหลดเมนูไม่สำเร็จ"
+                : "ไม่พบเมนูนี้"}
           </p>
+          <p className="mt-2 text-slate-500">
+            {sessionExpired
+              ? isTakeaway
+                ? "คิวรับกลับนี้ถูกปิดแล้ว กรุณาติดต่อพนักงานหากต้องการความช่วยเหลือ"
+                : "โต๊ะถูกปิดแล้ว กรุณาติดต่อพนักงานหากต้องการความช่วยเหลือ"
+              : menuError ?? "QR อาจหมดอายุหรือไม่ถูกต้อง"}
+          </p>
+          {menuQuery.isError ? (
+            <button
+              type="button"
+              className="mt-4 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+              onClick={() => void menuQuery.refetch()}
+            >
+              ลองโหลดเมนูอีกครั้ง
+            </button>
+          ) : null}
         </div>
       </div>
     );
@@ -285,7 +323,11 @@ export default function CustomerMenuPage(): JSX.Element {
           <div className="mt-1 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate text-xl font-bold text-slate-950">
-                {menu.table_name ? `โต๊ะ ${menu.table_name}` : "เมนูอาหาร"}
+                {isTakeaway
+                  ? `รับกลับ${queueNum ? ` · คิว ${String(queueNum).padStart(3, "0")}` : ""}`
+                  : menu.table_name
+                    ? `โต๊ะ ${menu.table_name}`
+                    : "เมนูอาหาร"}
               </p>
               <p className="text-xs text-slate-500">เลือกเมนู ใส่หมายเหตุ แล้วส่งออเดอร์เข้าครัว</p>
             </div>
@@ -303,18 +345,29 @@ export default function CustomerMenuPage(): JSX.Element {
         <section className="mx-4 mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
-              <ChefHat className="h-5 w-5" />
+              {isTakeaway ? <ShoppingBag className="h-5 w-5" /> : <ChefHat className="h-5 w-5" />}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-semibold text-slate-950">สั่งอาหารที่โต๊ะได้ทันที</p>
-              <p className="mt-0.5 text-sm text-slate-500">เพิ่มรายการได้หลายรอบ ระบบจะรวมกับโต๊ะเดิม</p>
+              <p className="font-semibold text-slate-950">{isTakeaway ? "สั่งอาหารรับกลับได้ทันที" : "สั่งอาหารที่โต๊ะได้ทันที"}</p>
+              <p className="mt-0.5 text-sm text-slate-500">
+                {isTakeaway ? "QR นี้ใช้สำหรับคิวรับกลับของคุณเท่านั้น" : "เพิ่มรายการได้หลายรอบ ระบบจะรวมกับโต๊ะเดิม"}
+              </p>
             </div>
           </div>
         </section>
 
-        {orderError || billError ? (
+        {orderError || billError || statusError ? (
           <section className="mx-4 mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700">
-            {orderError || billError}
+            <p>{orderError || billError || statusError}</p>
+            {statusError ? (
+              <button
+                type="button"
+                className="mt-3 rounded-full bg-red-700 px-3 py-2 text-xs font-semibold text-white"
+                onClick={() => void statusQuery.refetch()}
+              >
+                ลองโหลดสถานะอีกครั้ง
+              </button>
+            ) : null}
           </section>
         ) : null}
 
@@ -324,7 +377,7 @@ export default function CustomerMenuPage(): JSX.Element {
               <Loader2 className="h-5 w-5 animate-spin" />
               <div>
                 <p className="font-bold">กำลังโหลดสถานะออเดอร์</p>
-                <p className="text-xs text-sky-700">รอสักครู่ ระบบกำลังตรวจรายการล่าสุดของโต๊ะนี้</p>
+                <p className="text-xs text-sky-700">รอสักครู่ ระบบกำลังตรวจรายการล่าสุดของ{isTakeaway ? "คิวนี้" : "โต๊ะนี้"}</p>
               </div>
             </div>
           </section>
@@ -335,7 +388,7 @@ export default function CustomerMenuPage(): JSX.Element {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className={`text-base font-bold ${allDone ? "text-emerald-900" : "text-sky-900"}`}>
-                  {orderStatus.session_status === "bill_requested" ? "เรียกบิลแล้ว" : allDone ? "อาหารพร้อมเสิร์ฟแล้ว" : "สถานะออเดอร์"}
+                  {orderStatus.session_status === "bill_requested" ? "เรียกบิลแล้ว" : allDone ? (isTakeaway ? "อาหารพร้อมรับแล้ว" : "อาหารพร้อมเสิร์ฟแล้ว") : "สถานะออเดอร์"}
                 </p>
                 <p className={`mt-0.5 text-xs ${allDone ? "text-emerald-700" : "text-sky-700"}`}>
                   อัปเดตอัตโนมัติทุก 8 วินาที
@@ -366,7 +419,7 @@ export default function CustomerMenuPage(): JSX.Element {
             {allDone ? (
               <div className="mt-3 flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-emerald-800">
                 <CheckCircle2 className="h-5 w-5" />
-                <span className="font-semibold">พนักงานจะนำอาหารไปเสิร์ฟที่โต๊ะ</span>
+                <span className="font-semibold">{isTakeaway ? "กรุณารับอาหารที่เคาน์เตอร์" : "พนักงานจะนำอาหารไปเสิร์ฟที่โต๊ะ"}</span>
               </div>
             ) : null}
             {orderStatus.session_status === "bill_requested" ? (
@@ -413,7 +466,7 @@ export default function CustomerMenuPage(): JSX.Element {
                   {order.note ? (
                     <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">หมายเหตุ: {order.note}</div>
                   ) : null}
-                  <StatusList items={order.items} labels={STATUS_LABEL} />
+                  <StatusList items={order.items} labels={statusLabels} />
                 </div>
               ))}
             </div>
@@ -437,7 +490,7 @@ export default function CustomerMenuPage(): JSX.Element {
       <CartSheet
         open={cartOpen}
         title="ตรวจสอบออเดอร์"
-        subtitle={`${cartCount} รายการสำหรับ${menu.table_name ? `โต๊ะ ${menu.table_name}` : "ออเดอร์นี้"}`}
+        subtitle={`${cartCount} รายการสำหรับ${isTakeaway ? "คิวรับกลับนี้" : menu.table_name ? `โต๊ะ ${menu.table_name}` : "ออเดอร์นี้"}`}
         cart={cart}
         note={note}
         notePlaceholder="หมายเหตุรวมสำหรับออเดอร์นี้"

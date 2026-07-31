@@ -23,6 +23,15 @@ body {
   min-height: 100vh;
 }
 
+.mobile-category-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.mobile-category-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 @media print {
   body {
     background: #ffffff;

@@ -29,12 +29,12 @@ export default function QRManagerPage(): JSX.Element {
 
   // Generate QR image เมื่อมี token
   useEffect(() => {
-    if (!settings?.fb_qs_qr_token) { setQsQrDataUrl(""); return; }
+    if (hasTables || !settings?.fb_qs_qr_token) { setQsQrDataUrl(""); return; }
     const url = `${window.location.origin}/order/${settings.fb_qs_qr_token}`;
     QRCode.toDataURL(url, { width: 300, margin: 2, color: { dark: "#1e293b" } })
       .then(setQsQrDataUrl)
       .catch(() => setQsQrDataUrl(""));
-  }, [settings?.fb_qs_qr_token]);
+  }, [hasTables, settings?.fb_qs_qr_token]);
 
   const generateMutation = useMutation({
     mutationFn: async () => (await authApi.post("/restaurant/qs-qr/generate")).data.data,
@@ -57,7 +57,7 @@ export default function QRManagerPage(): JSX.Element {
 
   return (
     <div>
-      <PageHeader title="QR รับออเดอร์" subtitle="สร้างและพิมพ์ QR สำหรับลูกค้าสแกนสั่งอาหาร" />
+      <PageHeader title="QR รับออเดอร์" subtitle={hasTables ? "QR เฉพาะรอบสำหรับโต๊ะและออเดอร์รับกลับ" : "สร้างและพิมพ์ QR สำหรับลูกค้าสแกนสั่งอาหาร"} />
 
       <div className="grid gap-6 p-6 md:grid-cols-2">
         {/* Takeaway QR */}
@@ -67,12 +67,21 @@ export default function QRManagerPage(): JSX.Element {
               <QrCode className="h-6 w-6 text-orange-600" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-900">QR สั่งกลับบ้าน</h3>
-              <p className="text-sm text-slate-500">ลูกค้าสแกน สั่งอาหาร และรับเลขคิว</p>
+              <h3 className="font-bold text-slate-900">{hasTables ? "QR รับกลับต่อออเดอร์" : "QR สั่งกลับบ้าน"}</h3>
+              <p className="text-sm text-slate-500">{hasTables ? "เคาน์เตอร์เปิดคิวและออก QR ใหม่ให้ลูกค้าแต่ละราย" : "ลูกค้าสแกน สั่งอาหาร และรับเลขคิว"}</p>
             </div>
           </div>
 
-          {qsQrDataUrl ? (
+          {hasTables ? (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-center">
+              <QrCode className="mx-auto h-16 w-16 text-emerald-500" />
+              <p className="mt-4 font-bold text-emerald-900">ร้านที่มีโต๊ะจะไม่ใช้ QR รับกลับแบบถาวร</p>
+              <p className="mt-2 text-sm text-emerald-700">เปิดคิวรับกลับที่เคาน์เตอร์ ระบบจะออกเลขคิวและ QR ที่ใช้ได้เฉพาะออเดอร์นั้น</p>
+              <Button className="mt-5 bg-emerald-600 hover:bg-emerald-700" asChild>
+                <Link to="/restaurant/tables">ไปที่แผนที่โต๊ะเพื่อออก QR</Link>
+              </Button>
+            </div>
+          ) : qsQrDataUrl ? (
             <>
               <div className="flex justify-center">
                 <div className="rounded-3xl border-4 border-orange-200 bg-white p-4 shadow-md print:border-0">
@@ -123,23 +132,34 @@ export default function QRManagerPage(): JSX.Element {
         {/* Info panel */}
         <div className="space-y-4">
           <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
-            <h4 className="font-semibold text-blue-800 mb-3">วิธีใช้งาน QR สั่งกลับบ้าน</h4>
-            <ol className="space-y-2 text-sm text-blue-700">
-              <li className="flex gap-2"><span className="flex-shrink-0 font-bold">1.</span>Print QR แล้วติดที่เคาน์เตอร์หรือโต๊ะลูกค้า</li>
-              <li className="flex gap-2"><span className="flex-shrink-0 font-bold">2.</span>ลูกค้าสแกน QR ด้วยกล้องโทรศัพท์</li>
-              <li className="flex gap-2"><span className="flex-shrink-0 font-bold">3.</span>เลือกเมนู ใส่ตะกร้า กด "สั่งอาหาร"</li>
-              <li className="flex gap-2"><span className="flex-shrink-0 font-bold">4.</span>ระบบออกเลขคิวให้อัตโนมัติ</li>
-              <li className="flex gap-2"><span className="flex-shrink-0 font-bold">5.</span>เมื่อครัวกด "เสร็จแล้ว" ลูกค้าเห็น notification ทันที</li>
-            </ol>
+            <h4 className="mb-3 font-semibold text-blue-800">{hasTables ? "วิธีออก QR รับกลับที่เคาน์เตอร์" : "วิธีใช้งาน QR สั่งกลับบ้าน"}</h4>
+            {hasTables ? (
+              <ol className="space-y-2 text-sm text-blue-700">
+                <li className="flex gap-2"><span className="flex-shrink-0 font-bold">1.</span>เข้าแผนที่โต๊ะ แล้วกด “ออก QR รับกลับ”</li>
+                <li className="flex gap-2"><span className="flex-shrink-0 font-bold">2.</span>กรอกชื่อลูกค้าหรือเบอร์โทรถ้ามี แล้วเปิดคิว</li>
+                <li className="flex gap-2"><span className="flex-shrink-0 font-bold">3.</span>พิมพ์ QR ให้ลูกค้าสแกนเลือกเมนู</li>
+                <li className="flex gap-2"><span className="flex-shrink-0 font-bold">4.</span>รายการจะเข้า Kitchen Display พร้อมเลขคิวรับกลับ</li>
+                <li className="flex gap-2"><span className="flex-shrink-0 font-bold">5.</span>เมื่อรับอาหารแล้ว ปิดคิวเพื่อให้ QR หมดอายุ</li>
+              </ol>
+            ) : (
+              <ol className="space-y-2 text-sm text-blue-700">
+                <li className="flex gap-2"><span className="flex-shrink-0 font-bold">1.</span>พิมพ์ QR แล้วติดที่เคาน์เตอร์</li>
+                <li className="flex gap-2"><span className="flex-shrink-0 font-bold">2.</span>ลูกค้าสแกน QR ด้วยกล้องโทรศัพท์</li>
+                <li className="flex gap-2"><span className="flex-shrink-0 font-bold">3.</span>เลือกเมนู ใส่ตะกร้า กด “สั่งอาหาร”</li>
+                <li className="flex gap-2"><span className="flex-shrink-0 font-bold">4.</span>ระบบออกเลขคิวให้อัตโนมัติ</li>
+                <li className="flex gap-2"><span className="flex-shrink-0 font-bold">5.</span>เมื่อครัวทำเสร็จ ลูกค้าจะเห็นสถานะพร้อมรับ</li>
+              </ol>
+            )}
           </div>
 
           {hasTables ? (
             <>
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-                <h4 className="font-semibold text-amber-800 mb-2">ข้อแตกต่างกับ QR โต๊ะ</h4>
-                <div className="text-sm text-amber-700 space-y-1">
-                  <p>• <strong>QR กลับบ้าน:</strong> ลูกค้าแต่ละคนได้ออเดอร์และคิวของตัวเอง</p>
-                  <p>• <strong>QR โต๊ะ:</strong> ลูกค้าในรอบเปิดโต๊ะเดียวกันใช้ออเดอร์ร่วมกัน และ QR หมดอายุเมื่อปิดโต๊ะ</p>
+                <h4 className="font-semibold text-amber-800 mb-2">QR ทั้งสองแบบเป็น QR ต่อรอบ</h4>
+                <div className="space-y-1 text-sm text-amber-700">
+                  <p>• <strong>รับกลับ:</strong> เคาน์เตอร์เปิดคิวและพิมพ์ QR เฉพาะลูกค้ารายนั้น</p>
+                  <p>• <strong>นั่งทาน:</strong> เปิดโต๊ะและพิมพ์ QR สำหรับรอบของโต๊ะนั้น</p>
+                  <p>• เมื่อปิดโต๊ะหรือปิดคิว QR จะหมดอายุทันที</p>
                 </div>
               </div>
 

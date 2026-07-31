@@ -370,7 +370,7 @@ export default function WapOrderPage(): JSX.Element {
     <div className="flex h-full min-h-0 flex-col">
       <div className="grid min-h-0 flex-1 gap-4">
         <section className={`${isSummaryVisible ? "hidden" : "flex"} min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white`}>
-          <div className="border-b border-slate-200 px-4 py-3">
+          <div className="border-b border-slate-200 px-3 py-2 lg:px-4 lg:py-3">
             <div className="flex items-center gap-3">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -492,15 +492,15 @@ export default function WapOrderPage(): JSX.Element {
           ) : visibleProducts.length === 0 ? (
             <div className="flex h-72 items-center justify-center text-slate-500">ยังไม่มีเมนูสำหรับขาย</div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-auto p-4">
-              <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+            <div className="min-h-0 flex-1 overflow-auto p-3 lg:p-4">
+              <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3 2xl:gap-3">
                 {visibleProducts.map((product) => {
                   const cartItem = cart.find((item) => item.product.id === product.id);
                   const qty = cartItem?.qty ?? 0;
                   return (
                     <div
                       key={product.id}
-                      className="flex min-h-24 items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4"
+                      className="flex min-h-20 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 lg:min-h-24 lg:gap-3 lg:p-4"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="line-clamp-2 font-semibold text-slate-950">{product.name}</p>
@@ -513,16 +513,16 @@ export default function WapOrderPage(): JSX.Element {
                           <Button
                             variant="outline"
                             size="icon"
-                            className="h-10 w-10"
+                            className="h-11 w-11"
                             disabled={qty <= 0}
                             onClick={() => updateQty(product.id, -1)}
                           >
                             <Minus className="h-4 w-4" />
                           </Button>
-                          <span className="min-w-12 text-center text-base font-black text-slate-950">{qty}</span>
+                          <span className="min-w-8 text-center text-base font-black text-slate-950 lg:min-w-12">{qty}</span>
                           <Button
                             size="icon"
-                            className="h-10 w-10 bg-emerald-600 hover:bg-emerald-700"
+                            className="h-11 w-11 bg-emerald-600 hover:bg-emerald-700"
                             onClick={() => addProduct(product)}
                           >
                             <Plus className="h-4 w-4" />
@@ -536,9 +536,9 @@ export default function WapOrderPage(): JSX.Element {
             </div>
           )}
 
-          <div className="border-t border-slate-200 p-4">
+          <div className="border-t border-slate-200 p-3 lg:p-4">
             <Button
-              className="h-12 w-full bg-slate-950 text-base hover:bg-slate-800"
+              className="h-11 w-full bg-slate-950 text-sm hover:bg-slate-800 lg:h-12 lg:text-base"
               disabled={!canSubmit}
               onClick={() => setShowSummary(true)}
             >
@@ -548,7 +548,7 @@ export default function WapOrderPage(): JSX.Element {
         </section>
 
         <aside className={`${isSummaryVisible ? "flex" : "hidden"} min-h-0 flex-col rounded-lg border border-slate-200 bg-white`}>
-          <div className="border-b border-slate-200 p-4">
+          <div className="border-b border-slate-200 p-3 lg:p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <ReceiptText className="h-5 w-5 text-slate-700" />
@@ -566,12 +566,12 @@ export default function WapOrderPage(): JSX.Element {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto p-4">
+          <div className="min-h-0 flex-1 overflow-auto p-3 lg:p-4">
             {currentOrder ? (
               <div className="space-y-4">
-                <div className="rounded-lg bg-slate-950 p-5 text-center text-white">
+                <div className="rounded-lg bg-slate-950 p-4 text-center text-white lg:p-5">
                   <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Queue</p>
-                  <p className="mt-2 text-6xl font-black">{currentOrder.queue_display ?? "-"}</p>
+                  <p className="mt-1 text-5xl font-black lg:mt-2 lg:text-6xl">{currentOrder.queue_display ?? "-"}</p>
                   <p className="mt-2 text-sm text-slate-300">รับเงินแล้ว ฿{money(currentOrder.total_amount)}</p>
                 </div>
                 <div className="space-y-3 rounded-lg border border-slate-200 p-4">
@@ -602,10 +602,14 @@ export default function WapOrderPage(): JSX.Element {
                 <Button
                   className="h-12 w-full bg-orange-600 hover:bg-orange-700"
                   onClick={() => kitchenSlipMutation.mutate()}
-                  disabled={kitchenSlipMutation.isPending}
+                  disabled={kitchenSlipMutation.isPending || !customerSlipPrinted}
                 >
                   {kitchenSlipMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ChefHat className="mr-2 h-4 w-4" />}
-                  {currentOrder.kitchen_slip_printed_at ? "พิมพ์ออเดอร์ส่งครัวซ้ำ" : "พิมพ์ออเดอร์ส่งครัว"}
+                  {!customerSlipPrinted
+                    ? "พิมพ์สลิปลูกค้าก่อนส่งครัว"
+                    : currentOrder.kitchen_slip_printed_at
+                      ? "พิมพ์ออเดอร์ส่งครัวซ้ำ"
+                      : "พิมพ์ออเดอร์ส่งครัว"}
                 </Button>
               </div>
             ) : (
@@ -652,7 +656,7 @@ export default function WapOrderPage(): JSX.Element {
           </div>
 
           {!currentOrder ? (
-            <div className="border-t border-slate-200 p-4">
+            <div className="border-t border-slate-200 p-3 lg:p-4">
               <div className="mb-3 space-y-1 text-sm">
                 <div className="flex justify-between"><span>ยอดรวม</span><span className="font-bold">฿{money(total)}</span></div>
                 <div className="text-slate-500">เลือกวิธีรับเงินเพื่อออกคิว</div>

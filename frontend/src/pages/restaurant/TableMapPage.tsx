@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AxiosError } from "axios";
-import { Bell, ConciergeBell, Copy, MapPin, MoreVertical, Pencil, Plus, Printer, QrCode, ReceiptText, Trash2, Users } from "lucide-react";
+import { Bell, ConciergeBell, Copy, MapPin, MoreVertical, Pencil, Plus, Printer, QrCode, ReceiptText, ShoppingBag, Trash2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import QRCode from "qrcode";
@@ -54,6 +54,13 @@ type OpenSessionResult = {
   queue_number: number | null;
 };
 
+type QrPrintTarget = {
+  token: string;
+  title: string;
+  label: string;
+  description: string;
+};
+
 function getQrUrl(qrToken: string): string {
   const configuredOrigin = import.meta.env.VITE_API_BASE_URL?.trim();
   if (configuredOrigin) {
@@ -75,10 +82,13 @@ export default function TableMapPage(): JSX.Element {
   const [addOpen, setAddOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState("");
-  const [qrTable, setQrTable] = useState<TableData | null>(null);
+  const [qrTarget, setQrTarget] = useState<QrPrintTarget | null>(null);
   const [autoPrintPending, setAutoPrintPending] = useState(false);
   const [openTableDialogOpen, setOpenTableDialogOpen] = useState(false);
   const [openingTable, setOpeningTable] = useState<TableData | null>(null);
+  const [takeawayDialogOpen, setTakeawayDialogOpen] = useState(false);
+  const [takeawayCustomerName, setTakeawayCustomerName] = useState("");
+  const [takeawayCustomerPhone, setTakeawayCustomerPhone] = useState("");
   const [editOpen, setEditOpen] = useState(false);
   const [editingTable, setEditingTable] = useState<TableData | null>(null);
   const [newName, setNewName] = useState("");
@@ -161,13 +171,6 @@ export default function TableMapPage(): JSX.Element {
     onSuccess: async (session) => {
       const table = openingTable;
       if (!table) return;
-      const openedTable: TableData = {
-        ...table,
-        status: "occupied",
-        active_session_id: session.id,
-        queue_number: session.queue_number,
-        session_qr_token: session.qr_token,
-      };
       if (!session.qr_token) {
         toast({
           title: "เปิดโต๊ะแล้ว",
@@ -184,7 +187,12 @@ export default function TableMapPage(): JSX.Element {
       try {
         const dataUrl = await QRCode.toDataURL(getQrUrl(session.qr_token), { width: 320, margin: 2 });
         setQrDataUrl(dataUrl);
-        setQrTable(openedTable);
+        setQrTarget({
+          token: session.qr_token,
+          title: `QR รอบนี้ · โต๊ะ ${table.name}`,
+          label: `โต๊ะ ${table.name}`,
+          description: "ใช้ได้เฉพาะรอบเปิดโต๊ะปัจจุบัน",
+        });
         setQrOpen(true);
         setAutoPrintPending(true);
         toast({ title: "เปิดโต๊ะแล้ว", description: "กำลังเปิดหน้าพิมพ์ QR สำหรับรอบนี้" });
@@ -205,6 +213,65 @@ export default function TableMapPage(): JSX.Element {
     onError: (error) => {
       toast({
         title: "เปิดโต๊ะไม่สำเร็จ",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const openTakeawayMutation = useMutation({
+    mutationFn: async () => {
+      if (!branchId) {
+        throw new Error("กรุณาเลือกสาขาก่อนออก QR รับกลับ");
+      }
+      const response = await authApi.post("/restaurant/sessions", {
+        table_id: null,
+        guest_count: 1,
+        customer_name: takeawayCustomerName.trim() || undefined,
+        customer_phone: takeawayCustomerPhone.trim() || undefined,
+      });
+      return response.data.data as OpenSessionResult;
+    },
+    onSuccess: async (session) => {
+      if (!session.qr_token) {
+        toast({
+          title: "เปิดคิวรับกลับแล้ว แต่ยังไม่มี QR",
+          description: "กรุณาเปิด QR ต่อรอบในตั้งค่า F&B",
+          variant: "destructive",
+        });
+        setTakeawayDialogOpen(false);
+        return;
+      }
+      const queueLabel = session.queue_number
+        ? `คิว ${String(session.queue_number).padStart(3, "0")}`
+        : "ออเดอร์รับกลับ";
+      try {
+        const dataUrl = await QRCode.toDataURL(getQrUrl(session.qr_token), { width: 320, margin: 2 });
+        setQrDataUrl(dataUrl);
+        setQrTarget({
+          token: session.qr_token,
+          title: `QR รับกลับ · ${queueLabel}`,
+          label: `รับกลับ · ${queueLabel}`,
+          description: "ใช้ได้เฉพาะออเดอร์นี้และหมดอายุเมื่อปิดคิว",
+        });
+        setQrOpen(true);
+        setAutoPrintPending(true);
+        toast({ title: "เปิดคิวรับกลับแล้ว", description: "กำลังเปิดหน้าพิมพ์ QR สำหรับลูกค้า" });
+      } catch {
+        toast({
+          title: "เปิดคิวรับกลับแล้ว แต่สร้างรูป QR ไม่สำเร็จ",
+          description: "เปิดหน้าออเดอร์เพื่อดูคิวที่สร้างไว้",
+          variant: "destructive",
+        });
+      }
+      setTakeawayDialogOpen(false);
+      setTakeawayCustomerName("");
+      setTakeawayCustomerPhone("");
+      await queryClient.invalidateQueries({ queryKey: ["restaurant-sessions"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "เปิดคิวรับกลับไม่สำเร็จ",
         description: getErrorMessage(error),
         variant: "destructive",
       });
@@ -306,8 +373,12 @@ export default function TableMapPage(): JSX.Element {
       toast({ title: "ยังไม่มี QR สำหรับรอบนี้", description: "เปิดโต๊ะก่อน แล้วระบบจะสร้าง QR เฉพาะรอบนั้น", variant: "destructive" });
       return;
     }
-    await navigator.clipboard.writeText(getQrUrl(table.session_qr_token));
-    toast({ title: "คัดลอกลิงก์ QR สำหรับรอบนี้แล้ว", description: table.name });
+    await copyQrTarget(table.session_qr_token, table.name);
+  }
+
+  async function copyQrTarget(token: string, label: string): Promise<void> {
+    await navigator.clipboard.writeText(getQrUrl(token));
+    toast({ title: "คัดลอกลิงก์ QR สำหรับรอบนี้แล้ว", description: label });
   }
 
   async function confirmDeactivate(table: TableData): Promise<void> {
@@ -329,7 +400,12 @@ export default function TableMapPage(): JSX.Element {
     }
     const dataUrl = await QRCode.toDataURL(getQrUrl(table.session_qr_token), { width: 320, margin: 2 });
     setQrDataUrl(dataUrl);
-    setQrTable(table);
+    setQrTarget({
+      token: table.session_qr_token,
+      title: `QR รอบนี้ · โต๊ะ ${table.name}`,
+      label: `โต๊ะ ${table.name}`,
+      description: "ใช้ได้เฉพาะรอบเปิดโต๊ะปัจจุบัน",
+    });
     setAutoPrintPending(false);
     setQrOpen(true);
   }
@@ -355,9 +431,14 @@ export default function TableMapPage(): JSX.Element {
         title="แผนที่โต๊ะ"
         subtitle={`${tables.filter((t) => t.status === "occupied" || t.status === "bill_requested").length} / ${tables.length} โต๊ะที่มีลูกค้า`}
         actions={
-          <Button className="bg-orange-500 hover:bg-orange-600" disabled={!branchId} onClick={() => setAddOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" /> เพิ่มโต๊ะ
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={!branchId} onClick={() => setTakeawayDialogOpen(true)}>
+              <ShoppingBag className="mr-2 h-4 w-4" /> ออก QR รับกลับ
+            </Button>
+            <Button className="bg-orange-500 hover:bg-orange-600" disabled={!branchId} onClick={() => setAddOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> เพิ่มโต๊ะ
+            </Button>
+          </div>
         }
       />
 
@@ -564,6 +645,31 @@ export default function TableMapPage(): JSX.Element {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={takeawayDialogOpen} onOpenChange={setTakeawayDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>เปิดคิวรับกลับและออก QR</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              ระบบจะเปิดออเดอร์รับกลับ ออกเลขคิว และสร้าง QR เฉพาะออเดอร์นี้ ลูกค้าสแกนแล้วส่งรายการเข้าครัวได้ทันที
+            </div>
+            <div>
+              <Label>ชื่อลูกค้า (ถ้ามี)</Label>
+              <Input className="mt-1" value={takeawayCustomerName} onChange={(e) => setTakeawayCustomerName(e.target.value)} placeholder="เช่น คุณสมชาย" />
+            </div>
+            <div>
+              <Label>เบอร์โทร (ถ้ามี)</Label>
+              <Input className="mt-1" value={takeawayCustomerPhone} onChange={(e) => setTakeawayCustomerPhone(e.target.value)} placeholder="ใช้ค้นหาหรือติดต่อลูกค้า" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTakeawayDialogOpen(false)}>ยกเลิก</Button>
+            <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={!branchId || openTakeawayMutation.isPending} onClick={() => openTakeawayMutation.mutate()}>
+              {openTakeawayMutation.isPending ? "กำลังเปิดคิว..." : "เปิดคิวและพิมพ์ QR"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={openTableDialogOpen} onOpenChange={setOpenTableDialogOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>เปิดโต๊ะ {openingTable?.name}</DialogTitle></DialogHeader>
@@ -632,15 +738,15 @@ export default function TableMapPage(): JSX.Element {
         }}
       >
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>QR รอบนี้ โต๊ะ {qrTable?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{qrTarget?.title ?? "QR รอบนี้"}</DialogTitle></DialogHeader>
           <div className="qr-print-card rounded-2xl border border-slate-200 bg-white p-5 text-center">
             <div className="text-xs font-semibold uppercase text-slate-500">สแกนเพื่อสั่งอาหาร</div>
-            <div className="mt-1 text-2xl font-bold text-slate-950">โต๊ะ {qrTable?.name}</div>
-            <div className="mt-1 text-xs text-slate-500">ใช้ได้เฉพาะรอบเปิดโต๊ะปัจจุบัน</div>
-            {qrDataUrl && <img src={qrDataUrl} alt={`QR โต๊ะ ${qrTable?.name ?? ""}`} className="mx-auto mt-4 h-72 w-72 rounded-2xl" />}
-            {qrTable && (
+            <div className="mt-1 text-2xl font-bold text-slate-950">{qrTarget?.label}</div>
+            <div className="mt-1 text-xs text-slate-500">{qrTarget?.description}</div>
+            {qrDataUrl && <img src={qrDataUrl} alt={`QR ${qrTarget?.label ?? "สั่งอาหาร"}`} className="mx-auto mt-4 h-72 w-72 rounded-2xl" />}
+            {qrTarget && (
               <div className="mt-3 break-all rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                {qrTable.session_qr_token ? getQrUrl(qrTable.session_qr_token) : ""}
+                {getQrUrl(qrTarget.token)}
               </div>
             )}
             {autoPrintPending ? (
@@ -648,7 +754,7 @@ export default function TableMapPage(): JSX.Element {
             ) : null}
           </div>
           <div className="qr-dialog-actions mt-4 grid grid-cols-2 gap-2">
-            <Button disabled={!qrTable} onClick={() => qrTable && void copyQrLink(qrTable)} variant="outline">
+            <Button disabled={!qrTarget} onClick={() => qrTarget && void copyQrTarget(qrTarget.token, qrTarget.label)} variant="outline">
               <Copy className="mr-2 h-4 w-4" />
               คัดลอกลิงก์
             </Button>

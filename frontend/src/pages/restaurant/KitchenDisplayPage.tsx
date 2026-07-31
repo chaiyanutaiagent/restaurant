@@ -53,10 +53,7 @@ export default function KitchenDisplayPage(): JSX.Element {
 
   const updateMutation = useMutation({
     mutationFn: async ({ ticket, status }: { ticket: Ticket; status: string }) => {
-      const ticketsToUpdate = isRestaurantKitchen
-        ? allTickets.filter((item) => item.session_id === ticket.session_id && item.status === ticket.status)
-        : [ticket];
-      await Promise.all(ticketsToUpdate.map((item) => authApi.patch(`/restaurant/kitchen/${item.id}`, { status })));
+      await authApi.patch(`/restaurant/kitchen/${ticket.id}`, { status });
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["kitchen-tickets"] });
@@ -91,26 +88,26 @@ export default function KitchenDisplayPage(): JSX.Element {
   const allStations = [...new Set(allTickets.map((t) => t.station).filter(Boolean))] as string[];
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white">
-      <div className="border-b border-slate-700 px-6 py-4">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-slate-900 text-white">
+      <div className="shrink-0 border-b border-slate-700 px-3 py-2 sm:px-4 xl:px-6 xl:py-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 xl:gap-4">
           <div className="flex items-center gap-3">
-            <ChefHat className="h-7 w-7 text-emerald-400" />
+            <ChefHat className="h-6 w-6 text-emerald-400 xl:h-7 xl:w-7" />
             <div>
-              <h1 className="text-xl font-bold">Kitchen Display</h1>
-              <p className="text-sm text-slate-400">
+              <h1 className="text-lg font-bold xl:text-xl">Kitchen Display</h1>
+              <p className="hidden text-xs text-slate-400 sm:block xl:text-sm">
                 {isRestaurantKitchen ? "กดเสร็จแล้วเพื่อส่งคิวไปจอรับอาหาร" : "รายการเก่าขึ้นก่อน แยกโต๊ะและรับเองได้"}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3 text-sm text-slate-300">
-            <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-3 py-1.5">
+          <div className="flex items-center gap-2 text-xs text-slate-300 xl:gap-3 xl:text-sm">
+            <span className="inline-flex h-8 items-center gap-1 rounded-full bg-slate-800 px-2 xl:px-3">
               งานค้าง {summary.active}
             </span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-3 py-1.5">
-              <Clock className="h-4 w-4" /> Auto-refresh 5s
+            <span className="inline-flex h-8 items-center gap-1 rounded-full bg-slate-800 px-2 xl:px-3">
+              <Clock className="h-4 w-4" /> รีเฟรช 5s
             </span>
-            <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 ${urgentCount > 0 ? "bg-rose-500 text-white" : "bg-slate-800"}`}>
+            <span className={`inline-flex h-8 items-center gap-1 rounded-full px-2 xl:px-3 ${urgentCount > 0 ? "bg-rose-500 text-white" : "bg-slate-800"}`}>
               <Flame className="h-4 w-4" /> เกิน 10 นาที {urgentCount}
             </span>
             <button
@@ -123,7 +120,7 @@ export default function KitchenDisplayPage(): JSX.Element {
             </button>
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-800 pt-4">
+        <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-800 pt-2 xl:mt-4 xl:pt-4">
           {[
             { key: "all", label: `ทุกช่องทาง ${allTickets.length}` },
             { key: "dine_in", label: `โต๊ะ ${summary.dine_in}` },
@@ -133,17 +130,16 @@ export default function KitchenDisplayPage(): JSX.Element {
               key={item.key}
               type="button"
               onClick={() => setSourceFilter(item.key)}
-              className={`h-10 rounded-full px-4 text-sm font-semibold ${sourceFilter === item.key ? "bg-emerald-500 text-white" : "border border-slate-600 text-slate-300"}`}
+              className={`h-9 rounded-full px-3 text-xs font-semibold xl:h-10 xl:px-4 xl:text-sm ${sourceFilter === item.key ? "bg-emerald-500 text-white" : "border border-slate-600 text-slate-300"}`}
             >
               {item.label}
             </button>
           ))}
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="mx-1 h-6 w-px bg-slate-700" aria-hidden="true" />
           <button
             type="button"
             onClick={() => setStation("")}
-            className={`h-10 rounded-full px-4 text-sm font-semibold ${!station ? "bg-slate-100 text-slate-950" : "border border-slate-600 text-slate-300"}`}
+            className={`h-9 rounded-full px-3 text-xs font-semibold xl:h-10 xl:px-4 xl:text-sm ${!station ? "bg-slate-100 text-slate-950" : "border border-slate-600 text-slate-300"}`}
           >
             ทุกสถานี
           </button>
@@ -152,13 +148,13 @@ export default function KitchenDisplayPage(): JSX.Element {
               key={s}
               type="button"
               onClick={() => setStation(s)}
-              className={`h-10 rounded-full px-4 text-sm font-semibold ${station === s ? "bg-slate-100 text-slate-950" : "border border-slate-600 text-slate-300"}`}
+              className={`h-9 rounded-full px-3 text-xs font-semibold xl:h-10 xl:px-4 xl:text-sm ${station === s ? "bg-slate-100 text-slate-950" : "border border-slate-600 text-slate-300"}`}
             >
               {s}
             </button>
           ))}
           {oldestPending ? (
-            <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-400 px-3 py-1.5 text-sm font-semibold text-amber-950">
+            <span className="ml-auto inline-flex h-9 items-center gap-1 rounded-full bg-amber-400 px-3 text-xs font-semibold text-amber-950 xl:text-sm">
               <Timer className="h-4 w-4" /> รอนานสุด {elapsed(oldestPending.created_at)}
             </span>
           ) : null}
@@ -170,19 +166,20 @@ export default function KitchenDisplayPage(): JSX.Element {
         ) : null}
       </div>
 
-      <div className="grid h-[calc(100vh-202px)] grid-cols-1 gap-0 divide-y divide-slate-700 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-        {STATUSES.map((statusKey) => {
-          const cfg = STATUS_CONFIG[statusKey];
-          return (
-            <div key={statusKey} className="flex flex-col overflow-hidden">
-              <div className={`flex items-center gap-2 px-4 py-3 ${cfg.bg} bg-opacity-10 border-b border-slate-700`}>
-                <span className={`h-3 w-3 rounded-full ${cfg.badge}`} />
-                <span className="font-semibold text-slate-200">{cfg.label}</span>
-                <span className="ml-auto rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300">{grouped[statusKey].length}</span>
-              </div>
-              <div className="flex-1 space-y-3 overflow-y-auto p-3">
-                {grouped[statusKey].map((ticket) => (
-                  <div key={ticket.id} className={`rounded-2xl border p-4 ${elapsedSeconds(ticket.created_at) >= 600 && ticket.status !== "done" ? "border-rose-400 bg-rose-950/40" : "border-slate-700 bg-slate-800"}`}>
+      <div className="min-h-0 flex-1 overflow-x-auto">
+        <div className="grid h-full min-w-[780px] grid-cols-3 divide-x divide-slate-700">
+          {STATUSES.map((statusKey) => {
+            const cfg = STATUS_CONFIG[statusKey];
+            return (
+              <div key={statusKey} className="flex min-w-0 flex-col overflow-hidden">
+                <div className={`flex items-center gap-2 border-b border-slate-700 px-3 py-2 ${cfg.bg} bg-opacity-10 xl:px-4 xl:py-3`}>
+                  <span className={`h-3 w-3 rounded-full ${cfg.badge}`} />
+                  <span className="font-semibold text-slate-200">{cfg.label}</span>
+                  <span className="ml-auto rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300">{grouped[statusKey].length}</span>
+                </div>
+                <div className="flex-1 space-y-2 overflow-y-auto p-2 xl:space-y-3 xl:p-3">
+                  {grouped[statusKey].map((ticket) => (
+                    <div key={ticket.id} className={`rounded-xl border p-3 xl:rounded-2xl xl:p-4 ${elapsedSeconds(ticket.created_at) >= 600 && ticket.status !== "done" ? "border-rose-400 bg-rose-950/40" : "border-slate-700 bg-slate-800"}`}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
@@ -197,8 +194,8 @@ export default function KitchenDisplayPage(): JSX.Element {
                           ) : null}
                           {ticket.station ? <span className="text-xs text-slate-400">{ticket.station}</span> : null}
                         </div>
-                        <p className="mt-1 text-base font-bold text-white">{ticket.product_name}</p>
-                        <p className="text-3xl font-bold text-emerald-400">x{ticket.qty}</p>
+                        <p className="mt-1 text-sm font-bold text-white xl:text-base">{ticket.product_name}</p>
+                        <p className="text-2xl font-bold text-emerald-400 xl:text-3xl">x{ticket.qty}</p>
                         {ticket.special_request && (
                           <p className="mt-2 rounded-xl bg-amber-300 px-3 py-2 text-sm font-semibold text-amber-950">
                             {ticket.special_request}
@@ -212,21 +209,22 @@ export default function KitchenDisplayPage(): JSX.Element {
                         type="button"
                         disabled={updateMutation.isPending}
                         onClick={() => updateMutation.mutate({ ticket, status: NEXT_STATUS[statusKey] })}
-                        className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-slate-100 text-base font-bold text-slate-950 hover:bg-white disabled:opacity-60"
+                        className="mt-2 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-100 text-sm font-bold text-slate-950 hover:bg-white disabled:opacity-60 xl:mt-3 xl:h-12 xl:text-base"
                       >
                         {updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                         {NEXT_LABEL[statusKey]}
                       </button>
                     )}
-                  </div>
-                ))}
-                {grouped[statusKey].length === 0 && (
-                  <p className="py-8 text-center text-sm text-slate-600">ว่าง</p>
-                )}
+                    </div>
+                  ))}
+                  {grouped[statusKey].length === 0 && (
+                    <p className="py-8 text-center text-sm text-slate-600">ว่าง</p>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );

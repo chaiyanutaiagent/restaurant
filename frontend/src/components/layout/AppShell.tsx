@@ -39,14 +39,14 @@ export default function AppShell({ workspace = "admin" }: AppShellProps): JSX.El
       {isSidebarOpen ? (
         <button
           aria-label="Close sidebar"
-          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
           onClick={() => setIsSidebarOpen(false)}
           type="button"
         />
       ) : null}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar workspace={workspace} onMenuClick={() => setIsSidebarOpen(true)} title={title} />
-        <main className="flex-1 overflow-auto p-4 md:p-6">
+        <main className="flex-1 overflow-auto p-3 lg:p-6">
           <Outlet />
         </main>
       </div>

@@ -4,12 +4,13 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 import uuid
 
 from pydantic import ValidationError
 
 from app.schemas.restaurant import PlaceOrderRequest, TableRead
+from app.models.branch import Branch
 from app.services.dining_service import DiningService
 
 
@@ -59,6 +60,45 @@ class DiningSessionQrHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("dining_sessions.status IN", sql)
         self.assertIn("branch_settings.fb_table_qr_enabled IS true", sql)
         self.assertIn(["open", "bill_requested"], compiled.params.values())
+
+    async def test_public_menu_accepts_counter_opened_takeaway_session(self) -> None:
+        branch_id = uuid.uuid4()
+        company_id = uuid.uuid4()
+        session = SimpleNamespace(
+            id=uuid.uuid4(),
+            branch_id=branch_id,
+            company_id=company_id,
+            table_id=None,
+            queue_number=18,
+            status="open",
+            opened_at=datetime(2026, 7, 31, 10, 0, tzinfo=timezone.utc),
+        )
+        branch = SimpleNamespace(id=branch_id, name="สาขากรุงเทพ")
+        settings = SimpleNamespace(
+            fb_table_qr_enabled=True,
+            fb_service_mode="both",
+            fb_bill_at_table=True,
+        )
+        empty_products = MagicMock()
+        empty_products.all.return_value = []
+        empty_categories = MagicMock()
+        empty_categories.all.return_value = []
+        db = AsyncMock()
+        db.get.return_value = branch
+        db.scalar.return_value = settings
+        db.scalars.side_effect = [empty_products, empty_categories]
+        service = DiningService(db)
+        service.get_session_by_token = AsyncMock(return_value=session)
+
+        result = await service.get_public_menu(uuid.uuid4())
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.source_type, "quick_service")
+        self.assertIsNone(result.table_name)
+        self.assertEqual(result.queue_number, 18)
+        self.assertFalse(result.bill_at_table_enabled)
+        db.get.assert_awaited_once_with(Branch, branch_id)
 
     async def test_history_is_grouped_and_cancelled_items_are_not_totalled(self) -> None:
         first_item = _item(name="ข้าวผัด", qty=2, unit_price="60")

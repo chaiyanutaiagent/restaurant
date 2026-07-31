@@ -628,6 +628,8 @@ class DiningService:
         session = await self.get_session(session_id)
         if not session or session.company_id != company_id or not session.sale_order_id:
             raise ValueError("ไม่พบออเดอร์")
+        if not session.customer_slip_printed_at:
+            raise ValueError("กรุณาพิมพ์สลิปลูกค้าก่อนส่งออเดอร์เข้าครัว")
         settings = await self.db.scalar(select(BranchSettings).where(BranchSettings.branch_id == session.branch_id))
         await self._create_missing_kitchen_tickets(session, settings)
         now = datetime.now(timezone.utc)
@@ -905,19 +907,21 @@ class DiningService:
 
     async def get_public_menu(self, qr_token: uuid.UUID) -> PublicMenuResponse | None:
         active_session = await self.get_session_by_token(qr_token)
-        if not active_session or not active_session.table_id:
+        if not active_session:
             return None
 
-        table = await self.db.get(DiningTable, active_session.table_id)
-        if not table or not table.is_active:
-            return None
+        table: DiningTable | None = None
+        if active_session.table_id:
+            table = await self.db.get(DiningTable, active_session.table_id)
+            if not table or not table.is_active:
+                return None
 
-        branch = await self.db.get(Branch, table.branch_id)
+        branch = await self.db.get(Branch, active_session.branch_id)
         if not branch:
             return None
 
         settings = await self.db.scalar(
-            select(BranchSettings).where(BranchSettings.branch_id == table.branch_id)
+            select(BranchSettings).where(BranchSettings.branch_id == active_session.branch_id)
         )
         if not settings or not settings.fb_table_qr_enabled:
             return None
@@ -925,7 +929,7 @@ class DiningService:
         products_rows = (await self.db.scalars(
             select(Product)
             .where(
-                Product.company_id == table.company_id,
+                Product.company_id == active_session.company_id,
                 Product.product_type == "menu_item",
                 Product.is_active.is_(True),
                 Product.is_for_sale.is_(True),
@@ -934,7 +938,7 @@ class DiningService:
         )).all()
 
         categories_raw = (await self.db.scalars(
-            select(Category).where(Category.company_id == table.company_id, Category.is_active.is_(True))
+            select(Category).where(Category.company_id == active_session.company_id, Category.is_active.is_(True))
         )).all()
 
         cat_map = {c.id: c.name for c in categories_raw}
@@ -957,14 +961,15 @@ class DiningService:
         return PublicMenuResponse(
             session_id=active_session.id,
             queue_number=active_session.queue_number,
-            table_name=table.name,
+            table_name=table.name if table else None,
+            source_type="dine_in" if table else "quick_service",
             branch_name=branch.name,
             fb_service_mode=settings.fb_service_mode,
             categories=categories,
             products=products,
             session_status=active_session.status,
             opened_at=active_session.opened_at.isoformat(),
-            bill_at_table_enabled=settings.fb_bill_at_table,
+            bill_at_table_enabled=bool(table and settings.fb_bill_at_table),
         )
 
     async def _resolve_shift_and_location(

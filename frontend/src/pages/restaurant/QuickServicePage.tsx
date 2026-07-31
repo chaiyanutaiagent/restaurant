@@ -11,7 +11,9 @@ import {
   MenuList,
   MenuSearch,
   StatusList,
+  createMobileCartLineId,
   filterMenuProducts,
+  normalizeMobileCartItems,
   type MobileCartItem,
   type MobileMenuItem
 } from "@/pages/restaurant/components/MobileOrdering";
@@ -51,7 +53,7 @@ function readCartCache(token?: string): CartItem[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as CartItem[];
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? normalizeMobileCartItems(parsed) : [];
   } catch {
     localStorage.removeItem(`qs-cart-${token}`);
     return [];
@@ -166,36 +168,68 @@ export default function QuickServicePage(): JSX.Element {
   }
 
   function addToCart(product: MenuItem, specialRequest = ""): void {
+    const normalizedRequest = specialRequest.trim();
     setCart((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id);
+      const existing = prev.find(
+        (item) =>
+          item.product.id === product.id &&
+          item.special_request.trim() === normalizedRequest
+      );
       return existing
-        ? prev.map((item) => item.product.id === product.id ? { ...item, qty: item.qty + 1, special_request: specialRequest || item.special_request } : item)
-        : [...prev, { product, qty: 1, special_request: specialRequest }];
+        ? prev.map((item) => item.line_id === existing.line_id ? { ...item, qty: item.qty + 1 } : item)
+        : [...prev, {
+            line_id: createMobileCartLineId(product.id),
+            product,
+            qty: 1,
+            special_request: normalizedRequest
+          }];
     });
   }
 
-  function updateQty(id: string, delta: number): void {
-    setCart((prev) => prev.map((item) => item.product.id === id ? { ...item, qty: item.qty + delta } : item).filter((item) => item.qty > 0));
+  function updateQty(lineId: string, delta: number): void {
+    setCart((prev) => prev.map((item) => item.line_id === lineId ? { ...item, qty: item.qty + delta } : item).filter((item) => item.qty > 0));
   }
 
-  function removeFromCart(productId: string): void {
-    setCart((prev) => prev.filter((item) => item.product.id !== productId));
+  function removeFromCart(lineId: string): void {
+    setCart((prev) => prev.filter((item) => item.line_id !== lineId));
   }
 
-  function updateItemNote(productId: string, value: string): void {
-    setCart((prev) => prev.map((item) => item.product.id === productId ? { ...item, special_request: value } : item));
+  function updateItemNote(lineId: string, value: string): void {
+    setCart((prev) => prev.map((item) => item.line_id === lineId ? { ...item, special_request: value } : item));
   }
 
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
   const cartTotal = cart.reduce((sum, item) => sum + item.product.selling_price * item.qty, 0);
   const allDone = (orderStatus?.items ?? []).length > 0 && (orderStatus?.items ?? []).every((item) => item.status === "done" || item.status === "served");
   const orderError = getErrorMessage(orderMutation.error);
+  const statusError = getErrorMessage(statusQuery.error);
+  const menuError = getErrorMessage(menuQuery.error);
 
   if (menuQuery.isLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-50"><Loader2 className="h-8 w-8 animate-spin text-slate-700" /></div>;
   }
   if (!menu) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 text-center"><p className="text-slate-500">ไม่พบ QR นี้</p></div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 text-center">
+        <div>
+          <p className="text-2xl font-bold text-slate-800">
+            {menuQuery.isError ? "โหลดเมนูไม่สำเร็จ" : "ไม่พบ QR นี้"}
+          </p>
+          <p className="mt-2 text-sm text-slate-500">
+            {menuError ?? "QR อาจหมดอายุหรือไม่ถูกต้อง"}
+          </p>
+          {menuQuery.isError ? (
+            <button
+              type="button"
+              className="mt-4 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+              onClick={() => void menuQuery.refetch()}
+            >
+              ลองโหลดเมนูอีกครั้ง
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -237,6 +271,19 @@ export default function QuickServicePage(): JSX.Element {
         {orderError ? (
           <section className="mx-4 mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700">
             {orderError}
+          </section>
+        ) : null}
+
+        {orderResult && statusError ? (
+          <section className="mx-4 mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700">
+            <p>{statusError}</p>
+            <button
+              type="button"
+              className="mt-3 rounded-full bg-red-700 px-3 py-2 text-xs font-semibold text-white"
+              onClick={() => void statusQuery.refetch()}
+            >
+              ลองโหลดสถานะอีกครั้ง
+            </button>
           </section>
         ) : null}
 

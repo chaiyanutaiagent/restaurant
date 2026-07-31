@@ -175,7 +175,7 @@ export default function Sidebar({
   return (
     <aside
       className={cn(
-        "fixed inset-y-0 left-0 z-40 flex w-72 flex-col bg-gray-900 text-gray-100 transition-transform duration-200 md:static md:translate-x-0",
+        "fixed inset-y-0 left-0 z-40 flex w-72 flex-col bg-gray-900 text-gray-100 transition-transform duration-200 lg:static lg:translate-x-0",
         isSidebarOpen ? "translate-x-0" : "-translate-x-full"
       )}
     >
@@ -184,7 +184,7 @@ export default function Sidebar({
           <p className="text-lg font-semibold text-white">{brandTitle}</p>
           <p className="text-xs text-gray-400">{brandSubtitle}</p>
         </div>
-        <Button variant="ghost" size="icon" className="text-gray-300 md:hidden" onClick={onClose}>
+        <Button variant="ghost" size="icon" className="text-gray-300 lg:hidden" onClick={onClose}>
           <X className="h-5 w-5" />
         </Button>
       </div>

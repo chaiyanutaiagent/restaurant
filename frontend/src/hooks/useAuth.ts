@@ -1,9 +1,25 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import { useLocation, useNavigate } from "react-router-dom";
 import { authApi } from "@/lib/api";
 import { db } from "@/lib/db";
 import { useAuthStore } from "@/stores/auth.store";
 import type { LoginRequest } from "@/types/auth";
+
+function getLoginErrorMessage(error: unknown): string | null {
+  if (!error) return null;
+  if (axios.isAxiosError(error)) {
+    if (error.response?.status === 401) {
+      return "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง";
+    }
+    if (!error.response) {
+      return "เชื่อมต่อระบบไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองอีกครั้ง";
+    }
+    const detail = error.response.data?.detail ?? error.response.data?.error?.message;
+    if (typeof detail === "string") return detail;
+  }
+  return error instanceof Error ? error.message : "เข้าสู่ระบบไม่สำเร็จ";
+}
 
 export function useLogin(): {
   login: (payload: LoginRequest) => Promise<void>;
@@ -38,7 +54,7 @@ export function useLogin(): {
       await mutation.mutateAsync(payload);
     },
     isLoading: mutation.isPending,
-    error: mutation.error instanceof Error ? mutation.error.message : null
+    error: getLoginErrorMessage(mutation.error)
   };
 }
 

@@ -134,7 +134,7 @@ class BranchSettingsRead(BaseSchema):
     fb_line_mode: str = "group"
     fb_kitchen_stations: list[str] | None = None
     fb_setup_completed: bool = False
-    fb_qs_qr_token: str | None = None
+    fb_qs_qr_token: uuid.UUID | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -169,7 +169,7 @@ class BranchSettingsUpdate(BaseSchema):
     fb_line_mode: str | None = None
     fb_kitchen_stations: list[str] | None = None
     fb_setup_completed: bool | None = None
-    fb_qs_qr_token: str | None = None
+    fb_qs_qr_token: uuid.UUID | None = None
 
     @field_validator("promptpay_target", mode="before")
     @classmethod

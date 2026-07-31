@@ -68,22 +68,22 @@ export default function TopBar({ title, onMenuClick, workspace = "admin" }: TopB
   }, [branchId, defaultBranch, handleSwitchBranch]);
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-gray-200 bg-white px-4 shadow-sm md:px-6">
+    <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-3 shadow-sm lg:h-16 lg:px-6">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" className="md:hidden" onClick={onMenuClick}>
+        <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
           <Menu className="h-5 w-5" />
         </Button>
         <div>
           <p className={cn("text-lg font-bold", workspace === "restaurant" ? "text-orange-600" : "text-blue-600")}>
             {workspace === "restaurant" ? "Restaurant" : "Restaurant POS"}
           </p>
-          <p className="hidden text-sm text-gray-500 md:block">
+          <p className="hidden text-sm text-gray-500 lg:block">
             {workspace === "restaurant" ? "F&B Workspace" : title}
           </p>
         </div>
       </div>
 
-      <div className="hidden text-lg font-semibold text-gray-900 md:block">{title}</div>
+      <div className="hidden text-lg font-semibold text-gray-900 xl:block">{title}</div>
 
       <div className="flex items-center gap-2 md:gap-3">
         <DropdownMenu>
@@ -123,7 +123,7 @@ export default function TopBar({ title, onMenuClick, workspace = "admin" }: TopB
                   {user?.username.slice(0, 2).toUpperCase() ?? "AD"}
                 </AvatarFallback>
               </Avatar>
-              <div className="hidden text-left md:block">
+              <div className="hidden text-left xl:block">
                 <p className="text-sm font-medium text-gray-900">
                   {getDisplayName(user?.display_name ?? null, user?.username ?? "guest")}
                 </p>

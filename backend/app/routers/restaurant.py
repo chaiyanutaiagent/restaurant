@@ -1195,9 +1195,12 @@ async def update_fb_settings(
     }
     if has_tables is not None:
         update_values["fb_service_mode"] = service_mode_for(has_tables)
-        if not has_tables:
+        if has_tables:
+            update_values["fb_qs_qr_token"] = None
+        else:
             update_values["fb_table_qr_enabled"] = False
             update_values["fb_bill_at_table"] = False
+            update_values["fb_qs_qr_token"] = uuid.uuid4()
 
     field_mapping = {
         "table_qr_enabled": "fb_table_qr_enabled",
@@ -1295,7 +1298,9 @@ async def setup_fb_workspace(
     settings_row.fb_queue_reset = payload.queue_reset
     settings_row.fb_queue_prefix = payload.queue_prefix.strip()
     settings_row.fb_pickup_display_enabled = payload.pickup_display_enabled
-    if settings_row.fb_qs_qr_token is None:
+    if payload.has_tables:
+        settings_row.fb_qs_qr_token = None
+    elif settings_row.fb_qs_qr_token is None:
         settings_row.fb_qs_qr_token = uuid.uuid4()
     settings_row.fb_kitchen_stations = list(
         dict.fromkeys(
@@ -5353,6 +5358,11 @@ async def generate_qs_qr(
     )
     if not branch_settings:
         raise HTTPException(status_code=404, detail="ไม่พบ settings สาขา")
+    if branch_settings.fb_service_mode != "quick_service":
+        raise HTTPException(
+            status_code=400,
+            detail="ร้านที่มีโต๊ะต้องออก QR รับกลับจากการเปิดคิวที่เคาน์เตอร์",
+        )
     if not branch_settings.fb_qs_qr_token:
         import uuid as _uuid
         branch_settings.fb_qs_qr_token = _uuid.uuid4()
@@ -5418,22 +5428,23 @@ async def public_place_order(
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
-    if not session or not session.table_id:
+    if not session:
         raise HTTPException(status_code=404, detail="ไม่พบ QR นี้")
     if session.status == "bill_requested":
         raise HTTPException(status_code=400, detail="มีการเรียกบิลแล้ว กรุณารอพนักงาน")
 
-    table = await db.get(DiningTable, session.table_id)
-    if not table or not table.is_active:
-        raise HTTPException(status_code=404, detail="ไม่พบโต๊ะ")
+    if session.table_id:
+        table = await db.get(DiningTable, session.table_id)
+        if not table or not table.is_active:
+            raise HTTPException(status_code=404, detail="ไม่พบโต๊ะ")
 
     branch_settings = await db.scalar(
-        select(BranchSettings).where(BranchSettings.branch_id == table.branch_id)
+        select(BranchSettings).where(BranchSettings.branch_id == session.branch_id)
     )
 
     try:
         order = await svc.place_order(
-            table.company_id, table.branch_id, session, payload, "qr_self", branch_settings,
+            session.company_id, session.branch_id, session, payload, "qr_self", branch_settings,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -5475,6 +5486,8 @@ async def public_request_bill(
         raise HTTPException(status_code=404, detail="ไม่พบ QR นี้")
     if session_id is not None and session.id != session_id:
         raise HTTPException(status_code=404, detail="ไม่พบ session")
+    if session.table_id is None:
+        raise HTTPException(status_code=403, detail="ออเดอร์รับกลับไม่รองรับการเรียกบิลจาก QR")
     settings = await db.scalar(
         select(BranchSettings).where(BranchSettings.branch_id == session.branch_id)
     )
@@ -5503,7 +5516,10 @@ async def ingredient_usage_report(
 
 async def _get_qs_settings(db: AsyncSession, qs_token: uuid.UUID) -> BranchSettings | None:
     return await db.scalar(
-        select(BranchSettings).where(BranchSettings.fb_qs_qr_token == qs_token)
+        select(BranchSettings).where(
+            BranchSettings.fb_qs_qr_token == qs_token,
+            BranchSettings.fb_service_mode == "quick_service",
+        )
     )
 
 

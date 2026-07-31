@@ -15,10 +15,28 @@ export type MobileMenuItem = {
 export type MobileCategory = { id: string; name: string };
 
 export type MobileCartItem<TProduct extends MobileMenuItem = MobileMenuItem> = {
+  line_id: string;
   product: TProduct;
   qty: number;
   special_request: string;
 };
+
+export function createMobileCartLineId(productId: string): string {
+  const randomId = globalThis.crypto?.randomUUID?.();
+  return randomId ?? `${productId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+}
+
+export function normalizeMobileCartItems<TProduct extends MobileMenuItem>(
+  items: MobileCartItem<TProduct>[]
+): MobileCartItem<TProduct>[] {
+  return items
+    .filter((item) => item?.product?.id && Number(item.qty) > 0)
+    .map((item) => ({
+      ...item,
+      line_id: item.line_id || createMobileCartLineId(item.product.id),
+      special_request: item.special_request ?? ""
+    }));
+}
 
 export function formatCurrency(value: number): string {
   return `฿${value.toFixed(0)}`;
@@ -80,7 +98,7 @@ type CategoryTabsProps = {
 export function CategoryTabs({ categories, selectedCategory, onSelect, stickyTopClassName = "top-[94px]" }: CategoryTabsProps): JSX.Element {
   return (
     <div className={`sticky ${stickyTopClassName} z-10 mt-4 border-y border-slate-200 bg-slate-50/95 px-4 py-3 backdrop-blur`}>
-      <div className="flex gap-2 overflow-x-auto">
+      <div className="mobile-category-scroll flex gap-2 overflow-x-auto">
         <button
           type="button"
           onClick={() => onSelect("")}
@@ -129,7 +147,7 @@ type MenuItemRowProps<TProduct extends MobileMenuItem> = {
   cartItem?: MobileCartItem<TProduct>;
   onAdd: (product: TProduct) => void;
   onCustomize?: (product: TProduct) => void;
-  onQtyChange: (productId: string, delta: number) => void;
+  onQtyChange: (lineId: string, delta: number) => void;
 };
 
 export function MenuItemRow<TProduct extends MobileMenuItem>({ product, cartItem, onAdd, onCustomize, onQtyChange }: MenuItemRowProps<TProduct>): JSX.Element {
@@ -154,8 +172,8 @@ export function MenuItemRow<TProduct extends MobileMenuItem>({ product, cartItem
             <QuantityControl
               label={product.name}
               qty={cartItem.qty}
-              onDecrease={() => onQtyChange(product.id, -1)}
-              onIncrease={() => onQtyChange(product.id, 1)}
+              onDecrease={() => onQtyChange(cartItem.line_id, -1)}
+              onIncrease={() => onQtyChange(cartItem.line_id, 1)}
             />
           ) : (
             <div className="flex items-center gap-2">
@@ -190,7 +208,7 @@ type MenuListProps<TProduct extends MobileMenuItem> = {
   products: TProduct[];
   cart: MobileCartItem<TProduct>[];
   onAdd: (product: TProduct) => void;
-  onQtyChange: (productId: string, delta: number) => void;
+  onQtyChange: (lineId: string, delta: number) => void;
   onCustomize?: (product: TProduct) => void;
   emptyLabel?: string;
 };
@@ -208,7 +226,9 @@ export function MenuList<TProduct extends MobileMenuItem>({ products, cart, onAd
         <MenuItemRow
           key={product.id}
           product={product}
-          cartItem={cart.find((item) => item.product.id === product.id)}
+          cartItem={cart.find(
+            (item) => item.product.id === product.id && !item.special_request.trim()
+          )}
           onAdd={onAdd}
           onQtyChange={onQtyChange}
           onCustomize={onCustomize}
@@ -340,9 +360,9 @@ type CartSheetProps<TProduct extends MobileMenuItem> = {
   isSubmitting: boolean;
   extraFields?: ReactNode;
   onClose: () => void;
-  onRemove: (productId: string) => void;
-  onQtyChange: (productId: string, delta: number) => void;
-  onItemNoteChange: (productId: string, value: string) => void;
+  onRemove: (lineId: string) => void;
+  onQtyChange: (lineId: string, delta: number) => void;
+  onItemNoteChange: (lineId: string, value: string) => void;
   onNoteChange: (value: string) => void;
   onSubmit: () => void;
 };
@@ -391,10 +411,10 @@ export function CartSheet<TProduct extends MobileMenuItem>({
           </div>
         ) : null}
         {cart.map((item) => (
-          <div key={item.product.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div key={item.line_id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <p className="font-semibold text-slate-950">{item.product.name}</p>
-              <button type="button" aria-label={`ลบ ${item.product.name}`} onClick={() => onRemove(item.product.id)} className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+              <button type="button" aria-label={`ลบ ${item.product.name}`} onClick={() => onRemove(item.line_id)} className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500">
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
@@ -402,8 +422,8 @@ export function CartSheet<TProduct extends MobileMenuItem>({
               <QuantityControl
                 label={item.product.name}
                 qty={item.qty}
-                onDecrease={() => onQtyChange(item.product.id, -1)}
-                onIncrease={() => onQtyChange(item.product.id, 1)}
+                onDecrease={() => onQtyChange(item.line_id, -1)}
+                onIncrease={() => onQtyChange(item.line_id, 1)}
               />
               <span className="font-bold text-emerald-700">{formatCurrency(item.product.selling_price * item.qty)}</span>
             </div>
@@ -411,7 +431,7 @@ export function CartSheet<TProduct extends MobileMenuItem>({
               className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
               placeholder="หมายเหตุรายเมนู เช่น ไม่ใส่น้ำตาล"
               value={item.special_request}
-              onChange={(event) => onItemNoteChange(item.product.id, event.target.value)}
+              onChange={(event) => onItemNoteChange(item.line_id, event.target.value)}
             />
           </div>
         ))}

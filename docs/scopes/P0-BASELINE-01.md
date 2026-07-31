@@ -59,8 +59,8 @@ Phase: **Phase 0 — Baseline และ Freeze**
 - [x] Retail POS regression/smoke ผ่าน หรือบันทึกข้อจำกัดที่ตรวจได้
 - [x] Migration head ถูกบันทึก
 - [x] Database backup สร้างสำเร็จและมี checksum
-- [ ] Baseline commit สำเร็จ
-- [ ] Working tree หลัง commit สะอาด หรือมีรายการที่ตั้งใจไม่ commit ระบุไว้
+- [x] Baseline commit สำเร็จ
+- [x] Working tree หลัง commit สะอาด หรือมีรายการที่ตั้งใจไม่ commit ระบุไว้
 
 ## Rollback
 
@@ -79,5 +79,5 @@ Phase: **Phase 0 — Baseline และ Freeze**
 - Backup path: `/private/tmp/restaurant-p0-baseline-20260731-205944.dump`
 - Backup SHA-256: `e068e0c0924f27ea883b21d35f4574abb2c33781a1608da24cd3e86c1ce4c704`
 - Backup validation: PostgreSQL custom-format archive อ่านสารบัญได้ `1,034` รายการ
-- Baseline commit: Pending
+- Baseline commit: `2ab8df9` (`feat: baseline restaurant ERP workflows`)
 - Notes: F&B smoke ทดสอบ takeaway, dine-in, kitchen, handoff และ checkout; permission smoke ทดสอบ cashier, kitchen, recipe/cost และ manager. ไม่มีการแก้ source ระหว่างการตรวจ Phase 0 และยังไม่ได้ push/deploy

@@ -8,6 +8,10 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def effective_database_url(explicit_url: str | None, legacy_url: str) -> str:
+    return explicit_url or legacy_url
+
+
 class Settings(BaseSettings):
     postgres_db: str
     postgres_user: str
@@ -15,6 +19,8 @@ class Settings(BaseSettings):
     postgres_host: str
     postgres_port: int
     database_url: str
+    platform_database_url: str | None = None
+    restaurant_database_url: str | None = None
     redis_url: str
     secret_key: str
     algorithm: str
@@ -43,6 +49,32 @@ class Settings(BaseSettings):
     @property
     def database_url_sync(self) -> str:
         return self.database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def platform_database_url_effective(self) -> str:
+        return effective_database_url(self.platform_database_url, self.database_url)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def restaurant_database_url_effective(self) -> str:
+        return effective_database_url(self.restaurant_database_url, self.database_url)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def platform_database_url_sync(self) -> str:
+        return self.platform_database_url_effective.replace(
+            "postgresql+asyncpg://",
+            "postgresql+psycopg2://",
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def restaurant_database_url_sync(self) -> str:
+        return self.restaurant_database_url_effective.replace(
+            "postgresql+asyncpg://",
+            "postgresql+psycopg2://",
+        )
 
     @cached_property
     def is_production(self) -> bool:

@@ -23,7 +23,10 @@ RUN addgroup --system app \
     && adduser --system --ingroup app --home /app --no-create-home app
 
 COPY alembic.ini ./alembic.ini
+COPY alembic-boundaries.ini ./alembic-boundaries.ini
 COPY alembic ./alembic
+COPY alembic_platform ./alembic_platform
+COPY alembic_restaurant ./alembic_restaurant
 COPY app ./app
 
 RUN mkdir -p /app/uploads /app/logs \

@@ -56,3 +56,22 @@ COMPOSE_PROJECT_NAME=restaurant-pos-local-drill docker compose -f docker-compose
 - Uploads are now stored in a named Docker volume for local runs, matching the production persistence model.
 - Restored uploads default to owner `100:101`, matching the backend image's app user. Override with `LOCAL_UPLOADS_OWNER` only if the backend image user changes.
 - Redis is useful for continuity during a restore drill, but PostgreSQL and uploads are the durable application data.
+
+## Phase 1 Database Boundary Backup
+
+After running `./scripts/setup-local-database-boundary.sh`, create independent
+Platform and Restaurant dumps with:
+
+```sh
+./scripts/backup-local-database-boundary.sh
+```
+
+This produces `platform-core.dump` and `restaurant.dump`; it intentionally does
+not replace the legacy full backup above while data cutover is pending. Verify a
+backup by restoring both dumps into isolated drill databases:
+
+```sh
+BOUNDARY_DRILL_SUFFIX=verify01 BOUNDARY_DRILL_CLEANUP=1 \
+  ./scripts/restore-local-database-boundary-drill.sh \
+  backups/restaurant-boundaries-local-YYYYMMDDTHHMMSSZ
+```

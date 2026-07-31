@@ -40,3 +40,5 @@ Restaurant handles dining tables, dining sessions, QR menu ordering, kitchen tic
 ## Direction
 
 ERP stays the core platform. POS and Restaurant stay below ERP as modules. External systems integrate through APIs and webhooks rather than sharing code or database tables directly.
+
+Phase 1 is introducing explicit physical Control Plane and Restaurant database boundaries while the legacy database remains authoritative until a separately verified data cutover. See [Database Boundaries](./database-boundaries.md).

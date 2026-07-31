@@ -16,7 +16,12 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.config import settings
-from app.database import AsyncSessionLocal, init_db
+from app.database import (
+    AsyncSessionLocal,
+    PlatformSessionLocal,
+    RestaurantSessionLocal,
+    init_db,
+)
 from app.middleware.branch_context import BranchContextMiddleware
 from app.middleware.request_id import RequestIDMiddleware
 from app.routers import accounting as accounting_router
@@ -107,8 +112,8 @@ async def health_live() -> dict[str, str]:
     return {"status": "ok", "version": settings.app_version}
 
 
-async def _check_database() -> str:
-    async with AsyncSessionLocal() as db:
+async def _check_database(session_factory) -> str:
+    async with session_factory() as db:
         await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=5)
     return "ok"
 
@@ -137,7 +142,9 @@ async def health_ready() -> JSONResponse:
     checks: dict[str, dict[str, str]] = {}
 
     for name, check in (
-        ("database", _check_database),
+        ("database", lambda: _check_database(AsyncSessionLocal)),
+        ("platform_database", lambda: _check_database(PlatformSessionLocal)),
+        ("restaurant_database", lambda: _check_database(RestaurantSessionLocal)),
         ("redis", _check_redis),
     ):
         try:

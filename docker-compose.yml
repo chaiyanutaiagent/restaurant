@@ -8,6 +8,7 @@ services:
       - .env
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-database-boundaries.sh:/docker-entrypoint-initdb.d/20-database-boundaries.sh:ro
     networks:
       - restaurant_network
 

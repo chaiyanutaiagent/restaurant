@@ -14,6 +14,7 @@ from app.models.branch import Branch
 from app.models.role import Permission, Role, role_permissions_table
 from app.models.user import User, UserBranch
 from app.services.business_context_service import resolve_user_branch_context
+from app.services.platform_reference_projection import enqueue_reference_event
 from app.business_context import CanonicalBusinessContext
 from app.utils.security import (
     create_access_token,
@@ -24,8 +25,9 @@ from app.utils.security import (
 
 
 class AuthService:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, *, emit_reference_events: bool = False):
         self.db = db
+        self.emit_reference_events = emit_reference_events
 
     async def authenticate_user(
         self,
@@ -48,6 +50,14 @@ class AuthService:
 
         user.last_login_at = datetime.now(timezone.utc)
         await self.db.flush()
+        if self.emit_reference_events:
+            await enqueue_reference_event(
+                self.db,
+                aggregate_type="user",
+                aggregate_id=user.id,
+                company_id=user.company_id,
+                payload={"source": "auth.login"},
+            )
         return user
 
     async def get_user_permissions(

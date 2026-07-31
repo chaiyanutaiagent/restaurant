@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
+from app.database import get_identity_db
 from app.dependencies import TokenData, get_current_user, get_current_user_db
 from app.models.user import User
 from app.schemas.auth import (
@@ -28,7 +28,14 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
 def ok(data: Any) -> dict[str, Any]:
-    return {"data": data, "meta": {"version": settings.app_version}, "error": None}
+    return {
+        "data": data,
+        "meta": {
+            "version": settings.app_version,
+            "identity_database": settings.identity_database,
+        },
+        "error": None,
+    }
 
 
 def _token_response(access_token: str, refresh_token: str, user: User) -> TokenResponse:
@@ -49,7 +56,7 @@ def _token_response(access_token: str, refresh_token: str, user: User) -> TokenR
 async def login(
     payload: LoginRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
     x_company_id: str | None = Header(default=None, alias="X-Company-ID"),
 ) -> dict[str, Any]:
     company_id_raw = x_company_id or (str(payload.company_id) if payload.company_id else None)
@@ -60,7 +67,10 @@ async def login(
         )
     company_id = uuid.UUID(company_id_raw)
 
-    auth_service = AuthService(db)
+    auth_service = AuthService(
+        db,
+        emit_reference_events=settings.identity_database == "platform_core",
+    )
     user = await auth_service.authenticate_user(company_id, payload.username, payload.password)
     access_token, refresh_token = await auth_service.create_session(
         user=user,
@@ -75,7 +85,7 @@ async def login(
 async def refresh(
     payload: RefreshRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     auth_service = AuthService(db)
     access_token, refresh_token = await auth_service.refresh_session(
@@ -95,7 +105,7 @@ async def refresh(
 @router.post("/logout")
 async def logout(
     payload: LogoutRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     auth_service = AuthService(db)
     await auth_service.logout(payload.refresh_token)
@@ -122,7 +132,7 @@ async def me(
 @router.post("/switch-branch")
 async def switch_branch(
     payload: BranchSwitchRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
     user: User = Depends(get_current_user_db),
 ) -> dict[str, Any]:
     auth_service = AuthService(db)

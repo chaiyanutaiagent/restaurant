@@ -88,6 +88,11 @@ TARGET_DATABASE_SESSION_FACTORIES = {
     "restaurant": RestaurantSessionLocal,
 }
 
+IDENTITY_DATABASE_SESSION_FACTORIES = {
+    "legacy": AsyncSessionLocal,
+    "platform_core": PlatformSessionLocal,
+}
+
 
 def session_factory_for(
     target_database: str,
@@ -96,6 +101,55 @@ def session_factory_for(
         return TARGET_DATABASE_SESSION_FACTORIES[target_database]
     except KeyError as exc:
         raise ValueError(f"Unsupported target database: {target_database}") from exc
+
+
+def identity_session_factory_for(
+    identity_database: str,
+) -> async_sessionmaker[AsyncSession]:
+    try:
+        return IDENTITY_DATABASE_SESSION_FACTORIES[identity_database]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported identity database: {identity_database}") from exc
+
+
+def active_identity_session_factory() -> async_sessionmaker[AsyncSession]:
+    return identity_session_factory_for(settings.identity_database)
+
+
+def validate_runtime_database_names(
+    *,
+    identity_database: str,
+    reference_projector_enabled: bool,
+    legacy_database_name: str,
+    platform_database_name: str,
+    restaurant_database_name: str,
+) -> None:
+    if identity_database == "platform_core" and not reference_projector_enabled:
+        raise RuntimeError(
+            "Platform identity cutover requires REFERENCE_PROJECTOR_ENABLED=true"
+        )
+    if identity_database != "platform_core" and not reference_projector_enabled:
+        return
+    if len(
+        {
+            legacy_database_name,
+            platform_database_name,
+            restaurant_database_name,
+        }
+    ) != 3:
+        raise RuntimeError(
+            "Runtime cutover requires distinct legacy, Platform and Restaurant databases"
+        )
+
+
+async def current_database_name(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> str:
+    async with session_factory() as session:
+        value = await session.scalar(func.current_database())
+    if not value:
+        raise RuntimeError("Could not resolve current PostgreSQL database name")
+    return str(value)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -110,6 +164,12 @@ async def get_platform_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def get_restaurant_db() -> AsyncGenerator[AsyncSession, None]:
     async with RestaurantSessionLocal() as session:
+        yield session
+
+
+async def get_identity_db() -> AsyncGenerator[AsyncSession, None]:
+    session_factory = active_identity_session_factory()
+    async with session_factory() as session:
         yield session
 
 

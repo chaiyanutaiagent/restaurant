@@ -78,3 +78,29 @@ Restaurant preserves its operational `brands.central_location_id`,
 when applying Platform references. The transitional Restaurant `users` projection
 exists only for operational foreign-key compatibility and must never be used for
 authentication.
+
+## Identity Runtime Canary
+
+`P1-RUNTIME-CUTOVER-06` adds a server-owned `IDENTITY_DATABASE` switch with
+`legacy` as the default/rollback value and `platform_core` as the canary value.
+Login, refresh, logout, branch switching, current-user validation and permission
+context all use the selected identity session factory; operational router sessions
+remain on legacy until a separate Restaurant workflow cutover.
+
+Platform mode requires `REFERENCE_PROJECTOR_ENABLED=true`. Startup resolves
+`current_database()` through all three engines and refuses the cutover unless
+legacy, Platform and Restaurant are three distinct physical PostgreSQL databases.
+The in-process projector uses the same `FOR UPDATE SKIP LOCKED` claims as the CLI,
+so multiple backend replicas do not claim one event concurrently.
+
+Platform login updates `users.last_login_at`, creates the refresh token and audit,
+and enqueues the User reference event in one Platform transaction. The projector
+then updates Restaurant independently. Auth responses and `/health/ready` expose
+the active server mode for operational verification; clients cannot choose a
+database per request.
+
+Rolling back to `IDENTITY_DATABASE=legacy` does not copy token hashes between
+databases. Signed access tokens continue to validate while the legacy User remains
+active, but Platform-issued refresh tokens require a new legacy login. Production
+activation remains a separate operator decision after a fresh identity parity
+check, backup and canary window.

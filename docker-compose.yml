@@ -26,6 +26,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      IDENTITY_DATABASE: ${IDENTITY_DATABASE:-legacy}
+      REFERENCE_PROJECTOR_ENABLED: ${REFERENCE_PROJECTOR_ENABLED:-false}
+      REFERENCE_PROJECTOR_POLL_SECONDS: ${REFERENCE_PROJECTOR_POLL_SECONDS:-1}
+      REFERENCE_PROJECTOR_BATCH_SIZE: ${REFERENCE_PROJECTOR_BATCH_SIZE:-100}
     ports:
       - "${RESTAURANT_API_PORT:-8001}:8000"
     volumes:

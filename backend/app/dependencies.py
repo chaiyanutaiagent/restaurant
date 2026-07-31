@@ -9,7 +9,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_identity_db
 from app.models.user import User
 from app.services.business_context_service import resolve_user_branch_context
 from app.utils.security import decode_token
@@ -30,7 +30,7 @@ class TokenData:
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> TokenData:
     payload = decode_token(token)
     if payload.get("type") != "access":
@@ -110,7 +110,7 @@ def require_business_type(expected: str) -> Callable:
 
 async def get_current_user_db(
     current: TokenData = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> User:
     user = await db.get(User, current.user_id)
     if user is None or user.deleted_at is not None or not user.is_active:

@@ -20,7 +20,9 @@ from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
     RestaurantSessionLocal,
+    current_database_name,
     init_db,
+    validate_runtime_database_names,
 )
 from app.middleware.branch_context import BranchContextMiddleware
 from app.middleware.request_id import RequestIDMiddleware
@@ -37,11 +39,27 @@ from app.routers import auth, pos, products, purchase, reports, stock, stock_cou
 from app.routers import router
 from app.utils.create_superuser import ensure_default_company_seed_in_session
 from app.utils.seed_permissions import seed_default_permissions
+from app.services.reference_projector_worker import (
+    reference_projector_state,
+    run_reference_projector,
+)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await init_db()
+    legacy_database_name, platform_database_name, restaurant_database_name = await asyncio.gather(
+        current_database_name(AsyncSessionLocal),
+        current_database_name(PlatformSessionLocal),
+        current_database_name(RestaurantSessionLocal),
+    )
+    validate_runtime_database_names(
+        identity_database=settings.identity_database,
+        reference_projector_enabled=settings.reference_projector_enabled,
+        legacy_database_name=legacy_database_name,
+        platform_database_name=platform_database_name,
+        restaurant_database_name=restaurant_database_name,
+    )
     async with AsyncSessionLocal() as db:
         permissions_table_exists = await db.scalar(
             text("SELECT 1 FROM information_schema.tables WHERE table_name = 'permissions' LIMIT 1")
@@ -51,7 +69,31 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             # FIX S3-D-verify: bootstrap the documented company/admin seed so source-based docker compose matches the verification environment
             await ensure_default_company_seed_in_session(db)
             await db.commit()
-    yield
+
+    projector_stop: asyncio.Event | None = None
+    projector_task: asyncio.Task[None] | None = None
+    if settings.reference_projector_enabled:
+        projector_stop = asyncio.Event()
+        projector_task = asyncio.create_task(
+            run_reference_projector(
+                projector_stop,
+                poll_seconds=settings.reference_projector_poll_seconds,
+                batch_size=settings.reference_projector_batch_size,
+            ),
+            name="platform-reference-projector",
+        )
+
+    try:
+        yield
+    finally:
+        if projector_stop is not None:
+            projector_stop.set()
+        if projector_task is not None:
+            try:
+                await asyncio.wait_for(projector_task, timeout=5)
+            except TimeoutError:  # pragma: no cover - shutdown timeout path
+                projector_task.cancel()
+                await asyncio.gather(projector_task, return_exceptions=True)
 
 
 app = FastAPI(
@@ -159,6 +201,11 @@ async def health_ready() -> JSONResponse:
     except Exception:  # pragma: no cover - runtime dependency failure path
         checks["uploads"] = {"status": "error"}
 
+    if settings.reference_projector_enabled:
+        checks["reference_projector"] = {
+            "status": "ok" if reference_projector_state.running else "error"
+        }
+
     ready = all(check["status"] == "ok" for check in checks.values())
     status_code = status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE
     return JSONResponse(
@@ -166,6 +213,14 @@ async def health_ready() -> JSONResponse:
         content={
             "status": "ok" if ready else "error",
             "checks": checks,
+            "runtime": {
+                "identity_database": settings.identity_database,
+                "reference_projector_enabled": settings.reference_projector_enabled,
+                "reference_projector_running": reference_projector_state.running,
+                "reference_projector_failed_events": reference_projector_state.failed,
+                "reference_projector_loop_errors": reference_projector_state.loop_errors,
+                "reference_projector_last_error_type": reference_projector_state.last_error_type,
+            },
             "version": settings.app_version,
         },
     )

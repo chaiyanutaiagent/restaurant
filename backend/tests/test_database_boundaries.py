@@ -5,6 +5,7 @@ from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
     RestaurantSessionLocal,
+    active_identity_session_factory,
     session_factory_for,
 )
 
@@ -35,3 +36,8 @@ class DatabaseBoundaryTests(unittest.TestCase):
 
     def test_shared_env_can_include_database_bootstrap_variables(self) -> None:
         self.assertEqual(Settings.model_config.get("extra"), "ignore")
+
+    def test_identity_database_defaults_to_legacy(self) -> None:
+        self.assertEqual(settings.identity_database, "legacy")
+        self.assertFalse(settings.reference_projector_enabled)
+        self.assertIs(active_identity_session_factory(), AsyncSessionLocal)

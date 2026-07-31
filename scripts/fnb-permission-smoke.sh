@@ -4,6 +4,8 @@ set -euo pipefail
 INTERNAL_BASE_URL="${INTERNAL_BASE_URL:-http://127.0.0.1:8000}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SMOKE_PASSWORD="${SMOKE_PASSWORD:-SmokePass123!}"
+FNB_PERMISSION_IDENTITY_DATABASE="${FNB_PERMISSION_IDENTITY_DATABASE:-legacy}"
+FNB_PERMISSION_SERVICE_DATABASE="${FNB_PERMISSION_SERVICE_DATABASE:-legacy}"
 
 cd "$PROJECT_DIR"
 
@@ -16,7 +18,13 @@ require_cmd() {
 
 psql_at() {
   docker compose exec -T postgres sh -c \
-    'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"' sh "$1"
+    'case "$2" in
+       legacy) database_name="$POSTGRES_DB" ;;
+       platform_core) database_name="$PLATFORM_POSTGRES_DB" ;;
+       *) exit 2 ;;
+     esac
+     psql -U "$POSTGRES_USER" -d "$database_name" -Atc "$1"' \
+    sh "$1" "$FNB_PERMISSION_IDENTITY_DATABASE"
 }
 
 json_get() {
@@ -58,10 +66,13 @@ print(payload)' "$method" "$url" "$token" "$expected" "$body"
 }
 
 seed_roles_and_users() {
-  docker compose exec -T -e SMOKE_PASSWORD="$SMOKE_PASSWORD" backend python -c 'import asyncio
+  docker compose exec -T \
+    -e SMOKE_PASSWORD="$SMOKE_PASSWORD" \
+    -e FNB_PERMISSION_IDENTITY_DATABASE="$FNB_PERMISSION_IDENTITY_DATABASE" \
+    backend python -c 'import asyncio
 import os
 from sqlalchemy import select, delete, insert
-from app.database import AsyncSessionLocal
+from app.database import identity_session_factory_for
 from app.models.branch import Branch
 from app.models.company import Company
 from app.models.role import Permission, Role, role_permissions_table
@@ -69,6 +80,7 @@ from app.models.user import User, UserBranch
 from app.utils.security import hash_password
 
 PASSWORD = os.environ["SMOKE_PASSWORD"]
+IDENTITY_DATABASE = os.environ["FNB_PERMISSION_IDENTITY_DATABASE"]
 ROLE_DEFS = {
     "FNB Smoke Cashier": ["fb.menu.view", "fb.table.manage", "fb.order.create"],
     "FNB Smoke Kitchen": ["fb.menu.view", "fb.kitchen.manage"],
@@ -83,7 +95,8 @@ USER_DEFS = {
 }
 
 async def main():
-    async with AsyncSessionLocal() as db:
+    session_factory = identity_session_factory_for(IDENTITY_DATABASE)
+    async with session_factory() as db:
         company = await db.scalar(select(Company).where(Company.is_active.is_(True)).order_by(Company.created_at).limit(1))
         if not company:
             raise RuntimeError("No active company found")
@@ -171,21 +184,61 @@ login_as() {
 
 require_cmd docker
 require_cmd node
+case "$FNB_PERMISSION_IDENTITY_DATABASE" in
+  legacy|platform_core) ;;
+  *)
+    echo "FNB_PERMISSION_IDENTITY_DATABASE must be legacy or platform_core." >&2
+    exit 1
+    ;;
+esac
+case "$FNB_PERMISSION_SERVICE_DATABASE" in
+  legacy|restaurant) ;;
+  *)
+    echo "FNB_PERMISSION_SERVICE_DATABASE must be legacy or restaurant." >&2
+    exit 1
+    ;;
+esac
+if [[ "$FNB_PERMISSION_SERVICE_DATABASE" = "restaurant" && \
+      "$FNB_PERMISSION_IDENTITY_DATABASE" != "platform_core" ]]; then
+  echo "Restaurant permission smoke requires Platform identity." >&2
+  exit 1
+fi
 
 echo "== F&B permission smoke: seed permissions and demo menu"
-docker compose exec -T backend python -c '
+docker compose exec -T \
+  -e FNB_PERMISSION_IDENTITY_DATABASE="$FNB_PERMISSION_IDENTITY_DATABASE" \
+  backend python -c '
 import asyncio
-from app.database import AsyncSessionLocal
+import os
+from app.database import identity_session_factory_for
 from app.utils.seed_permissions import seed_default_permissions
 
 async def main():
-    async with AsyncSessionLocal() as db:
+    session_factory = identity_session_factory_for(os.environ["FNB_PERMISSION_IDENTITY_DATABASE"])
+    async with session_factory() as db:
         await seed_default_permissions(db)
 
 asyncio.run(main())
 ' >/dev/null
-docker compose exec -T backend python -m app.utils.seed_fnb_demo >/dev/null
+docker compose exec -T backend python -m app.utils.seed_fnb_demo \
+  --database "$FNB_PERMISSION_SERVICE_DATABASE" >/dev/null
 seed_roles_and_users
+
+if [[ "$FNB_PERMISSION_IDENTITY_DATABASE" = "platform_core" ]]; then
+  echo "== F&B permission smoke: project identity references"
+  docker compose exec -T backend \
+    python -m app.utils.project_platform_references --seed-snapshot >/dev/null
+  projection_tries=0
+  until docker compose exec -T backend \
+    python -m app.utils.project_platform_references --once --verify >/dev/null 2>&1; do
+    projection_tries=$((projection_tries + 1))
+    if [[ "$projection_tries" -ge 30 ]]; then
+      echo "Platform identity references did not reach Restaurant parity." >&2
+      exit 1
+    fi
+    sleep 1
+  done
+fi
 
 COMPANY_ID="$(psql_at "select id from companies order by created_at limit 1;")"
 BRANCH_ID="$(psql_at "select id from branches where company_id='$COMPANY_ID' and deleted_at is null order by sort_order, created_at limit 1;")"

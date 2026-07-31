@@ -2,6 +2,7 @@
 set -euo pipefail
 
 INTERNAL_BASE_URL="${INTERNAL_BASE_URL:-http://127.0.0.1:8000}"
+FNB_SMOKE_DATABASE="${FNB_SMOKE_DATABASE:-legacy}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$PROJECT_DIR"
@@ -15,7 +16,13 @@ require_cmd() {
 
 psql_at() {
   docker compose exec -T postgres sh -c \
-    'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"' sh "$1" \
+    'case "$2" in
+       legacy) database_name="$POSTGRES_DB" ;;
+       restaurant) database_name="$RESTAURANT_POSTGRES_DB" ;;
+       *) exit 2 ;;
+     esac
+     psql -U "$POSTGRES_USER" -d "$database_name" -Atc "$1"' \
+    sh "$1" "$FNB_SMOKE_DATABASE" \
     | sed '/^[A-Z][A-Z ]* [0-9][0-9]*$/d'
 }
 
@@ -56,12 +63,20 @@ json_get() {
 
 require_cmd docker
 require_cmd node
+case "$FNB_SMOKE_DATABASE" in
+  legacy|restaurant) ;;
+  *)
+    echo "FNB_SMOKE_DATABASE must be legacy or restaurant." >&2
+    exit 1
+    ;;
+esac
 
 echo "== F&B smoke: health"
 http_get "$INTERNAL_BASE_URL/health" >/dev/null
 
-echo "== F&B smoke: seed demo menu"
-docker compose exec -T backend python -m app.utils.seed_fnb_demo >/dev/null
+echo "== F&B smoke: seed demo menu in $FNB_SMOKE_DATABASE"
+docker compose exec -T backend python -m app.utils.seed_fnb_demo \
+  --database "$FNB_SMOKE_DATABASE" >/dev/null
 
 COMPANY_ID="$(psql_at "select id from companies order by created_at limit 1;")"
 BRANCH_ID="$(psql_at "select id from branches where company_id='$COMPANY_ID' and deleted_at is null order by sort_order, created_at limit 1;")"

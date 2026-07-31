@@ -6,6 +6,7 @@ from app.database import (
     PlatformSessionLocal,
     RestaurantSessionLocal,
     active_identity_session_factory,
+    active_restaurant_service_session_factory,
     session_factory_for,
 )
 
@@ -39,5 +40,10 @@ class DatabaseBoundaryTests(unittest.TestCase):
 
     def test_identity_database_defaults_to_legacy(self) -> None:
         self.assertEqual(settings.identity_database, "legacy")
+        self.assertEqual(settings.restaurant_service_database, "legacy")
         self.assertFalse(settings.reference_projector_enabled)
         self.assertIs(active_identity_session_factory(), AsyncSessionLocal)
+        self.assertIs(
+            active_restaurant_service_session_factory(),
+            AsyncSessionLocal,
+        )

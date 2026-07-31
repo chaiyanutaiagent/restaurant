@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.business_context import RESTAURANT
-from app.database import get_db
+from app.database import get_db, get_restaurant_service_db
 from app.dependencies import (
     TokenData,
     get_current_user,
@@ -1220,7 +1220,7 @@ async def create_brand_raw_material(
 @router.get("/settings")
 async def get_fb_settings(
     current: TokenData = Depends(require_any_permission(*FB_WORKSPACE_PERMISSIONS)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -1235,7 +1235,7 @@ async def get_fb_settings(
 async def update_fb_settings(
     payload: FBSettingsUpdate,
     current: TokenData = Depends(require_permission("fb.settings.manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -1293,7 +1293,7 @@ async def update_fb_settings(
 async def setup_fb_workspace(
     payload: FBSetupRequest,
     current: TokenData = Depends(require_permission("fb.settings.manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -1420,7 +1420,7 @@ async def setup_fb_workspace(
 @router.get("/tables")
 async def list_tables(
     current: TokenData = Depends(require_permission("fb.menu.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -1432,7 +1432,7 @@ async def list_tables(
 async def create_table(
     payload: TableCreate,
     current: TokenData = Depends(require_permission("fb.table.manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -1459,7 +1459,7 @@ async def create_table(
 async def get_table(
     table_id: uuid.UUID,
     current: TokenData = Depends(require_permission("fb.menu.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     if not current.branch_id:
@@ -1476,7 +1476,7 @@ async def update_table(
     table_id: uuid.UUID,
     payload: TableUpdate,
     current: TokenData = Depends(require_permission("fb.table.manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -1513,7 +1513,7 @@ async def update_table(
 async def delete_table(
     table_id: uuid.UUID,
     current: TokenData = Depends(require_permission("fb.table.manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -1542,7 +1542,7 @@ async def list_sessions(
     status_filter: str | None = Query(default=None, alias="status"),
     date_value: date | None = Query(default=None, alias="date", description="YYYY-MM-DD, default=today"),
     current: TokenData = Depends(require_permission("fb.menu.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -1598,7 +1598,7 @@ async def list_sessions(
 async def open_session(
     payload: SessionOpen,
     current: TokenData = Depends(require_permission("fb.table.manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -1625,7 +1625,7 @@ async def open_session(
 async def get_session(
     session_id: uuid.UUID,
     current: TokenData = Depends(require_permission("fb.menu.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session(session_id)
@@ -1638,7 +1638,7 @@ async def get_session(
 async def get_session_detail(
     session_id: uuid.UUID,
     current: TokenData = Depends(require_permission("fb.menu.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session(session_id)
@@ -1691,7 +1691,7 @@ async def place_order(
     session_id: uuid.UUID,
     payload: PlaceOrderRequest,
     current: TokenData = Depends(require_permission("fb.order.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await db.get(DiningSession, session_id)
@@ -1716,7 +1716,7 @@ async def cancel_order(
     order_id: uuid.UUID,
     payload: CancelRequest,
     current: TokenData = Depends(require_permission("fb.order.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not payload.reason.strip():
         raise HTTPException(status_code=400, detail="กรุณาระบุเหตุผลการยกเลิก")
@@ -1739,7 +1739,7 @@ async def cancel_order_item(
     item_id: uuid.UUID,
     payload: CancelRequest,
     current: TokenData = Depends(require_permission("fb.order.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not payload.reason.strip():
         raise HTTPException(status_code=400, detail="กรุณาระบุเหตุผลการยกเลิก")
@@ -1765,7 +1765,7 @@ async def update_order_item_status(
     item_id: uuid.UUID,
     payload: TicketStatusUpdate,
     current: TokenData = Depends(require_permission("fb.kitchen.manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     item = await db.get(DiningOrderItem, item_id)
     if not item:
@@ -1790,7 +1790,7 @@ async def update_order_item_status(
 async def request_bill(
     session_id: uuid.UUID,
     current: TokenData = Depends(require_permission("fb.order.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await db.get(DiningSession, session_id)
@@ -1805,7 +1805,7 @@ async def checkout_session(
     session_id: uuid.UUID,
     payload: SessionCheckoutRequest,
     current: TokenData = Depends(require_permission("fb.order.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     """รวมบิลโต๊ะ → สร้าง SaleOrder → ปิด session"""
     svc = DiningService(db)
@@ -1830,7 +1830,7 @@ async def get_session_payment_qr(
     session_id: uuid.UUID,
     amount: Decimal = Query(gt=0),
     current: TokenData = Depends(require_permission("fb.order.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     """Create a branch-scoped PromptPay QR for the current bill amount."""
     if not current.branch_id:
@@ -1871,7 +1871,7 @@ async def get_session_payment_qr(
 async def close_session(
     session_id: uuid.UUID,
     current: TokenData = Depends(require_permission("fb.table.manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await db.get(DiningSession, session_id)
@@ -1887,7 +1887,7 @@ async def close_session(
 async def list_kitchen_tickets(
     station: str | None = Query(default=None),
     current: TokenData = Depends(require_permission("fb.kitchen.manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -1914,7 +1914,7 @@ async def update_ticket(
     ticket_id: uuid.UUID,
     payload: TicketStatusUpdate,
     current: TokenData = Depends(require_permission("fb.kitchen.manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     ticket = await db.get(KitchenTicket, ticket_id)
     if not ticket or ticket.company_id != current.company_id:
@@ -1933,7 +1933,7 @@ async def update_ticket(
 @router.get("/pickup-queue")
 async def get_pickup_queue(
     current: TokenData = Depends(require_permission("fb.menu.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -1946,7 +1946,7 @@ async def get_pickup_queue(
 async def mark_pickup_queue_served(
     session_id: uuid.UUID,
     current: TokenData = Depends(require_any_permission("fb.order.create", "fb.kitchen.manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -5509,7 +5509,7 @@ async def test_fb_line_notify(
 @public_router.get("/{qr_token}")
 async def public_get_menu(
     qr_token: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     menu = await svc.get_public_menu(qr_token)
@@ -5522,7 +5522,7 @@ async def public_get_menu(
 async def public_place_order(
     qr_token: uuid.UUID,
     payload: PlaceOrderRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
@@ -5558,7 +5558,7 @@ async def public_place_order(
 async def public_order_status(
     qr_token: uuid.UUID,
     session_id: uuid.UUID | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
@@ -5576,7 +5576,7 @@ async def public_order_status(
 async def public_request_bill(
     qr_token: uuid.UUID,
     session_id: uuid.UUID | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
@@ -5624,7 +5624,7 @@ async def _get_qs_settings(db: AsyncSession, qs_token: uuid.UUID) -> BranchSetti
 @qs_router.get("/{qs_token}")
 async def qs_get_menu(
     qs_token: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     settings = await _get_qs_settings(db, qs_token)
     if not settings:
@@ -5681,7 +5681,7 @@ async def qs_place_order(
     payload: PlaceOrderRequest,
     customer_name: str | None = Query(default=None),
     customer_phone: str | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     settings = await _get_qs_settings(db, qs_token)
     if not settings:
@@ -5723,7 +5723,7 @@ async def qs_place_order(
 async def qs_order_status(
     qs_token: uuid.UUID,
     session_id: uuid.UUID = Query(...),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     settings = await _get_qs_settings(db, qs_token)
     if not settings:

@@ -55,6 +55,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     )
     validate_runtime_database_names(
         identity_database=settings.identity_database,
+        restaurant_service_database=settings.restaurant_service_database,
         reference_projector_enabled=settings.reference_projector_enabled,
         legacy_database_name=legacy_database_name,
         platform_database_name=platform_database_name,
@@ -215,6 +216,7 @@ async def health_ready() -> JSONResponse:
             "checks": checks,
             "runtime": {
                 "identity_database": settings.identity_database,
+                "restaurant_service_database": settings.restaurant_service_database,
                 "reference_projector_enabled": settings.reference_projector_enabled,
                 "reference_projector_running": reference_projector_state.running,
                 "reference_projector_failed_events": reference_projector_state.failed,

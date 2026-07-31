@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
+from app.database import get_db, get_identity_db, get_restaurant_service_db
 from app.dependencies import TokenData, get_current_user, require_any_permission, require_permission
 from app.models.role import Permission
 from app.schemas.role import PermissionRead
@@ -313,13 +313,17 @@ async def update_branch(
 async def get_branch_settings(
     branch_id: uuid.UUID,
     current: TokenData = Depends(require_permission("system.branch.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
-    await _require_branch_access(service, current, branch_id)
+    await _require_branch_access(AdminService(identity_db), current, branch_id)
     settings_row = await service.get_branch_settings(branch_id, current.company_id)
     settings_data: BranchSettingsRead = service.serialize_branch_settings(settings_row)
-    return ok(settings_data.model_dump())
+    return ok(
+        settings_data.model_dump(),
+        {"restaurant_service_database": settings.restaurant_service_database},
+    )
 
 
 @router.patch("/branches/{branch_id}/settings")
@@ -327,13 +331,17 @@ async def update_branch_settings(
     branch_id: uuid.UUID,
     payload: BranchSettingsUpdate,
     current: TokenData = Depends(require_permission("system.branch.edit")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
-    await _require_branch_access(service, current, branch_id)
+    await _require_branch_access(AdminService(identity_db), current, branch_id)
     settings_row = await service.update_branch_settings(branch_id, current.company_id, payload)
     settings_data: BranchSettingsRead = service.serialize_branch_settings(settings_row)
-    return ok(settings_data.model_dump())
+    return ok(
+        settings_data.model_dump(),
+        {"restaurant_service_database": settings.restaurant_service_database},
+    )
 
 
 @router.post("/branches/{branch_id}/settings/promptpay-qr")
@@ -341,10 +349,11 @@ async def upload_branch_promptpay_qr(
     branch_id: uuid.UUID,
     qr: UploadFile = File(...),
     current: TokenData = Depends(require_permission("system.branch.edit")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
-    await _require_branch_access(service, current, branch_id)
+    await _require_branch_access(AdminService(identity_db), current, branch_id)
     current_settings = await service.get_branch_settings(branch_id, current.company_id)
     previous_url = current_settings.promptpay_qr_url
     upload_service = UploadService()
@@ -360,17 +369,21 @@ async def upload_branch_promptpay_qr(
         raise
     if previous_url and previous_url != qr_url:
         await upload_service.delete_image(previous_url)
-    return ok(service.serialize_branch_settings(settings_row).model_dump())
+    return ok(
+        service.serialize_branch_settings(settings_row).model_dump(),
+        {"restaurant_service_database": settings.restaurant_service_database},
+    )
 
 
 @router.delete("/branches/{branch_id}/settings/promptpay-qr")
 async def delete_branch_promptpay_qr(
     branch_id: uuid.UUID,
     current: TokenData = Depends(require_permission("system.branch.edit")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
-    await _require_branch_access(service, current, branch_id)
+    await _require_branch_access(AdminService(identity_db), current, branch_id)
     current_settings = await service.get_branch_settings(branch_id, current.company_id)
     previous_url = current_settings.promptpay_qr_url
     settings_row = await service.update_branch_settings(
@@ -380,7 +393,10 @@ async def delete_branch_promptpay_qr(
     )
     if previous_url:
         await UploadService().delete_image(previous_url)
-    return ok(service.serialize_branch_settings(settings_row).model_dump())
+    return ok(
+        service.serialize_branch_settings(settings_row).model_dump(),
+        {"restaurant_service_database": settings.restaurant_service_database},
+    )
 
 
 @router.post("/branches/{branch_id}/settings/receipt-logo")
@@ -388,10 +404,11 @@ async def upload_branch_receipt_logo(
     branch_id: uuid.UUID,
     logo: UploadFile = File(...),
     current: TokenData = Depends(require_permission("system.branch.edit")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
-    await _require_branch_access(service, current, branch_id)
+    await _require_branch_access(AdminService(identity_db), current, branch_id)
     current_settings = await service.get_branch_settings(branch_id, current.company_id)
     previous_url = current_settings.receipt_logo_url
     upload_service = UploadService()
@@ -407,17 +424,21 @@ async def upload_branch_receipt_logo(
         raise
     if previous_url and previous_url != logo_url:
         await upload_service.delete_image(previous_url)
-    return ok(service.serialize_branch_settings(settings_row).model_dump())
+    return ok(
+        service.serialize_branch_settings(settings_row).model_dump(),
+        {"restaurant_service_database": settings.restaurant_service_database},
+    )
 
 
 @router.delete("/branches/{branch_id}/settings/receipt-logo")
 async def delete_branch_receipt_logo(
     branch_id: uuid.UUID,
     current: TokenData = Depends(require_permission("system.branch.edit")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
-    await _require_branch_access(service, current, branch_id)
+    await _require_branch_access(AdminService(identity_db), current, branch_id)
     current_settings = await service.get_branch_settings(branch_id, current.company_id)
     previous_url = current_settings.receipt_logo_url
     settings_row = await service.update_branch_settings(
@@ -427,7 +448,10 @@ async def delete_branch_receipt_logo(
     )
     if previous_url:
         await UploadService().delete_image(previous_url)
-    return ok(service.serialize_branch_settings(settings_row).model_dump())
+    return ok(
+        service.serialize_branch_settings(settings_row).model_dump(),
+        {"restaurant_service_database": settings.restaurant_service_database},
+    )
 
 
 @router.get("/branches/{branch_id}/replacement-rules")

@@ -93,6 +93,11 @@ IDENTITY_DATABASE_SESSION_FACTORIES = {
     "platform_core": PlatformSessionLocal,
 }
 
+RESTAURANT_SERVICE_SESSION_FACTORIES = {
+    "legacy": AsyncSessionLocal,
+    "restaurant": RestaurantSessionLocal,
+}
+
 
 def session_factory_for(
     target_database: str,
@@ -116,19 +121,46 @@ def active_identity_session_factory() -> async_sessionmaker[AsyncSession]:
     return identity_session_factory_for(settings.identity_database)
 
 
+def restaurant_service_session_factory_for(
+    restaurant_service_database: str,
+) -> async_sessionmaker[AsyncSession]:
+    try:
+        return RESTAURANT_SERVICE_SESSION_FACTORIES[restaurant_service_database]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported Restaurant service database: {restaurant_service_database}"
+        ) from exc
+
+
+def active_restaurant_service_session_factory() -> async_sessionmaker[AsyncSession]:
+    return restaurant_service_session_factory_for(settings.restaurant_service_database)
+
+
 def validate_runtime_database_names(
     *,
     identity_database: str,
+    restaurant_service_database: str = "legacy",
     reference_projector_enabled: bool,
     legacy_database_name: str,
     platform_database_name: str,
     restaurant_database_name: str,
 ) -> None:
+    if (
+        restaurant_service_database == "restaurant"
+        and identity_database != "platform_core"
+    ):
+        raise RuntimeError(
+            "Restaurant service cutover requires IDENTITY_DATABASE=platform_core"
+        )
     if identity_database == "platform_core" and not reference_projector_enabled:
         raise RuntimeError(
             "Platform identity cutover requires REFERENCE_PROJECTOR_ENABLED=true"
         )
-    if identity_database != "platform_core" and not reference_projector_enabled:
+    if (
+        identity_database != "platform_core"
+        and restaurant_service_database != "restaurant"
+        and not reference_projector_enabled
+    ):
         return
     if len(
         {
@@ -169,6 +201,12 @@ async def get_restaurant_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def get_identity_db() -> AsyncGenerator[AsyncSession, None]:
     session_factory = active_identity_session_factory()
+    async with session_factory() as session:
+        yield session
+
+
+async def get_restaurant_service_db() -> AsyncGenerator[AsyncSession, None]:
+    session_factory = active_restaurant_service_session_factory()
     async with session_factory() as session:
         yield session
 

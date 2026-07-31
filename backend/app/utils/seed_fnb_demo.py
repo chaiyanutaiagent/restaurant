@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import AsyncSessionLocal
+from app.database import restaurant_service_session_factory_for
 from app.models.branch import Branch
 from app.models.company import Company
 from app.models.product import Category, Product, Unit
@@ -287,14 +287,22 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="Seed demo F&B menu categories and products.")
     parser.add_argument("--company-id", default=None)
     parser.add_argument("--branch-id", default=None)
+    parser.add_argument(
+        "--database",
+        choices=("legacy", "restaurant"),
+        default="legacy",
+        help="Server-owned database boundary used by the rehearsal.",
+    )
     args = parser.parse_args()
 
-    async with AsyncSessionLocal() as db:
+    session_factory = restaurant_service_session_factory_for(args.database)
+    async with session_factory() as db:
         category_count, product_count = await seed_fnb_demo_menu(db, args.company_id, args.branch_id)
         print(
             "Seeded demo F&B menu: "
             f"{category_count} categories, {product_count} products, "
-            f"{len(DEMO_RAW_MATERIALS)} raw materials, {len(DEMO_RECIPES)} recipes"
+            f"{len(DEMO_RAW_MATERIALS)} raw materials, {len(DEMO_RECIPES)} recipes "
+            f"in {args.database}"
         )
 
 

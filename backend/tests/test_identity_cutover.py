@@ -8,7 +8,9 @@ import uuid
 from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
+    RestaurantSessionLocal,
     identity_session_factory_for,
+    restaurant_service_session_factory_for,
     validate_runtime_database_names,
 )
 from app.models.user import User
@@ -27,6 +29,39 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(identity_session_factory_for("platform_core"), PlatformSessionLocal)
         with self.assertRaisesRegex(ValueError, "Unsupported identity database"):
             identity_session_factory_for("client_selected_database")
+
+    def test_restaurant_service_session_factory_is_server_owned(self) -> None:
+        self.assertIs(
+            restaurant_service_session_factory_for("legacy"),
+            AsyncSessionLocal,
+        )
+        self.assertIs(
+            restaurant_service_session_factory_for("restaurant"),
+            RestaurantSessionLocal,
+        )
+        with self.assertRaisesRegex(ValueError, "Unsupported Restaurant service database"):
+            restaurant_service_session_factory_for("client_selected_database")
+
+    def test_restaurant_cutover_requires_platform_identity(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "IDENTITY_DATABASE=platform_core"):
+            validate_runtime_database_names(
+                identity_database="legacy",
+                restaurant_service_database="restaurant",
+                reference_projector_enabled=True,
+                legacy_database_name="legacy",
+                platform_database_name="platform",
+                restaurant_database_name="restaurant",
+            )
+
+    def test_restaurant_cutover_accepts_safe_runtime_topology(self) -> None:
+        validate_runtime_database_names(
+            identity_database="platform_core",
+            restaurant_service_database="restaurant",
+            reference_projector_enabled=True,
+            legacy_database_name="legacy",
+            platform_database_name="platform",
+            restaurant_database_name="restaurant",
+        )
 
     def test_platform_mode_requires_projector(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "REFERENCE_PROJECTOR_ENABLED"):

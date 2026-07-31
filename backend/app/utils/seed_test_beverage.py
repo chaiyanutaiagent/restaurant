@@ -195,13 +195,21 @@ async def seed_test_beverage(db: AsyncSession, company_id: str | None = None) ->
         await db.flush()
 
     for branch in branches:
+        other_active_brand_id = await db.scalar(
+            select(BrandBranch.brand_id).where(
+                BrandBranch.branch_id == branch.id,
+                BrandBranch.brand_id != brand.id,
+                BrandBranch.is_active.is_(True),
+            ).limit(1)
+        )
+        activate_test_brand = other_active_brand_id is None
         store_location = await seed_default_stock_location(db, company.id, branch.id)
         brand_branch = await db.scalar(
             select(BrandBranch).where(BrandBranch.brand_id == brand.id, BrandBranch.branch_id == branch.id).limit(1)
         )
         if brand_branch:
             brand_branch.store_location_id = brand_branch.store_location_id or store_location.id
-            brand_branch.is_active = True
+            brand_branch.is_active = activate_test_brand
         else:
             db.add(BrandBranch(
                 company_id=company.id,
@@ -209,7 +217,7 @@ async def seed_test_beverage(db: AsyncSession, company_id: str | None = None) ->
                 branch_id=branch.id,
                 store_location_id=store_location.id,
                 branch_type="company_owned",
-                is_active=True,
+                is_active=activate_test_brand,
             ))
         comparison_branch = await db.scalar(
             select(BrandBranch).where(
@@ -219,7 +227,7 @@ async def seed_test_beverage(db: AsyncSession, company_id: str | None = None) ->
         )
         if comparison_branch:
             comparison_branch.store_location_id = comparison_branch.store_location_id or store_location.id
-            comparison_branch.is_active = True
+            comparison_branch.is_active = False
         else:
             db.add(BrandBranch(
                 company_id=company.id,
@@ -227,7 +235,7 @@ async def seed_test_beverage(db: AsyncSession, company_id: str | None = None) ->
                 branch_id=branch.id,
                 store_location_id=store_location.id,
                 branch_type="company_owned",
-                is_active=True,
+                is_active=False,
             ))
 
     units = {

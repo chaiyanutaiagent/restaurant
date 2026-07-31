@@ -188,7 +188,7 @@ The Android project can be scaffolded before a production domain exists. DNS, TL
 5. Replay the full batch and verify that order, payment, queue, and stock totals do not change.
 6. Drop the response after the server commits and verify safe retry.
 7. Reject one row in a multi-order batch and verify that other rows still synchronize.
-8. Confirm branch and cashier attribution for BKK-01 and BKK-02.
+8. Confirm branch and cashier attribution for BKK-01 and an explicitly assigned test branch.
 9. Confirm that store users cannot read central RAW/READY stock.
 10. Upgrade the Android build without clearing the outbox.
 

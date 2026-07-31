@@ -24,7 +24,6 @@ from app.utils.security import hash_password
 DEFAULT_COMPANY_ID = uuid.UUID("1b8a1818-44d6-4d5f-9d22-e5e17b23c081")
 DEFAULT_BRANCHES = (
     {"code": "BKK-01", "name": "สาขากรุงเทพ", "sort_order": 1},
-    {"code": "BKK-02", "name": "สาขาบางนา", "sort_order": 2},
 )
 STORE_CASHIER_PERMISSIONS = (
     "brand.store.order.create",

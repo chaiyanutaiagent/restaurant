@@ -39,20 +39,22 @@ async def prepare() -> dict[str, str]:
     async with AsyncSessionLocal() as db:
         await seed_default_permissions(db)
         await ensure_default_company_seed_in_session(db)
+        branch = Branch(
+            company_id=DEFAULT_COMPANY_ID,
+            code=f"STOCK-SCOPE-{marker}",
+            name=f"Stock Access Scope Branch {marker}",
+            is_active=True,
+        )
+        other_branch = Branch(
+            company_id=DEFAULT_COMPANY_ID,
+            code=f"STOCK-OTHER-{marker}",
+            name=f"Stock Access Other Branch {marker}",
+            is_active=True,
+        )
+        db.add_all([branch, other_branch])
+        await db.flush()
         await seed_test_beverage(db, str(DEFAULT_COMPANY_ID))
 
-        branch = await db.scalar(
-            select(Branch).where(
-                Branch.company_id == DEFAULT_COMPANY_ID,
-                Branch.code == "BKK-01",
-            )
-        )
-        other_branch = await db.scalar(
-            select(Branch).where(
-                Branch.company_id == DEFAULT_COMPANY_ID,
-                Branch.code == "BKK-02",
-            )
-        )
         brand = await db.scalar(
             select(Brand).where(
                 Brand.company_id == DEFAULT_COMPANY_ID,
@@ -66,14 +68,18 @@ async def prepare() -> dict[str, str]:
             )
         )
         if (
-            branch is None
-            or other_branch is None
-            or brand is None
+            brand is None
             or other_brand is None
-            or brand.central_location_id is None
         ):
             raise RuntimeError("Default Restaurant stock configuration was not seeded")
 
+        raw_location = StockLocation(
+            company_id=DEFAULT_COMPANY_ID,
+            branch_id=branch.id,
+            code=f"RAW-{marker}",
+            name="Smoke Central Raw",
+            is_active=True,
+        )
         ready_location = StockLocation(
             company_id=DEFAULT_COMPANY_ID,
             branch_id=branch.id,
@@ -111,6 +117,7 @@ async def prepare() -> dict[str, str]:
         )
         db.add_all(
             [
+                raw_location,
                 ready_location,
                 store_location,
                 other_raw_location,
@@ -120,6 +127,8 @@ async def prepare() -> dict[str, str]:
         )
         await db.flush()
 
+        brand.central_branch_id = branch.id
+        brand.central_location_id = raw_location.id
         brand.central_ready_location_id = ready_location.id
         brand_branch = await db.scalar(
             select(BrandBranch).where(

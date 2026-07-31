@@ -1,6 +1,6 @@
 import unittest
 
-from app.config import effective_database_url, settings
+from app.config import Settings, effective_database_url, settings
 from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
@@ -32,3 +32,6 @@ class DatabaseBoundaryTests(unittest.TestCase):
 
     def test_legacy_session_factory_remains_available_during_boundary_slice(self) -> None:
         self.assertIsNot(AsyncSessionLocal, None)
+
+    def test_shared_env_can_include_database_bootstrap_variables(self) -> None:
+        self.assertEqual(Settings.model_config.get("extra"), "ignore")

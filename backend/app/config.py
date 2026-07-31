@@ -43,6 +43,9 @@ class Settings(BaseSettings):
         env_file=(".env", "../.env", "../../.env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # The repository-level env file is shared with PostgreSQL, Redis and
+        # Compose. Service-specific bootstrap variables are not app settings.
+        extra="ignore",
     )
 
     @computed_field  # type: ignore[prop-decorator]

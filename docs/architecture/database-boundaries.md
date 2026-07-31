@@ -54,3 +54,27 @@ Restaurant-owned tables include Restaurant menu/recipe, dining, kitchen, central
 `P1-DATA-CUTOVER-04` rehearses a consistent snapshot, Platform ownership pruning,
 Restaurant operational restore, parity checks and rollback. The legacy database
 remains authoritative until an outbox-backed runtime cutover is verified.
+`P1-REFERENCE-PROJECTION-05` verifies the outbox-backed reference path and
+crash-safe replay. Runtime routing still remains on legacy until Platform writes
+enqueue events in the same ownership transaction and one bounded API slice passes
+cutover UAT.
+
+## Reference Projection Contract
+
+`P1-REFERENCE-PROJECTION-05` introduces a Platform transactional outbox and a
+Restaurant idempotency ledger for Company, Brand, Branch, BrandBranch and User
+references. The event envelope contains only aggregate IDs and non-sensitive trace
+metadata; the projector reads current state from Platform instead of putting entity
+snapshots or credentials in the outbox.
+
+Processing has three independently committed steps: claim on Platform, upsert plus
+ledger insert on Restaurant, then acknowledgement on Platform. A crash after the
+Restaurant commit replays the event, and the Restaurant `event_id` primary key turns
+that replay into a no-op. No transaction or database session is kept open across the
+two database writes.
+
+Restaurant preserves its operational `brands.central_location_id`,
+`brands.central_ready_location_id` and `brand_branches.store_location_id` columns
+when applying Platform references. The transitional Restaurant `users` projection
+exists only for operational foreign-key compatibility and must never be used for
+authentication.

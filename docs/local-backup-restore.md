@@ -75,3 +75,26 @@ BOUNDARY_DRILL_SUFFIX=verify01 BOUNDARY_DRILL_CLEANUP=1 \
   ./scripts/restore-local-database-boundary-drill.sh \
   backups/restaurant-boundaries-local-YYYYMMDDTHHMMSSZ
 ```
+
+## Phase 1 Data Cutover Rehearsal
+
+The rehearsal stops the local backend writer, backs up the authoritative legacy
+database and both boundary targets, recreates only the two boundary targets,
+restores a common source snapshot, prunes Platform operational tables and checks
+row parity. The legacy database remains the runtime system of record.
+
+```sh
+./scripts/rehearse-local-data-cutover.sh --yes
+```
+
+The command prints the rehearsal backup directory. Roll back only the two target
+databases to their pre-rehearsal state with:
+
+```sh
+./scripts/rollback-local-data-cutover-rehearsal.sh --yes \
+  backups/p1-data-cutover-04-YYYYMMDDTHHMMSSZ
+```
+
+Both scripts refuse to recreate databases unless the legacy, Platform and
+Restaurant database names are distinct. Runtime routing must not be switched to
+the rehearsal targets until an outbox-backed reference projection is available.

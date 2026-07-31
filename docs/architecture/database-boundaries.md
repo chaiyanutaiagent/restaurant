@@ -50,4 +50,7 @@ Restaurant-owned tables include Restaurant menu/recipe, dining, kitchen, central
 5. Route authentication/assignment reads to Platform and one bounded Restaurant workflow to Restaurant.
 6. Expand routing only after parity checks; retain rollback to the legacy database until final sign-off.
 
-`P1-DATABASE-BOUNDARY-03` performs step 1 and records the guardrails for step 2. It does not perform or imply a data cutover.
+`P1-DATABASE-BOUNDARY-03` performs step 1 and records the guardrails for step 2.
+`P1-DATA-CUTOVER-04` rehearses a consistent snapshot, Platform ownership pruning,
+Restaurant operational restore, parity checks and rollback. The legacy database
+remains authoritative until an outbox-backed runtime cutover is verified.

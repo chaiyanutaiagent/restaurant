@@ -17,6 +17,7 @@ const titleMap: Record<string, string> = {
   "/pos/admin": "POS Admin",
   "/restaurant": "ภาพรวมร้านอาหาร",
   "/restaurant/admin": "Restaurant Admin",
+  "/restaurant/brands": "แบรนด์ร้านอาหาร",
   "/restaurant/wap": "ขายหน้าร้าน / กลับบ้าน",
   "/restaurant/close-shift": "ปิดกะร้านอาหาร",
   "/restaurant/tables": "แผนที่โต๊ะ",

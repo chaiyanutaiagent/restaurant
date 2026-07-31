@@ -3,6 +3,7 @@ import { BarChart2, ChefHat, ConciergeBell, Monitor, QrCode, ShoppingBag, Utensi
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { fbApi } from "@/lib/fbApi";
+import { brandNavigationApi } from "@/lib/brandNavigationApi";
 import { useAuthStore } from "@/stores/auth.store";
 import PageHeader from "@/components/layout/PageHeader";
 
@@ -16,8 +17,18 @@ export default function RestaurantIndexPage(): JSX.Element {
     queryFn: async () => (await fbApi.settings()).data.data,
     enabled: Boolean(branchId),
   });
+  const brandNavigationQuery = useQuery({
+    queryKey: ["brand-navigation"],
+    queryFn: async () => (await brandNavigationApi.mine()).data.data,
+    enabled: Boolean(branchId),
+    staleTime: 60_000,
+  });
 
   const settings = settingsQuery.data;
+  const currentBrand = brandNavigationQuery.data?.find((brand) =>
+    brand.branches.some((branch) => branch.branch_id === branchId),
+  );
+  const currentBrandBranch = currentBrand?.branches.find((branch) => branch.branch_id === branchId);
 
   if (settingsQuery.isLoading) {
     return <div className="p-8 text-center text-slate-500">กำลังโหลด...</div>;
@@ -104,13 +115,18 @@ export default function RestaurantIndexPage(): JSX.Element {
   return (
     <div>
       <PageHeader
-        title="F&B POS"
-        subtitle={hasTables ? "ร้านมีโต๊ะ · รองรับออเดอร์กลับบ้าน" : "ร้านไม่มีโต๊ะ · รับออเดอร์กลับบ้านและเรียกคิว"}
+        title={currentBrand?.name ?? "Restaurant"}
+        subtitle={`${currentBrandBranch?.branch_name ?? "สาขาปัจจุบัน"} · ${hasTables ? "ร้านมีโต๊ะและรองรับออเดอร์กลับบ้าน" : "รับออเดอร์กลับบ้านและเรียกคิว"}`}
         actions={
           hasPermission("fb.settings.manage") ? (
-            <Button variant="outline" asChild>
-              <Link to="/restaurant/settings">ตั้งค่า F&B</Link>
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" asChild>
+                <Link to="/restaurant/brands">จัดการแบรนด์</Link>
+              </Button>
+              <Button variant="outline" asChild>
+                <Link to="/restaurant/settings">ตั้งค่าร้าน</Link>
+              </Button>
+            </div>
           ) : null
         }
       />

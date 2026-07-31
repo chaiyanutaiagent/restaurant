@@ -69,7 +69,14 @@ export default function KitchenDisplayPage(): JSX.Element {
   const grouped = useMemo(() => {
     const result: Record<string, Ticket[]> = { pending: [], cooking: [], done: [] };
     tickets.forEach((ticket) => { if (ticket.status in result) result[ticket.status].push(ticket); });
-    Object.values(result).forEach((items) => items.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()));
+    Object.entries(result).forEach(([status, items]) => items.sort((a, b) => {
+      if (status === "done") {
+        const aTime = new Date(a.done_at ?? a.created_at).getTime();
+        const bTime = new Date(b.done_at ?? b.created_at).getTime();
+        return bTime - aTime;
+      }
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    }));
     return result;
   }, [tickets]);
   const oldestPending = grouped.pending[0];

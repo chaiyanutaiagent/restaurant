@@ -164,6 +164,28 @@ if [[ "$PICKUP_MATCH" != "${QUEUE_DISPLAY: -3}" ]]; then
   exit 1
 fi
 
+echo "== F&B smoke: takeaway handoff keeps session open until payment"
+HANDOFF_JSON="$(http_auth_json POST "$INTERNAL_BASE_URL/api/v1/restaurant/pickup-queue/$SESSION_ID/served" "$ACCESS_TOKEN" '{}')"
+HANDOFF_STATUS="$(printf '%s' "$HANDOFF_JSON" | json_get data.status)"
+if [[ "$HANDOFF_STATUS" != "open" ]]; then
+  echo "Expected takeaway session to remain open after handoff, got $HANDOFF_STATUS" >&2
+  exit 1
+fi
+
+TAKEAWAY_TOTAL="$(printf '%s' "$STATUS_JSON" | json_get data.total_amount)"
+TAKEAWAY_CHECKOUT_JSON="$(http_auth_json POST "$INTERNAL_BASE_URL/api/v1/restaurant/sessions/$SESSION_ID/checkout" "$ACCESS_TOKEN" "{\"payment_method\":\"cash\",\"paid_amount\":\"$TAKEAWAY_TOTAL\",\"payments\":[{\"payment_method\":\"cash\",\"amount\":\"$TAKEAWAY_TOTAL\"}],\"note\":\"takeaway handoff smoke checkout\"}")"
+TAKEAWAY_CHECKOUT_SOURCE="$(printf '%s' "$TAKEAWAY_CHECKOUT_JSON" | json_get data.source_type)"
+if [[ "$TAKEAWAY_CHECKOUT_SOURCE" != "quick_service" ]]; then
+  echo "Expected takeaway checkout source quick_service, got $TAKEAWAY_CHECKOUT_SOURCE" >&2
+  exit 1
+fi
+
+TAKEAWAY_CLOSED_STATUS="$(psql_at "select status from dining_sessions where id='$SESSION_ID';")"
+if [[ "$TAKEAWAY_CLOSED_STATUS" != "closed" ]]; then
+  echo "Expected takeaway session to close after payment, got $TAKEAWAY_CLOSED_STATUS" >&2
+  exit 1
+fi
+
 echo "== F&B smoke: dine-in customer order"
 TABLE_JSON="$(http_auth_json POST "$INTERNAL_BASE_URL/api/v1/restaurant/tables" "$ACCESS_TOKEN" "{\"name\":\"SMOKE-$(date +%H%M%S)\",\"capacity\":2,\"table_type\":\"dine_in\"}")"
 TABLE_ID="$(printf '%s' "$TABLE_JSON" | json_get data.id)"

@@ -9,6 +9,7 @@ type CompanyInfo = {
   name: string;
   website?: string | null;
   phone?: string | null;
+  logo_url?: string | null;
 };
 
 type BranchInfo = {
@@ -66,6 +67,9 @@ const ReceiptView = forwardRef<HTMLDivElement, ReceiptViewProps>(function Receip
     <>
       <div ref={ref} className="mx-auto max-w-sm bg-white p-4 text-sm text-gray-900 print:max-w-none print:p-0">
         <div className="space-y-1 text-center">
+          {company.logo_url ? (
+            <img src={company.logo_url} alt={`โลโก้ ${company.name}`} className="mx-auto mb-2 h-32 max-w-80 object-contain grayscale contrast-200" />
+          ) : null}
           <h2 className="text-lg font-bold">{company.name}</h2>
           <p>{branch.name}{branch.phone ? ` • ${branch.phone}` : ""}</p>
           <p className="font-semibold">ใบเสร็จรับเงิน</p>

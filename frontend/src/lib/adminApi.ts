@@ -56,6 +56,20 @@ export const branchApi = {
   getSettings: (id: string) => api.get<ApiResponse<BranchSettings>>(`/system/branches/${id}/settings`),
   updateSettings: (id: string, data: object) =>
     api.patch<ApiResponse<BranchSettings>>(`/system/branches/${id}/settings`, data),
+  uploadPromptPayQr: (id: string, file: File) => {
+    const formData = new FormData();
+    formData.append("qr", file);
+    return api.post<ApiResponse<BranchSettings>>(`/system/branches/${id}/settings/promptpay-qr`, formData);
+  },
+  deletePromptPayQr: (id: string) =>
+    api.delete<ApiResponse<BranchSettings>>(`/system/branches/${id}/settings/promptpay-qr`),
+  uploadReceiptLogo: (id: string, file: File) => {
+    const formData = new FormData();
+    formData.append("logo", file);
+    return api.post<ApiResponse<BranchSettings>>(`/system/branches/${id}/settings/receipt-logo`, formData);
+  },
+  deleteReceiptLogo: (id: string) =>
+    api.delete<ApiResponse<BranchSettings>>(`/system/branches/${id}/settings/receipt-logo`),
   listReplacementRules: (id: string) =>
     api.get<ApiResponse<BranchReplacementRule[]>>(`/system/branches/${id}/replacement-rules`),
   upsertReplacementRule: (id: string, data: { source_product_id: string; replacement_product_id: string }) =>

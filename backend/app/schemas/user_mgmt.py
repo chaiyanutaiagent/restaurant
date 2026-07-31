@@ -113,12 +113,14 @@ class BranchSettingsRead(BaseSchema):
     pos_max_discount_pct: float
     promptpay_target: str | None = None
     promptpay_name: str | None = None
+    promptpay_qr_url: str | None = None
     working_hours: dict[str, Any] | None = None
     public_storefront_enabled: bool
     allow_negative_stock: bool
     low_stock_alert_enabled: bool
     receipt_show_tax_id: bool
     receipt_show_logo: bool
+    receipt_logo_url: str | None = None
     receipt_copies: int
     notify_low_stock_email: str | None = None
     # F&B
@@ -148,12 +150,14 @@ class BranchSettingsUpdate(BaseSchema):
     pos_default_price_list_id: uuid.UUID | None = None
     promptpay_target: str | None = None
     promptpay_name: str | None = None
+    promptpay_qr_url: str | None = None
     working_hours: dict[str, Any] | None = None
     public_storefront_enabled: bool | None = None
     allow_negative_stock: bool | None = None
     low_stock_alert_enabled: bool | None = None
     receipt_show_tax_id: bool | None = None
     receipt_show_logo: bool | None = None
+    receipt_logo_url: str | None = None
     receipt_copies: int | None = None
     notify_low_stock_email: str | None = None
     # F&B

@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, CheckCircle2, ChefHat, Loader2, Printer, ReceiptText } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import QRCode from "qrcode";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { authApi } from "@/lib/api";
+import { fbApi } from "@/lib/fbApi";
 import { posApi } from "@/lib/posApi";
 import { useAuthStore } from "@/stores/auth.store";
 import { formatThaiCurrency } from "@/lib/cartUtils";
@@ -38,6 +40,7 @@ const SOURCE_LABELS: Record<string, string> = { dine_in: "โต๊ะ", quick_s
 
 export default function SessionCheckoutPage(): JSX.Element {
   const { sessionId } = useParams<{ sessionId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -48,7 +51,10 @@ export default function SessionCheckoutPage(): JSX.Element {
   const [creditRef, setCreditRef] = useState("");
   const [discount, setDiscount] = useState(0);
   const [checkoutResult, setCheckoutResult] = useState<CheckoutResult | null>(null);
+  const [paymentQrImageLoaded, setPaymentQrImageLoaded] = useState(false);
+  const [receiptLogoLoaded, setReceiptLogoLoaded] = useState(true);
   const receiptRef = useRef<HTMLDivElement>(null);
+  const autoPrintStartedRef = useRef(false);
 
   // ดึงข้อมูล session
   const sessionQuery = useQuery({
@@ -68,6 +74,12 @@ export default function SessionCheckoutPage(): JSX.Element {
   const locationsQuery = useQuery({
     queryKey: ["pos", "locations", branchId],
     queryFn: async () => (await posApi.listLocations(branchId ?? undefined)).data.data as StockLocation[],
+    enabled: Boolean(branchId),
+  });
+
+  const branchSettingsQuery = useQuery({
+    queryKey: ["branch-settings", branchId],
+    queryFn: async () => (await fbApi.settings()).data.data,
     enabled: Boolean(branchId),
   });
 
@@ -102,6 +114,54 @@ export default function SessionCheckoutPage(): JSX.Element {
     () => new Date().toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }),
     [checkoutResult]
   );
+  const uploadedQrUrl = branchSettingsQuery.data?.promptpay_qr_url ?? null;
+  const hasDynamicPromptPayTarget = Boolean(branchSettingsQuery.data?.promptpay_target);
+  const promptpayConfigured = Boolean(uploadedQrUrl || hasDynamicPromptPayTarget);
+
+  const paymentQrQuery = useQuery({
+    queryKey: ["session-payment-qr", sessionId, totalAfterDiscount],
+    queryFn: async () => {
+      const response = await authApi.get(`/restaurant/sessions/${sessionId}/payment-qr`, {
+        params: { amount: totalAfterDiscount.toFixed(2) },
+      });
+      const result = response.data.data as { payload: string; amount: string; promptpay_name: string | null };
+      const dataUrl = await QRCode.toDataURL(result.payload, { width: 320, margin: 1 });
+      return { ...result, dataUrl };
+    },
+    enabled: Boolean(sessionId && hasDynamicPromptPayTarget && !uploadedQrUrl && totalAfterDiscount > 0 && !checkoutResult),
+    retry: false,
+  });
+  const paymentQrSrc = uploadedQrUrl || paymentQrQuery.data?.dataUrl || null;
+  const paymentQrName = paymentQrQuery.data?.promptpay_name || branchSettingsQuery.data?.promptpay_name || null;
+  const receiptLogoSrc = branchSettingsQuery.data?.receipt_show_logo
+    ? branchSettingsQuery.data.receipt_logo_url
+    : null;
+
+  useEffect(() => {
+    setPaymentQrImageLoaded(false);
+  }, [paymentQrSrc]);
+
+  useEffect(() => {
+    setReceiptLogoLoaded(!receiptLogoSrc);
+  }, [receiptLogoSrc]);
+
+  useEffect(() => {
+    if (
+      searchParams.get("printBill") !== "1"
+      || autoPrintStartedRef.current
+      || !session
+      || !promptpayConfigured
+      || !paymentQrSrc
+      || !paymentQrImageLoaded
+      || !receiptLogoLoaded
+      || checkoutResult
+    ) return;
+
+    autoPrintStartedRef.current = true;
+    setPaymentMethod("promptpay");
+    const timer = window.setTimeout(() => window.print(), 350);
+    return () => window.clearTimeout(timer);
+  }, [checkoutResult, paymentQrImageLoaded, paymentQrSrc, promptpayConfigured, receiptLogoLoaded, searchParams, session]);
 
   const checkoutMutation = useMutation({
     mutationFn: async () => {
@@ -170,7 +230,16 @@ export default function SessionCheckoutPage(): JSX.Element {
 
             <div ref={receiptRef} className="restaurant-print-receipt mt-6 rounded-2xl border border-slate-200 p-4 text-left text-sm space-y-2">
               <div className="border-b border-dashed border-slate-300 pb-3 text-center">
-                <p className="text-base font-black text-slate-950">Restaurant POS Restaurant</p>
+                {receiptLogoSrc ? (
+                  <img
+                    src={receiptLogoSrc}
+                    alt="โลโก้ร้าน"
+                    className="mx-auto mb-2 h-32 max-w-80 object-contain grayscale contrast-200"
+                    onLoad={() => setReceiptLogoLoaded(true)}
+                    onError={() => setReceiptLogoLoaded(true)}
+                  />
+                ) : null}
+                <p className="text-base font-black text-slate-950">{branchSettingsQuery.data?.pos_receipt_header || "Restaurant POS Restaurant"}</p>
                 <p className="mt-1 text-xs text-slate-500">ใบเสร็จรับเงิน</p>
                 <p className="mt-1 text-xs text-slate-500">{receiptPrintedAt}</p>
               </div>
@@ -214,7 +283,7 @@ export default function SessionCheckoutPage(): JSX.Element {
                 </div>
               )}
               {checkoutResult.note ? <p className="border-t border-dashed border-slate-200 pt-2 text-xs text-slate-500">{checkoutResult.note}</p> : null}
-              <p className="border-t border-dashed border-slate-200 pt-3 text-center text-xs text-slate-500">ขอบคุณที่ใช้บริการ</p>
+              <p className="border-t border-dashed border-slate-200 pt-3 text-center text-xs text-slate-500">{branchSettingsQuery.data?.pos_receipt_footer || "ขอบคุณที่ใช้บริการ"}</p>
             </div>
 
             <div className="restaurant-print-actions mt-6 flex gap-3">
@@ -242,6 +311,84 @@ export default function SessionCheckoutPage(): JSX.Element {
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
+      <style>{`
+        @media print {
+          body { background: white !important; }
+          body * { visibility: hidden !important; }
+          .restaurant-print-bill, .restaurant-print-bill * { visibility: visible !important; }
+          .restaurant-print-bill {
+            display: block !important;
+            position: fixed !important;
+            inset: 0 auto auto 0 !important;
+            width: 80mm !important;
+            max-width: 80mm !important;
+            padding: 4mm !important;
+            color: #111827 !important;
+            background: white !important;
+            font-size: 11px !important;
+            line-height: 1.3 !important;
+          }
+        }
+      `}</style>
+
+      <div className="restaurant-print-bill hidden space-y-2 text-sm">
+        <div className="border-b border-dashed border-slate-300 pb-3 text-center">
+          {receiptLogoSrc ? (
+            <img
+              src={receiptLogoSrc}
+              alt="โลโก้ร้าน"
+              className="mx-auto mb-2 h-32 max-w-80 object-contain grayscale contrast-200"
+              onLoad={() => setReceiptLogoLoaded(true)}
+              onError={() => setReceiptLogoLoaded(true)}
+            />
+          ) : null}
+          <p className="text-base font-black">{branchSettingsQuery.data?.pos_receipt_header || "Restaurant POS Restaurant"}</p>
+          <p className="mt-1 text-xs">ใบแจ้งยอด / QR ชำระเงิน</p>
+          <p className="mt-1 text-xs">{receiptPrintedAt}</p>
+        </div>
+        <div className="space-y-1 border-b border-dashed border-slate-300 pb-3 text-xs">
+          <div className="flex justify-between"><span>ประเภท</span><span>{isDineIn ? "โต๊ะ" : "รับเอง / กลับบ้าน"}</span></div>
+          {session.table_name ? <div className="flex justify-between"><span>โต๊ะ</span><span>{session.table_name}</span></div> : null}
+          {session.queue_number ? <div className="flex justify-between"><span>คิว</span><span>{String(session.queue_number).padStart(3, "0")}</span></div> : null}
+          <div className="flex justify-between"><span>ลูกค้า</span><span>{session.customer_name || "ลูกค้าทั่วไป"}</span></div>
+        </div>
+        <div className="space-y-2 border-b border-dashed border-slate-300 pb-3">
+          {allItems.map((item) => (
+            <div key={item.id} className="grid grid-cols-[1fr_auto] gap-3">
+              <div>
+                <p className="font-medium">{item.product_name}</p>
+                <p className="text-xs">{item.qty} × {formatThaiCurrency(item.unit_price)}</p>
+              </div>
+              <span className="font-medium">{formatThaiCurrency(item.qty * item.unit_price)}</span>
+            </div>
+          ))}
+        </div>
+        <div className="space-y-1">
+          <div className="flex justify-between"><span>ยอดรวม</span><span>{formatThaiCurrency(subtotal)}</span></div>
+          {discount > 0 ? <div className="flex justify-between"><span>ส่วนลด</span><span>-{formatThaiCurrency(discount)}</span></div> : null}
+          <div className="flex justify-between border-t border-slate-300 pt-2 text-base font-black">
+            <span>ยอดชำระ</span><span>{formatThaiCurrency(totalAfterDiscount)}</span>
+          </div>
+        </div>
+        {paymentQrSrc ? (
+          <div className="border-t border-dashed border-slate-300 pt-3 text-center">
+            <p className="font-bold">สแกน QR เพื่อชำระเงิน</p>
+            <img
+              src={paymentQrSrc}
+              alt="QR PromptPay ชำระเงิน"
+              className="mx-auto mt-2 h-48 w-48 object-contain"
+              onLoad={() => setPaymentQrImageLoaded(true)}
+            />
+            <p className="mt-1 text-sm font-black">{formatThaiCurrency(totalAfterDiscount)}</p>
+            {paymentQrName ? <p className="text-xs">ชื่อบัญชี {paymentQrName}</p> : null}
+            {uploadedQrUrl ? <p className="mt-1 text-[10px]">กรุณาตรวจยอดก่อนยืนยันการชำระ</p> : null}
+          </div>
+        ) : null}
+        <p className="border-t border-dashed border-slate-300 pt-3 text-center text-xs">
+          {branchSettingsQuery.data?.pos_receipt_footer || "ขอบคุณที่ใช้บริการ"}
+        </p>
+      </div>
+
       {/* Header */}
       <div className="border-b border-slate-200 bg-white px-6 py-4 flex items-center gap-4">
         <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
@@ -350,6 +497,46 @@ export default function SessionCheckoutPage(): JSX.Element {
             <div className="rounded-2xl bg-slate-950 px-5 py-4 text-white">
               <p className="text-xs uppercase tracking-wider text-slate-300">ยอดสุทธิ</p>
               <p className="mt-1 text-3xl font-black">{formatThaiCurrency(totalAfterDiscount)}</p>
+            </div>
+
+            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-center">
+              {!promptpayConfigured ? (
+                <div className="text-left text-sm text-amber-800">
+                  <p className="font-bold">ยังไม่ได้ตั้งค่าบัญชี PromptPay</p>
+                  <p className="mt-1 text-xs">กรุณาตั้งค่าเบอร์มือถือหรือเลขผู้เสียภาษีของสาขาก่อนพิมพ์บิล QR</p>
+                  {branchId ? (
+                    <Button className="mt-3" size="sm" variant="outline" onClick={() => navigate(`/branches/${branchId}/settings`)}>
+                      ไปตั้งค่า PromptPay
+                    </Button>
+                  ) : null}
+                </div>
+              ) : paymentQrQuery.isLoading ? (
+                <div className="flex items-center justify-center gap-2 py-8 text-sm text-blue-700">
+                  <Loader2 className="h-5 w-5 animate-spin" /> กำลังสร้าง QR ตามยอด
+                </div>
+              ) : paymentQrQuery.isError ? (
+                <div className="text-sm text-rose-700">
+                  <p className="font-bold">สร้าง QR ชำระเงินไม่สำเร็จ</p>
+                  <Button className="mt-3" size="sm" variant="outline" onClick={() => paymentQrQuery.refetch()}>ลองใหม่</Button>
+                </div>
+              ) : paymentQrSrc ? (
+                <>
+                  <img
+                    src={paymentQrSrc}
+                    alt="QR PromptPay ชำระเงิน"
+                    className="mx-auto h-44 w-44 object-contain"
+                    onLoad={() => setPaymentQrImageLoaded(true)}
+                  />
+                  <p className="mt-2 text-sm font-bold text-slate-900">
+                    {uploadedQrUrl ? "QR ที่แนบไว้" : "PromptPay"} · {formatThaiCurrency(totalAfterDiscount)}
+                  </p>
+                  {paymentQrName ? <p className="mt-1 text-xs text-slate-500">{paymentQrName}</p> : null}
+                  {uploadedQrUrl ? <p className="mt-1 text-xs text-amber-700">QR จากรูปอาจไม่ใส่ยอดอัตโนมัติ กรุณาตรวจยอดตามบิล</p> : null}
+                  <Button className="mt-3 w-full" variant="outline" disabled={!paymentQrImageLoaded} onClick={() => window.print()}>
+                    <Printer className="mr-2 h-4 w-4" /> พิมพ์บิลพร้อม QR
+                  </Button>
+                </>
+              ) : null}
             </div>
 
             {/* Payment Method */}

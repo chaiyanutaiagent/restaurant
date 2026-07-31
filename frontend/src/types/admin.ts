@@ -47,12 +47,14 @@ export interface BranchSettings {
   pos_max_discount_pct: number;
   promptpay_target: string | null;
   promptpay_name: string | null;
+  promptpay_qr_url: string | null;
   working_hours: Record<string, { open: string; close: string }> | null;
   public_storefront_enabled: boolean;
   allow_negative_stock: boolean;
   low_stock_alert_enabled: boolean;
   receipt_show_tax_id: boolean;
   receipt_show_logo: boolean;
+  receipt_logo_url: string | null;
   receipt_copies: number;
   notify_low_stock_email: string | null;
   // F&B Module

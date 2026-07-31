@@ -19,6 +19,7 @@ import {
   Warehouse,
   Shield,
   ShoppingCart,
+  Store,
   Settings,
   Table2,
   Truck,
@@ -40,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { syncStockBalances, useLowStockCount } from "@/lib/syncService";
 import { branchApi, userApi } from "@/lib/adminApi";
 import { fbApi } from "@/lib/fbApi";
+import { brandNavigationApi } from "@/lib/brandNavigationApi";
 
 type SidebarProps = {
   workspace?: "admin" | "restaurant";
@@ -115,6 +117,7 @@ const fbItems: NavItem[] = [
 ]
 
 const fbSubItems: NavItem[] = [
+  { label: "แบรนด์ร้านอาหาร", to: "/restaurant/brands", icon: Store, permission: "fb.settings.manage" },
   { label: "ขายหน้าร้าน", to: "/restaurant/wap", icon: ShoppingCart, permission: "fb.order.create" },
   { label: "ออเดอร์", to: "/restaurant/orders", icon: ClipboardList, permission: "fb.order.create" },
   { label: "โต๊ะ", to: "/restaurant/tables", icon: Table2, permission: "fb.table.manage", feature: "tables" },
@@ -159,12 +162,24 @@ export default function Sidebar({
     queryFn: async () => (await fbApi.settings()).data.data as BranchSettings,
   });
   const fbEnabled = fbSettingsQuery.data?.fb_enabled ?? false;
+  const brandNavigationQuery = useQuery({
+    queryKey: ["brand-navigation"],
+    enabled: workspace === "restaurant" && hasFbAccess,
+    queryFn: async () => (await brandNavigationApi.mine()).data.data,
+    staleTime: 60_000,
+  });
+  const currentBrand = brandNavigationQuery.data?.find((brand) =>
+    brand.branches.some((branch) => branch.branch_id === branchId),
+  );
+  const currentBrandBranch = currentBrand?.branches.find((branch) => branch.branch_id === branchId);
   const hasTables = fbSettingsQuery.data
     ? fbSettingsQuery.data.fb_service_mode !== "quick_service"
     : false;
   const activeColor = workspace === "restaurant" ? "bg-orange-600" : "bg-blue-600";
-  const brandTitle = workspace === "restaurant" ? "Restaurant" : "Restaurant POS";
-  const brandSubtitle = workspace === "restaurant" ? "F&B Workspace" : "Admin Console";
+  const brandTitle = workspace === "restaurant" ? (currentBrand?.name ?? "Restaurant") : "Restaurant POS";
+  const brandSubtitle = workspace === "restaurant"
+    ? `Restaurant${currentBrandBranch ? ` · ${currentBrandBranch.branch_name}` : ""}`
+    : "Admin Console";
 
   useEffect(() => {
     if (hasPermission("inventory.stock.view")) {

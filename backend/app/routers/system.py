@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +38,7 @@ from app.schemas.user_access import (
     UserAccessRequestCreate,
 )
 from app.services.admin_service import AdminService
+from app.services.upload_service import UploadService
 from app.services.user_access_service import UserAccessService
 from app.utils.health_check import get_system_health
 from app.utils.rate_limiter import check_rate_limit
@@ -330,6 +331,100 @@ async def update_branch_settings(
     settings_row = await service.update_branch_settings(branch_id, current.company_id, payload)
     settings_data: BranchSettingsRead = service.serialize_branch_settings(settings_row)
     return ok(settings_data.model_dump())
+
+
+@router.post("/branches/{branch_id}/settings/promptpay-qr")
+async def upload_branch_promptpay_qr(
+    branch_id: uuid.UUID,
+    qr: UploadFile = File(...),
+    current: TokenData = Depends(require_permission("system.branch.edit")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    service = AdminService(db)
+    await _require_branch_access(service, current, branch_id)
+    current_settings = await service.get_branch_settings(branch_id, current.company_id)
+    previous_url = current_settings.promptpay_qr_url
+    upload_service = UploadService()
+    qr_url = await upload_service.save_image(qr, "promptpay-qr", str(current.company_id))
+    try:
+        settings_row = await service.update_branch_settings(
+            branch_id,
+            current.company_id,
+            BranchSettingsUpdate(promptpay_qr_url=qr_url),
+        )
+    except Exception:
+        await upload_service.delete_image(qr_url)
+        raise
+    if previous_url and previous_url != qr_url:
+        await upload_service.delete_image(previous_url)
+    return ok(service.serialize_branch_settings(settings_row).model_dump())
+
+
+@router.delete("/branches/{branch_id}/settings/promptpay-qr")
+async def delete_branch_promptpay_qr(
+    branch_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("system.branch.edit")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    service = AdminService(db)
+    await _require_branch_access(service, current, branch_id)
+    current_settings = await service.get_branch_settings(branch_id, current.company_id)
+    previous_url = current_settings.promptpay_qr_url
+    settings_row = await service.update_branch_settings(
+        branch_id,
+        current.company_id,
+        BranchSettingsUpdate(promptpay_qr_url=None),
+    )
+    if previous_url:
+        await UploadService().delete_image(previous_url)
+    return ok(service.serialize_branch_settings(settings_row).model_dump())
+
+
+@router.post("/branches/{branch_id}/settings/receipt-logo")
+async def upload_branch_receipt_logo(
+    branch_id: uuid.UUID,
+    logo: UploadFile = File(...),
+    current: TokenData = Depends(require_permission("system.branch.edit")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    service = AdminService(db)
+    await _require_branch_access(service, current, branch_id)
+    current_settings = await service.get_branch_settings(branch_id, current.company_id)
+    previous_url = current_settings.receipt_logo_url
+    upload_service = UploadService()
+    logo_url = await upload_service.save_image(logo, "receipt-logo", str(current.company_id))
+    try:
+        settings_row = await service.update_branch_settings(
+            branch_id,
+            current.company_id,
+            BranchSettingsUpdate(receipt_logo_url=logo_url, receipt_show_logo=True),
+        )
+    except Exception:
+        await upload_service.delete_image(logo_url)
+        raise
+    if previous_url and previous_url != logo_url:
+        await upload_service.delete_image(previous_url)
+    return ok(service.serialize_branch_settings(settings_row).model_dump())
+
+
+@router.delete("/branches/{branch_id}/settings/receipt-logo")
+async def delete_branch_receipt_logo(
+    branch_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("system.branch.edit")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    service = AdminService(db)
+    await _require_branch_access(service, current, branch_id)
+    current_settings = await service.get_branch_settings(branch_id, current.company_id)
+    previous_url = current_settings.receipt_logo_url
+    settings_row = await service.update_branch_settings(
+        branch_id,
+        current.company_id,
+        BranchSettingsUpdate(receipt_logo_url=None, receipt_show_logo=False),
+    )
+    if previous_url:
+        await UploadService().delete_image(previous_url)
+    return ok(service.serialize_branch_settings(settings_row).model_dump())
 
 
 @router.get("/branches/{branch_id}/replacement-rules")

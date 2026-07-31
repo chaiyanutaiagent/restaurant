@@ -47,6 +47,41 @@ class DiningSessionQrSchemaTests(unittest.TestCase):
 
 
 class DiningSessionQrHistoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_takeaway_handoff_marks_items_served_without_closing_unpaid_session(self) -> None:
+        company_id = uuid.uuid4()
+        branch_id = uuid.uuid4()
+        order_item_id = uuid.uuid4()
+        session = SimpleNamespace(
+            id=uuid.uuid4(),
+            company_id=company_id,
+            branch_id=branch_id,
+            table_id=None,
+            queue_number=10,
+            status="open",
+            closed_at=None,
+        )
+        ticket = SimpleNamespace(order_item_id=order_item_id, status="done")
+        order_item = SimpleNamespace(id=order_item_id, status="done")
+        ticket_rows = MagicMock()
+        ticket_rows.all.return_value = [ticket]
+        item_rows = MagicMock()
+        item_rows.all.return_value = [order_item]
+
+        db = AsyncMock()
+        db.get.return_value = session
+        db.scalar.return_value = None
+        db.scalars.side_effect = [ticket_rows, item_rows]
+        service = DiningService(db)
+
+        result = await service.mark_pickup_session_served(session.id, company_id, branch_id)
+
+        self.assertEqual(ticket.status, "served")
+        self.assertEqual(order_item.status, "served")
+        self.assertEqual(session.status, "open")
+        self.assertIsNone(session.closed_at)
+        self.assertEqual(result["status"], "open")
+        db.commit.assert_awaited_once()
+
     async def test_token_lookup_accepts_only_active_sessions_with_qr_enabled(self) -> None:
         db = AsyncMock()
         db.scalar.return_value = None

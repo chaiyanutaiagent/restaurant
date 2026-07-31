@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft, ImagePlus, Loader2, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
@@ -92,12 +92,14 @@ type SettingsFormState = {
   pos_max_discount_pct: number;
   promptpay_target: string;
   promptpay_name: string;
+  promptpay_qr_url: string;
   public_storefront_enabled: boolean;
   allow_negative_stock: boolean;
   low_stock_alert_enabled: boolean;
   notify_low_stock_email: string;
   receipt_show_tax_id: boolean;
   receipt_show_logo: boolean;
+  receipt_logo_url: string;
   receipt_copies: number;
 };
 
@@ -110,12 +112,14 @@ function settingsToForm(settings: BranchSettings | null | undefined): SettingsFo
     pos_max_discount_pct: settings?.pos_max_discount_pct ?? 100,
     promptpay_target: settings?.promptpay_target ?? "",
     promptpay_name: settings?.promptpay_name ?? "",
+    promptpay_qr_url: settings?.promptpay_qr_url ?? "",
     public_storefront_enabled: settings?.public_storefront_enabled ?? true,
     allow_negative_stock: settings?.allow_negative_stock ?? false,
     low_stock_alert_enabled: settings?.low_stock_alert_enabled ?? true,
     notify_low_stock_email: settings?.notify_low_stock_email ?? "",
     receipt_show_tax_id: settings?.receipt_show_tax_id ?? true,
     receipt_show_logo: settings?.receipt_show_logo ?? false,
+    receipt_logo_url: settings?.receipt_logo_url ?? "",
     receipt_copies: settings?.receipt_copies ?? 1
   };
 }
@@ -285,6 +289,46 @@ export default function BranchSettingsPage(): JSX.Element {
     },
     onError: (error) => {
       toast({ title: "บันทึกการตั้งค่าไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    }
+  });
+  const uploadPromptPayQrMutation = useMutation({
+    mutationFn: async (file: File) => branchApi.uploadPromptPayQr(id, file),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin", "branch-settings", id] });
+      toast({ title: "แนบรูป QR แล้ว" });
+    },
+    onError: (error) => {
+      toast({ title: "แนบรูป QR ไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    }
+  });
+  const deletePromptPayQrMutation = useMutation({
+    mutationFn: async () => branchApi.deletePromptPayQr(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin", "branch-settings", id] });
+      toast({ title: "ลบรูป QR แล้ว" });
+    },
+    onError: (error) => {
+      toast({ title: "ลบรูป QR ไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    }
+  });
+  const uploadReceiptLogoMutation = useMutation({
+    mutationFn: async (file: File) => branchApi.uploadReceiptLogo(id, file),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin", "branch-settings", id] });
+      toast({ title: "แนบโลโก้ร้านแล้ว" });
+    },
+    onError: (error) => {
+      toast({ title: "แนบโลโก้ไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    }
+  });
+  const deleteReceiptLogoMutation = useMutation({
+    mutationFn: async () => branchApi.deleteReceiptLogo(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin", "branch-settings", id] });
+      toast({ title: "ลบโลโก้ร้านแล้ว" });
+    },
+    onError: (error) => {
+      toast({ title: "ลบโลโก้ไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
     }
   });
   const saveReplacementRuleMutation = useMutation({
@@ -529,7 +573,7 @@ export default function BranchSettingsPage(): JSX.Element {
                   />
                 </Field>
                 <p className="text-sm text-gray-500">
-                  ตั้งค่าเฉพาะ {branch?.name ?? "สาขานี้"} — QR จะแสดงท้ายใบเสร็จลูกค้าของสาขานี้ หากเว้นว่างระบบจะไม่แสดง QR
+                  ตั้งค่าเฉพาะ {branch?.name ?? "สาขานี้"} — แนบรูป QR ของร้านได้ หรือกรอก PromptPay เพื่อให้ระบบสร้าง QR แบบระบุยอด
                 </p>
                 {qrPreviewError ? <p className="text-sm font-medium text-red-600">{qrPreviewError}</p> : null}
                 <Field label="ชื่อบัญชี">
@@ -538,6 +582,45 @@ export default function BranchSettingsPage(): JSX.Element {
                     onChange={(event) => setSettingsForm((prev) => prev ? { ...prev, promptpay_name: event.target.value } : prev)}
                     placeholder="ชื่อที่ต้องการแสดงใต้ QR"
                   />
+                </Field>
+                <Field label="แนบรูป QR ของร้าน">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      id="promptpay-qr-upload"
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      disabled={!canEdit || uploadPromptPayQrMutation.isPending}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) uploadPromptPayQrMutation.mutate(file);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                    <Button asChild variant="outline" disabled={!canEdit || uploadPromptPayQrMutation.isPending}>
+                      <label htmlFor="promptpay-qr-upload" className="cursor-pointer">
+                        {uploadPromptPayQrMutation.isPending
+                          ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          : <ImagePlus className="mr-2 h-4 w-4" />}
+                        {settings?.promptpay_qr_url ? "เปลี่ยนรูป QR" : "เลือกรูป QR"}
+                      </label>
+                    </Button>
+                    {settings?.promptpay_qr_url ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="text-red-600 hover:text-red-700"
+                        disabled={!canEdit || deletePromptPayQrMutation.isPending}
+                        onClick={() => deletePromptPayQrMutation.mutate()}
+                      >
+                        {deletePromptPayQrMutation.isPending
+                          ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          : <Trash2 className="mr-2 h-4 w-4" />}
+                        ลบรูป
+                      </Button>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">รองรับ PNG, JPG และ WebP รูปที่แนบจะถูกใช้บนบิลก่อน QR ที่ระบบสร้าง</p>
                 </Field>
                 <div className="flex justify-end">
                   <Button
@@ -553,7 +636,12 @@ export default function BranchSettingsPage(): JSX.Element {
               </div>
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
                 <p className="mb-3 text-sm font-medium text-gray-900">Preview QR</p>
-                {qrPreview ? (
+                {settings?.promptpay_qr_url ? (
+                  <div className="text-center">
+                    <span className="mb-2 inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">รูป QR ที่แนบ</span>
+                    <img src={settings.promptpay_qr_url} alt="QR ชำระเงินที่แนบ" className="mx-auto w-full max-w-56 rounded-lg object-contain" />
+                  </div>
+                ) : qrPreview ? (
                   <img src={qrPreview} alt="PromptPay QR" className="mx-auto w-full max-w-56" />
                 ) : (
                   <div className="flex h-56 items-center justify-center rounded-lg border border-dashed border-gray-300 px-4 text-center text-sm text-gray-500">
@@ -609,6 +697,50 @@ export default function BranchSettingsPage(): JSX.Element {
                   checked={settings?.receipt_show_logo ?? false}
                   onChange={(checked) => setSettingsForm((prev) => prev ? { ...prev, receipt_show_logo: checked } : prev)}
                 />
+                <Field label="แนบโลโก้ร้านสำหรับหัวบิล">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      id="receipt-logo-upload"
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      disabled={!canEdit || uploadReceiptLogoMutation.isPending}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) uploadReceiptLogoMutation.mutate(file);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                    <Button asChild variant="outline" disabled={!canEdit || uploadReceiptLogoMutation.isPending}>
+                      <label htmlFor="receipt-logo-upload" className="cursor-pointer">
+                        {uploadReceiptLogoMutation.isPending
+                          ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          : <ImagePlus className="mr-2 h-4 w-4" />}
+                        {settings?.receipt_logo_url ? "เปลี่ยนโลโก้" : "เลือกโลโก้"}
+                      </label>
+                    </Button>
+                    {settings?.receipt_logo_url ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="text-red-600 hover:text-red-700"
+                        disabled={!canEdit || deleteReceiptLogoMutation.isPending}
+                        onClick={() => deleteReceiptLogoMutation.mutate()}
+                      >
+                        {deleteReceiptLogoMutation.isPending
+                          ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          : <Trash2 className="mr-2 h-4 w-4" />}
+                        ลบโลโก้
+                      </Button>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">รองรับ PNG, JPG และ WebP แนะนำพื้นหลังโปร่งใสหรือสีขาว</p>
+                  {settings?.receipt_logo_url ? (
+                    <div className="mt-3 rounded-xl border border-gray-200 bg-white p-3">
+                      <img src={settings.receipt_logo_url} alt="โลโก้ร้าน" className="mx-auto h-48 max-w-[28rem] object-contain" />
+                    </div>
+                  ) : null}
+                </Field>
                 <Field label="จำนวนสำเนา">
                   <select
                     className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm"
@@ -634,7 +766,8 @@ export default function BranchSettingsPage(): JSX.Element {
                     company={{
                       name: branch?.name ?? "Restaurant POS",
                       website: settings?.pos_receipt_footer || undefined,
-                      phone: branch?.phone
+                      phone: branch?.phone,
+                      logo_url: settings?.receipt_show_logo ? settings.receipt_logo_url : undefined
                     }}
                     branch={{
                       name: branch?.name ?? "สาขาตัวอย่าง",

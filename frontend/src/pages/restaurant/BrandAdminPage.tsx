@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BarChart3, Building2, CheckCircle2, ClipboardList, Coins, ExternalLink, Loader2, PackageCheck, Plus, Store, X } from "lucide-react";
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { authApi } from "@/lib/api";
+import { useAuthStore } from "@/stores/auth.store";
 import type { Branch } from "@/types/user";
 
 type BrandBranch = {
@@ -66,7 +67,11 @@ function getApiErrorMessage(error: unknown): string {
 
 export default function BrandAdminPage(): JSX.Element {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const companyId = useAuthStore((state) => state.companyId);
+  const currentBranchId = useAuthStore((state) => state.branchId);
+  const setSession = useAuthStore((state) => state.setSession);
   const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
@@ -74,6 +79,7 @@ export default function BrandAdminPage(): JSX.Element {
   const [isActive, setIsActive] = useState(true);
   const [branchId, setBranchId] = useState("");
   const [branchType, setBranchType] = useState<"company_owned" | "franchise">("company_owned");
+  const [openingBranchId, setOpeningBranchId] = useState<string | null>(null);
 
   const brandsQuery = useQuery({ queryKey: ["restaurant-brands"], queryFn: fetchBrands });
   const branchesQuery = useQuery({ queryKey: ["system-branches"], queryFn: fetchBranches });
@@ -82,11 +88,22 @@ export default function BrandAdminPage(): JSX.Element {
   const activeBranches = selectedBrand?.branches.filter((item) => item.is_active) ?? [];
   const franchiseBranches = activeBranches.filter((item) => item.branch_type === "franchise");
   const companyBranches = activeBranches.filter((item) => item.branch_type !== "franchise");
+  const primaryBranch = activeBranches.find((item) => item.branch_id === currentBranchId) ?? activeBranches[0] ?? null;
 
   const availableBranches = useMemo(() => {
     const attached = new Set((selectedBrand?.branches ?? []).filter((item) => item.is_active).map((item) => item.branch_id));
     return (branchesQuery.data ?? []).filter((branch) => !attached.has(branch.id));
   }, [branchesQuery.data, selectedBrand]);
+
+  useEffect(() => {
+    if (selectedBrandId || brands.length === 0) return;
+    const firstBrand = brands[0];
+    setSelectedBrandId(firstBrand.id);
+    setSlug(firstBrand.slug);
+    setName(firstBrand.name);
+    setStorefrontMode(firstBrand.storefront_mode === "drink_shop" ? "drink_shop" : "food_stall");
+    setIsActive(firstBrand.is_active);
+  }, [brands, selectedBrandId]);
 
   function resetForm(): void {
     setSelectedBrandId(null);
@@ -108,6 +125,28 @@ export default function BrandAdminPage(): JSX.Element {
     setBranchType("company_owned");
   }
 
+  async function openRestaurantBranch(target: BrandBranch): Promise<void> {
+    if (!target.is_active) return;
+    setOpeningBranchId(target.branch_id);
+    try {
+      if (target.branch_id !== currentBranchId) {
+        if (!companyId) throw new Error("ไม่พบบริษัทของผู้ใช้");
+        const response = await authApi.switchBranch(target.branch_id);
+        setSession(response.data.data, companyId);
+        await queryClient.invalidateQueries({ refetchType: "none" });
+      }
+      navigate("/restaurant");
+    } catch (error) {
+      toast({
+        title: "เปิดระบบร้านอาหารไม่สำเร็จ",
+        description: getApiErrorMessage(error) || "กรุณาลองใหม่อีกครั้ง",
+        variant: "destructive",
+      });
+    } finally {
+      setOpeningBranchId(null);
+    }
+  }
+
   const saveBrandMutation = useMutation({
     mutationFn: async () => {
       const payload = {
@@ -123,7 +162,10 @@ export default function BrandAdminPage(): JSX.Element {
       return (await authApi.post("/restaurant/brands", payload)).data.data as Brand;
     },
     onSuccess: async (brand) => {
-      await queryClient.invalidateQueries({ queryKey: ["restaurant-brands"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["restaurant-brands"] }),
+        queryClient.invalidateQueries({ queryKey: ["brand-navigation"] }),
+      ]);
       toast({ title: selectedBrandId ? "อัปเดตแบรนด์แล้ว" : "สร้างแบรนด์แล้ว" });
       startEdit(brand);
     },
@@ -140,7 +182,10 @@ export default function BrandAdminPage(): JSX.Element {
       })).data.data as Brand;
     },
     onSuccess: async (brand) => {
-      await queryClient.invalidateQueries({ queryKey: ["restaurant-brands"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["restaurant-brands"] }),
+        queryClient.invalidateQueries({ queryKey: ["brand-navigation"] }),
+      ]);
       toast({ title: "ผูกสาขากับแบรนด์แล้ว" });
       setSelectedBrandId(brand.id);
       setBranchId("");
@@ -155,7 +200,10 @@ export default function BrandAdminPage(): JSX.Element {
       return (await authApi.delete(`/restaurant/brands/${selectedBrandId}/branches/${target.branch_id}`)).data.data as Brand;
     },
     onSuccess: async (brand) => {
-      await queryClient.invalidateQueries({ queryKey: ["restaurant-brands"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["restaurant-brands"] }),
+        queryClient.invalidateQueries({ queryKey: ["brand-navigation"] }),
+      ]);
       toast({ title: "ปิดการใช้งานสาขาในแบรนด์แล้ว" });
       setSelectedBrandId(brand.id);
     },
@@ -167,12 +215,12 @@ export default function BrandAdminPage(): JSX.Element {
   return (
     <div>
       <PageHeader
-        title="Brand Admin"
-        subtitle="สร้างแบรนด์ เลือก template และผูกสาขาที่ใช้งานแบรนด์"
+        title="แบรนด์ร้านอาหาร"
+        subtitle="Restaurant เป็นฟังก์ชันหลัก และแต่ละแบรนด์เป็นพื้นที่จัดการสาขา ร้าน ครัว เมนู และออเดอร์"
         actions={
           <Button variant="outline" onClick={resetForm}>
             <Plus className="mr-2 h-4 w-4" />
-            แบรนด์ใหม่
+            สร้างแบรนด์
           </Button>
         }
       />
@@ -214,7 +262,7 @@ export default function BrandAdminPage(): JSX.Element {
             <section className="rounded-lg border border-slate-200 bg-white p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <p className="text-sm font-semibold uppercase text-slate-500">Operations</p>
+                  <p className="text-sm font-semibold uppercase text-orange-600">Restaurant Brand</p>
                   <h2 className="mt-1 text-xl font-black text-slate-950">{selectedBrand.name}</h2>
                   <p className="mt-1 text-sm text-slate-500">/{selectedBrand.slug} · {selectedBrand.storefront_mode}</p>
                 </div>
@@ -235,11 +283,16 @@ export default function BrandAdminPage(): JSX.Element {
               </div>
 
               <div className="mt-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                <Button asChild variant="outline" className="justify-start">
-                  <Link to={`/store/${selectedBrand.slug}/orders`}>
-                    <Store className="mr-2 h-4 w-4" />
-                    WAP ขายหน้าร้าน
-                  </Link>
+                <Button
+                  variant="outline"
+                  className="justify-start border-orange-300 bg-orange-50 text-orange-800 hover:bg-orange-100"
+                  disabled={!primaryBranch || openingBranchId !== null}
+                  onClick={() => primaryBranch && void openRestaurantBranch(primaryBranch)}
+                >
+                  {openingBranchId === primaryBranch?.branch_id
+                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    : <Store className="mr-2 h-4 w-4" />}
+                  เปิดระบบร้านอาหาร
                 </Button>
                 <Button asChild variant="outline" className="justify-start">
                   <Link to={`/store/${selectedBrand.slug}/close-shift`}>
@@ -256,7 +309,7 @@ export default function BrandAdminPage(): JSX.Element {
                 <Button asChild variant="outline" className="justify-start">
                   <Link to={`/central/${selectedBrand.slug}/orders`}>
                     <Building2 className="mr-2 h-4 w-4" />
-                    BAO ส่วนกลาง
+                    ส่วนกลางแบรนด์
                   </Link>
                 </Button>
                 <Button asChild variant="outline" className="justify-start">
@@ -377,16 +430,29 @@ export default function BrandAdminPage(): JSX.Element {
                         <p className="font-bold text-slate-950">{item.branch_name || item.branch_id}</p>
                         <p className="text-sm text-slate-500">{branchTypeLabel(item.branch_type)} · {item.is_active ? "ใช้งานอยู่" : "ปิดใช้งาน"}</p>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-red-600 hover:bg-red-50"
-                        disabled={!item.is_active || deactivateBranchMutation.isPending}
-                        onClick={() => deactivateBranchMutation.mutate(item)}
-                      >
-                        <X className="mr-1 h-4 w-4" />
-                        ปิดสาขานี้
-                      </Button>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!item.is_active || openingBranchId !== null}
+                          onClick={() => void openRestaurantBranch(item)}
+                        >
+                          {openingBranchId === item.branch_id
+                            ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                            : <ExternalLink className="mr-1 h-4 w-4" />}
+                          เปิดร้าน
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-600 hover:bg-red-50"
+                          disabled={!item.is_active || deactivateBranchMutation.isPending}
+                          onClick={() => deactivateBranchMutation.mutate(item)}
+                        >
+                          <X className="mr-1 h-4 w-4" />
+                          ปิดสาขานี้
+                        </Button>
+                      </div>
                     </div>
                   )) : (
                     <div className="p-8 text-center text-slate-500">ยังไม่ได้ผูกสาขา</div>

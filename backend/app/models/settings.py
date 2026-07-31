@@ -53,6 +53,7 @@ class BranchSettings(UUIDMixin, TimestampMixin, Base):
     )
     promptpay_target: Mapped[str | None] = mapped_column(String(20), nullable=True)
     promptpay_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    promptpay_qr_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     working_hours: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     public_storefront_enabled: Mapped[bool] = mapped_column(
         Boolean,
@@ -79,6 +80,7 @@ class BranchSettings(UUIDMixin, TimestampMixin, Base):
         nullable=False,
         server_default=text("false"),
     )
+    receipt_logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     receipt_copies: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

@@ -868,8 +868,21 @@ class DiningService:
             or session.branch_id != branch_id
             or session.table_id is not None
             or session.queue_number is None
+            or session.status != "open"
         ):
             raise ValueError("ไม่พบคิวรับสินค้า")
+
+        outstanding_ticket = await self.db.scalar(
+            select(KitchenTicket.id)
+            .where(
+                KitchenTicket.session_id == session.id,
+                KitchenTicket.branch_id == branch_id,
+                KitchenTicket.status.in_(["pending", "cooking"]),
+            )
+            .limit(1)
+        )
+        if outstanding_ticket:
+            raise ValueError("อาหารของคิวนี้ยังทำไม่ครบ")
 
         tickets = list((await self.db.scalars(
             select(KitchenTicket)
@@ -893,8 +906,6 @@ class DiningService:
             for item in items:
                 item.status = "served"
 
-        session.status = "closed"
-        session.closed_at = datetime.now(timezone.utc)
         await self.db.commit()
         return {
             "session_id": str(session.id),
@@ -1109,6 +1120,8 @@ class DiningService:
 
         if not all_items:
             raise ValueError("ไม่มีรายการอาหารในออเดอร์นี้")
+        if full_session.table_id is None and any(item.status != "served" for item in all_items):
+            raise ValueError("กรุณายืนยันว่าลูกค้ารับอาหารครบแล้วก่อนออกบิล")
 
         # สร้าง CartItems พร้อม vat info จาก Product
         cart_items: list[CartItem] = []

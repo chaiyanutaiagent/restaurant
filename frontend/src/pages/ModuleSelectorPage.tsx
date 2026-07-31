@@ -26,10 +26,10 @@ type StoreEntry = {
 
 const modules = [
   {
-    title: "Restaurant POS",
-    eyebrow: "ร้านอาหาร / คาเฟ่",
-    description: "ออเดอร์ โต๊ะ (ถ้ามี) ครัว คิว และ QR รับออเดอร์",
-    to: "/restaurant",
+    title: "Restaurant",
+    eyebrow: "ร้านอาหารและแบรนด์",
+    description: "สร้างแบรนด์ แล้วจัดการสาขา ออเดอร์ โต๊ะ ครัว คิว เมนู และ QR ภายในแบรนด์",
+    to: "/restaurant/brands",
     icon: UtensilsCrossed,
     accent: "bg-orange-600",
     surface: "border-orange-200 bg-orange-50",
@@ -44,17 +44,6 @@ const modules = [
     accent: "bg-emerald-600",
     surface: "border-emerald-200 bg-emerald-50",
     text: "text-emerald-700",
-  },
-  {
-    title: "Brand / Franchise POS",
-    eyebrow: "ร้านแบรนด์และแฟรนไชส์",
-    description: "หน้าขายรายสาขา สต็อก เติมสินค้า ปิดกะ และเชื่อมส่วนกลาง",
-    to: "/restaurant/brands",
-    icon: Store,
-    accent: "bg-violet-600",
-    surface: "border-violet-200 bg-violet-50",
-    text: "text-violet-700",
-    isBrandModule: true,
   },
   {
     title: "ERP Admin",
@@ -118,7 +107,7 @@ export default function ModuleSelectorPage(): JSX.Element {
         setSession(response.data.data, companyId);
         await queryClient.invalidateQueries({ refetchType: "none" });
       }
-      navigate(`/store/${store.brand.slug}/${store.branch.landing_path}`);
+      navigate("/restaurant");
     } catch (error) {
       toast({
         title: "เปิดร้านไม่สำเร็จ",
@@ -130,19 +119,11 @@ export default function ModuleSelectorPage(): JSX.Element {
     }
   }
 
-  function openBrandModule(): void {
-    if (stores[0]) {
-      void openStore(stores[0]);
-      return;
-    }
-    navigate(hasPermission("fb.settings.manage") ? "/restaurant/brands" : "/login?next=%2F");
-  }
-
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
       <div className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 lg:py-16">
         <header className="max-w-3xl">
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Restaurant POS</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">ERP POS</p>
           <h1 className="mt-3 text-3xl font-black tracking-tight md:text-5xl">เลือกพื้นที่ที่ต้องการใช้งาน</h1>
           <p className="mt-3 text-sm leading-6 text-slate-600 md:text-base">
             เข้าร้านที่ใช้งานอยู่ได้ทันที หรือเลือกประเภทระบบ POS และหลังบ้านด้านล่าง
@@ -215,7 +196,7 @@ export default function ModuleSelectorPage(): JSX.Element {
                         </div>
                       </div>
                       <div className="mt-5 flex w-full items-center justify-between text-sm font-bold text-violet-700">
-                        <span>{store.branch.landing_path === "orders" ? "เปิดหน้าขาย" : "เปิดพื้นที่ร้าน"}</span>
+                        <span>เปิดระบบร้านอาหาร</span>
                         {isOpening ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
@@ -238,7 +219,7 @@ export default function ModuleSelectorPage(): JSX.Element {
             </h2>
           </div>
 
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {modules.map((module) => {
               const content = (
                 <>
@@ -254,29 +235,11 @@ export default function ModuleSelectorPage(): JSX.Element {
                   </div>
                   <div className={`mt-8 flex items-center justify-between text-sm font-bold ${module.text}`}>
                     <span>เข้าใช้งาน</span>
-                    {module.isBrandModule && openingStoreKey !== null ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
-                    )}
+                    <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
                   </div>
                 </>
               );
               const className = `group flex min-h-64 flex-col justify-between rounded-xl border p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg ${module.surface}`;
-
-              if (module.isBrandModule) {
-                return (
-                  <button
-                    key={module.title}
-                    type="button"
-                    className={className}
-                    disabled={openingStoreKey !== null}
-                    onClick={openBrandModule}
-                  >
-                    {content}
-                  </button>
-                );
-              }
 
               return (
                 <Link key={module.title} to={module.to} className={className}>

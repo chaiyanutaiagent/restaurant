@@ -2117,7 +2117,13 @@ export default function POSPage(): JSX.Element {
             <ReceiptView
               ref={receiptRef}
               order={lastOrder}
-              company={{ name: "Restaurant POS", phone: "0812345678" }}
+              company={{
+                name: "Restaurant POS",
+                phone: "0812345678",
+                logo_url: branchSettingsQuery.data?.receipt_show_logo
+                  ? branchSettingsQuery.data.receipt_logo_url
+                  : undefined,
+              }}
               branch={{ name: branchName }}
               cashier={user?.display_name ?? user?.username ?? "Cashier"}
             />

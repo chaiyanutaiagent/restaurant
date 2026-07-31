@@ -1487,16 +1487,18 @@ async def delete_table(
 @router.get("/sessions")
 async def list_sessions(
     status_filter: str | None = Query(default=None, alias="status"),
-    date: str | None = Query(default=None, description="YYYY-MM-DD, default=today"),
+    date_value: date | None = Query(default=None, alias="date", description="YYYY-MM-DD, default=today"),
     current: TokenData = Depends(require_permission("fb.menu.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
-    from sqlalchemy import func
     from sqlalchemy.orm import selectinload
 
-    target_date = date or datetime.now().strftime("%Y-%m-%d")
+    bkk = ZoneInfo("Asia/Bangkok")
+    target_date = date_value or datetime.now(bkk).date()
+    start_at = datetime.combine(target_date, time.min, tzinfo=bkk).astimezone(timezone.utc)
+    end_at = datetime.combine(target_date, time.max, tzinfo=bkk).astimezone(timezone.utc)
 
     q = (
         select(DiningSession)
@@ -1504,7 +1506,8 @@ async def list_sessions(
         .where(
             DiningSession.company_id == current.company_id,
             DiningSession.branch_id == current.branch_id,
-            func.date(DiningSession.opened_at) == target_date,
+            DiningSession.opened_at >= start_at,
+            DiningSession.opened_at <= end_at,
         )
         .order_by(DiningSession.opened_at.desc())
     )
@@ -1769,6 +1772,48 @@ async def checkout_session(
     return ok(result.model_dump())
 
 
+@router.get("/sessions/{session_id}/payment-qr")
+async def get_session_payment_qr(
+    session_id: uuid.UUID,
+    amount: Decimal = Query(gt=0),
+    current: TokenData = Depends(require_permission("fb.order.create")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Create a branch-scoped PromptPay QR for the current bill amount."""
+    if not current.branch_id:
+        raise HTTPException(status_code=400, detail="Branch context required")
+
+    session = await db.get(DiningSession, session_id)
+    if (
+        not session
+        or session.company_id != current.company_id
+        or session.branch_id != current.branch_id
+        or session.status == "closed"
+    ):
+        raise HTTPException(status_code=404, detail="ไม่พบออเดอร์ที่ยังเปิดอยู่")
+
+    settings_row = await db.scalar(
+        select(BranchSettings).where(
+            BranchSettings.branch_id == current.branch_id,
+            BranchSettings.company_id == current.company_id,
+        )
+    )
+    if not settings_row or not settings_row.promptpay_target:
+        raise HTTPException(status_code=400, detail="สาขานี้ยังไม่ได้ตั้งค่าบัญชี PromptPay")
+
+    qr_amount = Decimal(amount).quantize(Decimal("0.01"))
+    try:
+        payload = generate_promptpay_payload(settings_row.promptpay_target, qr_amount)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="ข้อมูล PromptPay ของสาขาไม่ถูกต้อง") from exc
+
+    return ok({
+        "payload": payload,
+        "amount": f"{qr_amount:.2f}",
+        "promptpay_name": settings_row.promptpay_name,
+    })
+
+
 @router.post("/sessions/{session_id}/close")
 async def close_session(
     session_id: uuid.UUID,
@@ -1847,7 +1892,7 @@ async def get_pickup_queue(
 @router.post("/pickup-queue/{session_id}/served")
 async def mark_pickup_queue_served(
     session_id: uuid.UUID,
-    current: TokenData = Depends(require_permission("fb.kitchen.manage")),
+    current: TokenData = Depends(require_any_permission("fb.order.create", "fb.kitchen.manage")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     if not current.branch_id:

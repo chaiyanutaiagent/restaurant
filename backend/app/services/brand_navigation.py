@@ -200,6 +200,8 @@ def build_brand_navigation(
                 "id": str(brand.id),
                 "slug": brand.slug,
                 "name": brand.name,
+                "business_type": getattr(brand, "business_type", None) or "restaurant",
+                "target_database": getattr(brand, "business_type", None) or "restaurant",
                 "central_branch_id": (
                     str(central_assignment.branch_id)
                     if central_assignment is not None

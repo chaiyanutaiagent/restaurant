@@ -19,5 +19,8 @@ export interface MeResponse {
   user: User;
   company_id: string;
   branch_id: string | null;
+  brand_id: string | null;
+  business_type: "restaurant" | "retail_pos" | "takeaway" | null;
+  target_database: "restaurant" | "retail_pos" | "takeaway" | null;
   permissions: string[];
 }

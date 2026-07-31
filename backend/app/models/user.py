@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -87,6 +88,20 @@ class UserBranch(UUIDMixin, Base):
             unique=True,
             postgresql_where=text("deleted_at IS NULL"),
         ),
+        CheckConstraint(
+            "business_type IS NULL OR business_type IN ('restaurant', 'retail_pos', 'takeaway')",
+            name="ck_user_branches_business_type",
+        ),
+        CheckConstraint(
+            "target_database IS NULL OR target_database IN ('restaurant', 'retail_pos', 'takeaway')",
+            name="ck_user_branches_target_database",
+        ),
+        CheckConstraint(
+            "(brand_id IS NULL AND business_type IS NULL AND target_database IS NULL) "
+            "OR (brand_id IS NOT NULL AND business_type IS NOT NULL "
+            "AND target_database = business_type)",
+            name="ck_user_branches_context_complete",
+        ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -105,6 +120,8 @@ class UserBranch(UUIDMixin, Base):
         nullable=True,
         index=True,
     )
+    business_type: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    target_database: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
     role_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("roles.id"),

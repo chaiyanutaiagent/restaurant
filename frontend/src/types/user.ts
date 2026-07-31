@@ -15,6 +15,9 @@ export interface User {
 export interface Branch {
   id: string;
   company_id: string;
+  brand_id?: string | null;
+  business_type?: "restaurant" | "retail_pos" | "takeaway" | null;
+  target_database?: "restaurant" | "retail_pos" | "takeaway" | null;
   code: string;
   name: string;
   name_en: string | null;
@@ -50,6 +53,9 @@ export interface UserBranch {
   branch_id: string;
   branch_name: string;
   branch_code: string;
+  brand_id: string | null;
+  business_type: "restaurant" | "retail_pos" | "takeaway" | null;
+  target_database: "restaurant" | "retail_pos" | "takeaway" | null;
   role_name: string;
   is_default: boolean;
 }

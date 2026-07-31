@@ -175,6 +175,8 @@ async def prepare() -> dict[str, str]:
                 branch_id=branch.id,
                 role_id=role.id,
                 brand_id=brand.id,
+                business_type="restaurant",
+                target_database="restaurant",
                 is_default=True,
             )
         )

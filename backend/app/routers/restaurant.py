@@ -12,11 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.business_context import RESTAURANT
 from app.database import get_db
 from app.dependencies import (
     TokenData,
     get_current_user,
     require_any_permission,
+    require_business_type,
     require_permission,
 )
 from app.models.branch import Branch
@@ -81,7 +83,11 @@ from app.schemas.transfer import (
     TOItemCreate,
 )
 
-router = APIRouter(prefix="/api/v1/restaurant", tags=["restaurant"])
+router = APIRouter(
+    prefix="/api/v1/restaurant",
+    tags=["restaurant"],
+    dependencies=[Depends(require_business_type(RESTAURANT))],
+)
 public_router = APIRouter(prefix="/api/public/menu", tags=["restaurant-public"])
 qs_router = APIRouter(prefix="/api/public/qs", tags=["restaurant-qs"])
 MIN_CREDIT_TOPUP_AMOUNT = Decimal("500.00")
@@ -270,6 +276,7 @@ async def _load_brand_for_slug(
         select(Brand).where(
             Brand.company_id == company_id,
             Brand.slug == slug,
+            Brand.business_type == RESTAURANT,
             Brand.is_active.is_(True),
         )
     )
@@ -293,7 +300,11 @@ async def _ensure_brand_branch(
     branch_id: uuid.UUID,
     brand: Brand | None,
 ) -> BrandBranch | None:
-    if not brand:
+    if (
+        not brand
+        or brand.company_id != company_id
+        or brand.business_type != RESTAURANT
+    ):
         return None
     brand_branch = await db.scalar(
         select(BrandBranch).where(
@@ -491,6 +502,8 @@ def _serialize_brand(brand: Brand, branches: list[BrandBranch] | None = None) ->
         "company_id": str(brand.company_id),
         "slug": brand.slug,
         "name": brand.name,
+        "business_type": brand.business_type,
+        "target_database": brand.business_type,
         "storefront_mode": brand.storefront_mode,
         "theme_config": brand.theme_config or {},
         "is_active": brand.is_active,
@@ -504,6 +517,8 @@ def _serialize_brand(brand: Brand, branches: list[BrandBranch] | None = None) ->
                 "id": str(item.id),
                 "branch_id": str(item.branch_id),
                 "branch_name": item.branch.name if item.branch else "",
+                "business_type": brand.business_type,
+                "target_database": brand.business_type,
                 "branch_type": item.branch_type,
                 "store_location_id": str(item.store_location_id) if item.store_location_id else None,
                 "is_active": item.is_active,
@@ -547,7 +562,11 @@ async def _create_transfer_for_central_order(
     if order.transfer_order_id:
         return order.transfer_order_id
     brand = await db.get(Brand, order.brand_id)
-    if not brand:
+    if (
+        not brand
+        or brand.company_id != order.company_id
+        or brand.business_type != RESTAURANT
+    ):
         raise HTTPException(status_code=409, detail="ไม่พบแบรนด์ของใบสั่งสินค้า")
     _brand_branch, from_branch_id, from_location_id, to_location_id = await _get_brand_transfer_config(
         db,
@@ -714,7 +733,10 @@ async def list_brands(
     q = (
         select(Brand)
         .options(selectinload(Brand.branches).selectinload(BrandBranch.branch))
-        .where(Brand.company_id == current.company_id)
+        .where(
+            Brand.company_id == current.company_id,
+            Brand.business_type == RESTAURANT,
+        )
         .order_by(Brand.name)
     )
     if not include_inactive:
@@ -742,6 +764,7 @@ async def create_brand(
         company_id=current.company_id,
         slug=slug,
         name=name,
+        business_type=payload.business_type,
         storefront_mode=payload.storefront_mode,
         theme_config=payload.theme_config or {},
         is_active=payload.is_active,
@@ -762,7 +785,11 @@ async def update_brand(
     brand = await db.scalar(
         select(Brand)
         .options(selectinload(Brand.branches).selectinload(BrandBranch.branch))
-        .where(Brand.id == brand_id, Brand.company_id == current.company_id)
+        .where(
+            Brand.id == brand_id,
+            Brand.company_id == current.company_id,
+            Brand.business_type == RESTAURANT,
+        )
     )
     if not brand:
         raise HTTPException(status_code=404, detail="ไม่พบแบรนด์")
@@ -806,13 +833,31 @@ async def upsert_brand_branch(
     brand = await db.scalar(
         select(Brand)
         .options(selectinload(Brand.branches).selectinload(BrandBranch.branch))
-        .where(Brand.id == brand_id, Brand.company_id == current.company_id)
+        .where(
+            Brand.id == brand_id,
+            Brand.company_id == current.company_id,
+            Brand.business_type == RESTAURANT,
+        )
     )
     if not brand:
         raise HTTPException(status_code=404, detail="ไม่พบแบรนด์")
     branch = await db.get(Branch, payload.branch_id)
     if not branch or branch.company_id != current.company_id:
         raise HTTPException(status_code=404, detail="ไม่พบสาขา")
+    if payload.is_active:
+        conflicting_brand_id = await db.scalar(
+            select(BrandBranch.brand_id).where(
+                BrandBranch.company_id == current.company_id,
+                BrandBranch.branch_id == branch.id,
+                BrandBranch.brand_id != brand.id,
+                BrandBranch.is_active.is_(True),
+            )
+        )
+        if conflicting_brand_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="สาขานี้มี Active Brand อยู่แล้ว",
+            )
     brand_branch = await db.scalar(
         select(BrandBranch).where(
             BrandBranch.company_id == current.company_id,
@@ -834,7 +879,11 @@ async def upsert_brand_branch(
     brand = await db.scalar(
         select(Brand)
         .options(selectinload(Brand.branches).selectinload(BrandBranch.branch))
-        .where(Brand.id == brand_id, Brand.company_id == current.company_id)
+        .where(
+            Brand.id == brand_id,
+            Brand.company_id == current.company_id,
+            Brand.business_type == RESTAURANT,
+        )
     )
     assert brand is not None
     return ok(_serialize_brand(brand))
@@ -861,7 +910,11 @@ async def deactivate_brand_branch(
     brand = await db.scalar(
         select(Brand)
         .options(selectinload(Brand.branches).selectinload(BrandBranch.branch))
-        .where(Brand.id == brand_id, Brand.company_id == current.company_id)
+        .where(
+            Brand.id == brand_id,
+            Brand.company_id == current.company_id,
+            Brand.business_type == RESTAURANT,
+        )
     )
     if not brand:
         raise HTTPException(status_code=404, detail="ไม่พบแบรนด์")

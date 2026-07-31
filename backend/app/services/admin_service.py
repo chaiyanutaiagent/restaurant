@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.dependencies import TokenData
+from app.business_context import CanonicalBusinessContext
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.branch import Branch
@@ -19,6 +20,7 @@ from app.models.role import Permission, Role, role_permissions_table
 from app.models.settings import BranchSettings, UserInvitation
 from app.models.stock import StockLocation
 from app.models.user import User, UserBranch
+from app.services.business_context_service import load_branch_business_context
 from app.schemas.role import PermissionRead
 from app.schemas.product import BranchProductReplacementRuleCreate, BranchProductReplacementRuleRead
 from app.schemas.user_mgmt import (
@@ -150,6 +152,8 @@ class AdminService:
         await self._ensure_username_available(company_id, data.username)
         await self._get_branch(company_id, data.branch_id)
         await self._get_role(company_id, data.role_id)
+        context = await load_branch_business_context(self.db, company_id, data.branch_id)
+        assert context is not None
 
         user = User(
             company_id=company_id,
@@ -169,6 +173,9 @@ class AdminService:
             UserBranch(
                 user_id=user.id,
                 branch_id=data.branch_id,
+                brand_id=context.brand_id,
+                business_type=context.business_type,
+                target_database=context.target_database,
                 role_id=data.role_id,
                 is_default=True,
             )
@@ -215,6 +222,8 @@ class AdminService:
         await self._get_user(company_id, user_id)
         await self._get_branch(company_id, data.branch_id)
         await self._get_role(company_id, data.role_id)
+        context = await load_branch_business_context(self.db, company_id, data.branch_id)
+        assert context is not None
 
         existing = await self.db.scalar(
             select(UserBranch)
@@ -234,12 +243,18 @@ class AdminService:
         if existing is not None:
             existing.deleted_at = None
             existing.role_id = data.role_id
+            existing.brand_id = context.brand_id
+            existing.business_type = context.business_type
+            existing.target_database = context.target_database
             existing.is_default = data.is_default
             assignment = existing
         else:
             assignment = UserBranch(
                 user_id=user_id,
                 branch_id=data.branch_id,
+                brand_id=context.brand_id,
+                business_type=context.business_type,
+                target_database=context.target_database,
                 role_id=data.role_id,
                 is_default=data.is_default,
             )
@@ -429,8 +444,22 @@ class AdminService:
         branches = (await self.db.execute(statement)).scalars().unique().all()
         counts = await self._branch_user_counts(company_id)
         settings_map = await self._branch_settings_map([branch.id for branch in branches])
+        context_map = {
+            branch.id: await load_branch_business_context(
+                self.db,
+                company_id,
+                branch.id,
+                required=False,
+            )
+            for branch in branches
+        }
         return [
-            self._build_branch_detail(branch, counts.get(branch.id, 0), settings_map.get(branch.id))
+            self._build_branch_detail(
+                branch,
+                counts.get(branch.id, 0),
+                settings_map.get(branch.id),
+                context_map.get(branch.id),
+            )
             for branch in branches
         ]
 
@@ -503,7 +532,13 @@ class AdminService:
         branch = await self._get_branch(company_id, branch_id)
         settings = await self.get_branch_settings(branch_id, company_id)
         counts = await self._branch_user_counts(company_id)
-        return self._build_branch_detail(branch, counts.get(branch.id, 0), settings)
+        context = await load_branch_business_context(
+            self.db,
+            company_id,
+            branch_id,
+            required=False,
+        )
+        return self._build_branch_detail(branch, counts.get(branch.id, 0), settings, context)
 
     async def get_branch_settings(self, branch_id: uuid.UUID, company_id: uuid.UUID) -> BranchSettings:
         await self._get_branch(company_id, branch_id)
@@ -636,6 +671,7 @@ class AdminService:
         # FIX S3-D-verify: allow branch-role invitations without contact details because the acceptance flow uses the OTP directly
         await self._get_branch(company_id, data.branch_id)
         await self._get_role(company_id, data.role_id)
+        await load_branch_business_context(self.db, company_id, data.branch_id)
 
         plain_otp = secrets.token_urlsafe(6)[:8].upper()
         invitation = UserInvitation(
@@ -708,10 +744,19 @@ class AdminService:
         )
         self.db.add(user)
         await self.db.flush()
+        context = await load_branch_business_context(
+            self.db,
+            company_id,
+            matched.branch_id,
+        )
+        assert context is not None
         self.db.add(
             UserBranch(
                 user_id=user.id,
                 branch_id=matched.branch_id,
+                brand_id=context.brand_id,
+                business_type=context.business_type,
+                target_database=context.target_database,
                 role_id=matched.role_id,
                 is_default=True,
             )
@@ -772,6 +817,9 @@ class AdminService:
                 branch_id=assignment.branch_id,
                 branch_name=assignment.branch.name,
                 branch_code=assignment.branch.code,
+                brand_id=assignment.brand_id,
+                business_type=assignment.business_type,
+                target_database=assignment.target_database,
                 role_id=assignment.role_id,
                 role_name=assignment.role.name,
                 is_default=assignment.is_default,
@@ -813,10 +861,14 @@ class AdminService:
         branch: Branch,
         user_count: int,
         settings: BranchSettings | None,
+        context: CanonicalBusinessContext | None,
     ) -> BranchDetailRead:
         return BranchDetailRead(
             id=branch.id,
             company_id=branch.company_id,
+            brand_id=context.brand_id if context else None,
+            business_type=context.business_type if context else None,
+            target_database=context.target_database if context else None,
             code=branch.code,
             name=branch.name,
             name_en=branch.name_en,

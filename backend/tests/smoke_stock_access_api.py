@@ -232,6 +232,8 @@ async def prepare() -> dict[str, str]:
                     branch_id=branch.id,
                     role_id=store_role.id,
                     brand_id=brand.id,
+                    business_type="restaurant",
+                    target_database="restaurant",
                     is_default=True,
                 ),
                 UserBranch(
@@ -239,6 +241,8 @@ async def prepare() -> dict[str, str]:
                     branch_id=branch.id,
                     role_id=central_role.id,
                     brand_id=brand.id,
+                    business_type="restaurant",
+                    target_database="restaurant",
                     is_default=True,
                 ),
             ]

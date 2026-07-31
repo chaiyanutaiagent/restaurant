@@ -111,6 +111,9 @@ async def me(
         user=UserRead.model_validate(user),
         company_id=current.company_id,
         branch_id=current.branch_id,
+        brand_id=current.brand_id,
+        business_type=current.business_type,
+        target_database=current.target_database,
         permissions=current.permissions,
     )
     return ok(data.model_dump())

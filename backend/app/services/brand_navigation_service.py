@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.dependencies import TokenData
+from app.business_context import RESTAURANT
 from app.models.restaurant import Brand, BrandBranch
 from app.models.role import Role
 from app.models.user import UserBranch
@@ -26,6 +27,7 @@ class BrandNavigationService:
                 )
                 .where(
                     Brand.company_id == current.company_id,
+                    Brand.business_type == RESTAURANT,
                     Brand.is_active.is_(True),
                 )
                 .order_by(Brand.name)

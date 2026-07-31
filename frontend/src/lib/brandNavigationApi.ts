@@ -15,6 +15,8 @@ export type BrandNavigationItem = {
   id: string;
   slug: string;
   name: string;
+  business_type: "restaurant";
+  target_database: "restaurant";
   central_branch_id: string | null;
   central_landing_path: string | null;
   branches: BrandNavigationBranch[];

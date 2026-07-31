@@ -15,6 +15,8 @@ type BrandBranch = {
   id: string;
   branch_id: string;
   branch_name: string;
+  business_type: "restaurant";
+  target_database: "restaurant";
   branch_type: "company_owned" | "franchise" | string;
   store_location_id: string | null;
   is_active: boolean;
@@ -24,6 +26,8 @@ type Brand = {
   id: string;
   slug: string;
   name: string;
+  business_type: "restaurant";
+  target_database: "restaurant";
   storefront_mode: "food_stall" | "drink_shop" | string;
   theme_config: Record<string, unknown>;
   is_active: boolean;

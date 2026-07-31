@@ -15,6 +15,9 @@ class UserBranchDetail(BaseSchema):
     branch_id: uuid.UUID
     branch_name: str
     branch_code: str
+    brand_id: uuid.UUID | None = None
+    business_type: str | None = None
+    target_database: str | None = None
     role_id: uuid.UUID
     role_name: str
     is_default: bool
@@ -223,6 +226,9 @@ class BranchUpdateFull(BaseSchema):
 class BranchDetailRead(BaseSchema):
     id: uuid.UUID
     company_id: uuid.UUID
+    brand_id: uuid.UUID | None = None
+    business_type: str | None = None
+    target_database: str | None = None
     code: str
     name: str
     name_en: str | None = None

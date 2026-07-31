@@ -38,4 +38,7 @@ class MeResponse(BaseModel):
     user: UserRead
     company_id: uuid.UUID
     branch_id: uuid.UUID | None
+    brand_id: uuid.UUID | None = None
+    business_type: str | None = None
+    target_database: str | None = None
     permissions: list[str]

@@ -17,6 +17,10 @@ class Brand(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("company_id", "slug", name="uq_brands_company_slug"),
         Index("ix_brands_company_active", "company_id", "is_active"),
+        CheckConstraint(
+            "business_type IN ('restaurant', 'retail_pos', 'takeaway')",
+            name="ck_brands_business_type",
+        ),
     )
 
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False, index=True)
@@ -30,6 +34,12 @@ class Brand(UUIDMixin, TimestampMixin, Base):
     )
     slug: Mapped[str] = mapped_column(String(80), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    business_type: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        server_default=text("'restaurant'"),
+        index=True,
+    )
     storefront_mode: Mapped[str] = mapped_column(String(50), nullable=False, server_default=text("'food_stall'"))
     theme_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
@@ -48,6 +58,12 @@ class BrandBranch(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("brand_id", "branch_id", name="uq_brand_branches_brand_branch"),
         Index("ix_brand_branches_company_brand", "company_id", "brand_id"),
+        Index(
+            "uq_brand_branches_active_branch",
+            "branch_id",
+            unique=True,
+            postgresql_where=text("is_active"),
+        ),
     )
 
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False, index=True)

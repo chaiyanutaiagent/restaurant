@@ -84,6 +84,9 @@ async def my_branches(
             "branch_id": item.branch_id,
             "branch_name": item.branch_name,
             "branch_code": item.branch_code,
+            "brand_id": item.brand_id,
+            "business_type": item.business_type,
+            "target_database": item.target_database,
             "role_name": item.role_name,
             "is_default": item.is_default,
         }

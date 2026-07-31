@@ -10,7 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.user import User, UserBranch
+from app.models.user import User
+from app.services.business_context_service import resolve_user_branch_context
 from app.utils.security import decode_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -23,6 +24,8 @@ class TokenData:
     branch_id: uuid.UUID | None
     permissions: list[str]
     brand_id: uuid.UUID | None = None
+    business_type: str | None = None
+    target_database: str | None = None
 
 
 async def get_current_user(
@@ -51,27 +54,17 @@ async def get_current_user(
             detail="User is inactive or no longer exists",
         )
     branch_id = uuid.UUID(payload["branch_id"]) if payload.get("branch_id") else None
-    brand_id: uuid.UUID | None = None
-    if branch_id is not None and not user.is_superuser:
-        assignment = await db.scalar(
-            select(UserBranch).where(
-                UserBranch.user_id == user.id,
-                UserBranch.branch_id == branch_id,
-                UserBranch.deleted_at.is_(None),
-            )
-        )
-        if assignment is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Branch access is no longer active",
-            )
-        brand_id = assignment.brand_id
+    context = None
+    if branch_id is not None:
+        context = await resolve_user_branch_context(db, user, branch_id)
     return TokenData(
         user_id=user_id,
         company_id=company_id,
         branch_id=branch_id,
         permissions=payload.get("permissions", []),
-        brand_id=brand_id,
+        brand_id=context.brand_id if context else None,
+        business_type=context.business_type if context else None,
+        target_database=context.target_database if context else None,
     )
 
 
@@ -94,6 +87,22 @@ def require_any_permission(*codes: str) -> Callable:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Permission required: one of {', '.join(codes)}",
+        )
+
+    return checker
+
+
+def require_business_type(expected: str) -> Callable:
+    async def checker(current: TokenData = Depends(get_current_user)) -> TokenData:
+        if current.business_type == expected:
+            return current
+        if current.business_type is None and (
+            current.branch_id is None or "*" in current.permissions
+        ):
+            return current
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Business context required: {expected}",
         )
 
     return checker

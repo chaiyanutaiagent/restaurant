@@ -414,6 +414,8 @@ async def prepare_central_flow(context: dict[str, str]) -> dict[str, str]:
                 branch_id=uuid.UUID(context["store_branch_id"]),
                 role_id=store_role.id,
                 brand_id=brand.id,
+                business_type="restaurant",
+                target_database="restaurant",
                 is_default=True,
             )
         )

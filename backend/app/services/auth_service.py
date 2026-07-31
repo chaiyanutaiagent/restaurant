@@ -13,6 +13,8 @@ from app.models.auth import RefreshToken
 from app.models.branch import Branch
 from app.models.role import Permission, Role, role_permissions_table
 from app.models.user import User, UserBranch
+from app.services.business_context_service import resolve_user_branch_context
+from app.business_context import CanonicalBusinessContext
 from app.utils.security import (
     create_access_token,
     create_refresh_token,
@@ -52,10 +54,7 @@ class AuthService:
         self,
         user: User,
         branch_id: uuid.UUID | None,
-    ) -> tuple[list[str], uuid.UUID | None]:
-        if user.is_superuser:
-            return ["*"], branch_id
-
+    ) -> tuple[list[str], uuid.UUID | None, CanonicalBusinessContext | None]:
         resolved_branch_id = branch_id
         if resolved_branch_id is None:
             default_branch = await self.db.scalar(
@@ -68,7 +67,15 @@ class AuthService:
             resolved_branch_id = default_branch
 
         if resolved_branch_id is None:
-            return [], None
+            return (["*"] if user.is_superuser else []), None, None
+
+        context = await resolve_user_branch_context(
+            self.db,
+            user,
+            resolved_branch_id,
+        )
+        if user.is_superuser:
+            return ["*"], resolved_branch_id, context
 
         statement = (
             select(Permission.code)
@@ -83,7 +90,7 @@ class AuthService:
             )
         )
         rows = await self.db.scalars(statement)
-        return sorted(set(rows.all())), resolved_branch_id
+        return sorted(set(rows.all())), resolved_branch_id, context
 
     async def create_session(
         self,
@@ -92,12 +99,15 @@ class AuthService:
         ip_address: str | None,
         user_agent: str | None,
     ) -> tuple[str, str]:
-        permissions, resolved_branch_id = await self.get_user_permissions(user, branch_id)
+        permissions, resolved_branch_id, context = await self.get_user_permissions(user, branch_id)
         access_token = create_access_token(
             subject=str(user.id),
             company_id=str(user.company_id),
             branch_id=str(resolved_branch_id) if resolved_branch_id else None,
             permissions=permissions,
+            brand_id=str(context.brand_id) if context else None,
+            business_type=context.business_type if context else None,
+            target_database=context.target_database if context else None,
         )
         refresh_token = create_refresh_token(
             subject=str(user.id),
@@ -170,12 +180,15 @@ class AuthService:
             )
 
         refresh_record.revoked_at = now
-        permissions, resolved_branch_id = await self.get_user_permissions(user, None)
+        permissions, resolved_branch_id, context = await self.get_user_permissions(user, None)
         access_token = create_access_token(
             subject=str(user.id),
             company_id=str(user.company_id),
             branch_id=str(resolved_branch_id) if resolved_branch_id else None,
             permissions=permissions,
+            brand_id=str(context.brand_id) if context else None,
+            business_type=context.business_type if context else None,
+            target_database=context.target_database if context else None,
         )
         new_refresh_token = create_refresh_token(
             subject=str(user.id),

@@ -26,6 +26,10 @@ def create_access_token(
     branch_id: str | None,
     permissions: list[str],
     expires_delta: timedelta | None = None,
+    *,
+    brand_id: str | None = None,
+    business_type: str | None = None,
+    target_database: str | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     expire = now + (
@@ -35,6 +39,9 @@ def create_access_token(
         "sub": subject,
         "company_id": company_id,
         "branch_id": branch_id,
+        "brand_id": brand_id,
+        "business_type": business_type,
+        "target_database": target_database,
         "permissions": permissions,
         "type": "access",
         "exp": expire,

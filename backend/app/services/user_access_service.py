@@ -18,12 +18,14 @@ from app.models.role import Role
 from app.models.settings import UserInvitation
 from app.models.user import User, UserBranch
 from app.models.user_access import UserAccessRequest
+from app.business_context import RESTAURANT
 from app.schemas.user_access import (
     UserAccessApproveRequest,
     UserAccessRequestCreate,
     UserAccessRequestRead,
 )
 from app.schemas.user_mgmt import AcceptInvitationRequest
+from app.services.business_context_service import load_branch_business_context
 from app.utils.security import hash_password, verify_password
 
 
@@ -420,12 +422,25 @@ class UserAccessService:
 
         try:
             await self.db.flush()
+            context = await load_branch_business_context(
+                self.db,
+                company_id,
+                branch.id,
+            )
+            assert context is not None
+            if request_row is not None and request_row.brand_id != context.brand_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Invitation Brand context is no longer active for this Branch",
+                )
             self.db.add(
                 UserBranch(
                     user_id=user.id,
                     branch_id=branch.id,
                     role_id=role.id,
-                    brand_id=request_row.brand_id if request_row else None,
+                    brand_id=context.brand_id,
+                    business_type=context.business_type,
+                    target_database=context.target_database,
                     is_default=True,
                 )
             )
@@ -497,12 +512,25 @@ class UserAccessService:
         )
         self.db.add(user)
         await self.db.flush()
+        context = await load_branch_business_context(
+            self.db,
+            row.company_id,
+            row.branch_id,
+        )
+        assert context is not None
+        if row.brand_id != context.brand_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Access request Brand context is no longer active for this Branch",
+            )
         self.db.add(
             UserBranch(
                 user_id=user.id,
                 branch_id=row.branch_id,
                 role_id=role.id,
-                brand_id=row.brand_id,
+                brand_id=context.brand_id,
+                business_type=context.business_type,
+                target_database=context.target_database,
                 is_default=True,
             )
         )
@@ -611,6 +639,7 @@ class UserAccessService:
             select(Brand).where(
                 Brand.company_id == company_id,
                 Brand.slug == brand_slug,
+                Brand.business_type == RESTAURANT,
                 Brand.is_active.is_(True),
             )
         )

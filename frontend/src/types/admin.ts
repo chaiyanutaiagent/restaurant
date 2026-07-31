@@ -4,6 +4,9 @@ export interface UserBranchDetail {
   branch_id: string;
   branch_name: string;
   branch_code: string;
+  brand_id: string | null;
+  business_type: "restaurant" | "retail_pos" | "takeaway" | null;
+  target_database: "restaurant" | "retail_pos" | "takeaway" | null;
   role_id: string;
   role_name: string;
   is_default: boolean;
@@ -76,6 +79,9 @@ export interface BranchSettings {
 export interface BranchDetail {
   id: string;
   company_id: string;
+  brand_id: string | null;
+  business_type: "restaurant" | "retail_pos" | "takeaway" | null;
+  target_database: "restaurant" | "retail_pos" | "takeaway" | null;
   code: string;
   name: string;
   name_en: string | null;

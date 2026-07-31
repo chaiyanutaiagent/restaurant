@@ -258,6 +258,8 @@ async def prepare() -> dict[str, str]:
                 user_id=user.id,
                 branch_id=central_branch.id,
                 brand_id=brand.id,
+                business_type="restaurant",
+                target_database="restaurant",
                 role_id=role.id,
                 is_default=True,
             )
@@ -283,6 +285,8 @@ async def prepare() -> dict[str, str]:
                 user_id=store_user.id,
                 branch_id=store_branch.id,
                 brand_id=brand.id,
+                business_type="restaurant",
+                target_database="restaurant",
                 role_id=store_role.id,
                 is_default=True,
             )

@@ -8,6 +8,7 @@ from sqlalchemy import select, and_, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.business_context import RESTAURANT
 from app.models.product import Product
 from app.models.audit import AuditLog
 from app.models.purchase import PurchaseOrder, PurchaseOrderItem
@@ -400,6 +401,7 @@ class RecipeService:
             .where(
                 Brand.id == recipe.brand_id,
                 Brand.company_id == company_id,
+                Brand.business_type == RESTAURANT,
                 Brand.is_active.is_(True),
             )
             .with_for_update()

@@ -590,6 +590,7 @@ class BrandTransferConfigUpdateRequest(BaseSchema):
 class BrandCreateRequest(BaseSchema):
     slug: str
     name: str
+    business_type: Literal["restaurant"] = "restaurant"
     storefront_mode: str = "food_stall"
     theme_config: dict | None = None
     is_active: bool = True

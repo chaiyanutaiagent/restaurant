@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.business_context import RESTAURANT
 from app.models.audit import AuditLog
 from app.models.branch import Branch
 from app.models.product import Product
@@ -64,6 +65,7 @@ class StockCutoverService:
         brand_statement = select(Brand).where(
             Brand.id == brand_id,
             Brand.company_id == company_id,
+            Brand.business_type == RESTAURANT,
             Brand.is_active.is_(True),
         )
         if lock:

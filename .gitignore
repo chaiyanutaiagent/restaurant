@@ -3,6 +3,7 @@
 !.env.example
 !.env.production.example
 !.env.android.example
+!.env.android-uat.example
 .secrets/
 __pycache__/
 *.pyc

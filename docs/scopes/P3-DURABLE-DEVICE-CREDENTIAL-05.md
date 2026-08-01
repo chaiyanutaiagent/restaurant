@@ -1,6 +1,6 @@
 # Scope ID: P3-DURABLE-DEVICE-CREDENTIAL-05
 
-สถานะ: **Automated/API/Android build verified — tablet interaction pending**
+สถานะ: **Browser Pair verified; isolated Android UAT APK ready — physical tablet pending**
 Phase: **Phase 3 — Dedicated Counter, Kitchen และ Device Pairing**
 วันที่เริ่ม: 1 สิงหาคม 2026
 ผู้อนุมัติให้ดำเนินการ: Platform Owner
@@ -21,6 +21,7 @@ Browser/PWA อ่าน MAC ไม่ได้และ Android อาจสุ
 - รักษา paired state เมื่อเครือข่ายขาด; หาก access หมดอายุให้รอเชื่อมต่อแทนการบังคับ Pair ใหม่
 - rotate pairing code และ revoke ต้องล้าง refresh credential และตัด access/refresh เดิมทันที
 - browser ใช้ origin-persistent storage เป็น fallback พร้อมระบุข้อจำกัดชัดเจน
+- สร้าง Android debug UAT package แยกจาก release package เพื่อไม่เขียนทับแอปใช้งานจริง
 
 ## Database / Ownership
 
@@ -37,6 +38,9 @@ Browser/PWA อ่าน MAC ไม่ได้และ Android อาจสุ
 - renewal โหลด Company/Brand/Branch/type/Station จาก live registry ใหม่ทุกครั้ง
 - Manager rotate/revoke เป็น authoritative kill switch; MAC หรือ client context ไม่มีอำนาจ
 - Android manifest ปิด backup จึงไม่ย้าย encrypted credential ข้ามเครื่อง
+- UAT debug ใช้ application ID ลงท้าย `.uat` และเปิด cleartext/mixed content เฉพาะ debug สำหรับ
+  Tailscale-encrypted test route; release package ยังคงปิด cleartext
+- endpoint จริงอยู่ใน `.env.android-uat` ที่ Git ignore; repository เก็บเฉพาะไฟล์ตัวอย่าง
 
 ## Out of Scope
 
@@ -56,7 +60,12 @@ Browser/PWA อ่าน MAC ไม่ได้และ Android อาจสุ
 - [x] legacy/Platform upgrade → downgrade → re-upgrade ผ่าน
 - [x] backend regression 156 tests, frontend type/build และ Android debug APK ผ่าน
 - [x] live database fingerprints ไม่เปลี่ยน
+- [x] Browser UAT Pair สำเร็จ, Device Gate ผ่าน และ server มี refresh hash 64 ตัวอักษร
+- [x] Android UAT APK ใช้ package/name แยกและฝัง Tailscale API endpoint ที่เข้าถึงได้
+- [x] UAT APK signature, manifest, embedded endpoint และ secure-storage plugin ตรวจผ่าน
+- [x] Android `lintDebug` และ `testDebugUnitTest` tasks ผ่าน
 - [ ] ยืนยัน Pair → reload/ปิดเปิดหน้า → เข้า Workspace โดยไม่ Pair ซ้ำบน tablet
+- [ ] ติดตั้ง UAT APK บน physical tablet; ยังไม่พบอุปกรณ์ผ่าน ADB
 - [x] worktree commit โดยไม่ push
 
 ## Rollback
@@ -81,6 +90,15 @@ Browser/PWA อ่าน MAC ไม่ได้และ Android อาจสุ
 - APK: `frontend/android/app/build/outputs/apk/debug/app-debug.apk`
 - APK SHA-256: `83e4e86cece23175de58999ec70ecb8a52f06ae4c0bd082794a2fd1e8b1cf18e`
 - Native storage: `@aparajita/capacitor-secure-storage@7.1.6`; Android AES-GCM + Keystore
+- Browser visual Pair: เข้า `/counter`, Device Gate ผ่าน และล็อก `BKK-01` สำเร็จ
+- Android UAT application ID/name: `com.chaiyanutaiagent.restaurant.uat` / `Restaurant POS UAT`
+- Android UAT route: Tailscale endpoint ตรวจ HTTP 200; local endpoint file ไม่ track ใน Git
+- Android UAT APK: `releases/uat/restaurant-pos-uat-debug-20260801.apk`
+- Android UAT APK SHA-256: `a923fae41ce93b389d6cba44cc5b433fd759b5e944ed63e68c84d32551fb6a96`
+- Android UAT verification: version `1.0-uat`, min SDK 23, target SDK 35, debug signature v1/v2 ผ่าน,
+  `allowBackup=false`, cleartext เปิดเฉพาะ debug manifest และ embedded API endpoint ถูกต้อง
+- Android quality gate: `lintDebug` และ `testDebugUnitTest` ผ่านด้วย JDK 21
+- Physical tablet: ADB server พร้อม แต่ยังไม่มีอุปกรณ์เชื่อมต่อ; installation/durable restart test pending
 - Existing device ที่ Pair ด้วยรุ่นก่อน Scope นี้ไม่มี refresh credential จึงต้อง Pair migration หนึ่งครั้ง
   เมื่อ access เดิมหมดอายุ; หลังจากนั้นเป็น durable pairing
 - Tablet visual device: `cc04b624-634e-44cb-b1e3-e5ce8d329b37` / `C-EF9H5QD6NR`

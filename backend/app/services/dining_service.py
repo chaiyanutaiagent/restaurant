@@ -1271,6 +1271,7 @@ class DiningService:
             branch_id,
             user_id,
             create_request,
+            brand_id=current.brand_id,
             approval_evidence=approval_evidence,
         )
 

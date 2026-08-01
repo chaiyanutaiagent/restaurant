@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BarChart3, Building2, CheckCircle2, ClipboardList, Coins, ExternalLink, Loader2, PackageCheck, Plus, Store, X } from "lucide-react";
+import { BarChart3, Building2, CheckCircle2, ClipboardList, Coins, ExternalLink, Factory, Loader2, PackageCheck, Plus, Store, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/layout/PageHeader";
@@ -76,6 +76,7 @@ export default function BrandAdminPage(): JSX.Element {
   const companyId = useAuthStore((state) => state.companyId);
   const currentBranchId = useAuthStore((state) => state.branchId);
   const setSession = useAuthStore((state) => state.setSession);
+  const hasPermission = useAuthStore((state) => state.hasPermission);
   const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
@@ -89,6 +90,14 @@ export default function BrandAdminPage(): JSX.Element {
   const branchesQuery = useQuery({ queryKey: ["system-branches"], queryFn: fetchBranches });
   const brands = brandsQuery.data ?? [];
   const selectedBrand = brands.find((brand) => brand.id === selectedBrandId) ?? null;
+  const canManageCompany = hasPermission("system.company.edit");
+  const productionEntitlementQuery = useQuery({
+    queryKey: ["central-production-entitlement", selectedBrandId],
+    queryFn: async () => (
+      await authApi.get(`/system/brands/${selectedBrandId}/modules/central-production`)
+    ).data.data as { is_enabled: boolean },
+    enabled: Boolean(selectedBrandId && canManageCompany),
+  });
   const activeBranches = selectedBrand?.branches.filter((item) => item.is_active) ?? [];
   const franchiseBranches = activeBranches.filter((item) => item.branch_type === "franchise");
   const companyBranches = activeBranches.filter((item) => item.branch_type !== "franchise");
@@ -214,6 +223,26 @@ export default function BrandAdminPage(): JSX.Element {
     onError: (error) => toast({ title: "ปิดสาขาไม่สำเร็จ", description: getApiErrorMessage(error), variant: "destructive" }),
   });
 
+  const productionEntitlementMutation = useMutation({
+    mutationFn: async (isEnabled: boolean) => {
+      if (!selectedBrandId) throw new Error("ยังไม่ได้เลือกแบรนด์");
+      return (
+        await authApi.put(`/system/brands/${selectedBrandId}/modules/central-production`, {
+          is_enabled: isEnabled,
+          config: {},
+        })
+      ).data.data as { is_enabled: boolean };
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["central-production-entitlement", selectedBrandId] }),
+        queryClient.invalidateQueries({ queryKey: ["restaurant-brand-features"] }),
+      ]);
+      toast({ title: "อัปเดตสิทธิ์ Production แล้ว" });
+    },
+    onError: (error) => toast({ title: "อัปเดต Production ไม่สำเร็จ", description: getApiErrorMessage(error), variant: "destructive" }),
+  });
+
   const isSaving = saveBrandMutation.isPending || attachBranchMutation.isPending || deactivateBranchMutation.isPending;
 
   return (
@@ -329,6 +358,26 @@ export default function BrandAdminPage(): JSX.Element {
                   </Link>
                 </Button>
               </div>
+              {canManageCompany ? (
+                <div className="mt-4 flex flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <Factory className="mt-0.5 h-5 w-5 text-slate-600" />
+                    <div>
+                      <p className="font-bold text-slate-950">Central kitchen / Production</p>
+                      <p className="text-sm text-slate-500">เปิดเฉพาะแบรนด์ที่ใช้งานครัวกลาง</p>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={productionEntitlementQuery.data?.is_enabled ?? false}
+                      disabled={productionEntitlementQuery.isLoading || productionEntitlementMutation.isPending}
+                      onChange={(event) => productionEntitlementMutation.mutate(event.target.checked)}
+                    />
+                    เปิดใช้งาน
+                  </label>
+                </div>
+              ) : null}
             </section>
           ) : null}
 

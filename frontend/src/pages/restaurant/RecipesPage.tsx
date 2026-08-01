@@ -53,6 +53,12 @@ type RecipeRead = RecipeListItem & {
     unit: string;
     latest_unit_cost: number;
     cost_per_recipe: number;
+    cost_source: "received_purchase_order" | "product_cost_fallback";
+    cost_source_reference: string;
+    cost_unit: string;
+    cost_source_unit: string;
+    normalized_quantity: number;
+    conversion_factor: number;
   }[];
   cost_per_yield: number;
   inventory_updates?: {
@@ -663,12 +669,18 @@ export default function RecipesPage(): JSX.Element {
                         <td className="px-4 py-3 font-medium text-slate-800">
                           {ing.ingredient_name}
                           <span className="ml-2 text-xs text-slate-400">{ing.ingredient_sku}</span>
+                          <p className="mt-1 text-xs font-normal text-slate-400">
+                            {ing.cost_source === "received_purchase_order" ? `รับซื้อ ${ing.cost_source_reference}` : `ต้นทุนสินค้า ${ing.cost_source_reference}`}
+                          </p>
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600">
                           {ing.quantity} {ing.unit}
+                          {ing.conversion_factor !== 1 ? (
+                            <p className="text-xs text-slate-400">= {ing.normalized_quantity} {ing.cost_unit}</p>
+                          ) : null}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600">
-                          ฿{Number(ing.latest_unit_cost).toFixed(4)}/{ing.unit}
+                          ฿{Number(ing.latest_unit_cost).toFixed(4)}/{ing.cost_unit}
                         </td>
                         <td className="px-4 py-3 text-right font-medium text-slate-800">
                           ฿{Number(ing.cost_per_recipe).toFixed(2)}

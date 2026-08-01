@@ -303,6 +303,29 @@ export type BrandOperationsReport = {
   brand_slug: string;
   date_from: string;
   date_to: string;
+  dashboard_totals: {
+    sales_amount: number;
+    payment_amount: number;
+    estimated_recipe_cogs: number;
+    waste_qty: number;
+    waste_cost: number;
+    shift_closure_amount: number;
+    missing_recipe_product_count: number;
+  };
+  reconciliation: {
+    sales: {
+      source_order_total: number;
+      branch_rows_total: number;
+      delta: number;
+      is_reconciled: boolean;
+    };
+    payments: {
+      source_payment_total: number;
+      source_order_total: number;
+      delta: number;
+      is_reconciled: boolean;
+    };
+  };
   sales_by_branch: Array<{
     branch_id: string;
     branch_name: string;
@@ -811,6 +834,8 @@ export const wapApi = {
   ),
   brandOperationsReport: (brandSlug: string, params?: { date_from?: string; date_to?: string }) =>
     api.get<ApiResponse<BrandOperationsReport>>(`/restaurant/central/${brandSlug}/reports/operations`, { params }),
+  brandFeatures: (brandSlug: string) =>
+    api.get<ApiResponse<{ central_production: boolean }>>(`/restaurant/central/${brandSlug}/features`),
   brandStockDashboard: (brandSlug: string) =>
     api.get<ApiResponse<BrandStockDashboard>>(`/restaurant/central/${brandSlug}/stock-dashboard`),
   stockCutoverPreview: (brandSlug: string) =>

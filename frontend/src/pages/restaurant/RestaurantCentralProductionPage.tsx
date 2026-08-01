@@ -95,29 +95,42 @@ export default function RestaurantCentralProductionPage(): JSX.Element {
   const centralBase = brandSlug ? `/central/${brandSlug}` : "/restaurant";
   const summaryParams = { date_from: dateFrom, date_to: dateTo, status: statusFilter || undefined };
 
+  const featuresQuery = useQuery({
+    queryKey: ["restaurant-brand-features", brandSlug],
+    queryFn: async () => {
+      if (!brandSlug) throw new Error("Brand is required");
+      return (await wapApi.brandFeatures(brandSlug)).data.data;
+    },
+    enabled: Boolean(brandSlug),
+  });
+  const productionEnabled = !brandSlug || featuresQuery.data?.central_production === true;
+
   const productionQuery = useQuery({
     queryKey: ["restaurant-central-production-summary", brandSlug ?? "legacy", summaryParams],
     queryFn: async () => (await wapApi.centralProductionSummary(brandSlug, summaryParams)).data.data,
+    enabled: productionEnabled,
   });
   const ingredientsQuery = useQuery({
     queryKey: ["restaurant-central-production-ingredients", brandSlug ?? "legacy", summaryParams],
     queryFn: async () => (await wapApi.centralProductionIngredients(brandSlug, summaryParams)).data.data,
+    enabled: productionEnabled,
   });
   const ordersQuery = useQuery({
     queryKey: ["restaurant-central-orders", brandSlug ?? "legacy"],
     queryFn: async () => (await wapApi.centralOrders(brandSlug)).data.data,
+    enabled: productionEnabled,
   });
   const batchQuery = useQuery({
     queryKey: ["restaurant-production-batches", brandSlug ?? "legacy", dateFrom, dateTo],
     queryFn: async () => (
       await wapApi.productionBatches(brandSlug as string, { date_from: dateFrom, date_to: dateTo })
     ).data.data,
-    enabled: Boolean(brandSlug),
+    enabled: Boolean(brandSlug && productionEnabled),
   });
   const transferConfigQuery = useQuery({
     queryKey: ["restaurant-central-transfer-config", brandSlug ?? "legacy"],
     queryFn: async () => (await wapApi.transferConfig(brandSlug ?? "")).data.data,
-    enabled: Boolean(brandSlug),
+    enabled: Boolean(brandSlug && productionEnabled),
   });
   const rawLocationId = transferConfigQuery.data?.central_location_id ?? null;
   const readyLocationId = transferConfigQuery.data?.central_ready_location_id ?? null;
@@ -126,7 +139,7 @@ export default function RestaurantCentralProductionPage(): JSX.Element {
     queryFn: async () => (
       await stockApi.listBalances({ location_id: rawLocationId ?? undefined })
     ).data.data as StockBalance[],
-    enabled: Boolean(rawLocationId),
+    enabled: Boolean(productionEnabled && rawLocationId),
   });
 
   const activeOrders = (ordersQuery.data ?? []).filter((order) =>
@@ -257,18 +270,22 @@ export default function RestaurantCentralProductionPage(): JSX.Element {
     setReceiveNote(note);
   }
 
-  const isLoading = productionQuery.isLoading
+  const isLoading = featuresQuery.isLoading || (productionEnabled && (
+    productionQuery.isLoading
     || ingredientsQuery.isLoading
     || ordersQuery.isLoading
     || batchQuery.isLoading
     || transferConfigQuery.isLoading
-    || rawStockQuery.isLoading;
-  const isError = productionQuery.isError
+    || rawStockQuery.isLoading
+  ));
+  const isError = featuresQuery.isError || (productionEnabled && (
+    productionQuery.isError
     || ingredientsQuery.isError
     || ordersQuery.isError
     || batchQuery.isError
     || transferConfigQuery.isError
-    || rawStockQuery.isError;
+    || rawStockQuery.isError
+  ));
 
   return (
     <div className="mx-auto flex min-h-full max-w-6xl flex-col gap-4">
@@ -296,7 +313,11 @@ export default function RestaurantCentralProductionPage(): JSX.Element {
         </div>
       </header>
 
-      {isLoading ? (
+      {!productionEnabled && !featuresQuery.isLoading && !featuresQuery.isError ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-center font-semibold text-amber-800">
+          แบรนด์นี้ยังไม่ได้เปิดใช้งาน Central kitchen / Production
+        </div>
+      ) : isLoading ? (
         <div className="flex h-72 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />โหลดแผนผลิต
         </div>

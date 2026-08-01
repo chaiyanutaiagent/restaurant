@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import uuid
+import zlib
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -152,6 +153,26 @@ class AccountingService:
         credit_total = q2(sum((Decimal(line.credit_amount) for line in lines), Decimal("0")))
         if debit_total != credit_total:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Posting lines are not balanced")
+
+        if reference_type is not None and reference_id is not None:
+            source_key = f"{company_id}:{entry_type}:{reference_type}:{reference_id}"
+            lock_key = zlib.crc32(source_key.encode("utf-8"))
+            if lock_key >= 2**31:
+                lock_key -= 2**32
+            await self.db.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                {"lock_key": lock_key},
+            )
+            existing = await self.db.scalar(
+                select(JournalEntry.id).where(
+                    JournalEntry.company_id == company_id,
+                    JournalEntry.entry_type == entry_type,
+                    JournalEntry.reference_type == reference_type,
+                    JournalEntry.reference_id == reference_id,
+                )
+            )
+            if existing is not None:
+                return await self.get_entry(existing, company_id)
 
         entry_prefix = f"JE{entry_date:%Y%m%d}-"
         existing_count = await self.db.scalar(

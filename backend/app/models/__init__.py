@@ -31,6 +31,8 @@ from app.models.stock_count import StockCountSession, StockCountItem
 from app.models.settings import BranchSettings, UserInvitation
 from app.models.user_access import UserAccessRequest
 from app.models.accounting import Account, JournalEntry, JournalLine, AccountBalance
+from app.models.integration import OperationalOutboxEvent
+from app.models.entitlement import BrandModuleEntitlement
 from app.models.etax import TaxDocument, TaxDocumentItem
 from app.models.payable import SupplierInvoice, APPayment, APPaymentAllocation, WHTCertificate
 from app.models.hr import (

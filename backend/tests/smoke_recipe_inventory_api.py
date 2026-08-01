@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from decimal import Decimal
 import uuid
 
@@ -14,11 +15,13 @@ from app.database import AsyncSessionLocal, engine
 from app.main import app
 from app.models.audit import AuditLog
 from app.models.branch import Branch
-from app.models.product import Product
+from app.models.hr import Employee
+from app.models.product import Product, Unit
 from app.models.restaurant import Brand, BrandBranch, BranchReplenishmentPolicy
 from app.models.role import Permission, Role
+from app.models.staff_assignment import StaffRoleAssignment
 from app.models.stock import StockBalance, StockLocation, StockMovement
-from app.models.user import User, UserBranch
+from app.models.user import User
 from app.utils.create_superuser import DEFAULT_COMPANY_ID, ensure_default_company_seed_in_session
 from app.utils.seed_test_beverage import seed_test_beverage
 from app.utils.seed_permissions import seed_default_permissions
@@ -44,12 +47,6 @@ async def prepare() -> dict[str, str]:
         await ensure_default_company_seed_in_session(db)
         await seed_test_beverage(db, str(DEFAULT_COMPANY_ID))
 
-        branch = await db.scalar(
-            select(Branch).where(
-                Branch.company_id == DEFAULT_COMPANY_ID,
-                Branch.code == "BKK-01",
-            )
-        )
         brand = await db.scalar(
             select(Brand).where(
                 Brand.company_id == DEFAULT_COMPANY_ID,
@@ -63,12 +60,50 @@ async def prepare() -> dict[str, str]:
             )
         )
         if (
-            branch is None
-            or brand is None
+            brand is None
             or other_brand is None
-            or brand.central_location_id is None
         ):
-            raise RuntimeError("Default brands and RAW location were not seeded")
+            raise RuntimeError("Default Restaurant brands were not seeded")
+
+        units = {
+            unit.code: unit
+            for unit in (
+                await db.scalars(
+                    select(Unit).where(
+                        Unit.company_id == DEFAULT_COMPANY_ID,
+                        Unit.code.in_(["G", "PCS"]),
+                        Unit.deleted_at.is_(None),
+                    )
+                )
+            ).all()
+        }
+        if set(units) != {"G", "PCS"}:
+            raise RuntimeError("Recipe smoke stock units were not seeded")
+
+        branch = Branch(
+            company_id=DEFAULT_COMPANY_ID,
+            code=f"RC-{marker}"[:20],
+            name="Recipe Smoke Branch",
+            is_active=True,
+        )
+        db.add(branch)
+        await db.flush()
+        brand_branch = BrandBranch(
+            company_id=DEFAULT_COMPANY_ID,
+            brand_id=brand.id,
+            branch_id=branch.id,
+            branch_type="company_owned",
+            is_active=True,
+        )
+        db.add(brand_branch)
+
+        raw_location = StockLocation(
+            company_id=DEFAULT_COMPANY_ID,
+            branch_id=branch.id,
+            code=f"R-RAW-{marker}",
+            name="Recipe Smoke Raw",
+            is_active=True,
+        )
 
         ready_location = StockLocation(
             company_id=DEFAULT_COMPANY_ID,
@@ -84,17 +119,11 @@ async def prepare() -> dict[str, str]:
             name="Recipe Smoke Store",
             is_active=True,
         )
-        db.add_all([ready_location, store_location])
+        db.add_all([raw_location, ready_location, store_location])
         await db.flush()
+        brand.central_branch_id = branch.id
+        brand.central_location_id = raw_location.id
         brand.central_ready_location_id = ready_location.id
-        brand_branch = await db.scalar(
-            select(BrandBranch).where(
-                BrandBranch.brand_id == brand.id,
-                BrandBranch.branch_id == branch.id,
-            )
-        )
-        if brand_branch is None:
-            raise RuntimeError("Restaurant branch mapping was not seeded")
         brand_branch.store_location_id = store_location.id
         store_location_ids = list(
             (
@@ -109,12 +138,19 @@ async def prepare() -> dict[str, str]:
         )
         store_location_ids = list(dict.fromkeys(store_location_ids))
 
-        def product(suffix: str, name: str, product_type: str = "raw_material") -> Product:
+        def product(
+            suffix: str,
+            name: str,
+            product_type: str = "raw_material",
+            *,
+            unit_code: str = "G",
+        ) -> Product:
             return Product(
                 company_id=DEFAULT_COMPANY_ID,
                 brand_id=brand.id,
                 sku=f"RECIPE-{suffix}-{marker}",
                 name=name,
+                unit_id=units[unit_code].id,
                 product_type=product_type,
                 inventory_role=None,
                 cost_price=Decimal("1"),
@@ -126,14 +162,20 @@ async def prepare() -> dict[str, str]:
 
         raw_input = product("RAW-1", "Recipe Raw One")
         second_raw_input = product("RAW-2", "Recipe Raw Two")
-        production_output = product("READY-OUT", "Recipe Ready Output")
-        menu_input = product("MENU-IN", "Recipe Menu Input")
-        menu_output = product("MENU-OUT", "Recipe Menu Output", "menu_item")
+        production_output = product("READY-OUT", "Recipe Ready Output", unit_code="PCS")
+        menu_input = product("MENU-IN", "Recipe Menu Input", unit_code="PCS")
+        menu_output = product(
+            "MENU-OUT",
+            "Recipe Menu Output",
+            "menu_item",
+            unit_code="PCS",
+        )
         other_brand_output = Product(
             company_id=DEFAULT_COMPANY_ID,
             brand_id=other_brand.id,
             sku=f"RECIPE-OTHER-{marker}",
             name="Other Brand Output",
+            unit_id=units["PCS"].id,
             product_type="menu_item",
             cost_price=Decimal("0"),
             selling_price=Decimal("0"),
@@ -186,21 +228,37 @@ async def prepare() -> dict[str, str]:
         )
         db.add(user)
         await db.flush()
-        db.add(
-            UserBranch(
-                user_id=user.id,
-                branch_id=branch.id,
-                role_id=role.id,
-                brand_id=brand.id,
-                business_type="restaurant",
-                target_database="restaurant",
-                is_default=True,
-            )
+        db.add_all(
+            [
+                Employee(
+                    company_id=DEFAULT_COMPANY_ID,
+                    branch_id=branch.id,
+                    user_id=user.id,
+                    employee_code=f"RC-{marker}"[:20],
+                    first_name="Recipe",
+                    last_name="Smoke",
+                    hire_date=date.today(),
+                    is_active=True,
+                ),
+                StaffRoleAssignment(
+                    company_id=DEFAULT_COMPANY_ID,
+                    user_id=user.id,
+                    role_id=role.id,
+                    scope_type="branch",
+                    scope_key=str(branch.id),
+                    brand_id=brand.id,
+                    branch_id=branch.id,
+                    station_key=None,
+                    assignment_reason="Phase 4 recipe smoke",
+                    assigned_by=user.id,
+                ),
+            ]
         )
         await db.commit()
 
         result = {
             "username": username,
+            "branch_id": str(branch.id),
             "brand_id": str(brand.id),
             "raw_location_id": str(brand.central_location_id),
             "ready_location_id": str(ready_location.id),
@@ -218,7 +276,7 @@ async def prepare() -> dict[str, str]:
     return result
 
 
-def login(client: TestClient, username: str) -> dict[str, str]:
+def login(client: TestClient, username: str, branch_id: str) -> dict[str, str]:
     data = expect(
         client.post(
             "/api/v1/auth/login",
@@ -226,6 +284,7 @@ def login(client: TestClient, username: str) -> dict[str, str]:
                 "company_id": str(DEFAULT_COMPANY_ID),
                 "username": username,
                 "password": PASSWORD,
+                "branch_id": branch_id,
             },
         ),
         200,
@@ -320,7 +379,7 @@ def run() -> None:
     store_local_product_id = ""
 
     with TestClient(app) as client:
-        headers = login(client, context["username"])
+        headers = login(client, context["username"], context["branch_id"])
 
         production_recipe = expect(
             client.post(
@@ -336,7 +395,7 @@ def run() -> None:
                         {
                             "ingredient_id": context["raw_input_id"],
                             "quantity": 1,
-                            "unit": "kg",
+                            "unit": "g",
                         }
                     ],
                 },
@@ -356,7 +415,7 @@ def run() -> None:
                         {
                             "ingredient_id": context["raw_input_id"],
                             "quantity": 2,
-                            "unit": "kg",
+                            "unit": "g",
                         }
                     ]
                 },
@@ -375,12 +434,12 @@ def run() -> None:
                         {
                             "ingredient_id": context["raw_input_id"],
                             "quantity": 2,
-                            "unit": "kg",
+                            "unit": "g",
                         },
                         {
                             "ingredient_id": context["second_raw_input_id"],
                             "quantity": 1,
-                            "unit": "kg",
+                            "unit": "g",
                         },
                     ]
                 },
@@ -404,7 +463,7 @@ def run() -> None:
                         {
                             "ingredient_id": context["menu_input_id"],
                             "quantity": 1,
-                            "unit": "portion",
+                            "unit": "PCS",
                         }
                     ],
                 },
@@ -438,7 +497,7 @@ def run() -> None:
                         {
                             "ingredient_id": context["menu_input_id"],
                             "quantity": 1,
-                            "unit": "portion",
+                            "unit": "PCS",
                         },
                         {
                             "ingredient_id": store_local_product_id,

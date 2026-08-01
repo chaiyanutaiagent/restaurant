@@ -32,6 +32,12 @@ class RecipeIngredientRead(RecipeIngredientBase):
     image_url: str | None = None
     latest_unit_cost: Decimal = Decimal("0")
     cost_per_recipe: Decimal = Decimal("0")
+    cost_source: Literal["received_purchase_order", "product_cost_fallback"] = "product_cost_fallback"
+    cost_source_reference: str = ""
+    cost_unit: str = ""
+    cost_source_unit: str = ""
+    normalized_quantity: Decimal = Decimal("0")
+    conversion_factor: Decimal = Decimal("1")
 
     model_config = ConfigDict(from_attributes=True)
 

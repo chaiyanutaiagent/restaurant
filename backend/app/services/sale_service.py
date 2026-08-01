@@ -34,6 +34,7 @@ from app.services.accounting_service import AccountingService
 from app.services.approval_service import ApprovalEvidence
 from app.services.crm_service import CRMService
 from app.services.notification_service import NotificationService
+from app.services.operational_handoff_service import ensure_sale_completed_handoff
 from app.services.stock_service import StockService
 from app.utils.webhook_dispatcher import trigger_event
 from app.schemas.crm import EarnPointsRequest
@@ -292,6 +293,29 @@ class SaleService:
         )
         return order
 
+    async def ensure_existing_sale_handoffs(
+        self,
+        order: SaleOrder,
+        company_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        brand_id: uuid.UUID | None = None,
+    ) -> SaleOrder:
+        await ensure_sale_completed_handoff(
+            self.db,
+            company_id=company_id,
+            brand_id=brand_id,
+            branch_id=order.branch_id,
+            order_id=order.id,
+            order_number=order.order_number,
+            total_amount=Decimal(order.total_amount),
+            item_count=len(order.items),
+            payment_methods=[payment.payment_method for payment in order.payments],
+        )
+        await self.db.commit()
+        await self._ensure_accounting_handoff(order, company_id, user_id)
+        return await self.get_sale(order.id, company_id)
+
     async def create_sale(
         self,
         company_id: uuid.UUID,
@@ -469,9 +493,12 @@ class SaleService:
                             if isinstance(row["product"], Product) and row["product"].product_type == "menu_item"
                         ],
                     )
-                    await self.db.commit()
-                    return await self.get_sale(existing.id, company_id)
-                return existing
+                return await self.ensure_existing_sale_handoffs(
+                    existing,
+                    company_id,
+                    user_id,
+                    brand_id=brand_id,
+                )
             order_id = inserted_id
         else:
             order = SaleOrder(**order_values)
@@ -613,6 +640,17 @@ class SaleService:
             )
         except Exception:
             pass
+        await ensure_sale_completed_handoff(
+            self.db,
+            company_id=company_id,
+            brand_id=brand_id,
+            branch_id=branch_id,
+            order_id=order_id,
+            order_number=str(order_values["order_number"]),
+            total_amount=total_amount,
+            item_count=len(item_rows),
+            payment_methods=[payment.payment_method for payment in payment_rows],
+        )
         await self.db.commit()
         order = await self.get_sale(order_id, company_id)
         if data.customer_id:
@@ -631,14 +669,22 @@ class SaleService:
             except Exception as e:
                 logger.error(f"Points earn failed: {e}")
                 await self.db.rollback()
+        await self._ensure_accounting_handoff(order, company_id, user_id)
+        return await self.get_sale(order_id, company_id)
+
+    async def _ensure_accounting_handoff(
+        self,
+        order: SaleOrder,
+        company_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
         try:
             accounting_svc = AccountingService(self.db)
             await accounting_svc.post_sale(order, company_id, user_id)
             await self.db.commit()
-        except Exception as e:
-            logger.error(f"Accounting post failed for {order.order_number}: {e}")
+        except Exception as exc:
+            logger.error("Accounting post failed for %s: %s", order.order_number, exc)
             await self.db.rollback()
-        return await self.get_sale(order_id, company_id)
 
     async def _generate_order_number(self, company_id: uuid.UUID, date_str: str) -> str:
         lock_key = hash(str(company_id) + date_str + "SALE") % (2**31)
@@ -887,7 +933,13 @@ class SaleService:
         for order in orders:
             existing = await self.get_existing_sale_by_client_order_id(company_id, branch_id, order.client_order_id)
             if existing is not None:
-                created.append(existing)
+                created.append(
+                    await self.ensure_existing_sale_handoffs(
+                        existing,
+                        company_id,
+                        user_id,
+                    )
+                )
                 continue
             created.append(await self.create_sale(company_id, branch_id, user_id, order))
         return created

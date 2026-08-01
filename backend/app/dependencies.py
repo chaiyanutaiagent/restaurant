@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import uuid
@@ -11,7 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_identity_db, get_restaurant_service_db
+from app.database import (
+    AsyncSessionLocal,
+    active_restaurant_service_session_factory,
+    get_identity_db,
+    get_restaurant_service_db,
+)
 from app.models.device import DeviceRegistration
 from app.models.settings import BranchSettings
 from app.models.user import User
@@ -109,6 +114,32 @@ async def get_current_user(
         assignment_ids=[uuid.UUID(value) for value in payload.get("assignment_ids", [])],
         scope_types=list(payload.get("scope_types", [])),
     )
+
+
+async def get_scoped_operational_db(
+    current: TokenData = Depends(get_current_user),
+) -> AsyncGenerator[AsyncSession, None]:
+    """Select an operational database only from validated staff context."""
+    session_factory = operational_session_factory_for(current)
+    async with session_factory() as session:
+        yield session
+
+
+def operational_session_factory_for(current: TokenData):
+    if current.target_database == "restaurant":
+        return active_restaurant_service_session_factory()
+    elif current.target_database in {None, "retail_pos"}:
+        return AsyncSessionLocal
+    elif current.target_database == "takeaway":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Takeaway operational service is not available",
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operational database context is invalid",
+        )
 
 
 async def resolve_device_token(

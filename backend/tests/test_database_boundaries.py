@@ -9,6 +9,7 @@ from app.database import (
     active_restaurant_service_session_factory,
     session_factory_for,
 )
+from app.models.integration import OperationalOutboxEvent
 
 
 class DatabaseBoundaryTests(unittest.TestCase):
@@ -47,3 +48,11 @@ class DatabaseBoundaryTests(unittest.TestCase):
             active_restaurant_service_session_factory(),
             AsyncSessionLocal,
         )
+
+    def test_restaurant_handoff_has_no_cross_database_foreign_key(self) -> None:
+        self.assertEqual(list(OperationalOutboxEvent.__table__.foreign_keys), [])
+        table_names = {
+            foreign_key.column.table.name
+            for foreign_key in OperationalOutboxEvent.__table__.foreign_keys
+        }
+        self.assertFalse({"retail", "takeaway"} & table_names)

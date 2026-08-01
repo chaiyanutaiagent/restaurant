@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 from datetime import date
 import uuid
@@ -50,6 +51,10 @@ UNIT_ALIASES = {
     "ลิตร": "l",
     "liter": "l",
     "liters": "l",
+    "pc": "pcs",
+    "piece": "pcs",
+    "pieces": "pcs",
+    "ชิ้น": "pcs",
     "ขีด": "heed",
 }
 
@@ -62,21 +67,38 @@ UNIT_TO_BASE = {
 }
 
 
+@dataclass(frozen=True)
+class UnitCostEvidence:
+    unit_cost: Decimal
+    source: str
+    source_reference: str
+    cost_unit: str
+    source_cost_unit: str
+
+
+def unit_conversion_factor(from_unit: str | None, to_unit: str | None) -> Decimal:
+    source = _normalize_unit(from_unit)
+    target = _normalize_unit(to_unit)
+    if not source or not target:
+        raise ValueError("ต้องระบุหน่วยสูตรและหน่วยสต็อกของวัตถุดิบ")
+    if source == target:
+        return Decimal("1")
+    source_base = UNIT_TO_BASE.get(source)
+    target_base = UNIT_TO_BASE.get(target)
+    if not source_base or not target_base:
+        raise ValueError(f"ไม่พบกฎแปลงหน่วยจาก {from_unit} เป็น {to_unit}")
+    if source_base[0] != target_base[0]:
+        raise ValueError(f"หน่วย {from_unit} และ {to_unit} เป็นคนละประเภท")
+    return (source_base[1] / target_base[1]).quantize(Decimal("0.00000001"))
+
+
 def _normalize_unit(unit: str | None) -> str:
     raw = (unit or "").strip().lower()
     return UNIT_ALIASES.get(raw, raw)
 
 
 def convert_quantity(value: Decimal, from_unit: str | None, to_unit: str | None) -> Decimal:
-    source = _normalize_unit(from_unit)
-    target = _normalize_unit(to_unit)
-    if not source or not target or source == target:
-        return value
-    source_base = UNIT_TO_BASE.get(source)
-    target_base = UNIT_TO_BASE.get(target)
-    if not source_base or not target_base or source_base[0] != target_base[0]:
-        return value
-    return (value * source_base[1] / target_base[1]).quantize(Decimal("0.0001"))
+    return (value * unit_conversion_factor(from_unit, to_unit)).quantize(Decimal("0.0001"))
 
 
 def _effective_yield(recipe: Recipe) -> Decimal:
@@ -120,10 +142,23 @@ class RecipeService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def _latest_unit_cost(self, company_id: uuid.UUID, ingredient_id: uuid.UUID) -> Decimal:
-        """ดึงราคาต่อหน่วยล่าสุดจาก PurchaseOrderItem"""
-        row = await self.db.scalar(
-            select(PurchaseOrderItem.unit_cost)
+    async def _latest_unit_cost(self, company_id: uuid.UUID, ingredient_id: uuid.UUID) -> UnitCostEvidence:
+        """Return the latest auditable unit-cost source for one ingredient."""
+        product = await self.db.scalar(
+            select(Product)
+            .options(selectinload(Product.unit))
+            .where(Product.id == ingredient_id, Product.company_id == company_id)
+        )
+        if product is None or product.unit is None or not product.unit.code.strip():
+            raise ValueError("ไม่พบวัตถุดิบหรือหน่วยสต็อกสำหรับคำนวณต้นทุน")
+        stock_unit = product.unit.code
+        row = (
+            await self.db.execute(
+                select(
+                    PurchaseOrderItem.unit_cost,
+                    PurchaseOrderItem.unit_code,
+                    PurchaseOrder.po_number,
+                )
             .join(PurchaseOrder, PurchaseOrderItem.po_id == PurchaseOrder.id)
             .where(
                 PurchaseOrderItem.company_id == company_id,
@@ -132,14 +167,60 @@ class RecipeService:
             )
             .order_by(desc(PurchaseOrder.created_at))
             .limit(1)
-        )
+            )
+        ).one_or_none()
         if row is not None:
-            return Decimal(str(row))
-        # fallback: ดึงจาก cost_price ของ Product
-        cost = await self.db.scalar(
-            select(Product.cost_price).where(Product.id == ingredient_id)
+            source_cost_unit = row.unit_code or stock_unit
+            units_per_purchase_unit = convert_quantity(
+                Decimal("1"), source_cost_unit, stock_unit
+            )
+            return UnitCostEvidence(
+                unit_cost=(Decimal(str(row.unit_cost)) / units_per_purchase_unit).quantize(
+                    Decimal("0.00000001")
+                ),
+                source="received_purchase_order",
+                source_reference=row.po_number,
+                cost_unit=stock_unit,
+                source_cost_unit=source_cost_unit,
+            )
+        return UnitCostEvidence(
+            unit_cost=Decimal(str(product.cost_price or 0)),
+            source="product_cost_fallback",
+            source_reference=product.sku,
+            cost_unit=stock_unit,
+            source_cost_unit=stock_unit,
         )
-        return Decimal(str(cost or 0))
+
+    async def _validate_ingredient_units(
+        self,
+        company_id: uuid.UUID,
+        ingredients: list,
+    ) -> None:
+        if not ingredients:
+            return
+        product_ids = list(dict.fromkeys(item.ingredient_id for item in ingredients))
+        products = list(
+            (
+                await self.db.scalars(
+                    select(Product)
+                    .options(selectinload(Product.unit))
+                    .where(
+                        Product.company_id == company_id,
+                        Product.id.in_(product_ids),
+                        Product.deleted_at.is_(None),
+                        Product.is_active.is_(True),
+                    )
+                )
+            ).all()
+        )
+        products_by_id = {product.id: product for product in products}
+        for ingredient in ingredients:
+            product = products_by_id.get(ingredient.ingredient_id)
+            if product is None:
+                raise ValueError("พบวัตถุดิบที่ไม่อยู่ในบริษัทหรือถูกปิดใช้งาน")
+            if product.unit is None or not product.unit.code.strip():
+                raise ValueError(f"วัตถุดิบ {product.name} ยังไม่มีหน่วยสต็อก")
+            unit_conversion_factor(ingredient.unit, product.unit.code)
 
     async def _enrich_recipe(
         self,
@@ -152,10 +233,11 @@ class RecipeService:
         ingredients_out: list[RecipeIngredientRead] = []
 
         for ing in recipe.ingredients:
-            unit_cost = await self._latest_unit_cost(company_id, ing.ingredient_id)
+            cost_evidence = await self._latest_unit_cost(company_id, ing.ingredient_id)
             product_unit = ing.ingredient.unit.code if ing.ingredient and ing.ingredient.unit else ing.unit
+            conversion_factor = unit_conversion_factor(ing.unit, product_unit)
             cost_qty = convert_quantity(Decimal(str(ing.quantity)), ing.unit, product_unit)
-            cost_line = (cost_qty * unit_cost).quantize(Decimal("0.0001"))
+            cost_line = (cost_qty * cost_evidence.unit_cost).quantize(Decimal("0.0001"))
             total_cost += cost_line
             ingredients_out.append(
                 RecipeIngredientRead(
@@ -169,8 +251,14 @@ class RecipeService:
                     unit=ing.unit,
                     sort_order=ing.sort_order,
                     notes=ing.notes,
-                    latest_unit_cost=unit_cost,
+                    latest_unit_cost=cost_evidence.unit_cost,
                     cost_per_recipe=cost_line,
+                    cost_source=cost_evidence.source,
+                    cost_source_reference=cost_evidence.source_reference,
+                    cost_unit=cost_evidence.cost_unit or product_unit,
+                    cost_source_unit=cost_evidence.source_cost_unit,
+                    normalized_quantity=cost_qty,
+                    conversion_factor=conversion_factor,
                 )
             )
 
@@ -643,6 +731,7 @@ class RecipeService:
         payload: RecipeCreate,
         actor_id: uuid.UUID | None = None,
     ) -> tuple[Recipe, list[RecipeInventoryUpdate]]:
+        await self._validate_ingredient_units(company_id, payload.ingredients)
         await self._validate_no_recipe_cycle(
             company_id,
             payload.product_id,
@@ -728,6 +817,7 @@ class RecipeService:
             recipe.is_active = payload.is_active
 
         if payload.ingredients is not None:
+            await self._validate_ingredient_units(company_id, payload.ingredients)
             await self._validate_no_recipe_cycle(
                 company_id,
                 recipe.product_id,
@@ -816,8 +906,8 @@ class RecipeService:
         items: list[IngredientUsageItem] = []
         grand_total = Decimal("0")
         for ingredient_id, data in usage.items():
-            unit_cost = await self._latest_unit_cost(company_id, ingredient_id)
-            total_cost = (data["qty"] * unit_cost).quantize(Decimal("0.01"))
+            cost_evidence = await self._latest_unit_cost(company_id, ingredient_id)
+            total_cost = (data["qty"] * cost_evidence.unit_cost).quantize(Decimal("0.01"))
             grand_total += total_cost
             items.append(
                 IngredientUsageItem(
@@ -826,7 +916,7 @@ class RecipeService:
                     ingredient_sku=data["sku"],
                     theoretical_qty=data["qty"].quantize(Decimal("0.0001")),
                     unit=data["unit"],
-                    latest_unit_cost=unit_cost,
+                    latest_unit_cost=cost_evidence.unit_cost,
                     total_cost=total_cost,
                 )
             )

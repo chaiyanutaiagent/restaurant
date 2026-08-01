@@ -86,6 +86,13 @@ class JournalEntry(UUIDMixin, TimestampMixin, Base):
         Index("ix_journal_entries_company_entry_number", "company_id", "entry_number"),
         Index("ix_journal_entries_period_year_period_month", "period_year", "period_month"),
         Index("ix_journal_entries_reference_type_reference_id", "reference_type", "reference_id"),
+        UniqueConstraint(
+            "company_id",
+            "entry_type",
+            "reference_type",
+            "reference_id",
+            name="uq_journal_entries_source_posting",
+        ),
     )
 
     company_id: Mapped[uuid.UUID] = mapped_column(

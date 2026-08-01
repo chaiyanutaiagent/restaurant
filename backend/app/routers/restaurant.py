@@ -7,7 +7,7 @@ import uuid
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from sqlalchemy import distinct, func, or_, select
+from sqlalchemy import Date, case, cast, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,9 +24,9 @@ from app.dependencies import (
     require_permission,
 )
 from app.models.branch import Branch
-from app.models.product import Product
-from app.models.pos import SaleOrder, SaleOrderItem
-from app.models.stock import StockBalance, StockLocation
+from app.models.product import Product, Unit
+from app.models.pos import Payment, SaleOrder, SaleOrderItem
+from app.models.stock import StockBalance, StockLocation, StockMovement
 from app.models.user import User
 from app.models.restaurant import (
     Brand, BrandBranch,
@@ -66,6 +66,8 @@ from app.services.offline_sale_authorization import (
     OfflineSaleAuthorizationService,
 )
 from app.services.report_scope_policy import require_brand_report_scope
+from app.services.restaurant_report_service import build_financial_reconciliation
+from app.services.entitlement_service import CENTRAL_PRODUCTION_MODULE, EntitlementService
 from app.services.staff_scope_policy import normalized_station_key
 from app.services.fb_setup import (
     DiningTableZonePlan,
@@ -302,6 +304,18 @@ def _require_brand_assignment(current: TokenData, brand: Brand | None) -> None:
         and brand.id != current.brand_id
     ):
         raise HTTPException(status_code=404, detail="ไม่พบแบรนด์")
+
+
+async def _require_central_production_enabled(
+    identity_db: AsyncSession,
+    company_id: uuid.UUID,
+    brand_id: uuid.UUID,
+) -> None:
+    await EntitlementService(identity_db).require_brand_module_enabled(
+        company_id,
+        brand_id,
+        CENTRAL_PRODUCTION_MODULE,
+    )
 
 
 async def _ensure_brand_branch(
@@ -1024,6 +1038,68 @@ async def delete_recipe(
 
 # ── Raw Materials ─────────────────────────────────────────────────────────────
 
+RAW_MATERIAL_UNIT_CODES = {
+    "g": "G",
+    "gram": "G",
+    "grams": "G",
+    "กรัม": "G",
+    "ก": "G",
+    "kg": "KG",
+    "kilogram": "KG",
+    "kilograms": "KG",
+    "กก": "KG",
+    "กิโล": "KG",
+    "กิโลกรัม": "KG",
+    "ml": "ML",
+    "milliliter": "ML",
+    "milliliters": "ML",
+    "มล": "ML",
+    "มิลลิลิตร": "ML",
+    "l": "L",
+    "liter": "L",
+    "liters": "L",
+    "ลิตร": "L",
+    "pcs": "PCS",
+    "pc": "PCS",
+    "piece": "PCS",
+    "pieces": "PCS",
+    "ชิ้น": "PCS",
+}
+
+
+async def _resolve_raw_material_unit(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    requested_unit: str,
+) -> Unit:
+    label = requested_unit.strip()
+    if not label:
+        raise HTTPException(status_code=400, detail="กรุณาระบุหน่วยสต็อก")
+    code = RAW_MATERIAL_UNIT_CODES.get(label.casefold(), label.upper())
+    if len(code) > 20:
+        raise HTTPException(status_code=400, detail="รหัสหน่วยสต็อกต้องไม่เกิน 20 ตัวอักษร")
+    unit = await db.scalar(
+        select(Unit).where(
+            Unit.company_id == company_id,
+            func.lower(Unit.code) == code.casefold(),
+        )
+    )
+    if unit is None:
+        unit = Unit(
+            company_id=company_id,
+            code=code,
+            name=label,
+            name_en=code,
+            decimal_places=3 if code in {"G", "KG", "ML", "L"} else 0,
+            is_active=True,
+        )
+        db.add(unit)
+        await db.flush()
+    else:
+        unit.deleted_at = None
+        unit.is_active = True
+    return unit
+
 @router.post("/raw-materials", status_code=status.HTTP_201_CREATED)
 async def create_raw_material(
     payload: RawMaterialCreate,
@@ -1034,6 +1110,7 @@ async def create_raw_material(
     name = payload.name.strip()
     if not sku or not name:
         raise HTTPException(status_code=400, detail="กรุณาระบุ SKU และชื่อวัตถุดิบ")
+    unit = await _resolve_raw_material_unit(db, current.company_id, payload.unit)
     service = ProductService(db)
     product = await service.create_product(
         current.company_id,
@@ -1043,6 +1120,7 @@ async def create_raw_material(
             description=f"Created from restaurant recipe setup ({payload.unit.strip() or 'unit'})",
             product_type="raw_material",
             inventory_role=payload.inventory_role,
+            unit_id=unit.id,
             cost_price=payload.cost_price,
             selling_price=0,
             vat_type="included",
@@ -1201,6 +1279,7 @@ async def create_brand_raw_material(
     name = payload.name.strip()
     if not sku or not name:
         raise HTTPException(status_code=400, detail="กรุณาระบุ SKU และชื่อวัตถุดิบ")
+    unit = await _resolve_raw_material_unit(db, current.company_id, payload.unit)
     service = ProductService(db)
     product = await service.create_product(
         current.company_id,
@@ -1210,6 +1289,7 @@ async def create_brand_raw_material(
             description=f"Created from {brand.slug} recipe setup ({payload.unit.strip() or 'unit'})",
             product_type="raw_material",
             inventory_role=payload.inventory_role,
+            unit_id=unit.id,
             cost_price=payload.cost_price,
             selling_price=0,
             vat_type="included",
@@ -3971,6 +4051,23 @@ async def _enrich_brand_production_summary(
     ]
 
 
+@router.get("/central/{brand_slug}/features")
+async def get_brand_features(
+    brand_slug: str,
+    current: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
+    _require_brand_assignment(current, brand)
+    entitlement = await EntitlementService(identity_db).get_brand_module(
+        current.company_id,
+        brand.id,
+        CENTRAL_PRODUCTION_MODULE,
+    )
+    return ok({"central_production": entitlement.is_enabled})
+
+
 @router.get("/central/{brand_slug}/production-summary")
 async def get_brand_central_production_summary(
     brand_slug: str,
@@ -3984,10 +4081,12 @@ async def get_brand_central_production_summary(
             "fb.kitchen.manage",
         )
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
+    await _require_central_production_enabled(identity_db, current.company_id, brand.id)
     active_statuses = ["submitted", "reserved_credit", "approved", "packed"]
     filters = [
         CentralOrder.company_id == current.company_id,
@@ -4043,10 +4142,12 @@ async def get_brand_central_production_ingredients(
             "fb.kitchen.manage",
         )
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
+    await _require_central_production_enabled(identity_db, current.company_id, brand.id)
     return ok(await _build_central_production_ingredients(db, current.company_id, brand.id, date_from, date_to, status_filter))
 
 
@@ -4063,10 +4164,12 @@ async def list_brand_production_batches(
             "fb.kitchen.manage",
         )
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
+    await _require_central_production_enabled(identity_db, current.company_id, brand.id)
     rows = await ProductionService(db).list_batches(
         current.company_id,
         brand.id,
@@ -4084,10 +4187,12 @@ async def create_brand_production_batch(
     current: TokenData = Depends(
         require_any_permission("brand.central.production.manage", "fb.kitchen.manage")
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
+    await _require_central_production_enabled(identity_db, current.company_id, brand.id)
     batch = await ProductionService(db).create_batch(
         current.company_id,
         brand.id,
@@ -4108,10 +4213,12 @@ async def get_brand_production_batch(
             "fb.kitchen.manage",
         )
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
+    await _require_central_production_enabled(identity_db, current.company_id, brand.id)
     batch = await ProductionService(db)._load_batch(
         current.company_id,
         brand.id,
@@ -4127,10 +4234,12 @@ async def start_brand_production_batch(
     current: TokenData = Depends(
         require_any_permission("brand.central.production.manage", "fb.kitchen.manage")
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
+    await _require_central_production_enabled(identity_db, current.company_id, brand.id)
     batch = await ProductionService(db).start_batch(
         current.company_id,
         brand.id,
@@ -4148,10 +4257,12 @@ async def complete_brand_production_batch(
     current: TokenData = Depends(
         require_any_permission("brand.central.production.manage", "fb.kitchen.manage")
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
+    await _require_central_production_enabled(identity_db, current.company_id, brand.id)
     batch = await ProductionService(db).complete_batch(
         current.company_id,
         brand.id,
@@ -4170,10 +4281,12 @@ async def cancel_brand_production_batch(
     current: TokenData = Depends(
         require_any_permission("brand.central.production.manage", "fb.kitchen.manage")
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
+    await _require_central_production_enabled(identity_db, current.company_id, brand.id)
     batch = await ProductionService(db).cancel_batch(
         current.company_id,
         brand.id,
@@ -4191,10 +4304,12 @@ async def complete_brand_central_production(
     current: TokenData = Depends(
         require_any_permission("brand.central.production.manage", "fb.kitchen.manage")
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
+    await _require_central_production_enabled(identity_db, current.company_id, brand.id)
     if brand.central_ready_location_id is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -4328,7 +4443,7 @@ async def get_brand_operations_report(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     current: TokenData = Depends(require_permission("fb.report.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
@@ -4336,25 +4451,82 @@ async def get_brand_operations_report(
     today = datetime.now(ZoneInfo("Asia/Bangkok")).date()
     from_value = date_from or today.replace(day=1)
     to_value = date_to or today
+    if to_value < from_value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="date_to must be on or after date_from",
+        )
 
-    sales_filters = [
+    sales_day = cast(func.timezone("Asia/Bangkok", SaleOrder.created_at), Date)
+    order_sales_filters = [
         SaleOrder.company_id == current.company_id,
         SaleOrder.status.in_(["completed", "partially_refunded"]),
-        Product.brand_id == brand.id,
-        func.date(SaleOrder.created_at) >= from_value,
-        func.date(SaleOrder.created_at) <= to_value,
+        sales_day >= from_value,
+        sales_day <= to_value,
     ]
+    brand_line_totals = (
+        select(
+            SaleOrderItem.order_id,
+            func.coalesce(func.sum(SaleOrderItem.subtotal), 0).label("brand_subtotal"),
+        )
+        .join(Product, Product.id == SaleOrderItem.product_id)
+        .where(
+            SaleOrderItem.company_id == current.company_id,
+            Product.company_id == current.company_id,
+            Product.brand_id == brand.id,
+        )
+        .group_by(SaleOrderItem.order_id)
+        .subquery()
+    )
+    order_line_totals = (
+        select(
+            SaleOrderItem.order_id,
+            func.coalesce(func.sum(SaleOrderItem.subtotal), 0).label("order_subtotal"),
+        )
+        .where(SaleOrderItem.company_id == current.company_id)
+        .group_by(SaleOrderItem.order_id)
+        .subquery()
+    )
+    allocation_ratio = case(
+        (
+            order_line_totals.c.order_subtotal > 0,
+            brand_line_totals.c.brand_subtotal / order_line_totals.c.order_subtotal,
+        ),
+        else_=0,
+    )
+    brand_sale_orders = (
+        select(
+            SaleOrder.id.label("order_id"),
+            SaleOrder.branch_id,
+            SaleOrder.user_id,
+            (SaleOrder.total_amount * allocation_ratio).label("total_amount"),
+            SaleOrder.change_amount,
+            allocation_ratio.label("allocation_ratio"),
+        )
+        .join(brand_line_totals, brand_line_totals.c.order_id == SaleOrder.id)
+        .join(order_line_totals, order_line_totals.c.order_id == SaleOrder.id)
+        .where(*order_sales_filters)
+        .subquery()
+    )
+    source_sales_total = Decimal(
+        str(
+            (
+                await db.scalar(
+                    select(func.coalesce(func.sum(brand_sale_orders.c.total_amount), 0))
+                )
+            )
+            or 0
+        )
+    ).quantize(Decimal("0.01"))
     sales_rows = (await db.execute(
         select(
             Branch.id.label("branch_id"),
             Branch.name.label("branch_name"),
-            func.count(distinct(SaleOrder.id)).label("order_count"),
-            func.coalesce(func.sum(SaleOrderItem.subtotal), 0).label("total_amount"),
+            func.count(brand_sale_orders.c.order_id).label("order_count"),
+            func.coalesce(func.sum(brand_sale_orders.c.total_amount), 0).label("total_amount"),
         )
-        .join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id)
-        .join(Product, SaleOrderItem.product_id == Product.id)
-        .join(Branch, SaleOrder.branch_id == Branch.id)
-        .where(*sales_filters)
+        .select_from(brand_sale_orders)
+        .join(Branch, brand_sale_orders.c.branch_id == Branch.id)
         .group_by(Branch.id, Branch.name)
         .order_by(Branch.name)
     )).all()
@@ -4365,16 +4537,55 @@ async def get_brand_operations_report(
             User.first_name,
             User.last_name,
             User.username,
-            func.count(distinct(SaleOrder.id)).label("order_count"),
-            func.coalesce(func.sum(SaleOrderItem.subtotal), 0).label("total_amount"),
+            func.count(brand_sale_orders.c.order_id).label("order_count"),
+            func.coalesce(func.sum(brand_sale_orders.c.total_amount), 0).label("total_amount"),
         )
-        .join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id)
-        .join(Product, SaleOrderItem.product_id == Product.id)
-        .join(User, SaleOrder.user_id == User.id)
-        .where(*sales_filters)
+        .select_from(brand_sale_orders)
+        .join(User, brand_sale_orders.c.user_id == User.id)
         .group_by(User.id, User.display_name, User.first_name, User.last_name, User.username)
-        .order_by(func.coalesce(func.sum(SaleOrderItem.subtotal), 0).desc())
+        .order_by(func.coalesce(func.sum(brand_sale_orders.c.total_amount), 0).desc())
     )).all()
+    payment_by_order = (
+        select(
+            Payment.order_id,
+            (
+                (
+                    func.coalesce(func.sum(Payment.amount), 0)
+                    - func.coalesce(brand_sale_orders.c.change_amount, 0)
+                )
+                * brand_sale_orders.c.allocation_ratio
+            ).label("net_paid"),
+        )
+        .join(brand_sale_orders, brand_sale_orders.c.order_id == Payment.order_id)
+        .group_by(
+            Payment.order_id,
+            brand_sale_orders.c.change_amount,
+            brand_sale_orders.c.allocation_ratio,
+        )
+        .subquery()
+    )
+    payment_source_total = Decimal(
+        str(
+            (
+                await db.scalar(
+                    select(func.coalesce(func.sum(payment_by_order.c.net_paid), 0))
+                )
+            )
+            or 0
+        )
+    )
+    sale_qty_rows = (
+        await db.execute(
+            select(
+                SaleOrderItem.product_id,
+                func.coalesce(func.sum(SaleOrderItem.qty), 0).label("sold_qty"),
+            )
+            .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
+            .join(Product, Product.id == SaleOrderItem.product_id)
+            .where(*order_sales_filters, Product.brand_id == brand.id)
+            .group_by(SaleOrderItem.product_id)
+        )
+    ).all()
 
     central_filters = [
         CentralOrder.company_id == current.company_id,
@@ -4482,6 +4693,39 @@ async def get_brand_operations_report(
         .order_by(Branch.name)
     )).all()
     recipe_rows = await RecipeService(db).list_recipes(current.company_id, brand_id=brand.id)
+    recipe_by_product = {row.product_id: row for row in recipe_rows if row.recipe_type == "menu_recipe"}
+    estimated_cogs = sum(
+        (
+            Decimal(str(row.sold_qty or 0))
+            * Decimal(str(recipe_by_product[row.product_id].cost_per_yield))
+            for row in sale_qty_rows
+            if row.product_id in recipe_by_product
+        ),
+        Decimal("0"),
+    ).quantize(Decimal("0.01"))
+    missing_recipe_product_count = sum(
+        1 for row in sale_qty_rows if row.product_id not in recipe_by_product
+    )
+    waste_day = cast(func.timezone("Asia/Bangkok", StockMovement.created_at), Date)
+    waste_row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(func.abs(StockMovement.qty)), 0).label("total_qty"),
+                func.coalesce(
+                    func.sum(func.abs(StockMovement.qty) * StockMovement.cost_per_unit),
+                    0,
+                ).label("total_cost"),
+            )
+            .join(Product, Product.id == StockMovement.product_id)
+            .where(
+                StockMovement.company_id == current.company_id,
+                Product.brand_id == brand.id,
+                StockMovement.movement_type == "waste",
+                waste_day >= from_value,
+                waste_day <= to_value,
+            )
+        )
+    ).one()
 
     sales_by_branch_map = {
         str(row.branch_id): {
@@ -4524,11 +4768,48 @@ async def get_brand_operations_report(
         delivery_item["received_order_count"] = int(row.received_order_count or 0)
         delivery_item["received_qty"] = _to_float(row.received_qty)
 
+    branch_sales_total = sum(
+        (Decimal(str(item["sales_amount"])) for item in sales_by_branch_map.values()),
+        Decimal("0"),
+    ).quantize(Decimal("0.01"))
+    reconciliation = build_financial_reconciliation(
+        source_sales_total=source_sales_total,
+        branch_rows_total=branch_sales_total,
+        source_payment_total=payment_source_total,
+    )
+    shift_closure_total = sum(
+        (Decimal(str(row.total_amount or 0)) for row in shift_closure_rows),
+        Decimal("0"),
+    ).quantize(Decimal("0.01"))
+
     return ok({
         "brand_id": str(brand.id),
         "brand_slug": brand.slug,
         "date_from": from_value.isoformat(),
         "date_to": to_value.isoformat(),
+        "dashboard_totals": {
+            "sales_amount": _to_float(source_sales_total),
+            "payment_amount": _to_float(payment_source_total),
+            "estimated_recipe_cogs": _to_float(estimated_cogs),
+            "waste_qty": _to_float(waste_row.total_qty),
+            "waste_cost": _to_float(waste_row.total_cost),
+            "shift_closure_amount": _to_float(shift_closure_total),
+            "missing_recipe_product_count": missing_recipe_product_count,
+        },
+        "reconciliation": {
+            "sales": {
+                **{
+                    key: (_to_float(value) if isinstance(value, Decimal) else value)
+                    for key, value in reconciliation["sales"].items()
+                },
+            },
+            "payments": {
+                **{
+                    key: (_to_float(value) if isinstance(value, Decimal) else value)
+                    for key, value in reconciliation["payments"].items()
+                },
+            },
+        },
         "sales_by_branch": [
             {
                 "branch_id": str(row.branch_id),

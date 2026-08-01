@@ -41,11 +41,13 @@ from app.schemas.staff_assignment import (
     StaffRoleAssignmentCreate,
     StaffRoleAssignmentRevoke,
 )
+from app.schemas.entitlement import BrandModuleEntitlementUpdate
 from app.services.admin_service import AdminService
 from app.services.role_preset_service import RolePresetService
 from app.services.staff_scope_service import StaffScopeService
 from app.services.upload_service import UploadService
 from app.services.user_access_service import UserAccessService
+from app.services.entitlement_service import CENTRAL_PRODUCTION_MODULE, EntitlementService
 from app.utils.health_check import get_system_health
 from app.utils.rate_limiter import check_rate_limit
 
@@ -164,6 +166,40 @@ async def revoke_user_role_assignment(
         payload.reason,
     )
     return ok(row.model_dump())
+
+
+@router.get("/brands/{brand_id}/modules/central-production")
+async def get_central_production_entitlement(
+    brand_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("system.company.view")),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    row = await EntitlementService(db).get_brand_module(
+        current.company_id,
+        brand_id,
+        CENTRAL_PRODUCTION_MODULE,
+    )
+    return ok(row.model_dump(mode="json"))
+
+
+@router.put("/brands/{brand_id}/modules/central-production")
+async def update_central_production_entitlement(
+    brand_id: uuid.UUID,
+    payload: BrandModuleEntitlementUpdate,
+    current: TokenData = Depends(require_permission("system.company.edit")),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    row = await EntitlementService(db).set_brand_module(
+        current.company_id,
+        brand_id,
+        CENTRAL_PRODUCTION_MODULE,
+        is_enabled=payload.is_enabled,
+        config=payload.config,
+        actor_id=current.user_id,
+    )
+    return ok(row.model_dump(mode="json"))
 
 
 @router.get("/users")

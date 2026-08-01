@@ -10,8 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
-from app.dependencies import TokenData, require_any_permission, require_permission
+from app.dependencies import (
+    TokenData,
+    get_scoped_operational_db as get_db,
+    require_any_permission,
+    require_permission,
+)
 from app.models.audit import AuditLog
 from app.models.settings import BranchSettings
 from app.schemas.stock import (

@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.models.audit import AuditLog
 from app.models.branch import Branch
 from app.models.company import Company
+from app.models.hr import Employee
 from app.models.restaurant import Brand, BrandBranch
 from app.models.role import Role
 from app.models.settings import BranchSettings
@@ -69,7 +70,8 @@ class StaffScopeService:
         if not include_revoked:
             statement = statement.where(StaffRoleAssignment.revoked_at.is_(None))
         rows = (await self.db.scalars(statement)).all()
-        return [self._build_read(row) for row in rows]
+        employee = await self._get_employee_for_user(company_id, user_id, required=False)
+        return [self._build_read(row, employee) for row in rows]
 
     async def create_assignment(
         self,
@@ -79,6 +81,11 @@ class StaffScopeService:
         data: StaffRoleAssignmentCreate,
     ) -> StaffRoleAssignmentRead:
         await self._get_user(company_id, user_id)
+        employee = await self._get_employee_for_user(
+            company_id,
+            user_id,
+            required=data.scope_type != "company",
+        )
         role = await self._get_role(company_id, data.role_id)
         if data.scope_type not in role.allowed_scope_types:
             raise HTTPException(
@@ -178,7 +185,8 @@ class StaffScopeService:
         )
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
-        return self._build_read(row)
+        employee = await self._get_employee_for_user(company_id, user_id, required=False)
+        return self._build_read(row, employee)
 
     async def revoke_assignment(
         self,
@@ -219,7 +227,33 @@ class StaffScopeService:
             new_value=self._snapshot(row, reason=reason),
         )
         await self.db.commit()
-        return self._build_read(row)
+        employee = await self._get_employee_for_user(company_id, user_id, required=False)
+        return self._build_read(row, employee)
+
+    async def _get_employee_for_user(
+        self,
+        company_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        required: bool,
+    ) -> Employee | None:
+        employee = await self.db.scalar(
+            select(Employee).where(
+                Employee.company_id == company_id,
+                Employee.user_id == user_id,
+                Employee.deleted_at.is_(None),
+                Employee.is_active.is_(True),
+            )
+        )
+        if employee is None and required:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "active_employee_required",
+                    "message": "Brand, Branch and Station assignments require an active HR Employee link",
+                },
+            )
+        return employee
 
     async def list_options(self, company_id: uuid.UUID) -> StaffAssignmentOptionsRead:
         company = await self.db.scalar(
@@ -455,7 +489,11 @@ class StaffScopeService:
             )
         return canonical
 
-    def _build_read(self, row: StaffRoleAssignment) -> StaffRoleAssignmentRead:
+    def _build_read(
+        self,
+        row: StaffRoleAssignment,
+        employee: Employee | None,
+    ) -> StaffRoleAssignmentRead:
         scope_label = {
             "company": "Company",
             "brand": row.brand.name if row.brand else "Brand",
@@ -466,6 +504,9 @@ class StaffScopeService:
             id=row.id,
             company_id=row.company_id,
             user_id=row.user_id,
+            employee_id=employee.id if employee else None,
+            employee_code=employee.employee_code if employee else None,
+            employee_name=employee.full_name if employee else None,
             role_id=row.role_id,
             role_name=row.role.name,
             scope_type=row.scope_type,

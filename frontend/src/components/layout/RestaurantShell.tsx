@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { authApi } from "@/lib/api";
+import { wapApi } from "@/lib/wapApi";
 import { useAuthStore } from "@/stores/auth.store";
 
 const CENTRAL_NAV = [
@@ -92,6 +93,15 @@ export default function RestaurantShell(): JSX.Element {
   const storeMatch = location.pathname.match(/^\/store\/([^/]+)(?:\/branches\/[^/]+)?(?:\/([^/]+))?/);
   const storeBrandSlug = storeMatch?.[1] ?? null;
   const storeSection = storeMatch?.[2] ?? "orders";
+  const brandFeaturesQuery = useQuery({
+    queryKey: ["restaurant-brand-features", centralBrandSlug],
+    queryFn: async () => {
+      if (!centralBrandSlug) throw new Error("Brand is required");
+      return (await wapApi.brandFeatures(centralBrandSlug)).data.data;
+    },
+    enabled: Boolean(centralBrandSlug),
+  });
+  const centralProductionEnabled = brandFeaturesQuery.data?.central_production ?? false;
 
   return (
     <div className="flex h-screen flex-col bg-slate-50">
@@ -99,7 +109,10 @@ export default function RestaurantShell(): JSX.Element {
         <nav className="border-b border-slate-200 bg-white px-3 py-2">
           <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2">
             <span className="mr-2 text-sm font-black uppercase tracking-wide text-slate-500">{centralBrandSlug}</span>
-            {CENTRAL_NAV.filter((item) => item.permissions.some((code) => hasPermission(code))).map((item) => (
+            {CENTRAL_NAV.filter((item) => (
+              item.permissions.some((code) => hasPermission(code))
+              && (item.path !== "production" || centralProductionEnabled)
+            )).map((item) => (
               <Link
                 key={item.path}
                 to={`/central/${centralBrandSlug}/${item.path}`}

@@ -76,6 +76,10 @@ export default function RestaurantCentralReportsPage(): JSX.Element {
   const totalCredit = (report?.credit_balances ?? []).reduce((sum, item) => sum + item.available_credit, 0);
   const totalShiftClosures = (report?.shift_closures_by_branch ?? []).reduce((sum, item) => sum + item.closure_count, 0);
   const totalShipped = (report?.delivery_by_branch ?? []).reduce((sum, item) => sum + item.shipped_amount, 0);
+  const estimatedCogs = report?.dashboard_totals.estimated_recipe_cogs ?? 0;
+  const wasteCost = report?.dashboard_totals.waste_cost ?? 0;
+  const salesReconciled = report?.reconciliation.sales.is_reconciled ?? false;
+  const paymentsReconciled = report?.reconciliation.payments.is_reconciled ?? false;
   const todaySales = (todayReport?.sales_by_branch ?? []).reduce((sum, item) => sum + item.total_amount, 0);
   const todayPendingOrders = (todayReport?.central_orders_by_status ?? [])
     .filter((item) => ["submitted", "reserved_credit", "approved", "packed"].includes(item.status))
@@ -255,7 +259,7 @@ export default function RestaurantCentralReportsPage(): JSX.Element {
         </div>
       ) : (
         <>
-          <section className="grid gap-3 sm:grid-cols-4">
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border border-slate-200 bg-white p-4">
               <p className="text-sm font-semibold text-slate-500">ยอดขาย</p>
               <p className="mt-2 text-2xl font-black text-slate-950">{money(totalSales)}</p>
@@ -279,6 +283,30 @@ export default function RestaurantCentralReportsPage(): JSX.Element {
             <div className="rounded-lg border border-slate-200 bg-white p-4">
               <p className="text-sm font-semibold text-slate-500">ยอดส่งสินค้า</p>
               <p className="mt-2 text-2xl font-black text-cyan-700">{money(totalShipped)}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <p className="text-sm font-semibold text-slate-500">ต้นทุนตามสูตร</p>
+              <p className="mt-2 text-2xl font-black text-orange-700">{money(estimatedCogs)}</p>
+              {report?.dashboard_totals.missing_recipe_product_count ? (
+                <p className="mt-1 text-xs font-semibold text-amber-700">ขาดสูตร {report.dashboard_totals.missing_recipe_product_count} เมนู</p>
+              ) : null}
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <p className="text-sm font-semibold text-slate-500">ต้นทุนของเสีย</p>
+              <p className="mt-2 text-2xl font-black text-rose-700">{money(wasteCost)}</p>
+              <p className="mt-1 text-xs text-slate-500">{report?.dashboard_totals.waste_qty.toLocaleString("th-TH") ?? "0"} หน่วย</p>
+            </div>
+          </section>
+
+          <section className={`rounded-lg border p-4 ${salesReconciled && paymentsReconciled ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+            <div className="flex items-start gap-3">
+              {salesReconciled && paymentsReconciled ? <PackageCheck className="mt-0.5 h-5 w-5 text-emerald-700" /> : <AlertTriangle className="mt-0.5 h-5 w-5 text-amber-700" />}
+              <div>
+                <h2 className="font-black text-slate-950">ตรวจยอดรายการต้นทาง</h2>
+                <p className="mt-1 text-sm text-slate-700">
+                  ยอดขาย {money(report?.reconciliation.sales.source_order_total ?? 0)} · ผลต่างรายสาขา {money(report?.reconciliation.sales.delta ?? 0)} · ผลต่างรับชำระ {money(report?.reconciliation.payments.delta ?? 0)}
+                </p>
+              </div>
             </div>
           </section>
 

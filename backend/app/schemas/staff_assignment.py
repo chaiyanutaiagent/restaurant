@@ -64,6 +64,9 @@ class StaffRoleAssignmentRead(BaseSchema):
     id: uuid.UUID
     company_id: uuid.UUID
     user_id: uuid.UUID
+    employee_id: uuid.UUID | None = None
+    employee_code: str | None = None
+    employee_name: str | None = None
     role_id: uuid.UUID
     role_name: str
     scope_type: RoleScope

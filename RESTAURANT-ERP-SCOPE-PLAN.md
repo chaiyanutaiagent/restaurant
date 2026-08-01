@@ -579,12 +579,12 @@ Platform Owner เลื่อนไปเป็น follow-up และ producti
 
 Acceptance Criteria:
 
-- [ ] Brand Manager เห็นข้อมูลรวมเฉพาะแบรนด์
-- [ ] Branch Manager เห็นเฉพาะสาขาที่ได้รับมอบหมาย
-- [ ] ต้นทุนเมนูคำนวณจากวัตถุดิบและหน่วยนับที่ตรวจสอบได้
-- [ ] การขายทำให้เกิด stock/payment/accounting handoff เพียงครั้งเดียว
-- [ ] Restaurant operational data ไม่มี SQL foreign key ไป Retail/Takeaway Database
-- [ ] รายงานรวมเท่ากับผลรวมรายการต้นทาง
+- [x] Brand Manager เห็นข้อมูลรวมเฉพาะแบรนด์
+- [x] Branch Manager เห็นเฉพาะสาขาที่ได้รับมอบหมาย
+- [x] ต้นทุนเมนูคำนวณจากวัตถุดิบและหน่วยนับที่ตรวจสอบได้
+- [x] การขายทำให้เกิด stock/payment/accounting handoff เพียงครั้งเดียว
+- [x] Restaurant operational data ไม่มี SQL foreign key ไป Retail/Takeaway Database
+- [x] รายงานรวมเท่ากับผลรวมรายการต้นทาง
 
 ไม่รวม: AI forecast, advanced CRM และ franchise royalty
 
@@ -592,6 +592,18 @@ Progress record: `P4-REPORT-SCOPE-01` บังคับ Company/Brand/Branch as
 แก้ Brand Manager consolidated-report permission, ป้องกัน Branch Manager ส่ง `branch_id` ข้าม assignment
 และล็อก shift/PDF ตาม Branch โดยผ่าน API matrix, backend 162 tests และ frontend type-check/build แล้ว
 Scope ถัดไปจึงขยาย Restaurant ERP dashboard/cost/reconciliation ต่อบน report boundary นี้ได้
+
+Progress record: `P4-DASHBOARD-COSTING-02` เพิ่ม Brand operations dashboard, source reconciliation,
+theoretical recipe COGS, waste cost และ cost provenance พร้อม strict unit conversion;
+`P4-SALE-HANDOFF-03` เพิ่ม transactional outbox และ idempotent accounting source contract;
+`P4-PRODUCTION-STAFF-04` เพิ่ม Brand production entitlement และบังคับ Active Employee link;
+`P4-RESTAURANT-ERP-ROUTING-05` route POS/Stock/Purchase/Transfer จาก signed business context ไป
+Restaurant operational session โดยไม่ให้ client เลือก database
+
+Gate record: `P4-PHASE-GATE-06` ผ่าน migration upgrade → downgrade → re-upgrade ทั้ง Legacy,
+Platform และ Restaurant, backend 174 tests, sale/staff/report/production/recipe API smokes และ frontend
+type-check/build เมื่อ 1 สิงหาคม 2026 Live databases และ rollback-safe backend `latest` ไม่เปลี่ยน,
+main backend คงหยุด และไม่มี production activation/deploy/push จาก gate นี้ จึงปิด Phase 4 ได้
 
 ### Phase 5 — Platform Onboarding และ Go-live
 

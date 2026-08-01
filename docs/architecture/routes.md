@@ -87,6 +87,25 @@ next operator. Generic `/pos` shift open/close also records staff and optional C
 - `GET /api/v1/restaurant/central/:brandSlug/reports/operations` requires `fb.report.view` plus a Company
   scope or matching Brand scope. Branch/Station assignments cannot use the consolidated route.
 
+The Brand operations response also carries source sales/payment reconciliation, theoretical recipe COGS,
+waste cost, and shift totals. Recipe responses expose the purchase/product cost source, source unit,
+normalized stock quantity, and conversion factor used for each ingredient.
+
+## Phase 4 ERP Boundaries
+
+- POS, Stock, Purchase, and Transfer choose the operational connection only from validated staff context:
+  Restaurant uses the Restaurant service factory, Retail remains rollback-safe legacy, unselected Company
+  context remains legacy, and Takeaway is rejected until Phase 6.
+- A completed Restaurant sale writes `restaurant.sale.completed.v1` to the operational outbox in the same
+  transaction as Sale/Payment/StockMovement. Duplicate client-order retry repairs the accounting handoff
+  without duplicating the sale, event, movement, payment, or journal.
+- `GET/PUT /api/v1/system/brands/:brandId/modules/central-production` reads or changes the Platform-owned
+  Brand entitlement. Brand production routes require permission, Brand scope, and an enabled entitlement.
+- `GET /api/v1/restaurant/central/:brandSlug/features` lets the Restaurant shell hide Production while the
+  entitlement is disabled; disabling it preserves existing production and stock history.
+- New Brand/Branch/Station role assignments require an active HR Employee link and return employee evidence.
+  Company Owner scope remains supported without creating payroll behavior.
+
 ## Migration Rule
 
 Keep legacy routes working while new canonical routes are introduced. Prefer redirects first, then move screens when each module admin is fully split.

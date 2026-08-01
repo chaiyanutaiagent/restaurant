@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 import os
 import secrets
 import uuid
@@ -15,6 +16,7 @@ from app.main import app
 from app.models.audit import AuditLog
 from app.models.branch import Branch
 from app.models.company import Company
+from app.models.hr import Employee
 from app.models.pos import CashierShift
 from app.models.product import Product
 from app.models.restaurant import (
@@ -32,7 +34,7 @@ from app.utils.create_superuser import DEFAULT_COMPANY_ID
 from app.utils.security import decode_token, hash_password
 
 
-DATABASE_PREFIXES = ("restaurant_p2_scope_", "restaurant_p2_approval_")
+DATABASE_PREFIXES = ("restaurant_p2_scope_", "restaurant_p2_approval_", "restaurant_p4_core_")
 TEST_PASSWORD = f"Aa1!{secrets.token_urlsafe(24)}"
 
 
@@ -74,7 +76,7 @@ async def seed_scope_context() -> ScopeContext:
     configured_database = os.environ.get("P2_SCOPE_DATABASE_NAME", "")
     if not configured_database.startswith(DATABASE_PREFIXES):
         raise RuntimeError(
-            "Phase 2 scope smoke refuses to write a non-Phase-2 temporary database"
+            "Staff scope smoke refuses to write a non-rehearsal temporary database"
         )
 
     async with AsyncSessionLocal() as db:
@@ -187,6 +189,23 @@ async def seed_scope_context() -> ScopeContext:
             for key, username in usernames.items()
         }
         db.add_all(list(users.values()))
+        await db.flush()
+        db.add_all(
+            [
+                Employee(
+                    company_id=company.id,
+                    branch_id=branch_a1.id,
+                    user_id=user.id,
+                    employee_code=f"P2-{key.upper()}-{marker}"[:20],
+                    first_name="P2",
+                    last_name=key.title(),
+                    hire_date=date.today(),
+                    is_active=True,
+                )
+                for key, user in users.items()
+                if key != "company"
+            ]
+        )
 
         foreign_company = Company(name=f"P2 Foreign Tenant {marker}", is_active=True)
         db.add(foreign_company)
@@ -344,6 +363,28 @@ async def seed_scope_context() -> ScopeContext:
             branch_a1_shift_id=branch_a1_shift.id,
             branch_a2_shift_id=branch_a2_shift.id,
         )
+
+
+async def seed_employee_link(
+    company_id: uuid.UUID,
+    branch_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> None:
+    """Create the HR identity required before granting an operational scope."""
+    async with AsyncSessionLocal() as db:
+        db.add(
+            Employee(
+                company_id=company_id,
+                branch_id=branch_id,
+                user_id=user_id,
+                employee_code=f"P4-COMPAT-{uuid.uuid4().hex[:8]}"[:20],
+                first_name="P4",
+                last_name="Compatibility",
+                hire_date=date.today(),
+                is_active=True,
+            )
+        )
+        await db.commit()
 
 
 async def verify_audit(
@@ -607,6 +648,12 @@ def run() -> None:
             201,
             "create compatibility kitchen user",
         )
+        client.portal.call(
+            seed_employee_link,
+            context.company_id,
+            context.branch_a1_id,
+            uuid.UUID(compatibility_user["id"]),
+        )
         create_assignment(
             client,
             headers,
@@ -717,7 +764,7 @@ def run() -> None:
             404,
             "brand generic dashboard cannot switch branch by query",
         )
-        expect(
+        brand_report = expect(
             client.get(
                 f"/api/v1/restaurant/central/{context.brand_a_slug}/reports/operations",
                 headers=brand_headers,
@@ -725,6 +772,18 @@ def run() -> None:
             200,
             "brand consolidated operations report",
         )
+        branch_total = sum(
+            Decimal(str(row["total_amount"])) for row in brand_report["sales_by_branch"]
+        )
+        source_total = Decimal(
+            str(brand_report["reconciliation"]["sales"]["source_order_total"])
+        )
+        if (
+            abs(branch_total - source_total) > Decimal("0.01")
+            or not brand_report["reconciliation"]["sales"]["is_reconciled"]
+            or not brand_report["reconciliation"]["payments"]["is_reconciled"]
+        ):
+            raise RuntimeError(f"Brand report source reconciliation failed: {brand_report}")
         expect(
             client.get(
                 f"/api/v1/restaurant/central/{context.brand_b_slug}/reports/operations",

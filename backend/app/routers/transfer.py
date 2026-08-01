@@ -7,8 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
-from app.dependencies import TokenData, require_permission
+from app.dependencies import TokenData, get_scoped_operational_db as get_db, require_permission
 from app.schemas.transfer import (
     ApproveTORequest,
     CancelTORequest,

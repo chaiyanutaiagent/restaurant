@@ -71,6 +71,16 @@ export default function RestaurantCentralOrdersPage(): JSX.Element {
   const [policyBranchId, setPolicyBranchId] = useState("");
   const [policyDrafts, setPolicyDrafts] = useState<Record<string, ReplenishmentPolicyDraft>>({});
 
+  const featuresQuery = useQuery({
+    queryKey: ["restaurant-brand-features", brandSlug],
+    queryFn: async () => {
+      if (!brandSlug) throw new Error("Brand is required");
+      return (await wapApi.brandFeatures(brandSlug)).data.data;
+    },
+    enabled: Boolean(brandSlug),
+  });
+  const productionEnabled = !brandSlug || featuresQuery.data?.central_production === true;
+
   const ordersQuery = useQuery({
     queryKey: ["restaurant-central-orders", brandSlug ?? "legacy"],
     queryFn: async () => (await wapApi.centralOrders(brandSlug)).data.data,
@@ -78,10 +88,12 @@ export default function RestaurantCentralOrdersPage(): JSX.Element {
   const productionQuery = useQuery({
     queryKey: ["restaurant-central-production-summary", brandSlug ?? "legacy"],
     queryFn: async () => (await wapApi.centralProductionSummary(brandSlug)).data.data,
+    enabled: productionEnabled,
   });
   const ingredientsQuery = useQuery({
     queryKey: ["restaurant-central-production-ingredients", brandSlug ?? "legacy"],
     queryFn: async () => (await wapApi.centralProductionIngredients(brandSlug)).data.data,
+    enabled: productionEnabled,
   });
   const branchesQuery = useQuery({
     queryKey: ["restaurant-config-branches", brandSlug],
@@ -129,7 +141,9 @@ export default function RestaurantCentralOrdersPage(): JSX.Element {
   const centralBase = brandSlug ? `/central/${brandSlug}` : "/restaurant";
 
   const selectedOrder = detailQuery.data ?? null;
-  const isLoading = ordersQuery.isLoading || productionQuery.isLoading || ingredientsQuery.isLoading;
+  const isLoading = ordersQuery.isLoading
+    || featuresQuery.isLoading
+    || (productionEnabled && (productionQuery.isLoading || ingredientsQuery.isLoading));
   const isWorking = useMemo(
     () => detailQuery.isFetching,
     [detailQuery.isFetching]
@@ -290,12 +304,14 @@ export default function RestaurantCentralOrdersPage(): JSX.Element {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button asChild variant="outline" size="sm">
-              <Link to={`${centralBase}/production`}>
-                <Factory className="mr-2 h-4 w-4" />
-                ผลิต
-              </Link>
-            </Button>
+            {productionEnabled ? (
+              <Button asChild variant="outline" size="sm">
+                <Link to={`${centralBase}/production`}>
+                  <Factory className="mr-2 h-4 w-4" />
+                  ผลิต
+                </Link>
+              </Button>
+            ) : null}
             <Button asChild variant="outline" size="sm">
               <Link to={`${centralBase}/credits`}>
                 <CreditCard className="mr-2 h-4 w-4" />
@@ -320,12 +336,15 @@ export default function RestaurantCentralOrdersPage(): JSX.Element {
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
           โหลดข้อมูลครัวกลาง
         </div>
-      ) : ordersQuery.isError || productionQuery.isError || ingredientsQuery.isError ? (
+      ) : ordersQuery.isError
+        || featuresQuery.isError
+        || (productionEnabled && (productionQuery.isError || ingredientsQuery.isError)) ? (
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-6 text-center font-semibold text-rose-700">
           โหลดข้อมูลครัวกลางไม่สำเร็จ
         </div>
       ) : (
         <>
+          {productionEnabled ? <>
           <section className="rounded-lg border border-slate-200 bg-white">
             <div className="flex items-center gap-2 border-b border-slate-200 p-4">
               <PackageCheck className="h-5 w-5 text-orange-600" />
@@ -373,6 +392,7 @@ export default function RestaurantCentralOrdersPage(): JSX.Element {
               )}
             </div>
           </section>
+          </> : null}
 
           {brandSlug ? (
             <section className="rounded-lg border border-slate-200 bg-white">

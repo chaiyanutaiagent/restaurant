@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from decimal import Decimal
 import uuid
 
@@ -14,11 +15,20 @@ from app.database import AsyncSessionLocal, engine
 from app.main import app
 from app.models.audit import AuditLog
 from app.models.branch import Branch
+from app.models.hr import Employee
 from app.models.product import Product
-from app.models.restaurant import Brand, ProductionBatch, ProductionBatchLine, Recipe, RecipeIngredient
+from app.models.restaurant import (
+    Brand,
+    BrandBranch,
+    ProductionBatch,
+    ProductionBatchLine,
+    Recipe,
+    RecipeIngredient,
+)
 from app.models.role import Permission, Role
+from app.models.staff_assignment import StaffRoleAssignment
 from app.models.stock import StockBalance, StockLocation, StockMovement
-from app.models.user import User, UserBranch
+from app.models.user import User
 from app.utils.create_superuser import DEFAULT_COMPANY_ID, ensure_default_company_seed_in_session
 from app.utils.seed_test_beverage import seed_test_beverage
 from app.utils.seed_permissions import seed_default_permissions
@@ -58,16 +68,41 @@ async def prepare() -> dict[str, str]:
         if branch is None or brand is None or brand.central_location_id is None:
             raise RuntimeError("Default Restaurant central configuration is missing")
 
+        production_branch = Branch(
+            company_id=DEFAULT_COMPANY_ID,
+            code=f"PB-{marker}"[:20],
+            name="Production Batch Branch",
+            is_active=True,
+        )
+        db.add(production_branch)
+        await db.flush()
+        db.add(
+            BrandBranch(
+                company_id=DEFAULT_COMPANY_ID,
+                brand_id=brand.id,
+                branch_id=production_branch.id,
+                branch_type="company_owned",
+                is_active=True,
+            )
+        )
+        raw_location = StockLocation(
+            company_id=DEFAULT_COMPANY_ID,
+            branch_id=production_branch.id,
+            code=f"PB-RAW-{marker}",
+            name="Production Batch Raw",
+            is_active=True,
+        )
         ready_location = StockLocation(
             company_id=DEFAULT_COMPANY_ID,
-            branch_id=branch.id,
+            branch_id=production_branch.id,
             code=f"PB-RDY-{marker}",
             name="Production Batch Ready",
             is_active=True,
         )
-        db.add(ready_location)
+        db.add_all([raw_location, ready_location])
         await db.flush()
-        brand.central_branch_id = branch.id
+        brand.central_branch_id = production_branch.id
+        brand.central_location_id = raw_location.id
         brand.central_ready_location_id = ready_location.id
 
         raw_product = Product(
@@ -126,8 +161,8 @@ async def prepare() -> dict[str, str]:
             [
                 StockBalance(
                     company_id=DEFAULT_COMPANY_ID,
-                    branch_id=branch.id,
-                    location_id=brand.central_location_id,
+                    branch_id=production_branch.id,
+                    location_id=raw_location.id,
                     product_id=raw_product.id,
                     variant_id=None,
                     qty_on_hand=Decimal("10"),
@@ -169,20 +204,36 @@ async def prepare() -> dict[str, str]:
         )
         db.add(user)
         await db.flush()
-        db.add(
-            UserBranch(
-                user_id=user.id,
-                branch_id=branch.id,
-                role_id=role.id,
-                brand_id=brand.id,
-                business_type="restaurant",
-                target_database="restaurant",
-                is_default=True,
-            )
+        db.add_all(
+            [
+                Employee(
+                    company_id=DEFAULT_COMPANY_ID,
+                    branch_id=production_branch.id,
+                    user_id=user.id,
+                    employee_code=f"PB-{marker}"[:20],
+                    first_name="Production",
+                    last_name="Smoke",
+                    hire_date=date.today(),
+                    is_active=True,
+                ),
+                StaffRoleAssignment(
+                    company_id=DEFAULT_COMPANY_ID,
+                    user_id=user.id,
+                    role_id=role.id,
+                    scope_type="branch",
+                    scope_key=str(production_branch.id),
+                    brand_id=brand.id,
+                    branch_id=production_branch.id,
+                    station_key=None,
+                    assignment_reason="Phase 4 production smoke",
+                    assigned_by=user.id,
+                ),
+            ]
         )
         await db.commit()
         context = {
             "username": username,
+            "branch_id": str(production_branch.id),
             "brand_id": str(brand.id),
             "raw_location_id": str(brand.central_location_id),
             "ready_location_id": str(ready_location.id),
@@ -193,7 +244,7 @@ async def prepare() -> dict[str, str]:
     return context
 
 
-def login(client: TestClient, username: str) -> dict[str, str]:
+def login(client: TestClient, username: str, branch_id: str) -> dict[str, str]:
     data = expect(
         client.post(
             "/api/v1/auth/login",
@@ -201,6 +252,7 @@ def login(client: TestClient, username: str) -> dict[str, str]:
                 "company_id": str(DEFAULT_COMPANY_ID),
                 "username": username,
                 "password": PASSWORD,
+                "branch_id": branch_id,
             },
         ),
         200,
@@ -285,7 +337,36 @@ def run() -> None:
         raise RuntimeError("DEFAULT_ADMIN_PASSWORD is required for production batch smoke")
     context = asyncio.run(prepare())
     with TestClient(app) as client:
-        headers = login(client, context["username"])
+        headers = login(client, context["username"], context["branch_id"])
+        expect(
+            client.get(
+                "/api/v1/restaurant/central/test-beverage/production-batches",
+                headers=headers,
+            ),
+            403,
+        )
+        admin_data = expect(
+            client.post(
+                "/api/v1/auth/login",
+                json={
+                    "company_id": str(DEFAULT_COMPANY_ID),
+                    "username": "admin",
+                    "password": settings.default_admin_password,
+                },
+            ),
+            200,
+        )
+        admin_headers = {"Authorization": f"Bearer {admin_data['access_token']}"}
+        entitlement = expect(
+            client.put(
+                f"/api/v1/system/brands/{context['brand_id']}/modules/central-production",
+                headers=admin_headers,
+                json={"is_enabled": True, "config": {}},
+            ),
+            200,
+        )
+        if not entitlement["is_enabled"]:
+            raise RuntimeError("Central production entitlement was not enabled")
         batch = expect(
             client.post(
                 "/api/v1/restaurant/central/test-beverage/production-batches",

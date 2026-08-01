@@ -9,8 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
-from app.dependencies import DeviceTokenData, TokenData, get_optional_counter_device, require_any_permission, require_permission
+from app.dependencies import (
+    DeviceTokenData,
+    TokenData,
+    get_optional_counter_device,
+    get_scoped_operational_db as get_db,
+    require_any_permission,
+    require_permission,
+)
 from app.models.company import Company
 from app.models.settings import BranchSettings
 from app.schemas.pos import CloseShiftRequest, CreateSaleRequest, OpenShiftRequest, PartialRefundRequest, RefundRequest, SaleOrderRead, ShiftRead, SyncSalesRequest, VoidRequest
@@ -189,13 +195,20 @@ async def create_sale(
     existing = await service.get_existing_sale_by_client_order_id(current.company_id, current.branch_id, payload.client_order_id)
     if existing is not None:
         response.status_code = status.HTTP_200_OK
-        return ok(SaleOrderRead.model_validate(existing).model_dump())
+        repaired = await service.ensure_existing_sale_handoffs(
+            existing,
+            current.company_id,
+            current.user_id,
+            brand_id=current.brand_id,
+        )
+        return ok(SaleOrderRead.model_validate(repaired).model_dump())
     approval_evidence = await _authorize_sale_discount(db, current, payload)
     order = await service.create_sale(
         current.company_id,
         current.branch_id,
         current.user_id,
         payload,
+        brand_id=current.brand_id,
         approval_evidence=approval_evidence,
     )
     return ok(SaleOrderRead.model_validate(order).model_dump())
@@ -218,7 +231,14 @@ async def sync_sales(
             sale_payload.client_order_id,
         )
         if existing is not None:
-            orders.append(existing)
+            orders.append(
+                await service.ensure_existing_sale_handoffs(
+                    existing,
+                    current.company_id,
+                    current.user_id,
+                    brand_id=current.brand_id,
+                )
+            )
             continue
         approval_evidence = await _authorize_sale_discount(db, current, sale_payload)
         orders.append(
@@ -227,6 +247,7 @@ async def sync_sales(
                 current.branch_id,
                 current.user_id,
                 sale_payload,
+                brand_id=current.brand_id,
                 approval_evidence=approval_evidence,
             )
         )

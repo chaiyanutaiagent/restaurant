@@ -209,7 +209,7 @@ export default function App(): JSX.Element {
                 <Route path="/products/:id/edit" element={<ProductFormPage />} />
                 <Route path="/units" element={<UnitsPage />} />
               </Route>
-              <Route element={<ProtectedRoute permission="inventory.stock.view" />}>
+              <Route element={<ProtectedRoute permissions={["inventory.stock.view", "inventory.stock.adjust.request"]} />}>
                 <Route path="/stock" element={<StockPage />} />
                 <Route path="/stock/multi-branch" element={<MultiBranchStockPage />} />
                 <Route path="/stock-count" element={<StockCountPage />} />

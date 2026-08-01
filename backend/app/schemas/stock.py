@@ -132,6 +132,7 @@ class AdjustmentRequest(BaseSchema):
     qty: Decimal
     note: str | None = None
     cost_per_unit: Decimal | None = None
+    approval_token: str | None = None
 
 
 class ReceiveItem(BaseSchema):

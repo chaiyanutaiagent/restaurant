@@ -14,7 +14,7 @@ Restaurant POS uses permission codes as the enforcement layer. Roles are company
 
 ## Phase 2 Canonical Starter Role Presets
 
-Policy version: `2026-08-01.2`
+Policy version: `2026-08-01.3`
 
 The backend owns the preset definitions and exposes resolved permission IDs through
 `GET /api/v1/system/role-presets`. The Roles UI consumes that contract and must not keep a separate
@@ -25,7 +25,7 @@ permission-code list.
 | Company Owner | Company | Company | No | Explicit full tenant permission catalog; no wildcard |
 | Brand Manager | Brand | Brand | No | Brand standards, menu, recipe, stock, production, and reports |
 | Branch Manager | Branch | Branch | Yes | Branch operations and staff requests; no central admin/approval permissions |
-| Cashier | Branch | Branch, Station | Yes | Sale, standard discount, cashier shift, product/stock view |
+| Cashier | Branch | Branch, Station | Yes | Sale, standard discount, approval requests for void/refund, cashier shift, product/stock view |
 | Kitchen Staff | Station | Station | Yes | `fb.menu.view` and `fb.kitchen.ticket.manage` only |
 
 The endpoint marks a preset unavailable and returns `missing_permission_codes` when the seeded
@@ -64,6 +64,23 @@ grant the legacy `fb.kitchen.manage` permission used by central production.
 Additional roadmap roles such as Company Admin, Area Manager, Service Staff, Kitchen Manager,
 Warehouse Staff, Purchasing, Accountant, HR, and Auditor remain deferred until their assignment and
 limit contracts are implemented.
+
+## Manager Approval Sessions
+
+Approval-sensitive operations use separate direct and request permissions. `pos.sale.void.request`,
+`pos.refund.request` and `inventory.stock.adjust.request` allow a Branch-scoped employee to initiate
+only the corresponding workflow; they do not grant the direct manager operation. A standard POS
+discount continues to use `pos.discount.apply`, while an amount above the Branch Cashier ceiling
+requires `pos.discount.override` evidence.
+
+An approver must be a different active User in the same Company, hold the direct permission in the
+requester's current Branch/Station context and have a Manager PIN. The identity service validates the
+PIN and issues a signed two-minute grant bound to Company, Branch, requester, action and a normalized
+request fingerprint. The operational transaction consumes the grant once in
+`approval_grant_usages`; payload changes, cross-context use and replay are rejected.
+
+Manager PIN hashes and lockout state are identity-owned. Operation audit rows record requester,
+approver, approval mode, reason, grant ID and request hash without storing the PIN or approval token.
 
 ## Migration Rule
 

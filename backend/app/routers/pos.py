@@ -10,10 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import TokenData, get_current_user, require_permission
+from app.dependencies import TokenData, require_any_permission, require_permission
 from app.models.company import Company
+from app.models.settings import BranchSettings
 from app.schemas.pos import CloseShiftRequest, CreateSaleRequest, OpenShiftRequest, PartialRefundRequest, RefundRequest, SaleOrderRead, ShiftRead, SyncSalesRequest, VoidRequest
-from app.services.sale_service import SaleService
+from app.services.approval_service import ApprovalEvidence, ApprovalService, has_permission
+from app.services.sale_service import SaleService, sale_discount_percentage
 from app.utils.promptpay import generate_promptpay_payload
 
 router = APIRouter(prefix="/api/v1/pos", tags=["pos"])
@@ -21,6 +23,71 @@ router = APIRouter(prefix="/api/v1/pos", tags=["pos"])
 
 def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"data": data, "meta": {"version": settings.app_version, **(meta or {})}, "error": None}
+
+
+def _approval_payload(
+    payload: CreateSaleRequest | VoidRequest | RefundRequest | PartialRefundRequest,
+    *,
+    order_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
+    value = payload.model_dump(
+        mode="json",
+        exclude={"approval_token"},
+        exclude_none=True,
+        exclude_unset=True,
+    )
+    if order_id is not None:
+        value["order_id"] = str(order_id)
+    return value
+
+
+async def _authorize_sale_discount(
+    db: AsyncSession,
+    current: TokenData,
+    payload: CreateSaleRequest,
+) -> ApprovalEvidence | None:
+    assert current.branch_id is not None
+    percentage = sale_discount_percentage(payload)
+    branch_settings = await db.scalar(
+        select(BranchSettings).where(
+            BranchSettings.company_id == current.company_id,
+            BranchSettings.branch_id == current.branch_id,
+        )
+    )
+    cashier_limit = Decimal(
+        branch_settings.pos_cashier_discount_limit_pct if branch_settings else 10
+    )
+    if percentage <= 0:
+        return None
+    if not (
+        has_permission(current.permissions, "pos.discount.apply")
+        or has_permission(current.permissions, "pos.discount.override")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission required: pos.discount.apply",
+        )
+    if percentage <= cashier_limit:
+        return None
+    return await ApprovalService(db).authorize_operation(
+        current=current,
+        action="pos.discount.override",
+        request_payload=_approval_payload(payload),
+        approval_token=payload.approval_token,
+        reason=(
+            f"Discount {percentage}% exceeds cashier limit {cashier_limit}%"
+        ),
+        resource_type="SaleOrder",
+        resource_id=payload.client_order_id,
+    )
+
+
+def _require_current_order_branch(current: TokenData, branch_id: uuid.UUID) -> None:
+    if current.branch_id is None or current.branch_id != branch_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Sale order not found",
+        )
 
 
 @router.post("/shifts/open", status_code=status.HTTP_201_CREATED)
@@ -83,7 +150,14 @@ async def create_sale(
     if existing is not None:
         response.status_code = status.HTTP_200_OK
         return ok(SaleOrderRead.model_validate(existing).model_dump())
-    order = await service.create_sale(current.company_id, current.branch_id, current.user_id, payload)
+    approval_evidence = await _authorize_sale_discount(db, current, payload)
+    order = await service.create_sale(
+        current.company_id,
+        current.branch_id,
+        current.user_id,
+        payload,
+        approval_evidence=approval_evidence,
+    )
     return ok(SaleOrderRead.model_validate(order).model_dump())
 
 
@@ -95,7 +169,27 @@ async def sync_sales(
 ) -> dict[str, Any]:
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
-    orders = await SaleService(db).sync_offline_sales(current.company_id, current.branch_id, current.user_id, payload.orders)
+    service = SaleService(db)
+    orders = []
+    for sale_payload in payload.orders:
+        existing = await service.get_existing_sale_by_client_order_id(
+            current.company_id,
+            current.branch_id,
+            sale_payload.client_order_id,
+        )
+        if existing is not None:
+            orders.append(existing)
+            continue
+        approval_evidence = await _authorize_sale_discount(db, current, sale_payload)
+        orders.append(
+            await service.create_sale(
+                current.company_id,
+                current.branch_id,
+                current.user_id,
+                sale_payload,
+                approval_evidence=approval_evidence,
+            )
+        )
     return ok([SaleOrderRead.model_validate(item).model_dump() for item in orders])
 
 
@@ -134,10 +228,30 @@ async def get_sale(
 async def void_sale(
     order_id: uuid.UUID,
     payload: VoidRequest,
-    current: TokenData = Depends(require_permission("pos.sale.void")),
+    current: TokenData = Depends(
+        require_any_permission("pos.sale.void", "pos.sale.void.request")
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    order = await SaleService(db).void_sale(order_id, current.company_id, current.user_id, payload)
+    service = SaleService(db)
+    existing = await service.get_sale(order_id, current.company_id)
+    _require_current_order_branch(current, existing.branch_id)
+    approval_evidence = await ApprovalService(db).authorize_operation(
+        current=current,
+        action="pos.sale.void",
+        request_payload=_approval_payload(payload, order_id=order_id),
+        approval_token=payload.approval_token,
+        reason=payload.void_reason,
+        resource_type="SaleOrder",
+        resource_id=str(order_id),
+    )
+    order = await service.void_sale(
+        order_id,
+        current.company_id,
+        current.user_id,
+        payload,
+        approval_evidence=approval_evidence,
+    )
     return ok(SaleOrderRead.model_validate(order).model_dump())
 
 
@@ -145,10 +259,30 @@ async def void_sale(
 async def refund_sale(
     order_id: uuid.UUID,
     payload: RefundRequest,
-    current: TokenData = Depends(require_permission("pos.refund.create")),
+    current: TokenData = Depends(
+        require_any_permission("pos.refund.create", "pos.refund.request")
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    order = await SaleService(db).refund_sale(order_id, current.company_id, current.user_id, payload.refund_reason)
+    service = SaleService(db)
+    existing = await service.get_sale(order_id, current.company_id)
+    _require_current_order_branch(current, existing.branch_id)
+    approval_evidence = await ApprovalService(db).authorize_operation(
+        current=current,
+        action="pos.refund.create",
+        request_payload=_approval_payload(payload, order_id=order_id),
+        approval_token=payload.approval_token,
+        reason=payload.refund_reason,
+        resource_type="SaleOrder",
+        resource_id=str(order_id),
+    )
+    order = await service.refund_sale(
+        order_id,
+        current.company_id,
+        current.user_id,
+        payload.refund_reason,
+        approval_evidence=approval_evidence,
+    )
     return ok(SaleOrderRead.model_validate(order).model_dump())
 
 
@@ -156,10 +290,30 @@ async def refund_sale(
 async def partial_refund_sale(
     order_id: uuid.UUID,
     payload: PartialRefundRequest,
-    current: TokenData = Depends(require_permission("pos.refund.create")),
+    current: TokenData = Depends(
+        require_any_permission("pos.refund.create", "pos.refund.request")
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    order = await SaleService(db).partial_refund_sale(order_id, current.company_id, current.user_id, payload)
+    service = SaleService(db)
+    existing = await service.get_sale(order_id, current.company_id)
+    _require_current_order_branch(current, existing.branch_id)
+    approval_evidence = await ApprovalService(db).authorize_operation(
+        current=current,
+        action="pos.refund.create",
+        request_payload=_approval_payload(payload, order_id=order_id),
+        approval_token=payload.approval_token,
+        reason=payload.refund_reason,
+        resource_type="SaleOrder",
+        resource_id=str(order_id),
+    )
+    order = await service.partial_refund_sale(
+        order_id,
+        current.company_id,
+        current.user_id,
+        payload,
+        approval_evidence=approval_evidence,
+    )
     return ok(SaleOrderRead.model_validate(order).model_dump())
 
 

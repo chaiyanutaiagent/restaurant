@@ -31,7 +31,7 @@ class RolePresetPolicyTests(unittest.TestCase):
                 "kitchen-staff",
             ],
         )
-        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-08-01.2")
+        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-08-01.3")
 
     def test_every_preset_uses_registered_permissions_without_duplicates(self) -> None:
         for policy in ROLE_PRESET_POLICIES:
@@ -62,6 +62,8 @@ class RolePresetPolicyTests(unittest.TestCase):
         self.assertEqual(codes.intersection(denied), set())
         self.assertIn("pos.sale.create", codes)
         self.assertIn("pos.discount.apply", codes)
+        self.assertIn("pos.sale.void.request", codes)
+        self.assertIn("pos.refund.request", codes)
 
     def test_kitchen_staff_is_station_scoped_and_kitchen_only(self) -> None:
         policy = self.policies["kitchen-staff"]

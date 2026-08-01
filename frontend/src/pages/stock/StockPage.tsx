@@ -73,7 +73,10 @@ export default function StockPage(): JSX.Element {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const canAdjust = usePermission("inventory.stock.adjust");
-  const canViewStock = usePermission("inventory.stock.view");
+  const canRequestAdjustment = usePermission("inventory.stock.adjust.request");
+  const hasStockAccess = usePermission("inventory.stock.view");
+  const canViewStock = hasStockAccess || canRequestAdjustment;
+  const canSubmitAdjustment = canAdjust || canRequestAdjustment;
   const [activeTab, setActiveTab] = useState("overview");
   const [locationId, setLocationId] = useState("");
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
@@ -382,9 +385,11 @@ export default function StockPage(): JSX.Element {
                   className="max-w-sm"
                 />
                 <div className="flex flex-wrap gap-2">
+                  {canSubmitAdjustment ? (
+                    <Button onClick={() => setAdjustOpen(true)}>ปรับสต็อก</Button>
+                  ) : null}
                   {canAdjust ? (
                     <>
-                      <Button onClick={() => setAdjustOpen(true)}>ปรับสต็อก</Button>
                       <Button variant="outline" onClick={() => setReceiveOpen(true)}>
                         <Plus className="h-4 w-4" />
                         รับสินค้า

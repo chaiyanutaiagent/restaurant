@@ -38,6 +38,7 @@ export const stockApi = {
     qty: number;
     note?: string;
     cost_per_unit?: number;
+    approval_token?: string;
   }) => api.post("/stock/adjust", data),
   receive: (data: {
     location_id: string;

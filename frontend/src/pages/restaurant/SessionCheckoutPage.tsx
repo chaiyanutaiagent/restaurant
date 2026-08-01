@@ -14,6 +14,8 @@ import { useAuthStore } from "@/stores/auth.store";
 import { formatThaiCurrency } from "@/lib/cartUtils";
 import type { CashierShift } from "@/types/pos";
 import type { StockLocation } from "@/types/stock";
+import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
+import { errorMessage } from "@/lib/approvalApi";
 
 type SessionItem = { id: string; product_name: string; qty: number; unit_price: number; special_request: string | null; status: string };
 type SessionOrder = { id: string; status: string; source?: string; order_number?: string; items: SessionItem[] };
@@ -45,6 +47,7 @@ export default function SessionCheckoutPage(): JSX.Element {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const branchId = useAuthStore((s) => s.branchId);
+  const hasPermission = useAuthStore((s) => s.hasPermission);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paidAmount, setPaidAmount] = useState(0);
@@ -53,6 +56,7 @@ export default function SessionCheckoutPage(): JSX.Element {
   const [checkoutResult, setCheckoutResult] = useState<CheckoutResult | null>(null);
   const [paymentQrImageLoaded, setPaymentQrImageLoaded] = useState(false);
   const [receiptLogoLoaded, setReceiptLogoLoaded] = useState(true);
+  const [managerApprovalOpen, setManagerApprovalOpen] = useState(false);
   const receiptRef = useRef<HTMLDivElement>(null);
   const autoPrintStartedRef = useRef(false);
 
@@ -94,6 +98,7 @@ export default function SessionCheckoutPage(): JSX.Element {
 
   const subtotal = allItems.reduce((sum, i) => sum + i.unit_price * i.qty, 0);
   const totalAfterDiscount = Math.max(subtotal - discount, 0);
+  const discountPercentage = subtotal > 0 ? (discount * 100) / subtotal : 0;
   const changeAmount = paymentMethod === "cash" ? Math.max(paidAmount - totalAfterDiscount, 0) : 0;
   const outstandingCount = allItems.filter((item) => item.status === "pending" || item.status === "cooking").length;
   const readyNotServedCount = allItems.filter((item) => item.status === "done").length;
@@ -163,9 +168,7 @@ export default function SessionCheckoutPage(): JSX.Element {
     return () => window.clearTimeout(timer);
   }, [checkoutResult, paymentQrImageLoaded, paymentQrSrc, promptpayConfigured, receiptLogoLoaded, searchParams, session]);
 
-  const checkoutMutation = useMutation({
-    mutationFn: async () => {
-      const res = await authApi.post(`/restaurant/sessions/${sessionId}/checkout`, {
+  const checkoutPayload = useMemo(() => ({
         // ส่ง shift_id และ location_id แบบ optional — backend auto-detect ถ้าไม่มี
         shift_id: shift?.id ?? null,
         location_id: locationId ?? null,
@@ -177,6 +180,13 @@ export default function SessionCheckoutPage(): JSX.Element {
         discount_amount: discount,
         customer_name: session?.customer_name ?? null,
         customer_phone: session?.customer_phone ?? null,
+  }), [creditRef, discount, locationId, paidAmount, paymentMethod, session?.customer_name, session?.customer_phone, shift?.id, totalAfterDiscount]);
+
+  const checkoutMutation = useMutation({
+    mutationFn: async (approvalToken?: string) => {
+      const res = await authApi.post(`/restaurant/sessions/${sessionId}/checkout`, {
+        ...checkoutPayload,
+        ...(approvalToken ? { approval_token: approvalToken } : {}),
       });
       return res.data.data as CheckoutResult;
     },
@@ -188,8 +198,29 @@ export default function SessionCheckoutPage(): JSX.Element {
       queryClient.invalidateQueries({ queryKey: ["pickup-queue"] });
       toast({ title: `ชำระเงินสำเร็จ — ${result.order_number}` });
     },
-    onError: (err: Error) => toast({ title: "ชำระเงินไม่สำเร็จ", description: err.message }),
+    onError: (error) => toast({
+      title: "ชำระเงินไม่สำเร็จ",
+      description: errorMessage(error, "กรุณาลองใหม่อีกครั้ง")
+    }),
   });
+
+  const canApplyDiscount = (
+    branchSettingsQuery.data?.pos_allow_discount ?? true
+  ) && (
+    hasPermission("pos.discount.apply") || hasPermission("pos.discount.override")
+  );
+  const canOverrideDiscount = hasPermission("pos.discount.override");
+  const cashierDiscountLimit = branchSettingsQuery.data?.pos_cashier_discount_limit_pct ?? 10;
+  const hardMaxDiscountPercentage = branchSettingsQuery.data?.pos_max_discount_pct ?? 100;
+  const hardMaxDiscountAmount = (subtotal * hardMaxDiscountPercentage) / 100;
+
+  function handleCheckout(): void {
+    if (discountPercentage > cashierDiscountLimit && !canOverrideDiscount) {
+      setManagerApprovalOpen(true);
+      return;
+    }
+    checkoutMutation.mutate(undefined);
+  }
 
   const canCheckout =
     allItems.length > 0 &&
@@ -489,8 +520,9 @@ export default function SessionCheckoutPage(): JSX.Element {
             {/* Discount */}
             <div>
               <Label className="text-xs text-slate-500">ส่วนลด (บาท)</Label>
-              <Input type="number" className="mt-1" value={discount} min={0} max={subtotal}
-                onChange={(e) => setDiscount(Math.min(Number(e.target.value), subtotal))} />
+              <Input type="number" className="mt-1" value={discount} min={0} max={hardMaxDiscountAmount}
+                disabled={!canApplyDiscount}
+                onChange={(e) => setDiscount(Math.min(Number(e.target.value), hardMaxDiscountAmount))} />
             </div>
 
             {/* Total */}
@@ -591,7 +623,7 @@ export default function SessionCheckoutPage(): JSX.Element {
             <Button
               className="h-14 w-full rounded-2xl bg-emerald-600 text-lg font-bold hover:bg-emerald-700 disabled:opacity-50"
               disabled={!canCheckout}
-              onClick={() => checkoutMutation.mutate()}
+              onClick={handleCheckout}
             >
               {checkoutMutation.isPending
                 ? <Loader2 className="h-6 w-6 animate-spin" />
@@ -600,6 +632,19 @@ export default function SessionCheckoutPage(): JSX.Element {
           </div>
         </div>
       </div>
+      {managerApprovalOpen && sessionId ? (
+        <ManagerApprovalDialog
+          open
+          onOpenChange={setManagerApprovalOpen}
+          action="pos.discount.override"
+          requestPayload={{ session_id: sessionId, ...checkoutPayload }}
+          reason={`ส่วนลด ${discountPercentage.toFixed(2)}% เกินเพดาน Cashier ${cashierDiscountLimit.toFixed(2)}%`}
+          description="ส่วนลดของ Restaurant checkout นี้ต้องได้รับอนุมัติจาก Manager"
+          onApproved={async (token) => {
+            await checkoutMutation.mutateAsync(token);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

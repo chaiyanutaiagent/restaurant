@@ -73,6 +73,7 @@ export interface Payment {
   payment_method: PaymentMethod;
   amount: number;
   reference_no: string | null;
+  original_payment_id?: string | null;
   paid_at: string;
 }
 
@@ -152,6 +153,7 @@ export interface PendingSale {
   change_amount: number;
   created_at: number;
   synced: boolean;
+  approval_token?: string | null;
 }
 
 export interface HeldSaleDraft {

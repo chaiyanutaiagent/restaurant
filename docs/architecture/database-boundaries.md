@@ -26,6 +26,7 @@ Platform-owned tables for the data-cutover design:
 - `role_permissions`
 - `user_branches`
 - `staff_role_assignments`
+- `manager_pin_credentials`
 - `refresh_tokens`
 - `user_access_requests`
 - `user_invitations`
@@ -138,3 +139,17 @@ operational records, legacy route compatibility and separate Platform/Restaurant
 backup/restore. Passing this gate permits separately scoped Phase 2 work; it does
 not activate production or make the canary databases the permanent system of
 record.
+
+## Phase 2 Approval Boundary
+
+`P2-APPROVAL-SESSIONS-03` keeps Manager PIN credentials exclusively in the identity boundary: legacy
+while `IDENTITY_DATABASE=legacy`, with the same schema contract prepared in Platform. Signed approval
+grants cross the boundary as short-lived evidence only; PIN hashes and lockout state are never copied
+to Restaurant.
+
+`approval_grant_usages`, Branch discount/stock limits, refund payment links and operational approval
+audit evidence belong to the operational boundary: legacy while the default router remains on legacy,
+with the same schema contract prepared in Restaurant. Usage rows retain Company, Branch, requester and
+approver IDs as scalar references without cross-database foreign keys. Grant consumption is flushed in
+the same transaction as the sale, refund, void or stock movement, so a failed operation does not burn
+the grant and a committed operation cannot replay it.

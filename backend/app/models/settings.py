@@ -4,7 +4,7 @@ from datetime import datetime
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, Text, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,21 @@ if TYPE_CHECKING:
 
 class BranchSettings(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "branch_settings"
+    __table_args__ = (
+        CheckConstraint(
+            "pos_max_discount_pct >= 0 AND pos_max_discount_pct <= 100",
+            name="pos_max_discount_range",
+        ),
+        CheckConstraint(
+            "pos_cashier_discount_limit_pct >= 0 "
+            "AND pos_cashier_discount_limit_pct <= pos_max_discount_pct",
+            name="pos_cashier_discount_limit_within_max",
+        ),
+        CheckConstraint(
+            "stock_adjust_approval_threshold_qty >= 0",
+            name="stock_adjust_approval_threshold_nonnegative",
+        ),
+    )
 
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -46,6 +61,16 @@ class BranchSettings(UUIDMixin, TimestampMixin, Base):
         Numeric(5, 2),
         nullable=False,
         server_default=text("100"),
+    )
+    pos_cashier_discount_limit_pct: Mapped[float] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        server_default=text("10"),
+    )
+    stock_adjust_approval_threshold_qty: Mapped[float] = mapped_column(
+        Numeric(12, 4),
+        nullable=False,
+        server_default=text("10"),
     )
     pos_default_price_list_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

@@ -6,6 +6,7 @@ from app.models.user import User, UserBranch
 from app.models.staff_assignment import StaffRoleAssignment
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
+from app.models.approval import ApprovalGrantUsage, ManagerPinCredential
 from app.models.product import (
     Unit,
     Category,
@@ -83,6 +84,8 @@ __all__ = [
     "StaffRoleAssignment",
     "AuditLog",
     "RefreshToken",
+    "ManagerPinCredential",
+    "ApprovalGrantUsage",
     "Unit",
     "Category",
     "Product",

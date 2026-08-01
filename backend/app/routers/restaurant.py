@@ -1811,7 +1811,11 @@ async def checkout_session(
     """รวมบิลโต๊ะ → สร้าง SaleOrder → ปิด session"""
     svc = DiningService(db)
     session = await db.get(DiningSession, session_id)
-    if not session or session.company_id != current.company_id:
+    if (
+        not session
+        or session.company_id != current.company_id
+        or session.branch_id != current.branch_id
+    ):
         raise HTTPException(status_code=404, detail="ไม่พบ session")
     if session.status == "closed":
         raise HTTPException(status_code=400, detail="Session ปิดแล้ว")
@@ -1819,7 +1823,9 @@ async def checkout_session(
         raise HTTPException(status_code=400, detail="Branch context required")
     try:
         result = await svc.checkout_session(
-            session, current.company_id, current.branch_id, current.user_id, payload
+            session,
+            current,
+            payload,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

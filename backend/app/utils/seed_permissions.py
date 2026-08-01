@@ -115,6 +115,12 @@ PERMISSIONS: list[dict[str, str]] = [
         "description": "Void or cancel POS sales transactions.",
     },
     {
+        "code": "pos.sale.void.request",
+        "name": "Request POS Sale Void",
+        "module": "pos",
+        "description": "Request manager approval to void POS sales transactions.",
+    },
+    {
         "code": "pos.discount.apply",
         "name": "Apply Discount",
         "module": "pos",
@@ -131,6 +137,12 @@ PERMISSIONS: list[dict[str, str]] = [
         "name": "Create Refund",
         "module": "pos",
         "description": "Process POS refunds.",
+    },
+    {
+        "code": "pos.refund.request",
+        "name": "Request Refund",
+        "module": "pos",
+        "description": "Request manager approval to process POS refunds.",
     },
     {
         "code": "pos.cashier.open_shift",
@@ -185,6 +197,12 @@ PERMISSIONS: list[dict[str, str]] = [
         "name": "Adjust Stock",
         "module": "inventory",
         "description": "Adjust stock quantities.",
+    },
+    {
+        "code": "inventory.stock.adjust.request",
+        "name": "Request Stock Adjustment",
+        "module": "inventory",
+        "description": "Adjust stock within policy limits or request manager approval.",
     },
     {
         "code": "inventory.purchase.view",

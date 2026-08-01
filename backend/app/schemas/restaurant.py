@@ -394,6 +394,7 @@ class SessionCheckoutRequest(BaseSchema):
     customer_tax_id: str | None = None
     customer_id: uuid.UUID | None = None
     note: str | None = None
+    approval_token: str | None = None
 
 
 class SessionCheckoutResult(BaseSchema):

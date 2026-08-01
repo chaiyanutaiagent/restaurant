@@ -14,9 +14,11 @@ export const posApi = {
   syncSales: (orders: object[]) => api.post<ApiResponse<SaleOrder[]>>("/pos/sales/sync", { orders }),
   listSales: (params?: object) => api.get<ApiResponse<SaleOrder[]>>("/pos/sales", { params }),
   getSale: (id: string) => api.get<ApiResponse<SaleOrder>>(`/pos/sales/${id}`),
-  voidSale: (id: string, reason: string) => api.post(`/pos/sales/${id}/void`, { void_reason: reason }),
-  refundSale: (id: string, reason: string) => api.post(`/pos/sales/${id}/refund`, { refund_reason: reason }),
-  partialRefundSale: (id: string, data: { refund_reason: string; items: Array<{ order_item_id: string; qty: number }> }) =>
+  voidSale: (id: string, reason: string, approvalToken?: string) =>
+    api.post(`/pos/sales/${id}/void`, { void_reason: reason, approval_token: approvalToken }),
+  refundSale: (id: string, reason: string, approvalToken?: string) =>
+    api.post(`/pos/sales/${id}/refund`, { refund_reason: reason, approval_token: approvalToken }),
+  partialRefundSale: (id: string, data: { refund_reason: string; items: Array<{ order_item_id: string; qty: number }>; approval_token?: string }) =>
     api.post<ApiResponse<SaleOrder>>(`/pos/sales/${id}/refund/partial`, data),
   getPromptPayQR: (amount?: number, target?: string) => api.get("/pos/promptpay/qr", { params: { amount, target } }),
   listLocations: (branchId?: string) =>

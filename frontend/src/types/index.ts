@@ -23,3 +23,4 @@ export * from "@/types/hr";
 export * from "@/types/integration";
 export * from "@/types/logistics";
 export * from "@/types/paymentGateway";
+export * from "@/types/approval";

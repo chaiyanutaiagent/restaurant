@@ -99,6 +99,8 @@ export interface BranchSettings {
   pos_require_customer: boolean;
   pos_allow_discount: boolean;
   pos_max_discount_pct: number;
+  pos_cashier_discount_limit_pct: number;
+  stock_adjust_approval_threshold_qty: number;
   promptpay_target: string | null;
   promptpay_name: string | null;
   promptpay_qr_url: string | null;

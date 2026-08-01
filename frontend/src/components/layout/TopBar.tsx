@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Building2, ChevronDown, LogOut, Menu, UserCircle2 } from "lucide-react";
-import { useCallback, useEffect, useMemo } from "react";
+import { Building2, ChevronDown, KeyRound, LogOut, Menu, UserCircle2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { authApi } from "@/lib/api";
 import { useLogout } from "@/hooks/useAuth";
 import { useAuthStore } from "@/stores/auth.store";
@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/use-toast";
+import ManagerPinDialog from "@/components/approval/ManagerPinDialog";
 
 type TopBarProps = {
   title: string;
@@ -31,6 +32,14 @@ export default function TopBar({ title, onMenuClick, workspace = "admin" }: TopB
   const stationKey = useAuthStore((state) => state.stationKey);
   const companyId = useAuthStore((state) => state.companyId);
   const setSession = useAuthStore((state) => state.setSession);
+  const hasPermission = useAuthStore((state) => state.hasPermission);
+  const [managerPinOpen, setManagerPinOpen] = useState(false);
+  const canApproveOperations = [
+    "pos.discount.override",
+    "pos.sale.void",
+    "pos.refund.create",
+    "inventory.stock.adjust"
+  ].some((permission) => hasPermission(permission));
 
   const branchesQuery = useQuery({
     queryKey: ["system", "my-branches"],
@@ -149,12 +158,19 @@ export default function TopBar({ title, onMenuClick, workspace = "admin" }: TopB
               <UserCircle2 className="mr-2 h-4 w-4" />
               {getDisplayName(user?.display_name ?? null, user?.username ?? "guest")}
             </DropdownMenuItem>
+            {canApproveOperations ? (
+              <DropdownMenuItem onClick={() => setManagerPinOpen(true)}>
+                <KeyRound className="mr-2 h-4 w-4" />
+                ตั้งค่า Manager PIN
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem onClick={logout}>
               <LogOut className="mr-2 h-4 w-4" />
               ออกจากระบบ
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <ManagerPinDialog open={managerPinOpen} onOpenChange={setManagerPinOpen} />
       </div>
     </header>
   );

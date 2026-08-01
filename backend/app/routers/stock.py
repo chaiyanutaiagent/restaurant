@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from typing import Any
 import uuid
 
 from fastapi import APIRouter, Depends, Query, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
 from app.dependencies import TokenData, require_any_permission, require_permission
 from app.models.audit import AuditLog
+from app.models.settings import BranchSettings
 from app.schemas.stock import (
     AdjustmentRequest,
     ReceiveStockRequest,
@@ -23,6 +26,7 @@ from app.schemas.stock import (
     TransferRequest,
 )
 from app.services.stock_service import StockService
+from app.services.approval_service import ApprovalEvidence, ApprovalService
 from app.services.stock_access_service import (
     STOCK_MANAGE_PERMISSIONS,
     STOCK_VIEW_PERMISSIONS,
@@ -34,6 +38,15 @@ router = APIRouter(prefix="/api/v1/stock", tags=["stock"])
 
 def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"data": data, "meta": {"version": settings.app_version, **(meta or {})}, "error": None}
+
+
+def _adjustment_approval_payload(payload: AdjustmentRequest) -> dict[str, Any]:
+    return payload.model_dump(
+        mode="json",
+        exclude={"approval_token"},
+        exclude_none=True,
+        exclude_unset=True,
+    )
 
 
 @router.get("/locations")
@@ -190,7 +203,12 @@ async def list_movements(
 @router.post("/adjust", status_code=status.HTTP_201_CREATED)
 async def adjust_stock(
     payload: AdjustmentRequest,
-    current: TokenData = Depends(require_any_permission(*STOCK_MANAGE_PERMISSIONS)),
+    current: TokenData = Depends(
+        require_any_permission(
+            *STOCK_MANAGE_PERMISSIONS,
+            "inventory.stock.adjust.request",
+        )
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     service = StockService(db)
@@ -199,6 +217,28 @@ async def adjust_stock(
         requested_location_id=payload.location_id,
         manage=True,
     )
+    location = await service.get_location(current.company_id, payload.location_id)
+    branch_settings = await db.scalar(
+        select(BranchSettings).where(
+            BranchSettings.company_id == current.company_id,
+            BranchSettings.branch_id == location.branch_id,
+        )
+    )
+    threshold = Decimal(
+        branch_settings.stock_adjust_approval_threshold_qty
+        if branch_settings
+        else 10
+    )
+    approval_evidence: ApprovalEvidence | None = None
+    if abs(Decimal(payload.qty)) > threshold:
+        approval_evidence = await ApprovalService(db).authorize_operation(
+            current=current,
+            action="inventory.stock.adjust",
+            request_payload=_adjustment_approval_payload(payload),
+            approval_token=payload.approval_token,
+            reason=payload.note or "Stock adjustment above branch threshold",
+            resource_type="StockMovement",
+        )
     movement = await service.adjust(current.company_id, current.user_id, payload)
     db.add(
         AuditLog(
@@ -208,7 +248,17 @@ async def adjust_stock(
             action="stock.adjust",
             resource="StockMovement",
             resource_id=str(movement.id),
-            new_value={"product_id": str(payload.product_id), "qty": str(payload.qty)},
+            new_value={
+                "product_id": str(payload.product_id),
+                "qty": str(payload.qty),
+                "note": payload.note,
+                "approval_threshold_qty": str(threshold),
+                "approval": (
+                    approval_evidence.as_audit_value()
+                    if approval_evidence is not None
+                    else None
+                ),
+            },
         )
     )
     await db.commit()

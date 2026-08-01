@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     algorithm: str
     access_token_expire_minutes: int
     refresh_token_expire_days: int
+    approval_token_expire_seconds: int = Field(default=120, ge=30, le=300)
+    manager_pin_max_failed_attempts: int = Field(default=5, ge=3, le=10)
+    manager_pin_lock_minutes: int = Field(default=15, ge=1, le=60)
     default_admin_password: str | None = None
     environment: Literal["development", "staging", "production", "test"]
     cors_origins: list[str]

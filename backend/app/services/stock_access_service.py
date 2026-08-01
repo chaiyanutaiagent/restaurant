@@ -33,11 +33,15 @@ STORE_STOCK_VIEW_PERMISSIONS = {
     "brand.store.stock.view",
     "brand.store.stock.adjust",
 }
-STORE_STOCK_MANAGE_PERMISSIONS = {"brand.store.stock.adjust"}
+STORE_STOCK_MANAGE_PERMISSIONS = {
+    "brand.store.stock.adjust",
+    "inventory.stock.adjust.request",
+}
 
 STOCK_VIEW_PERMISSIONS = (
     "inventory.stock.view",
     "inventory.stock.adjust",
+    "inventory.stock.adjust.request",
     "brand.store.stock.view",
     "brand.store.stock.adjust",
     "brand.central.raw_stock.view",

@@ -615,7 +615,27 @@ class AdminService:
         data: BranchSettingsUpdate,
     ) -> BranchSettings:
         settings = await self.get_branch_settings(branch_id, company_id)
-        for field, value in data.model_dump(exclude_unset=True).items():
+        changes = data.model_dump(exclude_unset=True)
+        requested_hard_max = Decimal(
+            changes.get("pos_max_discount_pct", settings.pos_max_discount_pct)
+        )
+        requested_cashier_limit = Decimal(
+            changes.get(
+                "pos_cashier_discount_limit_pct",
+                settings.pos_cashier_discount_limit_pct,
+            )
+        )
+        if requested_hard_max < 0 or requested_hard_max > 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="POS maximum discount must be between 0 and 100 percent",
+            )
+        if requested_cashier_limit > requested_hard_max:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cashier discount limit cannot exceed the branch maximum",
+            )
+        for field, value in changes.items():
             setattr(settings, field, value)
         self._audit(company_id, None, "system.branch.settings_updated", "Branch", branch_id)
         await self.db.commit()

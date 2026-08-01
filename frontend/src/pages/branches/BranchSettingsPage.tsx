@@ -90,6 +90,8 @@ type SettingsFormState = {
   pos_require_customer: boolean;
   pos_allow_discount: boolean;
   pos_max_discount_pct: number;
+  pos_cashier_discount_limit_pct: number;
+  stock_adjust_approval_threshold_qty: number;
   promptpay_target: string;
   promptpay_name: string;
   promptpay_qr_url: string;
@@ -110,6 +112,8 @@ function settingsToForm(settings: BranchSettings | null | undefined): SettingsFo
     pos_require_customer: settings?.pos_require_customer ?? false,
     pos_allow_discount: settings?.pos_allow_discount ?? true,
     pos_max_discount_pct: settings?.pos_max_discount_pct ?? 100,
+    pos_cashier_discount_limit_pct: settings?.pos_cashier_discount_limit_pct ?? 10,
+    stock_adjust_approval_threshold_qty: settings?.stock_adjust_approval_threshold_qty ?? 10,
     promptpay_target: settings?.promptpay_target ?? "",
     promptpay_name: settings?.promptpay_name ?? "",
     promptpay_qr_url: settings?.promptpay_qr_url ?? "",
@@ -548,7 +552,30 @@ export default function BranchSettingsPage(): JSX.Element {
                   min={0}
                   max={100}
                   value={settings?.pos_max_discount_pct ?? 100}
-                  onChange={(event) => setSettingsForm((prev) => prev ? { ...prev, pos_max_discount_pct: Number(event.target.value || 0) } : prev)}
+                  onChange={(event) => {
+                    const maximum = Number(event.target.value || 0);
+                    setSettingsForm((prev) => prev ? {
+                      ...prev,
+                      pos_max_discount_pct: maximum,
+                      pos_cashier_discount_limit_pct: Math.min(
+                        prev.pos_cashier_discount_limit_pct,
+                        maximum
+                      )
+                    } : prev);
+                  }}
+                />
+              </Field>
+              <Field label="Cashier Discount Ceiling % (เกินกว่านี้ต้อง Manager อนุมัติ)">
+                <Input
+                  type="number"
+                  disabled={!settings?.pos_allow_discount}
+                  min={0}
+                  max={settings?.pos_max_discount_pct ?? 100}
+                  value={settings?.pos_cashier_discount_limit_pct ?? 10}
+                  onChange={(event) => setSettingsForm((prev) => prev ? {
+                    ...prev,
+                    pos_cashier_discount_limit_pct: Number(event.target.value || 0)
+                  } : prev)}
                 />
               </Field>
               <div className="flex justify-end">
@@ -672,6 +699,18 @@ export default function BranchSettingsPage(): JSX.Element {
                 <Input
                   value={settings?.notify_low_stock_email ?? ""}
                   onChange={(event) => setSettingsForm((prev) => prev ? { ...prev, notify_low_stock_email: event.target.value } : prev)}
+                />
+              </Field>
+              <Field label="Stock Adjustment Threshold (เกินจำนวนนี้ต้อง Manager อนุมัติ)">
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.0001"
+                  value={settings?.stock_adjust_approval_threshold_qty ?? 10}
+                  onChange={(event) => setSettingsForm((prev) => prev ? {
+                    ...prev,
+                    stock_adjust_approval_threshold_qty: Number(event.target.value || 0)
+                  } : prev)}
                 />
               </Field>
               <div className="flex justify-end">

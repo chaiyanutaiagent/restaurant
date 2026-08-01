@@ -34,6 +34,8 @@ import CreateCustomerDialog from "@/pages/crm/CreateCustomerDialog";
 import RedeemPointsDialog from "@/pages/crm/RedeemPointsDialog";
 import CloseShiftDialog from "@/pages/pos/CloseShiftDialog";
 import ReceiptView from "@/pages/pos/ReceiptView";
+import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
+import type { ApprovalAction } from "@/types/approval";
 
 const SHIFT_CACHE_KEY = "restaurant-pos-current-shift";
 const BARCODE_FORMATS = ["ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e", "qr_code"] as const;
@@ -134,6 +136,14 @@ type ReplacementPlanEntry = {
   matchedSource: "central" | "local" | "suggested";
 };
 
+type PendingManagerApproval = {
+  action: ApprovalAction;
+  requestPayload: Record<string, unknown>;
+  reason: string;
+  description: string;
+  onApproved: (approvalToken: string) => Promise<void>;
+};
+
 const paymentMethodLabels: Record<PaymentMethod, string> = {
   cash: "เงินสด",
   promptpay: "PromptPay",
@@ -211,6 +221,7 @@ export default function POSPage(): JSX.Element {
   const [partialRefundOrder, setPartialRefundOrder] = useState<SaleOrder | null>(null);
   const [partialRefundReason, setPartialRefundReason] = useState("");
   const [partialRefundQtys, setPartialRefundQtys] = useState<Record<string, string>>({});
+  const [pendingManagerApproval, setPendingManagerApproval] = useState<PendingManagerApproval | null>(null);
   const [exchangeContext, setExchangeContext] = useState<ExchangeContextDraft | null>(null);
   const [splitPaymentEnabled, setSplitPaymentEnabled] = useState(false);
   const [secondaryPaymentMethod, setSecondaryPaymentMethod] = useState<PaymentMethod>("promptpay");
@@ -811,20 +822,46 @@ export default function POSPage(): JSX.Element {
     toast({ title: "อัปเดตราคาในบิลแล้ว" });
   }
 
+  async function executeVoidSale(approvalToken?: string): Promise<void> {
+    if (!voidOrder) return;
+    await posApi.voidSale(voidOrder.id, voidReason.trim(), approvalToken);
+    toast({ title: "Void บิลสำเร็จ", description: voidOrder.order_number });
+    setVoidOrder(null);
+    setVoidReason("");
+    await recentSalesQuery.refetch();
+  }
+
   async function handleVoidSale(): Promise<void> {
     if (!voidOrder || !voidReason.trim()) {
       toast({ title: "กรุณาระบุเหตุผลในการ void" });
       return;
     }
+    if (!hasPermission("pos.sale.void")) {
+      const orderId = voidOrder.id;
+      const reason = voidReason.trim();
+      setPendingManagerApproval({
+        action: "pos.sale.void",
+        requestPayload: { order_id: orderId, void_reason: reason },
+        reason,
+        description: `Void บิล ${voidOrder.order_number} ต้องได้รับอนุมัติจาก Manager`,
+        onApproved: executeVoidSale
+      });
+      return;
+    }
     try {
-      await posApi.voidSale(voidOrder.id, voidReason.trim());
-      toast({ title: "Void บิลสำเร็จ", description: voidOrder.order_number });
-      setVoidOrder(null);
-      setVoidReason("");
-      await recentSalesQuery.refetch();
+      await executeVoidSale();
     } catch (error) {
       toast({ title: "Void บิลไม่สำเร็จ", description: error instanceof Error ? error.message : "ลองใหม่อีกครั้ง" });
     }
+  }
+
+  async function executeRefundSale(approvalToken?: string): Promise<void> {
+    if (!refundOrder) return;
+    await posApi.refundSale(refundOrder.id, refundReason.trim(), approvalToken);
+    toast({ title: "Refund สำเร็จ", description: refundOrder.order_number });
+    setRefundOrder(null);
+    setRefundReason("");
+    await recentSalesQuery.refetch();
   }
 
   async function handleRefundSale(): Promise<void> {
@@ -832,12 +869,20 @@ export default function POSPage(): JSX.Element {
       toast({ title: "กรุณาระบุเหตุผลในการคืนสินค้า" });
       return;
     }
+    if (!hasPermission("pos.refund.create")) {
+      const orderId = refundOrder.id;
+      const reason = refundReason.trim();
+      setPendingManagerApproval({
+        action: "pos.refund.create",
+        requestPayload: { order_id: orderId, refund_reason: reason },
+        reason,
+        description: `คืนเงินเต็มบิล ${refundOrder.order_number} ต้องได้รับอนุมัติจาก Manager`,
+        onApproved: executeRefundSale
+      });
+      return;
+    }
     try {
-      await posApi.refundSale(refundOrder.id, refundReason.trim());
-      toast({ title: "Refund สำเร็จ", description: refundOrder.order_number });
-      setRefundOrder(null);
-      setRefundReason("");
-      await recentSalesQuery.refetch();
+      await executeRefundSale();
     } catch (error) {
       toast({ title: "Refund ไม่สำเร็จ", description: error instanceof Error ? error.message : "ลองใหม่อีกครั้ง" });
     }
@@ -882,7 +927,10 @@ export default function POSPage(): JSX.Element {
     });
   }
 
-  async function handlePartialRefundSale(startExchange = false): Promise<void> {
+  async function handlePartialRefundSale(
+    startExchange = false,
+    approvalToken?: string
+  ): Promise<void> {
     if (!partialRefundOrder || !partialRefundReason.trim()) {
       toast({ title: "กรุณาระบุเหตุผลในการคืนสินค้า" });
       return;
@@ -900,6 +948,22 @@ export default function POSPage(): JSX.Element {
       toast({ title: "เลือกสินค้าที่ต้องการคืนก่อน" });
       return;
     }
+    if (!hasPermission("pos.refund.create") && !approvalToken) {
+      const orderId = partialRefundOrder.id;
+      const reason = partialRefundReason.trim();
+      setPendingManagerApproval({
+        action: "pos.refund.create",
+        requestPayload: {
+          order_id: orderId,
+          refund_reason: reason,
+          items: refundItems
+        },
+        reason,
+        description: `คืนบางรายการจากบิล ${partialRefundOrder.order_number} ต้องได้รับอนุมัติจาก Manager`,
+        onApproved: (token) => handlePartialRefundSale(startExchange, token)
+      });
+      return;
+    }
     const refundedItemNames = partialRefundOrder.items
       .filter((item) => refundItems.some((entry) => entry.order_item_id === item.id))
       .map((item) => item.product_name);
@@ -907,6 +971,7 @@ export default function POSPage(): JSX.Element {
       const response = await posApi.partialRefundSale(partialRefundOrder.id, {
         refund_reason: partialRefundReason.trim(),
         items: refundItems,
+        approval_token: approvalToken,
       });
       const updatedOrder = response.data.data as SaleOrder;
       const refundAmount = partialRefundPreview.amount;
@@ -931,6 +996,7 @@ export default function POSPage(): JSX.Element {
         );
       }
     } catch (error) {
+      if (approvalToken) throw error;
       toast({ title: "คืนบางรายการไม่สำเร็จ", description: error instanceof Error ? error.message : "ลองใหม่อีกครั้ง" });
     }
   }
@@ -1080,17 +1146,9 @@ export default function POSPage(): JSX.Element {
     toast({ title: "บันทึกออฟไลน์แล้ว", description: "รายการขายถูกคิวไว้เพื่อ sync ภายหลัง" });
   }
 
-  async function handleCheckout(): Promise<void> {
-    if (!currentShift || cart.items.length === 0) {
-      return;
-    }
-    setIsSubmitting(true);
-    try {
-      if (!isOnline) {
-        await queueOfflineSale();
-        return;
-      }
-      const response = await posApi.createSale({
+  function buildCheckoutPayload(approvalToken?: string): Record<string, unknown> {
+    if (!currentShift) return {};
+    return {
         shift_id: currentShift.id,
         location_id: currentShift.location_id,
         items: cart.items.map((item) => ({
@@ -1115,7 +1173,12 @@ export default function POSPage(): JSX.Element {
         customer_tax_id: customerTaxId || selectedCustomer?.tax_id || null,
         customer_id: selectedCustomer?.id ?? null,
         note: exchangeNote,
-      });
+        ...(approvalToken ? { approval_token: approvalToken } : {})
+    };
+  }
+
+  async function executeOnlineCheckout(approvalToken?: string): Promise<void> {
+      const response = await posApi.createSale(buildCheckoutPayload(approvalToken));
       const order = response.data.data as SaleOrder;
       setLastOrder(order);
       setShowReceipt(true);
@@ -1123,6 +1186,45 @@ export default function POSPage(): JSX.Element {
       await db.completedOrders.put({ ...order, synced_at: Date.now() });
       await syncStockBalances(branchId ?? undefined);
       toast({ title: "ชำระเงินสำเร็จ" });
+  }
+
+  async function handleCheckout(): Promise<void> {
+    if (!currentShift || cart.items.length === 0) {
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      if (!isOnline) {
+        if (effectiveDiscountPct > cashierDiscountLimit && !canOverrideDiscount) {
+          toast({
+            title: "ส่วนลดนี้ต้องอนุมัติขณะออนไลน์",
+            description: "ลดส่วนลดให้อยู่ในเพดาน Cashier หรือเชื่อมต่ออินเทอร์เน็ตก่อนบันทึก",
+            variant: "destructive"
+          });
+          return;
+        }
+        await queueOfflineSale();
+        return;
+      }
+      if (effectiveDiscountPct > cashierDiscountLimit && !canOverrideDiscount) {
+        const payload = buildCheckoutPayload();
+        setPendingManagerApproval({
+          action: "pos.discount.override",
+          requestPayload: payload,
+          reason: `ส่วนลด ${effectiveDiscountPct.toFixed(2)}% เกินเพดาน Cashier ${cashierDiscountLimit.toFixed(2)}%`,
+          description: "ส่วนลดรวมของบิลนี้เกินเพดาน Cashier และต้องได้รับอนุมัติจาก Manager",
+          onApproved: async (token) => {
+            setIsSubmitting(true);
+            try {
+              await executeOnlineCheckout(token);
+            } finally {
+              setIsSubmitting(false);
+            }
+          }
+        });
+        return;
+      }
+      await executeOnlineCheckout();
     } catch (error) {
       toast({ title: "ชำระเงินไม่สำเร็จ", description: error instanceof Error ? error.message : "ลองใหม่อีกครั้ง" });
     } finally {
@@ -1158,12 +1260,21 @@ export default function POSPage(): JSX.Element {
   const branchSettings = branchSettingsQuery.data;
   const canApplyDiscount = hasPermission("pos.discount.apply") || hasPermission("pos.discount.override");
   const canOverrideDiscount = hasPermission("pos.discount.override");
-  const canVoidSale = hasPermission("pos.sale.void");
-  const canRefundSale = hasPermission("pos.refund.create");
+  const canVoidSale = hasPermission("pos.sale.void") || hasPermission("pos.sale.void.request");
+  const canRefundSale = hasPermission("pos.refund.create") || hasPermission("pos.refund.request");
   const canManageCentralReplacementRules = hasPermission("system.branch.edit");
   const discountAllowed = (branchSettings?.pos_allow_discount ?? true) && canApplyDiscount;
   const maxDiscountPct = branchSettings?.pos_max_discount_pct ?? 100;
   const maxDiscountAmount = (cart.subtotal * maxDiscountPct) / 100;
+  const cashierDiscountLimit = branchSettings?.pos_cashier_discount_limit_pct ?? 10;
+  const grossBeforeDiscount = cart.items.reduce(
+    (sum, item) => sum + Number(item.original_price) * Number(item.qty),
+    0
+  );
+  const netAfterDiscount = Math.max(cart.subtotal - totalDiscount, 0);
+  const effectiveDiscountPct = grossBeforeDiscount > 0
+    ? Math.max(0, ((grossBeforeDiscount - netAfterDiscount) * 100) / grossBeforeDiscount)
+    : 0;
   const refundableStatuses: SaleOrder["status"][] = ["completed", "partially_refunded"];
   const paymentAuditSummary = useMemo(() => {
     const totals = new Map<string, number>();
@@ -2633,6 +2744,19 @@ export default function POSPage(): JSX.Element {
         settings={loyaltySettingsQuery.data ?? null}
         onRedeemed={(discountAmount) => setLoyaltyDiscount(discountAmount)}
       />
+      {pendingManagerApproval ? (
+        <ManagerApprovalDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setPendingManagerApproval(null);
+          }}
+          action={pendingManagerApproval.action}
+          requestPayload={pendingManagerApproval.requestPayload}
+          reason={pendingManagerApproval.reason}
+          description={pendingManagerApproval.description}
+          onApproved={pendingManagerApproval.onApproved}
+        />
+      ) : null}
     </div>
   );
 }

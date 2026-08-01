@@ -5,10 +5,12 @@ from decimal import Decimal
 import json
 import uuid
 
+from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.dependencies import TokenData
 from app.models.pos import CashierShift, SaleOrder
 from app.models.product import Product, Category
 from app.models.restaurant import (
@@ -18,6 +20,11 @@ from app.models.settings import BranchSettings
 from app.models.branch import Branch
 from app.models.stock import StockLocation
 from app.services.notification_service import NotificationService
+from app.services.approval_service import (
+    ApprovalEvidence,
+    ApprovalService,
+    has_permission,
+)
 from app.schemas.pos import CartItem, CreateSaleRequest, PaymentCreateRequest
 from app.schemas.restaurant import (
     DiningOrderItemRead, DiningOrderRead, KitchenTicketRead,
@@ -1094,12 +1101,16 @@ class DiningService:
     async def checkout_session(
         self,
         session: DiningSession,
-        company_id: uuid.UUID,
-        branch_id: uuid.UUID,
-        user_id: uuid.UUID,
+        current: TokenData,
         payload: SessionCheckoutRequest,
     ) -> SessionCheckoutResult:
-        from app.services.sale_service import SaleService
+        from app.services.sale_service import SaleService, sale_discount_percentage
+
+        company_id = current.company_id
+        branch_id = current.branch_id
+        if branch_id is None:
+            raise ValueError("Branch context required")
+        user_id = current.user_id
 
         # resolve shift + location (auto-detect ถ้าไม่ได้ระบุ)
         resolved_shift_id, resolved_location_id = await self._resolve_shift_and_location(
@@ -1188,8 +1199,54 @@ class DiningService:
             note=" | ".join(note_parts) if note_parts else None,
         )
 
+        discount_percentage = sale_discount_percentage(create_request)
+        approval_evidence: ApprovalEvidence | None = None
+        if discount_percentage > 0 and not (
+            has_permission(current.permissions, "pos.discount.apply")
+            or has_permission(current.permissions, "pos.discount.override")
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission required: pos.discount.apply",
+            )
+        settings = await self.db.scalar(
+            select(BranchSettings).where(
+                BranchSettings.company_id == company_id,
+                BranchSettings.branch_id == branch_id,
+            )
+        )
+        cashier_limit = Decimal(
+            settings.pos_cashier_discount_limit_pct if settings else 10
+        )
+        if discount_percentage > cashier_limit:
+            approval_payload = payload.model_dump(
+                mode="json",
+                exclude={"approval_token"},
+                exclude_none=True,
+                exclude_unset=True,
+            )
+            approval_payload["session_id"] = str(session.id)
+            approval_evidence = await ApprovalService(self.db).authorize_operation(
+                current=current,
+                action="pos.discount.override",
+                request_payload=approval_payload,
+                approval_token=payload.approval_token,
+                reason=(
+                    f"Restaurant checkout discount {discount_percentage}% exceeds "
+                    f"cashier limit {cashier_limit}%"
+                ),
+                resource_type="DiningSession",
+                resource_id=str(session.id),
+            )
+
         sale_svc = SaleService(self.db)
-        sale_order = await sale_svc.create_sale(company_id, branch_id, user_id, create_request)
+        sale_order = await sale_svc.create_sale(
+            company_id,
+            branch_id,
+            user_id,
+            create_request,
+            approval_evidence=approval_evidence,
+        )
 
         # ปิด session
         await self.close_session(session, sale_order_id=sale_order.id)

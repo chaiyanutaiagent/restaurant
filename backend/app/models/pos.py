@@ -309,6 +309,12 @@ class Payment(UUIDMixin, Base):
     payment_method: Mapped[str] = mapped_column(String(30), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     reference_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    original_payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("payments.id"),
+        nullable=True,
+        index=True,
+    )
     paid_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -71,7 +71,7 @@ const comingSoonItems: NavItem[] = [
   { label: "ลูกค้า", to: "/crm", icon: Users, permission: "pos.sale.view" },
   { label: "สินค้า", to: "/products", icon: Package, permission: "inventory.product.view" },
   { label: "หน่วยสินค้า", to: "/units", icon: Ruler, permission: "inventory.product.view" },
-  { label: "คลังสินค้า", to: "/stock", icon: Warehouse, permission: "inventory.stock.view" }
+  { label: "คลังสินค้า", to: "/stock", icon: Warehouse, permissions: ["inventory.stock.view", "inventory.stock.adjust.request"] }
 ];
 
 const reportItems: NavItem[] = [
@@ -182,7 +182,7 @@ export default function Sidebar({
     : "Admin Console";
 
   useEffect(() => {
-    if (hasPermission("inventory.stock.view")) {
+    if (hasPermission("inventory.stock.view") || hasPermission("inventory.stock.adjust.request")) {
       void syncStockBalances();
     }
   }, [hasPermission]);

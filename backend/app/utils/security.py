@@ -77,6 +77,39 @@ def create_refresh_token(
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
+def create_approval_token(
+    *,
+    grant_id: uuid.UUID,
+    company_id: uuid.UUID,
+    branch_id: uuid.UUID,
+    requester_id: uuid.UUID,
+    approver_id: uuid.UUID,
+    action: str,
+    reason: str,
+    request_hash: str,
+    expires_delta: timedelta | None = None,
+) -> str:
+    now = datetime.now(timezone.utc)
+    expire = now + (
+        expires_delta or timedelta(seconds=settings.approval_token_expire_seconds)
+    )
+    payload = {
+        "sub": str(requester_id),
+        "jti": str(grant_id),
+        "company_id": str(company_id),
+        "branch_id": str(branch_id),
+        "requester_id": str(requester_id),
+        "approver_id": str(approver_id),
+        "action": action,
+        "reason": reason,
+        "request_hash": request_hash,
+        "type": "approval",
+        "exp": expire,
+        "iat": now,
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
+
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])

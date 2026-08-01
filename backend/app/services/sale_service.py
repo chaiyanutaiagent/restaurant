@@ -18,6 +18,7 @@ from app.models.company import Company
 from app.models.pos import CashierShift, Payment, SaleOrder, SaleOrderItem
 from app.models.product import Product, ProductVariant
 from app.models.restaurant import BrandBranch
+from app.models.settings import BranchSettings
 from app.models.stock import StockBalance, StockLocation
 from app.models.user import User
 from app.schemas.pos import (
@@ -30,6 +31,7 @@ from app.schemas.pos import (
     VoidRequest,
 )
 from app.services.accounting_service import AccountingService
+from app.services.approval_service import ApprovalEvidence
 from app.services.crm_service import CRMService
 from app.services.notification_service import NotificationService
 from app.services.stock_service import StockService
@@ -48,6 +50,42 @@ def q2(value: Decimal) -> Decimal:
 
 def q4(value: Decimal) -> Decimal:
     return Decimal(value).quantize(FOURPLACES, rounding=ROUND_HALF_UP)
+
+
+def _discounted_value(
+    base_price: Decimal,
+    discount_amount: Decimal,
+    discount_type: str,
+) -> Decimal:
+    if discount_type == "percent":
+        discounted = base_price - (base_price * discount_amount / Decimal("100"))
+    else:
+        discounted = base_price - discount_amount
+    return max(Decimal("0"), discounted)
+
+
+def sale_discount_percentage(data: CreateSaleRequest) -> Decimal:
+    gross = Decimal("0")
+    subtotal = Decimal("0")
+    for item in data.items:
+        qty = Decimal(item.qty)
+        original_price = Decimal(item.original_price)
+        gross += original_price * qty
+        effective_price = _discounted_value(
+            original_price,
+            Decimal(item.discount_amount),
+            item.discount_type,
+        )
+        subtotal += q4(effective_price) * qty
+    after_order_discount = _discounted_value(
+        q2(subtotal),
+        Decimal(data.discount_amount),
+        data.discount_type,
+    )
+    if gross <= 0:
+        return Decimal("0.00")
+    total_discount = max(Decimal("0"), gross - after_order_discount)
+    return q2(total_discount * Decimal("100") / gross)
 
 
 class SaleService:
@@ -202,9 +240,51 @@ class SaleService:
         data: CreateSaleRequest,
         brand_id: uuid.UUID | None = None,
         recipe_inventory_location_id: uuid.UUID | None = None,
+        approval_evidence: ApprovalEvidence | None = None,
     ) -> SaleOrder:
         if not data.items:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one cart item is required")
+
+        discount_percentage = sale_discount_percentage(data)
+        branch_settings = await self.db.scalar(
+            select(BranchSettings).where(
+                BranchSettings.company_id == company_id,
+                BranchSettings.branch_id == branch_id,
+            )
+        )
+        allow_discount = branch_settings.pos_allow_discount if branch_settings else True
+        hard_max = Decimal(
+            branch_settings.pos_max_discount_pct if branch_settings else 100
+        )
+        cashier_limit = Decimal(
+            branch_settings.pos_cashier_discount_limit_pct if branch_settings else 10
+        )
+        if discount_percentage > 0 and not allow_discount:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Discounts are disabled for this branch",
+            )
+        if discount_percentage > hard_max:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "discount_limit_exceeded",
+                    "message": "Discount exceeds the branch maximum",
+                    "discount_percentage": str(discount_percentage),
+                    "maximum_percentage": str(hard_max),
+                },
+            )
+        if discount_percentage > cashier_limit and approval_evidence is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "approval_required",
+                    "action": "pos.discount.override",
+                    "message": "Manager approval is required",
+                    "discount_percentage": str(discount_percentage),
+                    "cashier_limit_percentage": str(cashier_limit),
+                },
+            )
 
         shift = await self._get_shift_for_sale(company_id, branch_id, user_id, data.shift_id)
         location = await self._get_location(company_id, data.location_id)
@@ -432,7 +512,16 @@ class SaleService:
                 action="pos.sale.create",
                 resource="SaleOrder",
                 resource_id=str(order_id),
-                new_value={"order_number": order_values["order_number"], "total_amount": str(total_amount)},
+                new_value={
+                    "order_number": order_values["order_number"],
+                    "total_amount": str(total_amount),
+                    "discount_percentage": str(discount_percentage),
+                    "approval": (
+                        approval_evidence.as_audit_value()
+                        if approval_evidence is not None
+                        else None
+                    ),
+                },
             )
         )
         try:
@@ -510,6 +599,7 @@ class SaleService:
         company_id: uuid.UUID,
         user_id: uuid.UUID,
         data: VoidRequest,
+        approval_evidence: ApprovalEvidence | None = None,
     ) -> SaleOrder:
         order = await self.get_sale(order_id, company_id)
         if order.status != "completed":
@@ -576,7 +666,19 @@ class SaleService:
                 action="pos.sale.void",
                 resource="SaleOrder",
                 resource_id=str(order.id),
-                new_value={"void_reason": data.void_reason},
+                old_value={
+                    "status": "completed",
+                    "total_amount": str(order.total_amount),
+                },
+                new_value={
+                    "status": "voided",
+                    "void_reason": data.void_reason,
+                    "approval": (
+                        approval_evidence.as_audit_value()
+                        if approval_evidence is not None
+                        else None
+                    ),
+                },
             )
         )
         try:
@@ -593,6 +695,7 @@ class SaleService:
         company_id: uuid.UUID,
         user_id: uuid.UUID,
         refund_reason: str,
+        approval_evidence: ApprovalEvidence | None = None,
     ) -> SaleOrder:
         order = await self.get_sale(order_id, company_id)
         if order.status not in {"completed", "partially_refunded"}:
@@ -615,6 +718,7 @@ class SaleService:
             refund_reason=refund_reason,
             refund_rows=refundable_items,
             audit_action="pos.sale.refund",
+            approval_evidence=approval_evidence,
         )
         if q2(Decimal(order.refund_amount or 0)) >= q2(Decimal(order.total_amount or 0)):
             try:
@@ -632,6 +736,7 @@ class SaleService:
         company_id: uuid.UUID,
         user_id: uuid.UUID,
         payload: PartialRefundRequest,
+        approval_evidence: ApprovalEvidence | None = None,
     ) -> SaleOrder:
         order = await self.get_sale(order_id, company_id)
         if order.status not in {"completed", "partially_refunded"}:
@@ -664,6 +769,7 @@ class SaleService:
             refund_reason=payload.refund_reason,
             refund_rows=refund_rows,
             audit_action="pos.sale.partial_refund",
+            approval_evidence=approval_evidence,
         )
         await self.db.commit()
         return await self.get_sale(order.id, company_id)
@@ -764,6 +870,7 @@ class SaleService:
         refund_reason: str,
         refund_rows: list[tuple[SaleOrderItem, Decimal]],
         audit_action: str,
+        approval_evidence: ApprovalEvidence | None = None,
     ) -> Decimal:
         if not refund_reason.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Refund reason is required")
@@ -845,7 +952,7 @@ class SaleService:
         order.note = f"{order.note}\n{note_line}".strip() if order.note else note_line
         active_shift.total_sales = q2(max(Decimal("0"), Decimal(active_shift.total_sales or 0) - refund_total))
 
-        for payment_method, amount, reference_no in refundable_allocations:
+        for original_payment_id, payment_method, amount, reference_no in refundable_allocations:
             self.db.add(
                 Payment(
                     order_id=order.id,
@@ -853,6 +960,7 @@ class SaleService:
                     payment_method=payment_method,
                     amount=-amount,
                     reference_no=reference_no,
+                    original_payment_id=original_payment_id,
                     note=refund_reason.strip(),
                 )
             )
@@ -868,6 +976,15 @@ class SaleService:
                 new_value={
                     "refund_reason": refund_reason.strip(),
                     "refund_amount": str(refund_total),
+                    "original_payment_ids": [
+                        str(payment_id)
+                        for payment_id, _, _, _ in refundable_allocations
+                    ],
+                    "approval": (
+                        approval_evidence.as_audit_value()
+                        if approval_evidence is not None
+                        else None
+                    ),
                     "items": [
                         {
                             "order_item_id": str(item.id),
@@ -890,14 +1007,18 @@ class SaleService:
         excluded_vat = q2(Decimal(item.vat_amount) * ratio) if item.vat_type == "excluded" else Decimal("0")
         return q2(q2(line_subtotal) - order_discount_share + excluded_vat)
 
-    def _allocate_refund_payments(self, order: SaleOrder, refund_total: Decimal) -> list[tuple[str, Decimal, str | None]]:
+    def _allocate_refund_payments(
+        self,
+        order: SaleOrder,
+        refund_total: Decimal,
+    ) -> list[tuple[uuid.UUID, str, Decimal, str | None]]:
         positive_payments = [payment for payment in order.payments if Decimal(payment.amount) > 0]
         if not positive_payments:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Original payment data not found")
 
         total_paid = q2(sum((Decimal(payment.amount) for payment in positive_payments), Decimal("0")))
         remaining = q2(refund_total)
-        rows: list[tuple[str, Decimal, str | None]] = []
+        rows: list[tuple[uuid.UUID, str, Decimal, str | None]] = []
         for index, payment in enumerate(positive_payments):
             if index == len(positive_payments) - 1:
                 amount = remaining
@@ -905,7 +1026,14 @@ class SaleService:
                 amount = q2(refund_total * (Decimal(payment.amount) / total_paid))
                 remaining = q2(remaining - amount)
             if amount > 0:
-                rows.append((payment.payment_method, amount, payment.reference_no))
+                rows.append(
+                    (
+                        payment.id,
+                        payment.payment_method,
+                        amount,
+                        payment.reference_no,
+                    )
+                )
         return rows
 
     async def _get_shift_for_sale(
@@ -1016,11 +1144,7 @@ class SaleService:
         )
 
     def _apply_discount(self, base_price: Decimal, discount_amount: Decimal, discount_type: str) -> Decimal:
-        if discount_type == "percent":
-            discounted = base_price - (base_price * discount_amount / Decimal("100"))
-        else:
-            discounted = base_price - discount_amount
-        return max(Decimal("0"), discounted)
+        return _discounted_value(base_price, discount_amount, discount_type)
 
     def _calc_vat(self, subtotal: Decimal, vat_type: str, vat_rate: Decimal) -> Decimal:
         if vat_type == "excluded":

@@ -121,6 +121,8 @@ class BranchSettingsRead(BaseSchema):
     pos_require_customer: bool
     pos_allow_discount: bool
     pos_max_discount_pct: float
+    pos_cashier_discount_limit_pct: float = 10
+    stock_adjust_approval_threshold_qty: float = 10
     promptpay_target: str | None = None
     promptpay_name: str | None = None
     promptpay_qr_url: str | None = None
@@ -156,7 +158,9 @@ class BranchSettingsUpdate(BaseSchema):
     pos_receipt_footer: str | None = None
     pos_require_customer: bool | None = None
     pos_allow_discount: bool | None = None
-    pos_max_discount_pct: float | None = None
+    pos_max_discount_pct: float | None = Field(default=None, ge=0, le=100)
+    pos_cashier_discount_limit_pct: float | None = Field(default=None, ge=0, le=100)
+    stock_adjust_approval_threshold_qty: float | None = Field(default=None, ge=0)
     pos_default_price_list_id: uuid.UUID | None = None
     promptpay_target: str | None = None
     promptpay_name: str | None = None

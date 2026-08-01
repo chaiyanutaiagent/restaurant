@@ -359,7 +359,7 @@ class StockService:
             cost_per_unit=data.cost_per_unit,
             note=data.note,
         )
-        await self.db.commit()
+        await self.db.flush()
         return movement
 
     async def receive(

@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import {
@@ -18,6 +18,8 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { productApi } from "@/lib/productApi";
 import { stockApi } from "@/lib/stockApi";
+import { approvalErrorDetail, errorMessage } from "@/lib/approvalApi";
+import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
 import type { ApiResponse } from "@/types/api";
 import type { Product, ProductListItem } from "@/types/product";
 import type { StockBalance, StockLocation } from "@/types/stock";
@@ -59,6 +61,7 @@ export default function AdjustmentDialog({
 }: AdjustmentDialogProps): JSX.Element {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [pendingApprovalValues, setPendingApprovalValues] = useState<FormValues | null>(null);
   const form = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -116,15 +119,15 @@ export default function AdjustmentDialog({
 
   const previewQty = Number(currentBalance?.qty_on_hand ?? 0) + Number(adjustmentQty ?? 0);
 
-  async function submit(values: FormValues): Promise<void> {
-    try {
+  async function executeAdjustment(values: FormValues, approvalToken?: string): Promise<void> {
       await stockApi.adjust({
         location_id: values.location_id,
         product_id: values.product_id,
         variant_id: values.variant_id || undefined,
         qty: values.qty,
         note: values.note || undefined,
-        cost_per_unit: values.cost_per_unit
+        cost_per_unit: values.cost_per_unit,
+        approval_token: approvalToken
       });
       toast({ title: "ปรับสต็อกสำเร็จ" });
       await queryClient.invalidateQueries({ queryKey: ["stock"] });
@@ -138,10 +141,19 @@ export default function AdjustmentDialog({
         cost_per_unit: undefined,
         note: ""
       });
+  }
+
+  async function submit(values: FormValues): Promise<void> {
+    try {
+      await executeAdjustment(values);
     } catch (error) {
+      if (approvalErrorDetail(error)?.code === "approval_required") {
+        setPendingApprovalValues(values);
+        return;
+      }
       toast({
         title: "ปรับสต็อกไม่สำเร็จ",
-        description: error instanceof Error ? error.message : "กรุณาลองใหม่อีกครั้ง",
+        description: errorMessage(error, "กรุณาลองใหม่อีกครั้ง"),
         variant: "destructive"
       });
     }
@@ -149,7 +161,17 @@ export default function AdjustmentDialog({
 
   const variants = productDetailQuery.data?.data.variants ?? [];
 
+  const pendingApprovalPayload = pendingApprovalValues ? {
+    location_id: pendingApprovalValues.location_id,
+    product_id: pendingApprovalValues.product_id,
+    variant_id: pendingApprovalValues.variant_id || undefined,
+    qty: pendingApprovalValues.qty,
+    note: pendingApprovalValues.note || undefined,
+    cost_per_unit: pendingApprovalValues.cost_per_unit
+  } : null;
+
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
@@ -254,5 +276,19 @@ export default function AdjustmentDialog({
         </form>
       </DialogContent>
     </Dialog>
+    {pendingApprovalValues && pendingApprovalPayload ? (
+      <ManagerApprovalDialog
+        open
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingApprovalValues(null);
+        }}
+        action="inventory.stock.adjust"
+        requestPayload={pendingApprovalPayload}
+        reason={pendingApprovalValues.note?.trim() || "ปรับสต็อกเกิน threshold ของสาขา"}
+        description="จำนวนที่ปรับเกิน threshold ของสาขาและต้องได้รับอนุมัติจาก Manager"
+        onApproved={(token) => executeAdjustment(pendingApprovalValues, token)}
+      />
+    ) : null}
+    </>
   );
 }

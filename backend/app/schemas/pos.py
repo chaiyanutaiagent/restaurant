@@ -74,6 +74,7 @@ class CreateSaleRequest(BaseSchema):
     note: str | None = None
     is_offline: bool = False
     client_order_id: str | None = None
+    approval_token: str | None = None
 
 
 class PaymentRead(BaseSchema):
@@ -82,6 +83,7 @@ class PaymentRead(BaseSchema):
     payment_method: str
     amount: Decimal
     reference_no: str | None = None
+    original_payment_id: uuid.UUID | None = None
     paid_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -143,10 +145,12 @@ class SaleOrderRead(BaseSchema):
 
 class VoidRequest(BaseSchema):
     void_reason: str
+    approval_token: str | None = None
 
 
 class RefundRequest(BaseSchema):
     refund_reason: str
+    approval_token: str | None = None
 
 
 class PartialRefundItemRequest(BaseSchema):
@@ -157,6 +161,7 @@ class PartialRefundItemRequest(BaseSchema):
 class PartialRefundRequest(BaseSchema):
     refund_reason: str
     items: list[PartialRefundItemRequest] = Field(default_factory=list)
+    approval_token: str | None = None
 
 
 class ReceiptData(BaseSchema):

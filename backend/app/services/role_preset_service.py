@@ -10,7 +10,7 @@ from app.models.role import Permission
 from app.schemas.role import RolePresetRead, RoleScope
 
 
-ROLE_PRESET_POLICY_VERSION = "2026-08-01.2"
+ROLE_PRESET_POLICY_VERSION = "2026-08-01.3"
 
 
 @dataclass(frozen=True)
@@ -43,9 +43,11 @@ COMPANY_OWNER_PERMISSION_CODES = (
     "pos.sale.view",
     "pos.sale.create",
     "pos.sale.void",
+    "pos.sale.void.request",
     "pos.discount.apply",
     "pos.discount.override",
     "pos.refund.create",
+    "pos.refund.request",
     "pos.cashier.open_shift",
     "pos.cashier.close_shift",
     "pos.report.view",
@@ -55,6 +57,7 @@ COMPANY_OWNER_PERMISSION_CODES = (
     "inventory.product.delete",
     "inventory.stock.view",
     "inventory.stock.adjust",
+    "inventory.stock.adjust.request",
     "inventory.purchase.view",
     "inventory.purchase.create",
     "inventory.purchase.approve",
@@ -198,7 +201,9 @@ ROLE_PRESET_POLICIES = (
         permission_codes=(
             "pos.sale.view",
             "pos.sale.create",
+            "pos.sale.void.request",
             "pos.discount.apply",
+            "pos.refund.request",
             "pos.cashier.open_shift",
             "pos.cashier.close_shift",
             "inventory.product.view",

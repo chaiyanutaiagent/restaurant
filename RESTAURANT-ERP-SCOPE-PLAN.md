@@ -648,6 +648,14 @@ shift close พร้อมแก้ mixed central/store stock scope ของ C
 role/approval smokes, Retail idempotency/reconciliation, frontend type-check/build และ repository safety ผ่าน
 เมื่อ 1 สิงหาคม 2026 โดยไม่มี production activation/deploy/push
 
+Gate record: `P5-PRODUCTION-READINESS-05` ผ่าน clean-room backend `189` tests และ QR → Kitchen →
+served → bill/payment → stock/accounting/outbox → central report, standalone Chromium mobile/tablet
+โดยไม่มี page/console/HTTP 5xx error, offline sync `100` orders แบบสอง batch และ lost-ack replay
+โดยได้ canonical sale/payment/session/outbox/journal/stock เดิม, frontend type-check/build, backend audit
+ไม่มี known vulnerability, frontend findings ไม่เกิน reviewed exceptions เดิม, readiness documents และ
+repository safety เมื่อ 1 สิงหาคม 2026; physical-device UAT, security/operator/Platform Owner sign-off
+และ Draft PR CI ยัง pending โดยไม่มี production activation, live migration หรือ Phase 6 work
+
 Owner สั่งเลื่อน physical/visual UAT จนกว่าอุปกรณ์จริงจะมาถึง งานที่เหลือคือ UAT ส่วนนั้น,
 dependency risk acceptance, production checklist และ controlled owner sign-off ห้ามเริ่ม Phase 6,
 deploy production, migrate ฐาน live หรือสร้าง Platform Owner บนฐาน live จนกว่าจะครบและมีคำสั่งชัดเจน

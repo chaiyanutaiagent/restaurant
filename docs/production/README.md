@@ -91,6 +91,18 @@ See [security-hardening.md](./security-hardening.md) for the final dependency au
 
 See [uat-smoke-test.md](./uat-smoke-test.md) for automated smoke tests, optional auth smoke, manual business UAT, and sign-off guidance.
 
+See [phase5-readiness-workbook.md](./phase5-readiness-workbook.md) for the
+non-device evidence package and the remaining owner-controlled Phase 5 gates.
+
+See [device-uat-checklist.md](./device-uat-checklist.md) for the real counter,
+kitchen, pickup, camera, network, and printer test matrix to run when hardware arrives.
+
+See [operator-training-drill.md](./operator-training-drill.md) for the operator
+handoff walkthrough and incident tabletop scenarios.
+
+See [security-risk-acceptance.md](./security-risk-acceptance.md) for the release-time
+audit refresh and accountable security-owner decision record.
+
 ## Final go-live and handoff
 
 Before internet-facing launch, complete the final operational handoff package:

@@ -661,6 +661,16 @@ Owner สั่งเลื่อน physical/visual UAT จนกว่าอ�
 dependency risk acceptance, production checklist และ controlled owner sign-off ห้ามเริ่ม Phase 6,
 deploy production, migrate ฐาน live หรือสร้าง Platform Owner บนฐาน live จนกว่าจะครบและมีคำสั่งชัดเจน
 
+Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
+ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `waiting_for_hardware` ลำดับงานที่ล็อกไว้คือ
+
+1. ยืนยันอุปกรณ์จริง, OS/browser/app, printer, network/UAT environment และผู้รับผิดชอบแต่ละ sign-off
+2. ทำ physical dine-in/takeaway, pairing/revoke/restart/offline/lost-ack/printer และ ERP reconciliation UAT
+3. หากพบ defect ให้แก้เฉพาะ approved failure scope แล้วรัน automated readiness/CI และ physical retest ซ้ำ
+4. เมื่อ release candidate คงที่ ให้ refresh dependency audit และรับ Security Owner decision
+5. ทำ operator incident drill, production/go-live checklist, backup/restore/monitoring/TLS/rollback review และ owner sign-off
+6. รับ Platform Owner Restaurant completion approval แล้วจึงขอคำสั่งแยกสำหรับ mark PR ready/merge, deploy หรือเริ่ม Phase 6
+
 ### Restaurant Completion Gate — ต้องผ่านก่อนเริ่มระบบอื่น
 
 Restaurant ถือว่าเสร็จสำหรับเริ่ม Phase 6 เมื่อครบทั้งหมด:

@@ -79,6 +79,22 @@ Do not put passwords, tokens, private keys, database URLs, customer data, or bac
 - [ ] Review [go-live-checklist.md](./go-live-checklist.md), [operator-handoff.md](./operator-handoff.md), [incident-quick-guide.md](./incident-quick-guide.md), and [sign-off.md](./sign-off.md).
 - [ ] Obtain security, operator/business, and Platform Owner approvals.
 
+## Next work queue
+
+Resume with scope `P5-PHYSICAL-UAT-SIGNOFF-06`. The scope remains part of Restaurant Phase 5; the `06` suffix is only the next work-record sequence and does not mean Takeaway Phase 6 has started.
+
+| Order | Trigger | Work | Required evidence | Owner/status |
+| --- | --- | --- | --- | --- |
+| 1 | Before hardware arrives | Assign business UAT, security, operator, rollback, and Platform owners; fill non-secret production values | Named owners and completed value fields | Owner: pending |
+| 2 | Target hardware arrives | Run [device-uat-checklist.md](./device-uat-checklist.md) on counter, kitchen, pickup display, camera, printer, and actual network | Dine-in/takeaway, pairing/revocation, restart, offline/lost-ack, printer, and reconciliation evidence | `waiting_for_hardware` |
+| 3 | Any device item fails | Fix only the approved failure scope, re-run regression/readiness gates, and repeat affected physical cases | Linked defect, immutable fix commit, green CI, and physical retest | Conditional |
+| 4 | Device release candidate is stable | Re-run dependency audits against the exact commit and complete [security-risk-acceptance.md](./security-risk-acceptance.md) | Security-owner accept/mitigate/block decision | Pending |
+| 5 | UAT and security decision pass | Run [operator-training-drill.md](./operator-training-drill.md), finish production/go-live checklist, and confirm backup/restore, monitoring, TLS, and rollback ownership | Operator/business sign-off and completed production checklist | Pending |
+| 6 | All prior rows pass | Obtain Platform Owner Restaurant completion approval and update the Restaurant Completion Gate | Approved sign-off record tied to the release commit | Pending |
+| 7 | Completion approval exists | Ask for a separate explicit decision to mark the PR ready/merge, deploy production, or begin Takeaway Phase 6 | Recorded owner instruction and change scope | Blocked until approval |
+
+When resuming, first confirm the hardware inventory, target browser/app versions, printer connection type, network profile, UAT environment, and accountable people. Do not store credentials or pairing secrets in Git.
+
 ## Stop conditions
 
 Stop the release if any required automated gate fails, a production value is unknown, a security risk is blocked, device UAT fails, reconciliation differs, backup/restore evidence is stale, or an accountable approver is unavailable. Do not deploy, migrate a live database, create live Platform Owner credentials, or begin Phase 6 from this workbook alone.

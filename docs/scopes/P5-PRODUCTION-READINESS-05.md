@@ -49,6 +49,19 @@ Compose project ต้องขึ้นต้น `restaurant-p5-uat-readiness`;
 - ไม่มี schema migration และไม่มี production/live data change ให้ rollback
 - Playwright dependency และไฟล์ทดสอบถูกแยกจาก production runtime; production frontend image ยังคงเป็น nginx/static assets
 
+## Handoff ไปงานรอบถัดไป
+
+```text
+next_scope_id: P5-PHYSICAL-UAT-SIGNOFF-06
+next_scope_phase: Restaurant Phase 5
+trigger: real_hardware_received
+status: waiting_for_hardware
+```
+
+เมื่องานกลับมาทำต่อ ให้เริ่มจากยืนยันรายการอุปกรณ์/OS/browser/printer/network และผู้รับผิดชอบ จากนั้นทำ physical dine-in/takeaway UAT, pairing/revoke/restart/offline/printer/reconciliation ตาม checklist หากพบ defect ให้เปิดขอบเขตแก้เฉพาะจุดและรัน automated readiness gate ซ้ำ เมื่อ release candidate คงที่จึงทำ fresh security decision, operator/go-live checklist และ Platform Owner completion sign-off ตามลำดับ
+
+หลัง sign-off ครบต้องขอคำสั่งแยกสำหรับ mark PR ready/merge, production deployment หรือเริ่ม Takeaway Phase 6; ห้ามถือว่าอนุมัติโดยอัตโนมัติ
+
 ## Evidence
 
 ```text

@@ -511,9 +511,9 @@ legacy shared compatibility API และไม่ใช่ Retail Database API 
 Acceptance Criteria:
 
 - [x] ทดสอบผู้ใช้จำลองอย่างน้อย Company Owner, Brand Manager, Branch Manager, Cashier และ Kitchen Staff
-- [ ] Cashier ทำรายการเกิน limit ไม่ได้โดยไม่มี approval
+- [x] Cashier ทำรายการเกิน limit ไม่ได้โดยไม่มี approval
 - [x] Kitchen Staff เข้าหน้าการเงินหรือ settings ไม่ได้
-- [ ] Audit Log ระบุผู้ทำ ผู้อนุมัติ สาขา เวลา และเหตุผลได้
+- [x] Audit Log ระบุผู้ทำ ผู้อนุมัติ สาขา เวลา และเหตุผลได้
 
 ไม่รวม: HR/payroll engine ใหม่
 
@@ -524,8 +524,17 @@ policy/API และให้หน้า Roles ใช้ server contract เด
 `P2-SCOPE-ASSIGNMENTS-02` เพิ่ม Role scope contract และ assignment ระดับ
 Company/Brand/Branch/Station พร้อม Station-locked token, granular kitchen-ticket permission,
 create/revoke audit และ compatibility กับ `user_branches` เดิม โดยผ่าน isolated API matrix และ
-Legacy/Platform migration rehearsal แล้ว งาน Manager PIN, Limit และ approval session ยังต้องทำใน
-Scope ID ถัดไปก่อนปิด Phase 2 gate
+Legacy/Platform migration rehearsal แล้ว
+
+`P2-APPROVAL-SESSIONS-03` เพิ่ม Manager PIN ที่ hash พร้อม lockout, approval session แบบอายุสั้นและ
+single-use ที่ผูก request fingerprint, limit enforcement สำหรับ discount/void/refund/stock, original
+payment link และ approval audit โดยผ่าน API matrix และ migration rehearsal ครบทั้ง Legacy, Platform
+และ Restaurant
+
+Gate record: `P2-PHASE-GATE-04` ผ่าน consolidated persona/scope/approval matrix, migration
+upgrade → downgrade → re-upgrade, backend 140 tests และ frontend type-check/build เมื่อ 1 สิงหาคม 2026
+จึงปิด Phase 2 และเริ่ม Phase 3 ได้ภายใต้ Scope ID ใหม่ โดย production activation ยังต้องอนุมัติแยก
+และ visual browser click-through ถูกเลื่อนเพราะ session ไม่มี in-app Browser instance
 
 ### Phase 3 — Dedicated Counter, Kitchen และ Device Pairing
 

@@ -29,7 +29,7 @@ from app.utils.create_superuser import DEFAULT_COMPANY_ID
 from app.utils.security import decode_token, hash_password
 
 
-DATABASE_PREFIX = "restaurant_p2_scope_"
+DATABASE_PREFIXES = ("restaurant_p2_scope_", "restaurant_p2_approval_")
 TEST_PASSWORD = f"Aa1!{secrets.token_urlsafe(24)}"
 
 
@@ -65,8 +65,10 @@ def expect(response, expected: int, label: str):
 
 async def seed_scope_context() -> ScopeContext:
     configured_database = os.environ.get("P2_SCOPE_DATABASE_NAME", "")
-    if not configured_database.startswith(DATABASE_PREFIX):
-        raise RuntimeError("Phase 2 scope smoke refuses to write a non-scope database")
+    if not configured_database.startswith(DATABASE_PREFIXES):
+        raise RuntimeError(
+            "Phase 2 scope smoke refuses to write a non-Phase-2 temporary database"
+        )
 
     async with AsyncSessionLocal() as db:
         actual_database = await db.scalar(func.current_database())

@@ -158,6 +158,7 @@ async def prepare() -> dict[str, str]:
             "inventory.stock.adjust",
             "inventory.stock.adjust.request",
             "fb.order.create",
+            "system.role.view",
         }
         permissions = {
             permission.code: permission
@@ -183,6 +184,7 @@ async def prepare() -> dict[str, str]:
             permissions["pos.refund.create"],
             permissions["inventory.stock.adjust"],
             permissions["inventory.stock.view"],
+            permissions["system.role.view"],
         ]
         cashier_role = Role(
             company_id=DEFAULT_COMPANY_ID,
@@ -368,6 +370,38 @@ def run() -> None:
     with TestClient(app) as client:
         manager_headers = login(client, context["manager_username"])
         cashier_headers = login(client, context["cashier_username"])
+
+        presets = expect(
+            client.get("/api/v1/system/role-presets", headers=manager_headers),
+            200,
+        )
+        if [preset["key"] for preset in presets] != [
+            "company-owner",
+            "brand-manager",
+            "branch-manager",
+            "cashier",
+            "kitchen-staff",
+        ]:
+            raise RuntimeError("Phase 2 role preset order is invalid")
+        if any(
+            preset["policy_version"] != "2026-08-01.3"
+            or not preset["is_available"]
+            for preset in presets
+        ):
+            raise RuntimeError("Phase 2 role preset policy is unavailable or stale")
+        preset_by_key = {preset["key"]: preset for preset in presets}
+        cashier_codes = set(preset_by_key["cashier"]["permission_codes"])
+        if not {"pos.sale.void.request", "pos.refund.request"}.issubset(cashier_codes):
+            raise RuntimeError("Cashier preset is missing approval request permissions")
+        if cashier_codes.intersection(
+            {"pos.sale.void", "pos.discount.override", "pos.refund.create"}
+        ):
+            raise RuntimeError("Cashier preset contains direct approval permissions")
+        if set(preset_by_key["kitchen-staff"]["permission_codes"]) != {
+            "fb.menu.view",
+            "fb.kitchen.ticket.manage",
+        }:
+            raise RuntimeError("Kitchen Staff escaped the station kitchen boundary")
 
         status_data = expect(
             client.get("/api/v1/approvals/manager-pin", headers=manager_headers),
@@ -724,7 +758,7 @@ def run() -> None:
     asyncio.run(verify(context))
     print(
         "p2_approval_api_smoke=ok "
-        "pin_hash_lockout=true single_use=true fingerprint=true "
+        "role_presets=true pin_hash_lockout=true single_use=true fingerprint=true "
         "discount_void_refund_stock=true restaurant_checkout=true "
         "original_payment_link=true"
     )

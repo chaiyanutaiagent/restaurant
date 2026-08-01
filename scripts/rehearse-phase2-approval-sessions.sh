@@ -256,6 +256,37 @@ for database_name in "$LEGACY_DATABASE" "$PLATFORM_DATABASE"; do
     || fail "manager PIN table is missing from $database_name"
 done
 
+printf 'Running isolated assignment and authorization API matrix on latest Phase 2 schema...\n'
+scope_output="$(docker compose -f "$COMPOSE_FILE" run --rm --no-deps \
+  -e P2_SCOPE_DATABASE_NAME="$LEGACY_DATABASE" \
+  -e P2_PLATFORM_DATABASE_NAME="$PLATFORM_DATABASE" \
+  -e P2_RESTAURANT_DATABASE_NAME="$RESTAURANT_DATABASE" \
+  -e IDENTITY_DATABASE=legacy \
+  -e RESTAURANT_SERVICE_DATABASE=legacy \
+  -e REFERENCE_PROJECTOR_ENABLED=false \
+  -v "$PWD/backend/tests:/app/tests:ro" \
+  backend sh -c '
+    set -eu
+    database_server="${DATABASE_URL%/*}"
+    platform_server="${PLATFORM_DATABASE_URL%/*}"
+    restaurant_server="${RESTAURANT_DATABASE_URL%/*}"
+    export DATABASE_URL="$database_server/$P2_SCOPE_DATABASE_NAME"
+    export PLATFORM_DATABASE_URL="$platform_server/$P2_PLATFORM_DATABASE_NAME"
+    export RESTAURANT_DATABASE_URL="$restaurant_server/$P2_RESTAURANT_DATABASE_NAME"
+    export PYTHONPATH=/app
+    python /app/tests/smoke_staff_scope_api.py
+  ')"
+printf '%s\n' "$scope_output"
+for assertion in \
+  p2_scope_company_brand_branch=ok \
+  p2_scope_station_isolation=ok \
+  p2_scope_multi_role_union=ok \
+  p2_scope_audit_revoke=ok \
+  p2_scope_kitchen_boundary=ok; do
+  printf '%s\n' "$scope_output" | grep -F "$assertion" >/dev/null \
+    || fail "missing scope API assertion: $assertion"
+done
+
 printf 'Running isolated Manager PIN and approval operation API matrix...\n'
 approval_output="$(docker compose -f "$COMPOSE_FILE" run --rm --no-deps \
   -e P2_LEGACY_DATABASE_NAME="$LEGACY_DATABASE" \
@@ -302,6 +333,11 @@ restaurant_schema_contract_version=2
 upgrade_downgrade_reupgrade=true
 manager_pin_hash_lockout=true
 approval_single_use_fingerprint=true
+company_brand_branch_scope=true
+station_ticket_isolation=true
+multi_role_context_union=true
+assignment_audit_revoke=true
+kitchen_privilege_boundary=true
 discount_void_refund_stock_matrix=true
 restaurant_checkout_discount=true
 original_payment_link=true

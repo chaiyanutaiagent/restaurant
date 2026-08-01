@@ -35,6 +35,7 @@ REFERENCE_COLUMNS: dict[str, tuple[str, ...]] = {
         "timezone",
         "fiscal_year_start",
         "is_active",
+        "credential_version",
         "created_at",
         "updated_at",
     ),

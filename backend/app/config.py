@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     approval_token_expire_seconds: int = Field(default=120, ge=30, le=300)
     manager_pin_max_failed_attempts: int = Field(default=5, ge=3, le=10)
     manager_pin_lock_minutes: int = Field(default=15, ge=1, le=60)
+    platform_login_max_failed_attempts: int = Field(default=5, ge=3, le=10)
+    platform_login_lock_minutes: int = Field(default=15, ge=1, le=60)
     device_pairing_pin_expire_minutes: int = Field(default=10, ge=2, le=60)
     device_pairing_max_failed_attempts: int = Field(default=5, ge=3, le=10)
     device_pairing_lock_minutes: int = Field(default=15, ge=1, le=60)

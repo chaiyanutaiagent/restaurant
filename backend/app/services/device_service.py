@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.dependencies import TokenData
 from app.models.audit import AuditLog
+from app.models.company import Company
 from app.models.device import DeviceRegistration
 from app.models.restaurant import BrandBranch
 from app.models.settings import BranchSettings
@@ -247,6 +248,9 @@ class DeviceService:
         now = datetime.now(timezone.utc)
         if device is None or device.revoked_at is not None:
             raise invalid_pairing_credentials()
+        company = await self.db.get(Company, device.company_id)
+        if company is None or not company.is_active:
+            raise invalid_pairing_credentials()
         if device.pairing_locked_until is not None and device.pairing_locked_until > now:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -307,7 +311,13 @@ class DeviceService:
             user_agent=user_agent,
         )
         await self.db.commit()
-        return self._session_read(device, context.brand_id, refresh_token, now)
+        return self._session_read(
+            device,
+            context.brand_id,
+            refresh_token,
+            now,
+            company.credential_version,
+        )
 
     async def renew_device(
         self,
@@ -335,6 +345,9 @@ class DeviceService:
             )
         ):
             raise invalid_refresh_credential()
+        company = await self.db.get(Company, device.company_id)
+        if company is None or not company.is_active:
+            raise invalid_refresh_credential()
         try:
             context = await self._restaurant_context(device.company_id, device.branch_id)
             await self._canonical_station(
@@ -359,7 +372,13 @@ class DeviceService:
             user_agent=user_agent,
         )
         await self.db.commit()
-        return self._session_read(device, context.brand_id, data.refresh_token, now)
+        return self._session_read(
+            device,
+            context.brand_id,
+            data.refresh_token,
+            now,
+            company.credential_version,
+        )
 
     @staticmethod
     def _new_refresh_credential(device_id: uuid.UUID) -> str:
@@ -389,6 +408,7 @@ class DeviceService:
         brand_id: uuid.UUID,
         refresh_token: str,
         now: datetime,
+        company_credential_version: int,
     ) -> DevicePairRead:
         access_token = create_device_access_token(
             device_id=device.id,
@@ -398,6 +418,7 @@ class DeviceService:
             device_type=device.device_type,
             station_key=device.station_key,
             credential_version=device.credential_version,
+            company_credential_version=company_credential_version,
         )
         token_payload = decode_token(access_token)
         expires_in = max(int(token_payload["exp"] - now.timestamp()), 0)

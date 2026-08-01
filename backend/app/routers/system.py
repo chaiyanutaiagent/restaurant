@@ -48,6 +48,7 @@ from app.services.staff_scope_service import StaffScopeService
 from app.services.upload_service import UploadService
 from app.services.user_access_service import UserAccessService
 from app.services.entitlement_service import CENTRAL_PRODUCTION_MODULE, EntitlementService
+from app.services.tenant_control_policy import TenantControlPolicy
 from app.utils.health_check import get_system_health
 from app.utils.rate_limiter import check_rate_limit
 
@@ -237,6 +238,7 @@ async def create_user(
     current: TokenData = Depends(require_permission("system.user.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    await TenantControlPolicy(db).require_capacity(current.company_id, "users")
     service = AdminService(db)
     user = await service.create_user(current.company_id, current.user_id, payload)
     detail = await service.get_user_detail(user.id, current.company_id)
@@ -397,6 +399,7 @@ async def create_branch(
     current: TokenData = Depends(require_permission("system.branch.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    await TenantControlPolicy(db).require_capacity(current.company_id, "branches")
     service = AdminService(db)
     branch = await service.create_branch(current.company_id, payload)
     detail = await service.get_branch_detail(branch.id, current.company_id)

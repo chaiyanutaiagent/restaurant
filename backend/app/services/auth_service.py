@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
+from app.models.company import Company
 from app.models.role import Role
 from app.models.staff_assignment import StaffRoleAssignment
 from app.models.user import User, UserBranch
@@ -37,11 +38,16 @@ class AuthService:
         username: str,
         password: str,
     ) -> User:
-        statement = select(User).where(
-            User.company_id == company_id,
-            User.username == username,
-            User.deleted_at.is_(None),
-            User.is_active.is_(True),
+        statement = (
+            select(User)
+            .join(Company, Company.id == User.company_id)
+            .where(
+                User.company_id == company_id,
+                User.username == username,
+                User.deleted_at.is_(None),
+                User.is_active.is_(True),
+                Company.is_active.is_(True),
+            )
         )
         user = await self.db.scalar(statement)
         if user is None or not verify_password(password, user.hashed_password):
@@ -168,6 +174,12 @@ class AuthService:
         user_agent: str | None,
         station_key: str | None = None,
     ) -> tuple[str, str]:
+        company = await self.db.get(Company, user.company_id)
+        if company is None or not company.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Company is inactive or no longer exists",
+            )
         (
             permissions,
             resolved_branch_id,
@@ -187,12 +199,14 @@ class AuthService:
             station_key=resolved_station_key,
             assignment_ids=[str(value) for value in assignment_ids],
             scope_types=scope_types,
+            company_credential_version=company.credential_version,
         )
         refresh_token = create_refresh_token(
             subject=str(user.id),
             company_id=str(user.company_id),
             branch_id=str(resolved_branch_id) if resolved_branch_id else None,
             station_key=resolved_station_key,
+            company_credential_version=company.credential_version,
         )
         expires_at = self._extract_expiration(refresh_token)
         self.db.add(
@@ -247,17 +261,28 @@ class AuthService:
                 detail="Refresh token is invalid",
             )
 
-        user = await self.db.scalar(
-            select(User).where(
-                User.id == refresh_record.user_id,
-                User.deleted_at.is_(None),
-                User.is_active.is_(True),
+        row = (
+            await self.db.execute(
+                select(User, Company)
+                .join(Company, Company.id == User.company_id)
+                .where(
+                    User.id == refresh_record.user_id,
+                    User.deleted_at.is_(None),
+                    User.is_active.is_(True),
+                    Company.is_active.is_(True),
+                )
             )
-        )
-        if user is None:
+        ).one_or_none()
+        if row is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found",
+            )
+        user, company = row
+        if int(payload.get("company_credential_version", 1)) != company.credential_version:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token has been revoked",
             )
 
         refresh_record.revoked_at = now
@@ -287,12 +312,14 @@ class AuthService:
             station_key=resolved_station_key,
             assignment_ids=[str(value) for value in assignment_ids],
             scope_types=scope_types,
+            company_credential_version=company.credential_version,
         )
         new_refresh_token = create_refresh_token(
             subject=str(user.id),
             company_id=str(user.company_id),
             branch_id=str(resolved_branch_id) if resolved_branch_id else None,
             station_key=resolved_station_key,
+            company_credential_version=company.credential_version,
         )
         self.db.add(
             RefreshToken(

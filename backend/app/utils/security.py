@@ -33,6 +33,7 @@ def create_access_token(
     station_key: str | None = None,
     assignment_ids: list[str] | None = None,
     scope_types: list[str] | None = None,
+    company_credential_version: int = 1,
 ) -> str:
     now = datetime.now(timezone.utc)
     expire = now + (
@@ -49,6 +50,7 @@ def create_access_token(
         "assignment_ids": assignment_ids or [],
         "scope_types": scope_types or [],
         "permissions": permissions,
+        "company_credential_version": company_credential_version,
         "type": "access",
         "exp": expire,
         "iat": now,
@@ -62,6 +64,7 @@ def create_refresh_token(
     *,
     branch_id: str | None = None,
     station_key: str | None = None,
+    company_credential_version: int = 1,
 ) -> str:
     now = datetime.now(timezone.utc)
     payload = {
@@ -69,6 +72,7 @@ def create_refresh_token(
         "company_id": company_id,
         "branch_id": branch_id,
         "station_key": station_key,
+        "company_credential_version": company_credential_version,
         "type": "refresh",
         "jti": str(uuid.uuid4()),
         "exp": now + timedelta(days=settings.refresh_token_expire_days),
@@ -119,6 +123,7 @@ def create_device_access_token(
     device_type: str,
     station_key: str | None,
     credential_version: int,
+    company_credential_version: int = 1,
     expires_delta: timedelta | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
@@ -135,7 +140,31 @@ def create_device_access_token(
         "device_type": device_type,
         "station_key": station_key,
         "credential_version": credential_version,
+        "company_credential_version": company_credential_version,
         "type": "device_access",
+        "jti": str(uuid.uuid4()),
+        "exp": expire,
+        "iat": now,
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
+
+def create_platform_access_token(
+    *,
+    operator_id: uuid.UUID,
+    credential_version: int,
+    is_superuser: bool,
+    expires_delta: timedelta | None = None,
+) -> str:
+    now = datetime.now(timezone.utc)
+    expire = now + (
+        expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
+    )
+    payload = {
+        "sub": str(operator_id),
+        "credential_version": credential_version,
+        "is_superuser": is_superuser,
+        "type": "platform_access",
         "jti": str(uuid.uuid4()),
         "exp": expire,
         "iat": now,

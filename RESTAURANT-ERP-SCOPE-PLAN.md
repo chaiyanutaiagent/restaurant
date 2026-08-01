@@ -617,13 +617,19 @@ main backend คงหยุด และไม่มี production activation/d
 
 Acceptance Criteria:
 
-- [ ] สร้างร้านลูกค้าใหม่โดยไม่แก้ source code หรือ SQL ด้วยมือ
-- [ ] ปิด Company แล้วทุก user/device ของ tenant เข้าไม่ได้
+- [x] สร้างร้านลูกค้าใหม่โดยไม่แก้ source code หรือ SQL ด้วยมือ
+- [x] ปิด Company แล้วทุก user/device ของ tenant เข้าไม่ได้
 - [ ] Backup/restore tenant test ผ่าน
 - [ ] UAT ตั้งแต่ QR order จนถึง ERP report ผ่าน
 - [ ] Production checklist และ owner sign-off ครบ
 
 ไม่รวม: ระบบเก็บเงิน subscription อัตโนมัติ
+
+Progress record: `P5-TENANT-LIFECYCLE-01` เพิ่ม Platform Owner identity/workspace แยก,
+Company + initial Company Owner onboarding, derived checklist, manual feature/limit controls,
+audited suspend/reactivate และ Company credential generation ที่ revoke user/device รุ่นเดิมถาวร;
+isolated Legacy/Platform/Restaurant migration rehearsal, backend `183` tests, lifecycle API smoke และ
+frontend type-check/build ผ่าน โดยไม่ migrate/deploy production หรือเปลี่ยนฐาน live
 
 ### Restaurant Completion Gate — ต้องผ่านก่อนเริ่มระบบอื่น
 

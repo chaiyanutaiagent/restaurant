@@ -27,6 +27,7 @@ from app.database import (
 from app.middleware.branch_context import BranchContextMiddleware
 from app.middleware.request_id import RequestIDMiddleware
 from app.routers import accounting as accounting_router
+from app.routers import platform as platform_router
 from app.routers import api_mgmt, approvals, device_workspaces, devices, incoming_webhook, public_api, storefront
 from app.routers import crm as crm_router
 from app.routers import etax as etax_router
@@ -126,6 +127,7 @@ app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads"
 
 app.include_router(router)
 app.include_router(auth.router)
+app.include_router(platform_router.router)
 app.include_router(approvals.router)
 app.include_router(devices.router)
 app.include_router(devices.auth_router)

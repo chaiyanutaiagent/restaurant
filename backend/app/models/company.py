@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Integer, String, Text, text
+from sqlalchemy import Boolean, CheckConstraint, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, relationship, mapped_column
 
 from app.database import Base
@@ -15,6 +15,12 @@ if TYPE_CHECKING:
 
 class Company(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "companies"
+    __table_args__ = (
+        CheckConstraint(
+            "credential_version > 0",
+            name="company_credential_version_positive",
+        ),
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     name_en: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -45,6 +51,11 @@ class Company(UUIDMixin, TimestampMixin, Base):
         Boolean,
         nullable=False,
         server_default=text("true"),
+    )
+    credential_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
     )
 
     branches: Mapped[list["Branch"]] = relationship("Branch", back_populates="company")

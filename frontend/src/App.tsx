@@ -2,9 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Capacitor } from "@capacitor/core";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
+import PlatformProtectedRoute from "@/components/auth/PlatformProtectedRoute";
 import DeviceProtectedRoute from "@/components/auth/DeviceProtectedRoute";
 import AppShell from "@/components/layout/AppShell";
 import RestaurantShell from "@/components/layout/RestaurantShell";
+import PlatformShell from "@/components/layout/PlatformShell";
 import { Toaster } from "@/components/ui/toaster";
 import { initAutoSync } from "@/lib/syncService";
 import AccountingPage from "@/pages/accounting/AccountingPage";
@@ -73,6 +75,10 @@ import BrandStaffRequestsPage from "@/pages/restaurant/BrandStaffRequestsPage";
 import CounterDevicePage from "@/pages/devices/CounterDevicePage";
 import DevicePairingPage from "@/pages/devices/DevicePairingPage";
 import DevicesPage from "@/pages/devices/DevicesPage";
+import PlatformLoginPage from "@/pages/platform/PlatformLoginPage";
+import PlatformCompaniesPage from "@/pages/platform/PlatformCompaniesPage";
+import PlatformCompanyDetailPage from "@/pages/platform/PlatformCompanyDetailPage";
+import PlatformAuditPage from "@/pages/platform/PlatformAuditPage";
 import { useEffect } from "react";
 
 const queryClient = new QueryClient({
@@ -89,6 +95,15 @@ export default function App(): JSX.Element {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/platform/login" element={<PlatformLoginPage />} />
+          <Route element={<PlatformProtectedRoute />}>
+            <Route element={<PlatformShell />}>
+              <Route path="/platform" element={<Navigate to="/platform/companies" replace />} />
+              <Route path="/platform/companies" element={<PlatformCompaniesPage />} />
+              <Route path="/platform/companies/:companyId" element={<PlatformCompanyDetailPage />} />
+              <Route path="/platform/audit" element={<PlatformAuditPage />} />
+            </Route>
+          </Route>
           <Route path="/device/pair" element={<DevicePairingPage />} />
           <Route element={<DeviceProtectedRoute type="counter" />}>
             <Route path="/counter" element={<CounterDevicePage />} />

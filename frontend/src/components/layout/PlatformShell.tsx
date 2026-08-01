@@ -1,0 +1,73 @@
+import { Building2, ClipboardList, LogOut, ShieldCheck } from "lucide-react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { usePlatformAuthStore } from "@/stores/platform-auth.store";
+
+export default function PlatformShell(): JSX.Element {
+  const operator = usePlatformAuthStore((state) => state.operator);
+  const clearSession = usePlatformAuthStore((state) => state.clearSession);
+  const navigate = useNavigate();
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <header className="border-b border-slate-800 bg-slate-950/95">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-emerald-400 p-2.5 text-slate-950">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">
+                Platform Control Plane
+              </p>
+              <h1 className="text-lg font-semibold">Restaurant Platform</h1>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-sm">
+            <div className="hidden text-right sm:block">
+              <p className="font-medium">{operator?.display_name}</p>
+              <p className="text-xs text-slate-400">Platform Owner</p>
+            </div>
+            <button
+              type="button"
+              className="rounded-lg border border-slate-700 p-2 text-slate-300 hover:bg-slate-800"
+              aria-label="ออกจาก Platform"
+              onClick={() => {
+                clearSession();
+                navigate("/platform/login", { replace: true });
+              }}
+            >
+              <LogOut className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      </header>
+      <div className="mx-auto grid max-w-7xl gap-6 px-5 py-6 md:grid-cols-[220px_minmax(0,1fr)]">
+        <nav className="flex gap-2 md:flex-col">
+          <NavLink
+            to="/platform/companies"
+            className={({ isActive }) =>
+              `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+                isActive ? "bg-emerald-400 text-slate-950" : "text-slate-300 hover:bg-slate-900"
+              }`
+            }
+          >
+            <Building2 className="h-5 w-5" /> บริษัทลูกค้า
+          </NavLink>
+          <NavLink
+            to="/platform/audit"
+            className={({ isActive }) =>
+              `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+                isActive ? "bg-emerald-400 text-slate-950" : "text-slate-300 hover:bg-slate-900"
+              }`
+            }
+          >
+            <ClipboardList className="h-5 w-5" /> Audit Log
+          </NavLink>
+        </nav>
+        <main className="min-w-0">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}

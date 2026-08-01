@@ -17,6 +17,7 @@ from app.schemas.device import (
     DeviceRenewRequest,
 )
 from app.services.device_service import DeviceService
+from app.services.tenant_control_policy import TenantControlPolicy
 
 
 router = APIRouter(prefix="/api/v1/system/devices", tags=["devices"])
@@ -52,6 +53,7 @@ async def create_device(
     db: AsyncSession = Depends(get_identity_db),
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await TenantControlPolicy(db).require_capacity(current.company_id, "devices")
     result = await DeviceService(db, restaurant_db=restaurant_db).create_device(
         current,
         payload,

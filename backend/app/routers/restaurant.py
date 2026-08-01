@@ -21,6 +21,7 @@ from app.dependencies import (
     get_optional_counter_device,
     require_any_permission,
     require_business_type,
+    require_company_feature,
     require_permission,
 )
 from app.models.branch import Branch
@@ -68,6 +69,7 @@ from app.services.offline_sale_authorization import (
 from app.services.report_scope_policy import require_brand_report_scope
 from app.services.restaurant_report_service import build_financial_reconciliation
 from app.services.entitlement_service import CENTRAL_PRODUCTION_MODULE, EntitlementService
+from app.services.tenant_control_policy import TenantControlPolicy
 from app.services.staff_scope_policy import normalized_station_key
 from app.services.fb_setup import (
     DiningTableZonePlan,
@@ -98,7 +100,10 @@ from app.schemas.transfer import (
 router = APIRouter(
     prefix="/api/v1/restaurant",
     tags=["restaurant"],
-    dependencies=[Depends(require_business_type(RESTAURANT))],
+    dependencies=[
+        Depends(require_business_type(RESTAURANT)),
+        Depends(require_company_feature("restaurant")),
+    ],
 )
 public_router = APIRouter(prefix="/api/public/menu", tags=["restaurant-public"])
 qs_router = APIRouter(prefix="/api/public/qs", tags=["restaurant-qs"])
@@ -775,6 +780,9 @@ async def create_brand(
     current: TokenData = Depends(require_permission("fb.settings.manage")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    controls = TenantControlPolicy(db)
+    await controls.require_feature(current.company_id, "restaurant")
+    await controls.require_capacity(current.company_id, "brands")
     slug = payload.slug.strip().lower()
     name = payload.name.strip()
     if not slug or not name:

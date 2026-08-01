@@ -18,6 +18,8 @@ from app.database import (
     get_restaurant_service_db,
 )
 from app.models.device import DeviceRegistration
+from app.models.company import Company
+from app.models.platform import PlatformOperator
 from app.models.settings import BranchSettings
 from app.models.user import User
 from app.services.business_context_service import (
@@ -28,6 +30,7 @@ from app.services.staff_scope_policy import normalized_station_key
 from app.utils.security import decode_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+platform_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/platform/auth/login")
 
 
 @dataclass
@@ -61,6 +64,14 @@ class DeviceTokenData:
     last_seen_at: datetime
 
 
+@dataclass
+class PlatformTokenData:
+    operator_id: uuid.UUID
+    username: str
+    display_name: str
+    is_superuser: bool
+
+
 def _device_unauthorized() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -80,18 +91,31 @@ async def get_current_user(
         )
     user_id = uuid.UUID(payload["sub"])
     company_id = uuid.UUID(payload["company_id"])
-    user = await db.scalar(
-        select(User).where(
-            User.id == user_id,
-            User.company_id == company_id,
-            User.deleted_at.is_(None),
-            User.is_active.is_(True),
+    row = (
+        await db.execute(
+            select(User, Company)
+            .join(Company, Company.id == User.company_id)
+            .where(
+                User.id == user_id,
+                User.company_id == company_id,
+                User.deleted_at.is_(None),
+                User.is_active.is_(True),
+                Company.is_active.is_(True),
+            )
         )
-    )
-    if user is None:
+    ).one_or_none()
+    if row is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User is inactive or no longer exists",
+        )
+    user, company = row
+    # Tokens issued before Phase 5 implicitly belong to generation 1. Once a
+    # Company is suspended the generation increments, so those tokens stay dead.
+    if int(payload.get("company_credential_version", 1)) != company.credential_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User session has been revoked",
         )
     branch_id = uuid.UUID(payload["branch_id"]) if payload.get("branch_id") else None
     context = None
@@ -113,6 +137,44 @@ async def get_current_user(
         station_key=payload.get("station_key"),
         assignment_ids=[uuid.UUID(value) for value in payload.get("assignment_ids", [])],
         scope_types=list(payload.get("scope_types", [])),
+    )
+
+
+async def get_current_platform_operator(
+    token: str = Depends(platform_oauth2_scheme),
+    db: AsyncSession = Depends(get_identity_db),
+) -> PlatformTokenData:
+    payload = decode_token(token)
+    if payload.get("type") != "platform_access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+        )
+    try:
+        operator_id = uuid.UUID(payload["sub"])
+        credential_version = int(payload["credential_version"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Platform credential",
+        ) from exc
+    operator = await db.scalar(
+        select(PlatformOperator).where(
+            PlatformOperator.id == operator_id,
+            PlatformOperator.is_active.is_(True),
+            PlatformOperator.credential_version == credential_version,
+        )
+    )
+    if operator is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Platform operator is inactive or no longer exists",
+        )
+    return PlatformTokenData(
+        operator_id=operator.id,
+        username=operator.username,
+        display_name=operator.display_name,
+        is_superuser=operator.is_superuser,
     )
 
 
@@ -166,8 +228,12 @@ async def resolve_device_token(
             DeviceRegistration.branch_id == branch_id,
         )
     )
+    company = await db.get(Company, company_id)
     if (
         device is None
+        or company is None
+        or not company.is_active
+        or int(payload.get("company_credential_version", 1)) != company.credential_version
         or device.revoked_at is not None
         or device.paired_at is None
         or device.credential_version != credential_version
@@ -304,6 +370,19 @@ def require_business_type(expected: str) -> Callable:
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Business context required: {expected}",
         )
+
+    return checker
+
+
+def require_company_feature(feature_key: str) -> Callable:
+    async def checker(
+        current: TokenData = Depends(get_current_user),
+        db: AsyncSession = Depends(get_identity_db),
+    ) -> TokenData:
+        from app.services.tenant_control_policy import TenantControlPolicy
+
+        await TenantControlPolicy(db).require_feature(current.company_id, feature_key)
+        return current
 
     return checker
 

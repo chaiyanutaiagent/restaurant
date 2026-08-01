@@ -40,6 +40,20 @@ export interface RoleDetail {
   user_count: number;
 }
 
+export interface RolePreset {
+  key: string;
+  name: string;
+  description: string;
+  default_scope: "company" | "brand" | "branch" | "station";
+  allowed_scopes: Array<"company" | "brand" | "branch" | "station">;
+  is_branch_assignable: boolean;
+  permission_ids: string[];
+  permission_codes: string[];
+  missing_permission_codes: string[];
+  is_available: boolean;
+  policy_version: string;
+}
+
 export interface BranchSettings {
   id: string;
   branch_id: string;

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from pydantic import ConfigDict
 
 from app.schemas import BaseSchema
+
+
+RoleScope = Literal["company", "brand", "branch", "station"]
 
 
 class PermissionRead(BaseSchema):
@@ -14,6 +18,20 @@ class PermissionRead(BaseSchema):
     module: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RolePresetRead(BaseSchema):
+    key: str
+    name: str
+    description: str
+    default_scope: RoleScope
+    allowed_scopes: list[RoleScope]
+    is_branch_assignable: bool
+    permission_ids: list[uuid.UUID]
+    permission_codes: list[str]
+    missing_permission_codes: list[str]
+    is_available: bool
+    policy_version: str
 
 
 class RoleBase(BaseSchema):

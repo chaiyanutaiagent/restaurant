@@ -12,86 +12,31 @@ Restaurant POS uses permission codes as the enforcement layer. Roles are company
 - `brand.*` - Brand storefront apps, replenishment, and delivery receive
 - `hr.*` - HR, attendance, and payroll
 
-## Recommended Role Presets
+## Phase 2 Canonical Starter Role Presets
 
-### ERP Admin
+Policy version: `2026-08-01`
 
-For core platform administration.
+The backend owns the preset definitions and exposes resolved permission IDs through
+`GET /api/v1/system/role-presets`. The Roles UI consumes that contract and must not keep a separate
+permission-code list.
 
-Includes:
+| Preset | Default scope | Allowed scopes | Branch-request compatible | Boundary |
+|---|---|---|---|---|
+| Company Owner | Company | Company | No | Explicit full tenant permission catalog; no wildcard |
+| Brand Manager | Brand | Brand | No | Brand standards, menu, recipe, stock, production, and reports |
+| Branch Manager | Branch | Branch | Yes | Branch operations and staff requests; no central admin/approval permissions |
+| Cashier | Branch | Branch, Station | Yes | Sale, standard discount, cashier shift, product/stock view |
+| Kitchen Staff | Station | Station | Yes | `fb.menu.view` and `fb.kitchen.manage` only |
 
-- Company and branch management
-- User and role management
-- Product and inventory administration
-- Purchase and transfer access
-- Accounting and payment visibility
+The endpoint marks a preset unavailable and returns `missing_permission_codes` when the seeded
+permission catalog drifts. Clients must not silently create a partial preset.
 
-### POS Manager
+`is_branch_assignable` remains a compatibility bridge for the existing branch user-access flow.
+Company/Brand/Station assignment persistence and enforcement are separate Phase 2 scopes.
 
-For store managers responsible for POS operations.
-
-Includes:
-
-- POS sales and sale history
-- Void, refund, and discount override
-- Open and close cashier shifts
-- POS reports
-- Product and stock visibility
-
-### Cashier
-
-For front-line POS users.
-
-Includes:
-
-- POS sale creation
-- Standard discount application
-- Open and close cashier shifts
-- Product and stock visibility
-
-### Store Cashier
-
-For brand storefront users such as Restaurant branch staff.
-
-Includes:
-
-- Brand storefront order creation
-- Brand storefront shift close
-- Store replenishment request submission
-- Delivery receive from central operations
-
-### Restaurant Manager
-
-For restaurant/F&B managers.
-
-Includes:
-
-- Menu and session visibility
-- Table management
-- Order management
-- Kitchen management
-- Recipe management
-- F&B reports and settings
-- Product and stock visibility
-
-### Kitchen Staff
-
-For kitchen display users.
-
-Includes:
-
-- F&B menu/session visibility
-- Kitchen ticket status updates
-
-### Integration Admin
-
-For users managing external system connections such as `poolproject`.
-
-Includes:
-
-- API keys and webhook administration
-- External order visibility
-- External order fulfillment handoff
+Additional roadmap roles such as Company Admin, Area Manager, Service Staff, Kitchen Manager,
+Warehouse Staff, Purchasing, Accountant, HR, and Auditor remain deferred until their assignment and
+limit contracts are implemented.
 
 ## Migration Rule
 

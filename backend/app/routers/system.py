@@ -38,6 +38,7 @@ from app.schemas.user_access import (
     UserAccessRequestCreate,
 )
 from app.services.admin_service import AdminService
+from app.services.role_preset_service import RolePresetService
 from app.services.upload_service import UploadService
 from app.services.user_access_service import UserAccessService
 from app.utils.health_check import get_system_health
@@ -222,6 +223,15 @@ async def get_roles(
 ) -> dict[str, Any]:
     service = AdminService(db)
     data = [role.model_dump() for role in await service.list_roles(current.company_id)]
+    return ok(data)
+
+
+@router.get("/role-presets")
+async def get_role_presets(
+    _: TokenData = Depends(require_permission("system.role.view")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    data = [preset.model_dump() for preset in await RolePresetService(db).list_presets()]
     return ok(data)
 
 

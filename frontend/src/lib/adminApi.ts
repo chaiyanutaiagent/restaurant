@@ -6,6 +6,7 @@ import type {
   BranchSettings,
   InviteResponse,
   RoleDetail,
+  RolePreset,
   UserAccessApprovalResult,
   UserAccessRequest,
   UserAccessRequestStatus,
@@ -37,6 +38,7 @@ export const userApi = {
 
 export const roleApi = {
   list: () => api.get<ApiResponse<RoleDetail[]>>("/system/roles"),
+  presets: () => api.get<ApiResponse<RolePreset[]>>("/system/role-presets"),
   create: (data: {
     name: string;
     description?: string;

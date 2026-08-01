@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useMemo, useState } from "react";
 import PageHeader from "@/components/layout/PageHeader";
@@ -21,7 +21,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { usePermission } from "@/hooks/usePermission";
 import { roleApi } from "@/lib/adminApi";
 import { systemApi } from "@/lib/api";
-import type { RoleDetail } from "@/types/admin";
+import type { RoleDetail, RolePreset } from "@/types/admin";
 import type { Permission } from "@/types/user";
 
 const moduleLabels: Record<string, string> = {
@@ -34,162 +34,12 @@ const moduleLabels: Record<string, string> = {
   brand: "Brand Store"
 };
 
-const rolePresets = [
-  {
-    key: "erp-admin",
-    name: "ERP Admin",
-    description: "ERP core administration",
-    branchAssignable: false,
-    codes: [
-      "system.company.view",
-      "system.company.edit",
-      "system.branch.view",
-      "system.branch.create",
-      "system.branch.edit",
-      "system.user.view",
-      "system.user.create",
-      "system.user.edit",
-      "system.user.approve",
-      "system.role.view",
-      "system.role.create",
-      "system.role.edit",
-      "inventory.product.view",
-      "inventory.product.create",
-      "inventory.product.edit",
-      "inventory.stock.view",
-      "inventory.stock.adjust",
-      "inventory.purchase.view",
-      "inventory.purchase.create",
-      "inventory.transfer.view",
-      "inventory.transfer.create",
-      "brand.central.raw_stock.view",
-      "brand.central.raw_stock.manage",
-      "brand.central.ready_stock.view",
-      "brand.central.ready_stock.manage",
-      "brand.central.production.view",
-      "brand.central.production.manage",
-      "brand.store.stock.view",
-      "brand.store.stock.adjust",
-      "accounting.report.view",
-      "accounting.invoice.view",
-      "accounting.payment.view",
-    ],
-  },
-  {
-    key: "pos-manager",
-    name: "POS Manager",
-    description: "POS operations and reports",
-    branchAssignable: true,
-    codes: [
-      "pos.sale.view",
-      "pos.sale.create",
-      "pos.sale.void",
-      "pos.discount.apply",
-      "pos.discount.override",
-      "pos.refund.create",
-      "pos.cashier.open_shift",
-      "pos.cashier.close_shift",
-      "pos.report.view",
-      "system.user.request",
-      "inventory.product.view",
-      "inventory.stock.view",
-    ],
-  },
-  {
-    key: "cashier",
-    name: "Cashier",
-    description: "Cashier POS access",
-    branchAssignable: true,
-    codes: [
-      "pos.sale.view",
-      "pos.sale.create",
-      "pos.discount.apply",
-      "pos.cashier.open_shift",
-      "pos.cashier.close_shift",
-      "inventory.product.view",
-      "inventory.stock.view",
-    ],
-  },
-  {
-    key: "store-manager",
-    name: "Store Manager",
-    description: "Brand store operations and branch staff requests",
-    branchAssignable: true,
-    codes: [
-      "brand.store.order.create",
-      "brand.store.shift.close",
-      "brand.store.replenishment.submit",
-      "brand.store.delivery.receive",
-      "brand.store.stock.view",
-      "brand.store.stock.adjust",
-      "fb.order.create",
-      "fb.report.view",
-      "system.user.request",
-    ],
-  },
-  {
-    key: "store-cashier",
-    name: "Store Cashier",
-    description: "Brand storefront sales, shift close, and delivery receive",
-    branchAssignable: true,
-    codes: [
-      "brand.store.order.create",
-      "brand.store.shift.close",
-      "brand.store.replenishment.submit",
-      "brand.store.delivery.receive",
-      "brand.store.stock.view",
-    ],
-  },
-  {
-    key: "restaurant-manager",
-    name: "Restaurant Manager",
-    description: "Restaurant operations and admin",
-    branchAssignable: true,
-    codes: [
-      "fb.menu.view",
-      "fb.order.create",
-      "fb.kitchen.manage",
-      "fb.table.manage",
-      "fb.recipe.manage",
-      "fb.report.view",
-      "fb.settings.manage",
-      "brand.central.raw_stock.view",
-      "brand.central.raw_stock.manage",
-      "brand.central.ready_stock.view",
-      "brand.central.ready_stock.manage",
-      "brand.central.production.view",
-      "brand.central.production.manage",
-      "inventory.product.view",
-      "inventory.stock.view",
-      "system.user.request",
-    ],
-  },
-  {
-    key: "kitchen-staff",
-    name: "Kitchen Staff",
-    description: "Kitchen display access",
-    branchAssignable: true,
-    codes: [
-      "fb.menu.view",
-      "fb.kitchen.manage",
-      "brand.central.raw_stock.view",
-      "brand.central.ready_stock.view",
-      "brand.central.production.view",
-      "brand.central.production.manage",
-    ],
-  },
-  {
-    key: "integration-admin",
-    name: "Integration Admin",
-    description: "API keys, webhooks, and external orders",
-    branchAssignable: false,
-    codes: [
-      "system.company.edit",
-      "pos.sale.view",
-      "pos.sale.create",
-    ],
-  },
-];
+const scopeLabels: Record<RolePreset["default_scope"], string> = {
+  company: "ทั้งบริษัท",
+  brand: "แบรนด์",
+  branch: "สาขา",
+  station: "จุดปฏิบัติงาน"
+};
 
 type RoleFormState = {
   name: string;
@@ -227,8 +77,15 @@ export default function RolesPage(): JSX.Element {
     queryFn: async () => (await systemApi.permissions()).data.data
   });
 
+  const rolePresetsQuery = useQuery({
+    queryKey: ["system", "role-presets"],
+    queryFn: async () => (await roleApi.presets()).data.data,
+    enabled: canCreate
+  });
+
   const roles = rolesQuery.data ?? [];
   const permissions = permissionsQuery.data ?? [];
+  const rolePresets = rolePresetsQuery.data ?? [];
   const selectedRole = roles.find((role) => role.id === selectedRoleId) ?? null;
 
   const groupedPermissions = useMemo(() => {
@@ -411,7 +268,8 @@ export default function RolesPage(): JSX.Element {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         editingRole={editingRole}
-        permissions={permissions}
+        rolePresets={rolePresets}
+        rolePresetsError={rolePresetsQuery.isError}
         groupedPermissions={groupedPermissions}
         form={form}
         setForm={setForm}
@@ -425,7 +283,8 @@ type RoleDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editingRole: RoleDetail | null;
-  permissions: Permission[];
+  rolePresets: RolePreset[];
+  rolePresetsError: boolean;
   groupedPermissions: Record<string, Permission[]>;
   form: RoleFormState;
   setForm: Dispatch<SetStateAction<RoleFormState>>;
@@ -436,7 +295,8 @@ function RoleDialog({
   open,
   onOpenChange,
   editingRole,
-  permissions,
+  rolePresets,
+  rolePresetsError,
   groupedPermissions,
   form,
   setForm,
@@ -444,15 +304,12 @@ function RoleDialog({
 }: RoleDialogProps): JSX.Element {
   const applyPreset = (presetKey: string): void => {
     const preset = rolePresets.find((item) => item.key === presetKey);
-    if (!preset) return;
-    const ids = permissions
-      .filter((permission) => preset.codes.includes(permission.code))
-      .map((permission) => permission.id);
+    if (!preset || !preset.is_available) return;
     setForm({
       name: preset.name,
       description: preset.description,
-      permission_ids: ids,
-      is_branch_assignable: preset.branchAssignable,
+      permission_ids: preset.permission_ids,
+      is_branch_assignable: preset.is_branch_assignable
     });
   };
 
@@ -495,9 +352,15 @@ function RoleDialog({
               >
                 <option value="">เลือก preset</option>
                 {rolePresets.map((preset) => (
-                  <option key={preset.key} value={preset.key}>{preset.name}</option>
+                  <option key={preset.key} value={preset.key} disabled={!preset.is_available}>
+                    {preset.name} · {scopeLabels[preset.default_scope]}
+                    {preset.is_available ? "" : " (permission ไม่ครบ)"}
+                  </option>
                 ))}
               </select>
+              {rolePresetsError ? (
+                <p className="text-xs text-red-600">โหลด Role preset จากระบบไม่สำเร็จ</p>
+              ) : null}
             </Field>
           ) : null}
           <Field label="ชื่อ Role *">

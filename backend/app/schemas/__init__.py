@@ -17,7 +17,7 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.schemas.company import CompanyBase, CompanyCreate, CompanyRead, CompanyUpdate
-from app.schemas.role import PermissionRead, RoleBase, RoleCreate, RoleRead, RoleUpdate
+from app.schemas.role import PermissionRead, RoleBase, RoleCreate, RolePresetRead, RoleRead, RoleUpdate
 from app.schemas.product import (
     CategoryBase,
     CategoryCreate,
@@ -287,6 +287,7 @@ __all__ = [
     "BranchUpdate",
     "BranchRead",
     "PermissionRead",
+    "RolePresetRead",
     "RoleBase",
     "RoleCreate",
     "RoleUpdate",

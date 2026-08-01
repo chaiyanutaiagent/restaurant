@@ -184,6 +184,15 @@ class PlatformLifecycleAction(BaseSchema):
         return _required_text(value, field_name="reason", max_length=500)
 
 
+class PlatformTenantExportRequest(BaseSchema):
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        return _required_text(value, field_name="reason", max_length=500)
+
+
 class PlatformTenantControlsRead(BaseSchema):
     plan_code: str
     feature_flags: dict[str, bool]

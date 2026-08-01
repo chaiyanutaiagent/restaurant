@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 import uuid
 
 from fastapi import HTTPException, status
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError
 from passlib.context import CryptContext
 
 from app.config import settings
@@ -214,7 +215,7 @@ def decode_offline_sale_authorization(token: str) -> dict:
             algorithms=[settings.algorithm],
             options={"verify_exp": False},
         )
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid offline sale authorization",
@@ -224,7 +225,7 @@ def decode_offline_sale_authorization(token: str) -> dict:
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",

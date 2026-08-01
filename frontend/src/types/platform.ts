@@ -76,6 +76,40 @@ export type PlatformCompanyCreate = {
   reason: string;
 };
 
+export type PlatformTenantExport = {
+  format: "restaurant-tenant-export";
+  format_version: number;
+  generated_at: string;
+  company_id: string;
+  content_sha256: string;
+  request: { reason: string; requested_by: string };
+  redaction: {
+    policy: string;
+    marker: string;
+    redacted_cells: number;
+  };
+  summary: {
+    boundary_count: number;
+    table_count: number;
+    row_count: number;
+  };
+  boundaries: Record<
+    string,
+    {
+      aliases: string[];
+      table_count: number;
+      tables: Record<
+        string,
+        {
+          row_count: number;
+          redacted_columns: string[];
+          rows: Array<Record<string, unknown>>;
+        }
+      >;
+    }
+  >;
+};
+
 export type PlatformAuditEvent = {
   id: string;
   company_id: string | null;

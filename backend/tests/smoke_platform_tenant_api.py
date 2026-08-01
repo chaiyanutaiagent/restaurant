@@ -154,6 +154,7 @@ async def verify_evidence(company_id: uuid.UUID, device_id: uuid.UUID) -> None:
             raise RuntimeError("Phase 5 lifecycle evidence is incomplete")
         required_actions = {
             "platform.company.create",
+            "platform.company.export",
             "platform.company.controls.update",
             "platform.company.suspend",
             "platform.company.reactivate",
@@ -211,6 +212,25 @@ def main() -> None:
         tenant_headers = {"Authorization": f"Bearer {tenant_session['access_token']}"}
         expect(client.get("/api/v1/auth/me", headers=tenant_headers), 200, "Tenant access")
         owner_id = uuid.UUID(tenant_session["user"]["id"])
+        exported = expect(
+            client.post(
+                f"/api/v1/platform/companies/{company_id}/export",
+                headers=platform_headers,
+                json={"reason": "Phase 5 tenant portability evidence"},
+            ),
+            200,
+            "Export Company",
+        )
+        identity_tables = exported["boundaries"]["identity"]["tables"]
+        user_rows = identity_tables["users"]["rows"]
+        if (
+            exported["format"] != "restaurant-tenant-export"
+            or len(exported["content_sha256"]) != 64
+            or not user_rows
+            or user_rows[0]["hashed_password"] != "[REDACTED]"
+            or exported["redaction"]["redacted_cells"] < 1
+        ):
+            raise RuntimeError("Tenant export security evidence is incomplete")
         device_token, device_id = client.portal.call(seed_device, company_id, owner_id)
         device_headers = {"Authorization": f"Bearer {device_token}"}
         expect(client.get("/api/v1/device-auth/me", headers=device_headers), 200, "Device access")

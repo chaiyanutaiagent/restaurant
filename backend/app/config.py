@@ -12,6 +12,13 @@ def effective_database_url(explicit_url: str | None, legacy_url: str) -> str:
     return explicit_url or legacy_url
 
 
+def resolve_api_docs_enabled(environment: str, configured: bool | None) -> bool:
+    """Keep local docs convenient while defaulting internet production to closed."""
+    if configured is not None:
+        return configured
+    return environment != "production"
+
+
 class Settings(BaseSettings):
     postgres_db: str
     postgres_user: str
@@ -47,6 +54,7 @@ class Settings(BaseSettings):
     cors_origins: list[str]
     app_name: str
     app_version: str
+    enable_api_docs: bool | None = None
     celery_broker_url: str
     celery_result_backend: str
     upload_dir: str = "./uploads"
@@ -98,6 +106,10 @@ class Settings(BaseSettings):
     @cached_property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @cached_property
+    def api_docs_enabled(self) -> bool:
+        return resolve_api_docs_enabled(self.environment, self.enable_api_docs)
 
 
 settings = Settings()

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Circle, KeyRound, Save, ShieldOff, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Circle, Download, KeyRound, Save, ShieldOff, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -60,11 +60,27 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
       void refresh();
     }
   });
+  const exportCompany = useMutation({
+    mutationFn: async () => {
+      if (!reason.trim()) throw new Error("กรุณาระบุเหตุผลเพื่อบันทึก Audit Log");
+      return (await platformApi.exportCompany(companyId, reason)).data.data;
+    },
+    onSuccess: (artifact) => {
+      const blob = new Blob([JSON.stringify(artifact, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `tenant-export-${artifact.company_id}-${artifact.generated_at.slice(0, 10)}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setReason("");
+    }
+  });
 
   if (company.isLoading) return <p className="text-slate-400">กำลังโหลด Company...</p>;
   if (company.error || !company.data) return <p className="text-red-300">{platformErrorMessage(company.error)}</p>;
   const data = company.data;
-  const mutationError = lifecycle.error ?? saveControls.error;
+  const mutationError = lifecycle.error ?? saveControls.error ?? exportCompany.error;
 
   return (
     <div className="space-y-6">
@@ -129,6 +145,7 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
         {mutationError ? <p className="mt-4 text-sm text-red-300">{platformErrorMessage(mutationError)}</p> : null}
         <div className="mt-6 flex flex-wrap gap-3 border-t border-slate-700 pt-5">
           <Button className="bg-emerald-400 text-slate-950 hover:bg-emerald-300" onClick={() => saveControls.mutate()} disabled={saveControls.isPending}><Save className="h-4 w-4" />บันทึก controls</Button>
+          <Button variant="outline" onClick={() => exportCompany.mutate()} disabled={exportCompany.isPending}><Download className="h-4 w-4" />{exportCompany.isPending ? "กำลังจัด export..." : "ดาวน์โหลด tenant export"}</Button>
           {data.is_active ? (
             <Button variant="destructive" onClick={() => lifecycle.mutate(true)} disabled={lifecycle.isPending}><ShieldOff className="h-4 w-4" />ระงับ Company</Button>
           ) : (
@@ -136,6 +153,7 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
           )}
         </div>
         <div className="mt-4 flex gap-2 text-xs text-amber-300"><AlertTriangle className="h-4 w-4 shrink-0" /><p>การระงับจะเพิ่ม credential generation, revoke refresh sessions และยกเลิก credential ของ tablet ทุกเครื่องทันที</p></div>
+        <p className="mt-2 text-xs text-slate-500">Tenant export มีข้อมูลธุรกิจ/ข้อมูลส่วนบุคคล แต่แทนค่า password, hash, token และ secret ทั้งหมดก่อนดาวน์โหลด พร้อมบันทึก checksum ใน Audit Log</p>
       </section>
     </div>
   );

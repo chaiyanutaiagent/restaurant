@@ -33,9 +33,11 @@ from app.schemas.platform import (
     PlatformOperatorRead,
     PlatformTenantControlsRead,
     PlatformTenantControlsUpdate,
+    PlatformTenantExportRequest,
     PlatformTokenResponse,
 )
 from app.services.platform_reference_projection import enqueue_reference_event
+from app.services.tenant_export_service import TenantExportBoundary, build_tenant_export
 from app.utils.security import create_platform_access_token, decode_token, hash_password, verify_password
 
 
@@ -423,6 +425,47 @@ class PlatformTenantService:
         )
         await self.db.commit()
         return await self.get_company(company.id)
+
+    async def export_company(
+        self,
+        company_id: uuid.UUID,
+        data: PlatformTenantExportRequest,
+        *,
+        ip_address: str | None,
+        user_agent: str | None,
+    ) -> dict[str, Any]:
+        company = await self.db.get(Company, company_id)
+        if company is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        artifact = await build_tenant_export(
+            company_id,
+            [
+                TenantExportBoundary("identity", self.db),
+                TenantExportBoundary("restaurant", self.restaurant_db),
+            ],
+            reason=data.reason,
+            requested_by=f"platform-operator:{self.operator_id}",
+        )
+        self._audit(
+            company_id=company.id,
+            action="platform.company.export",
+            resource_id=company.id,
+            reason=data.reason,
+            old_value=None,
+            new_value={
+                "format": artifact["format"],
+                "format_version": artifact["format_version"],
+                "content_sha256": artifact["content_sha256"],
+                "boundary_count": artifact["summary"]["boundary_count"],
+                "table_count": artifact["summary"]["table_count"],
+                "row_count": artifact["summary"]["row_count"],
+                "redacted_cells": artifact["redaction"]["redacted_cells"],
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        await self.db.commit()
+        return artifact
 
     async def list_audit_events(
         self,

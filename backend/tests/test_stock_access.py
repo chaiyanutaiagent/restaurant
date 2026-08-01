@@ -138,6 +138,25 @@ class StockAccessServiceTests(unittest.IsolatedAsyncioTestCase):
             (self.raw_location_id, self.ready_location_id),
         )
 
+    async def test_company_owner_scope_combines_store_and_central_locations(self) -> None:
+        scope = await StockAccessService(self.db()).resolve_scope(
+            self.token(
+                [
+                    "brand.store.stock.view",
+                    "brand.central.raw_stock.view",
+                    "brand.central.ready_stock.view",
+                ]
+            )
+        )
+        self.assertEqual(
+            scope.location_ids,
+            (
+                self.store_location_id,
+                self.raw_location_id,
+                self.ready_location_id,
+            ),
+        )
+
     async def test_production_permission_can_view_raw_and_ready(self) -> None:
         scope = await StockAccessService(self.db()).resolve_scope(
             self.token(["brand.central.production.manage"])

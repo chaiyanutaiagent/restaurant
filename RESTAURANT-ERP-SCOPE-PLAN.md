@@ -619,8 +619,8 @@ Acceptance Criteria:
 
 - [x] สร้างร้านลูกค้าใหม่โดยไม่แก้ source code หรือ SQL ด้วยมือ
 - [x] ปิด Company แล้วทุก user/device ของ tenant เข้าไม่ได้
-- [ ] Backup/restore tenant test ผ่าน
-- [ ] UAT ตั้งแต่ QR order จนถึง ERP report ผ่าน
+- [x] Backup/restore tenant test ผ่าน
+- [x] UAT ตั้งแต่ QR order จนถึง ERP report ผ่าน
 - [ ] Production checklist และ owner sign-off ครบ
 
 ไม่รวม: ระบบเก็บเงิน subscription อัตโนมัติ
@@ -631,11 +631,26 @@ audited suspend/reactivate และ Company credential generation ที่ rev
 isolated Legacy/Platform/Restaurant migration rehearsal, backend `183` tests, lifecycle API smoke และ
 frontend type-check/build ผ่าน โดยไม่ migrate/deploy production หรือเปลี่ยนฐาน live
 
-Next action handoff (1 สิงหาคม 2026): หากกลับมาถามว่า “ทำอะไรต่อ” ให้เริ่ม
-`P5-TENANT-RESILIENCE-02` ตามลำดับ tenant export → isolated tenant backup/restore drill →
-monitoring/alerts → incident and recovery evidence จากนั้นจึงทำ full UAT ตั้งแต่ QR order ถึง
-ERP report และ production security review/owner sign-off ห้ามเริ่ม Phase 6, deploy production,
-migrate ฐาน live หรือสร้าง Platform Owner บนฐาน live จนกว่า Phase 5 gate ที่เหลือจะผ่านและมีคำสั่งชัดเจน
+Gate record: `P5-TENANT-RESILIENCE-02` เพิ่ม credential-redacted tenant export,
+three-boundary backup/checksum, isolated restore drill, monitoring/webhook alert และ incident/recovery
+evidence โดยผ่าน backend `185` tests, tenant API smoke, frontend type-check/build และ restore checksum
+เมื่อ 1 สิงหาคม 2026 โดยไม่เพิ่ม migration ไม่แตะฐาน live และไม่มี production activation
+
+Gate record: `P5-UAT-SECURITY-03` ผ่าน automated clean-room QR → Kitchen → payment →
+recipe stock/accounting → ERP report UAT, exactly-once handoff, dine-in/takeaway และ role permission smoke,
+backend `188` tests, frontend type-check/build, backend dependency audit, production API-doc disable,
+nginx CSP/config และ repository safety เมื่อ 1 สิงหาคม 2026 โดยไม่มี production activation/deploy/push;
+visual browser/device UAT, dependency risk acceptance และ owner sign-off ยัง pending
+
+Gate record: `P5-COMPLETION-NONDEVICE-04` เพิ่ม Company Owner ใน Restaurant security matrix และ
+explicit Retail POS compatibility ตั้งแต่ context → sale/payment → stock → accounting/outbox → report →
+shift close พร้อมแก้ mixed central/store stock scope ของ Company Owner; isolated backend `189` tests,
+role/approval smokes, Retail idempotency/reconciliation, frontend type-check/build และ repository safety ผ่าน
+เมื่อ 1 สิงหาคม 2026 โดยไม่มี production activation/deploy/push
+
+Owner สั่งเลื่อน physical/visual UAT จนกว่าอุปกรณ์จริงจะมาถึง งานที่เหลือคือ UAT ส่วนนั้น,
+dependency risk acceptance, production checklist และ controlled owner sign-off ห้ามเริ่ม Phase 6,
+deploy production, migrate ฐาน live หรือสร้าง Platform Owner บนฐาน live จนกว่าจะครบและมีคำสั่งชัดเจน
 
 ### Restaurant Completion Gate — ต้องผ่านก่อนเริ่มระบบอื่น
 
@@ -643,11 +658,14 @@ Restaurant ถือว่าเสร็จสำหรับเริ่ม Ph
 
 - [ ] Phase 0–5 ผ่าน Acceptance Criteria
 - [ ] ครัวป่า ปลาเขื่อนผ่าน UAT แบบ dine-in และรับกลับ
-- [ ] Role/Scope อย่างน้อย Owner, Manager, Cashier และ Kitchen ผ่าน security test
-- [ ] Restaurant ERP report กระทบยอดกับ order/payment/stock ได้
-- [ ] Backup/restore และ rollback ผ่าน
-- [ ] Retail POS regression suite ผ่าน
+- [x] Role/Scope อย่างน้อย Owner, Manager, Cashier และ Kitchen ผ่าน security test
+- [x] Restaurant ERP report กระทบยอดกับ order/payment/stock ได้
+- [x] Backup/restore และ rollback ผ่าน
+- [x] Retail POS regression suite ผ่าน
 - [ ] Platform Owner ลงนามอนุมัติ Restaurant completion
+
+สถานะ physical/visual UAT: **deferred by owner until hardware arrives**; automated dine-in/takeaway chain
+ผ่านแล้ว แต่ยังไม่ใช้แทนการทดสอบ `ครัวป่า ปลาเขื่อน` บนอุปกรณ์จริงและไม่ใช้แทน owner sign-off
 
 หาก Gate ข้อใดไม่ผ่าน ห้ามเริ่ม Phase 6 แม้งาน Takeaway จะดูเหมือนใช้เวลาไม่นาน
 

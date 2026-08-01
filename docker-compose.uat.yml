@@ -1,0 +1,10 @@
+services:
+  backend:
+    environment:
+      DEFAULT_ADMIN_PASSWORD: ${P5_UAT_ADMIN_PASSWORD:?P5_UAT_ADMIN_PASSWORD is required}
+      P5_UAT_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}
+      SECRET_KEY: phase5-uat-isolated-hmac-key-2026-only
+      ENABLE_API_DOCS: "true"
+      ENVIRONMENT: development
+    volumes:
+      - ./backend/tests:/app/tests:ro

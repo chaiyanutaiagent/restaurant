@@ -275,3 +275,19 @@ The next PR should implement the remaining production deployment behavior:
 - centralized logging, metrics, and alerting
 - upload malware scanning, object storage, quotas, and lifecycle cleanup
 - secrets management, rotation, and deployment-time injection
+
+## Tenant resilience check
+
+After scheduling `scripts/backup-tenant-boundaries.sh` for each production Company, schedule:
+
+```sh
+RESILIENCE_BASE_URL=https://restaurant.example.com \
+RESILIENCE_BACKUP_ROOT=/secure/backups \
+RESILIENCE_ALERT_WEBHOOK_URL=https://alerts.example.net/hooks/restaurant \
+RESILIENCE_EVIDENCE_FILE=/var/log/restaurant/resilience-latest.json \
+scripts/monitor-production-resilience.sh
+```
+
+The check exits non-zero for readiness failure, reference projector failures, excessive disk use,
+stale/missing backup artifacts, or dump checksum mismatch. Set
+`RESILIENCE_REQUIRE_ALERT_WEBHOOK=1` when alert delivery is mandatory.

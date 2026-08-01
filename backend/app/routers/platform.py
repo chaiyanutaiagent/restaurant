@@ -16,6 +16,7 @@ from app.schemas.platform import (
     PlatformLoginRequest,
     PlatformOperatorRead,
     PlatformTenantControlsUpdate,
+    PlatformTenantExportRequest,
 )
 from app.services.platform_service import PlatformAuthService, PlatformTenantService
 
@@ -196,6 +197,25 @@ async def update_controls(
         user_agent=user_agent,
     )
     return ok(company.model_dump(mode="json"))
+
+
+@router.post("/companies/{company_id}/export")
+async def export_company(
+    company_id: uuid.UUID,
+    payload: PlatformTenantExportRequest,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    artifact = await _tenant_service(db, restaurant_db, current).export_company(
+        company_id,
+        payload,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(artifact)
 
 
 @router.get("/audit")

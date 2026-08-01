@@ -6,6 +6,7 @@ import type {
   PlatformCompanyDetail,
   PlatformCompanyListItem,
   PlatformOperator,
+  PlatformTenantExport,
   PlatformTokenResponse
 } from "@/types/platform";
 
@@ -83,6 +84,11 @@ export const platformApi = {
     platformApiClient.put<PlatformApiResponse<PlatformCompanyDetail>>(
       `/companies/${companyId}/controls`,
       payload
+    ),
+  exportCompany: (companyId: string, reason: string) =>
+    platformApiClient.post<PlatformApiResponse<PlatformTenantExport>>(
+      `/companies/${companyId}/export`,
+      { reason }
     ),
   audit: (companyId?: string) =>
     platformApiClient.get<PlatformApiResponse<PlatformAuditEvent[]>>("/audit", {

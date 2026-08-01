@@ -18,6 +18,18 @@ pip-audit -r requirements.txt
 Run the backend audit with Python 3.11, matching the backend Dockerfile. Do not
 copy vulnerability acceptance or sign-off from the source project.
 
+Reviewed result on 1 August 2026 for `P5-UAT-SECURITY-03`:
+
+- Backend `pip-audit` reports zero known vulnerabilities after upgrading FastAPI/Pydantic,
+  replacing `python-jose` with PyJWT 2.13.0, and upgrading python-multipart, WeasyPrint and aiosmtplib.
+- Production frontend audit reports two package rows for one React Router RSC-mode CSRF advisory.
+  This application uses only declarative `BrowserRouter` in a static CSR bundle; it has no React Router
+  Actions, SSR, RSC or server runtime. The production container contains nginx and built assets only.
+  Treat this as a reviewed non-reachable finding, but obtain security-owner acceptance before go-live.
+- The full frontend audit additionally reports Vite/esbuild development-server findings. Vite and its
+  Node toolchain exist only in the build stage and are absent from the production nginx runtime.
+- There are no critical npm findings. Re-run both audits at release time because advisory data changes.
+
 ## Docker Base Image Policy
 
 Production Dockerfiles avoid `latest` tags. Current policy:
@@ -92,8 +104,12 @@ HTTP local production mode includes:
 - `X-XSS-Protection: 1; mode=block`
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+- `Content-Security-Policy` restricting scripts to same-origin, blocking framing and objects, and limiting
+  API/WebSocket/image/font connections to the reviewed application requirements
 
-HSTS is intentionally present only in the HTTPS template. Do not enable HSTS on local HTTP mode. A Content Security Policy is still a follow-up because it needs frontend asset and API behavior review.
+HSTS is intentionally present only in the HTTPS template. Do not enable HSTS on local HTTP mode.
+The CSP keeps `'unsafe-inline'` for styles because the current component stack emits inline styles; scripts
+do not allow inline execution. Re-test CSP behavior during visual UAT whenever frontend integrations change.
 
 ## Secrets Policy
 
@@ -113,9 +129,11 @@ Resolve or formally accept these before internet-facing production go-live:
 
 - Confirm backend `pip-audit` remains clean in CI or the production build environment
 - Run `./scripts/run-backend-regression.sh` before launch and after dependency upgrades
-- Formally accept the remaining frontend moderate Vite/esbuild dev-server advisory for the static production image, or upgrade Vite in a focused frontend tooling PR
+- Have the security owner formally accept the React Router RSC-mode advisory as non-reachable for the
+  static `BrowserRouter` application, or complete and test the broader React 19/React Router 8 migration
+- Formally accept the Vite/esbuild dev-server findings for the build-only toolchain, or upgrade Vite in a focused frontend tooling PR
 - Confirm `ENABLE_API_DOCS=false` in production and verify `/api/docs` and `/api/openapi.json` return 404
-- Add a reviewed Content Security Policy or record why it is deferred
+- Complete visual browser/device UAT with the production CSP enabled
 - Decide whether to clean up WeasyPrint/fontconfig cache warnings before launch or accept them as non-blocking while PDF rendering works
 - Define the operational owner for monthly dependency and base-image updates
 
@@ -123,7 +141,8 @@ Resolve or formally accept these before internet-facing production go-live:
 
 Short-term acceptable only with operator sign-off:
 
-- Vite/esbuild finding affects the dev server path; production serves static files from nginx
+- React Router RSC-mode finding is outside the static CSR execution path; production has no React Router server runtime or Actions
+- Vite/esbuild findings affect the dev/build path; production serves static files from nginx
 - WeasyPrint currently renders PDFs but emits fontconfig cache warnings in the non-root backend container
 - Registry and deployment scripts do not store credentials and rely on host-level `docker login`
 - Uploads are image-restricted but not malware-scanned

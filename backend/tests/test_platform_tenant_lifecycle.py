@@ -12,8 +12,14 @@ from app.schemas.platform import (
     PlatformCompanyCreate,
     PlatformLifecycleAction,
     PlatformTenantControlsUpdate,
+    PlatformTenantExportRequest,
 )
 from app.services.platform_service import PlatformTenantService
+from app.services.tenant_export_service import (
+    REDACTED,
+    is_sensitive_export_column,
+    sanitize_export_value,
+)
 from app.services.tenant_control_policy import TenantControlPolicy
 from app.utils.security import (
     create_access_token,
@@ -54,6 +60,41 @@ class PlatformTenantSchemaTests(unittest.TestCase):
                 plan_limits={"users": -1},
                 reason="test",
             )
+        with self.assertRaises(ValidationError):
+            PlatformTenantExportRequest(reason="   ")
+
+
+class TenantExportSecurityTests(unittest.TestCase):
+    def test_credential_columns_are_redacted(self) -> None:
+        for column_name in (
+            "hashed_password",
+            "initial_password_hash",
+            "token_hash",
+            "refresh_credential_hash",
+            "pairing_pin_hash",
+            "omise_secret_key",
+            "smtp_password",
+            "line_notify_token",
+            "scb_api_key",
+            "secret",
+        ):
+            self.assertTrue(is_sensitive_export_column(column_name), column_name)
+        self.assertFalse(is_sensitive_export_column("credential_version"))
+        self.assertFalse(is_sensitive_export_column("password_changed_at"))
+        self.assertEqual(REDACTED, "[REDACTED]")
+
+    def test_nested_json_credentials_are_redacted(self) -> None:
+        sanitized, redactions = sanitize_export_value(
+            {
+                "event": "payment.completed",
+                "authorization": "Bearer nested-secret",
+                "gateway": {"accessToken": "secret", "reference": "PAY-01"},
+            }
+        )
+        self.assertEqual(redactions, 2)
+        self.assertEqual(sanitized["authorization"], REDACTED)
+        self.assertEqual(sanitized["gateway"]["accessToken"], REDACTED)
+        self.assertEqual(sanitized["gateway"]["reference"], "PAY-01")
 
 
 class PlatformCredentialTests(unittest.TestCase):

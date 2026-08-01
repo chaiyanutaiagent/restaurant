@@ -15,7 +15,7 @@ from app.models.audit import AuditLog
 from app.models.pos import CashierShift, SaleOrder
 from app.models.product import Product, Category
 from app.models.restaurant import (
-    DiningOrder, DiningOrderItem, DiningSession, DiningTable, KitchenTicket,
+    BrandBranch, DiningOrder, DiningOrderItem, DiningSession, DiningTable, KitchenTicket,
 )
 from app.models.settings import BranchSettings
 from app.models.branch import Branch
@@ -1138,10 +1138,27 @@ class DiningService:
             raise ValueError("Branch context required")
         user_id = current.user_id
 
+        # When a Restaurant branch has a canonical STORE-STOCK mapping, checkout
+        # must use that same location so the Sale handoff can post recipe usage.
+        # Legacy/non-Brand branches keep the existing first-location fallback.
+        recipe_inventory_location_id: uuid.UUID | None = None
+        if current.brand_id is not None:
+            membership = await self.db.scalar(
+                select(BrandBranch).where(
+                    BrandBranch.company_id == company_id,
+                    BrandBranch.brand_id == current.brand_id,
+                    BrandBranch.branch_id == branch_id,
+                    BrandBranch.is_active.is_(True),
+                )
+            )
+            if membership is not None:
+                recipe_inventory_location_id = membership.store_location_id
+
         # resolve shift + location (auto-detect ถ้าไม่ได้ระบุ)
         resolved_shift_id, resolved_location_id = await self._resolve_shift_and_location(
             company_id, branch_id, user_id,
             payload.shift_id, payload.location_id,
+            recipe_inventory_location_id,
         )
 
         # รวบรวม order items ทั้งหมดจาก session
@@ -1272,6 +1289,7 @@ class DiningService:
             user_id,
             create_request,
             brand_id=current.brand_id,
+            recipe_inventory_location_id=recipe_inventory_location_id,
             approval_evidence=approval_evidence,
         )
 

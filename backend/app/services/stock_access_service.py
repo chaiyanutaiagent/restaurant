@@ -176,52 +176,57 @@ class StockAccessService:
         )
         can_access_raw = bool(raw_permissions.intersection(current.permissions))
         can_access_ready = bool(ready_permissions.intersection(current.permissions))
+        allowed_location_ids: set[uuid.UUID] = set()
         if can_access_raw or can_access_ready:
-            allowed_central_ids: set[uuid.UUID] = set()
             for brand_id, central_branch_id, raw_location_id, ready_location_id in brand_rows:
                 if current.brand_id is not None and brand_id != current.brand_id:
                     continue
                 if central_branch_id != branch_id:
                     continue
                 if can_access_raw and raw_location_id is not None:
-                    allowed_central_ids.add(raw_location_id)
+                    allowed_location_ids.add(raw_location_id)
                 if can_access_ready and ready_location_id is not None:
-                    allowed_central_ids.add(ready_location_id)
-            return tuple(
-                location_id
-                for location_id in all_location_ids
-                if location_id in allowed_central_ids
-            )
+                    allowed_location_ids.add(ready_location_id)
 
-        store_statement = select(BrandBranch.store_location_id).where(
-            BrandBranch.company_id == current.company_id,
-            BrandBranch.branch_id == branch_id,
-            BrandBranch.is_active.is_(True),
-            BrandBranch.store_location_id.is_not(None),
-        )
-        if current.brand_id is not None:
-            store_statement = store_statement.where(
-                BrandBranch.brand_id == current.brand_id
-            )
-        store_location_ids = set(
-            (await self.db.scalars(store_statement)).all()
-        )
         store_permissions = (
             STORE_STOCK_MANAGE_PERMISSIONS
             if manage
             else STORE_STOCK_VIEW_PERMISSIONS
         )
-        use_store_mapping = current.brand_id is not None or bool(
+        has_store_permission = bool(
             store_permissions.intersection(current.permissions)
         )
-        allowed_store_ids = (
-            store_location_ids
-            if use_store_mapping
-            else set(all_location_ids)
-        )
+        # A role may legitimately cover both central and store stock (for
+        # example Company Owner). Do not let central permissions hide the
+        # store location of a retail-only brand that has no central warehouse.
+        if has_store_permission or not (can_access_raw or can_access_ready):
+            store_statement = select(BrandBranch.store_location_id).where(
+                BrandBranch.company_id == current.company_id,
+                BrandBranch.branch_id == branch_id,
+                BrandBranch.is_active.is_(True),
+                BrandBranch.store_location_id.is_not(None),
+            )
+            if current.brand_id is not None:
+                store_statement = store_statement.where(
+                    BrandBranch.brand_id == current.brand_id
+                )
+            store_location_ids = set(
+                (await self.db.scalars(store_statement)).all()
+            )
+            use_store_mapping = current.brand_id is not None or has_store_permission
+            allowed_store_ids = (
+                store_location_ids
+                if use_store_mapping
+                else set(all_location_ids)
+            )
+            allowed_location_ids.update(
+                location_id
+                for location_id in allowed_store_ids
+                if location_id not in separated_central_location_ids
+            )
+
         return tuple(
             location_id
             for location_id in all_location_ids
-            if location_id in allowed_store_ids
-            and location_id not in separated_central_location_ids
+            if location_id in allowed_location_ids
         )

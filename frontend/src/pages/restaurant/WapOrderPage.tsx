@@ -4,7 +4,7 @@ import { liveQuery } from "dexie";
 import { AlertTriangle, ChefHat, ClipboardCheck, CloudUpload, CreditCard, LogOut, Loader2, Menu, Minus, PackageCheck, PackageOpen, Plus, Printer, ReceiptText, Warehouse, Wifi, WifiOff } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "@/components/ui/button";
 import {
@@ -144,6 +144,7 @@ function Slip({
 
 export default function WapOrderPage(): JSX.Element {
   const { brandSlug } = useParams<{ brandSlug?: string }>();
+  const location = useLocation();
   const { toast } = useToast();
   const logout = useLogout();
   const isOnline = useOnlineStatus();
@@ -167,7 +168,10 @@ export default function WapOrderPage(): JSX.Element {
     retry: false,
   });
   const storeBase = brandSlug ? `/store/${brandSlug}` : "/restaurant";
-  const orderPath = brandSlug ? `${storeBase}/orders` : "/restaurant/wap";
+  const isCounterWorkspace = location.pathname.startsWith("/counter/");
+  const orderPath = isCounterWorkspace
+    ? "/counter/orders"
+    : brandSlug ? `${storeBase}/orders` : "/restaurant/wap";
   const stockPath = brandSlug ? `${storeBase}/stock` : "/stock";
   const closeShiftPath = `${storeBase}/close-shift`;
   const centralBase = brandSlug ? `/central/${brandSlug}` : null;

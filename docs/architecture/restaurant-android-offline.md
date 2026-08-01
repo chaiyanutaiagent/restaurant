@@ -30,12 +30,18 @@ Implemented in the current development branch:
 - Logout and shift-close guards while any local sale is unacknowledged.
 - Capacitor 7 Android shell (`com.chaiyanutaiagent.restaurant`), Network/App lifecycle plugins, HTTPS-only traffic, and disabled Android backup.
 - A compiled debug APK for native build verification.
+- Phase 3 signed offline-sale authorization with a 12-hour configurable lease bound to the
+  cashier, Company, Branch, shift, location, Brand and optional paired Counter device.
+- Current clients refuse to accept a new offline payment when the cached lease is missing,
+  expired, or belongs to another Counter. The sync API validates each row independently.
+- Device revocation rejects orders created after revoke while preserving paid orders created
+  under a valid lease before revoke. Pre-policy durable outbox rows remain replayable during rollout.
 
 Still required before a production pilot:
 
 - Production domain, trusted TLS, final API URL, and production CORS update.
 - Physical Android device offline UAT, final app icon, printer integration, and release signing.
-- Secure native credential storage and an explicit offline-authorization expiry policy.
+- Secure native credential storage.
 - A native persistent worker if synchronization must occur while the app is fully terminated. The current pilot synchronizes while open, on reconnection, and on resume; queued rows survive termination and synchronize on the next launch.
 
 ## Pilot guarantees
@@ -119,7 +125,7 @@ The online bootstrap returns all branch-scoped data needed to sell:
 - open cashier shift
 - active restaurant menu snapshot
 - payment configuration
-- offline policy and expiry
+- signed offline policy, expiry, and optional Counter-device binding
 - server time and snapshot version
 
 ### Push
@@ -164,7 +170,8 @@ The one-device-per-branch pilot reduces this conflict. Multi-device rollout requ
 - First login and branch selection are online-only.
 - Offline selling requires a cached open shift owned by the current cashier.
 - The pilot does not open a new shift offline.
-- The production pilot must add an explicit local-authorization expiry; the current development build persists the signed-in session so short network outages do not stop a sale.
+- The signed offline authorization expires after the configured lease window (12 hours by default).
+  Expiry blocks new local payment acceptance; already queued paid rows remain durable for review/sync.
 - Closing a shift locally marks it pending; the server close request runs only after the order outbox for that shift is empty.
 - User/branch revocation is applied on the next successful contact with the API.
 

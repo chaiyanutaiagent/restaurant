@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import uuid
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -111,10 +111,10 @@ async def get_current_user(
     )
 
 
-async def get_current_device(
-    token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_identity_db),
-    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+async def resolve_device_token(
+    token: str,
+    db: AsyncSession,
+    restaurant_db: AsyncSession,
 ) -> DeviceTokenData:
     payload = decode_token(token)
     if payload.get("type") != "device_access":
@@ -196,6 +196,33 @@ async def get_current_device(
         paired_at=device.paired_at,
         last_seen_at=last_seen_at,
     )
+
+
+async def get_current_device(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> DeviceTokenData:
+    return await resolve_device_token(token, db, restaurant_db)
+
+
+async def get_optional_counter_device(
+    device_authorization: str | None = Header(default=None, alias="X-Device-Authorization"),
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> DeviceTokenData | None:
+    if device_authorization is None:
+        return None
+    scheme, separator, token = device_authorization.partition(" ")
+    if separator != " " or scheme.lower() != "bearer" or not token.strip():
+        raise _device_unauthorized()
+    current = await resolve_device_token(token.strip(), db, restaurant_db)
+    if current.device_type != "counter" or current.station_key is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Counter device required for this workspace",
+        )
+    return current
 
 
 def require_permission(code: str) -> Callable:

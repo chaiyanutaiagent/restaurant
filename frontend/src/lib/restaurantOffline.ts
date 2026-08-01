@@ -2,6 +2,7 @@ import { Network } from "@capacitor/network";
 import { db, type RestaurantPendingOrder } from "@/lib/db";
 import { wapApi, type WapMenu, type WapOrder, type WapPaidOrderPayload } from "@/lib/wapApi";
 import { useAuthStore } from "@/stores/auth.store";
+import { useDeviceStore } from "@/stores/device.store";
 
 type RestaurantScope = {
   companyId: string;
@@ -66,6 +67,31 @@ async function installationId(): Promise<string> {
   const value = randomId();
   await db.offlineSettings.put({ key, value });
   return value;
+}
+
+function assertCurrentOfflineAuthorization(menu: WapMenu, scope: RestaurantScope): void {
+  if (
+    menu.offline_policy_version !== 1
+    || !menu.offline_authorization
+    || !menu.offline_authorization_expires_at
+  ) {
+    throw new Error("เมนูในเครื่องยังไม่มีสิทธิ์ขายออฟไลน์ กรุณาต่ออินเทอร์เน็ตและโหลดหน้าขายใหม่");
+  }
+  const expiresAt = new Date(menu.offline_authorization_expires_at).getTime();
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    throw new Error("สิทธิ์ขายออฟไลน์หมดอายุ กรุณาต่ออินเทอร์เน็ตและลงชื่อพนักงานใหม่");
+  }
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/counter")) {
+    const device = useDeviceStore.getState().device;
+    if (
+      !device
+      || device.device_type !== "counter"
+      || device.branch_id !== scope.branchId
+      || menu.offline_device_id !== device.device_id
+    ) {
+      throw new Error("สิทธิ์ขายออฟไลน์ไม่ตรงกับ Counter เครื่องนี้ กรุณาต่ออินเทอร์เน็ตและโหลดใหม่");
+    }
+  }
 }
 
 export async function fetchAndCacheRestaurantMenu(brandSlug?: string): Promise<WapMenu> {
@@ -255,6 +281,7 @@ export async function queueRestaurantOrder(
   menu: WapMenu,
 ): Promise<RestaurantQueuedOrderResult> {
   const scope = currentScope();
+  assertCurrentOfflineAuthorization(menu, scope);
   const clientOrderId = `${await installationId()}:${randomId()}`;
   const localCreatedAt = new Date().toISOString();
   const queuedPayload: WapPaidOrderPayload & { client_order_id: string; local_created_at: string } = {
@@ -263,6 +290,8 @@ export async function queueRestaurantOrder(
     location_id: menu.location_id ?? payload.location_id,
     client_order_id: clientOrderId,
     local_created_at: localCreatedAt,
+    offline_policy_version: menu.offline_policy_version,
+    offline_authorization: menu.offline_authorization,
     is_offline: true,
   };
   const localOrder = buildLocalOrder(queuedPayload, menu, scope.userId);

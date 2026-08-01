@@ -4,6 +4,7 @@ import axios, {
   type InternalAxiosRequestConfig
 } from "axios";
 import { useAuthStore } from "@/stores/auth.store";
+import { useDeviceStore } from "@/stores/device.store";
 import type { ApiResponse } from "@/types/api";
 import type { LoginRequest, MeResponse, TokenResponse } from "@/types/auth";
 import type { Branch, Permission, User, UserBranch } from "@/types/user";
@@ -26,6 +27,7 @@ const api = axios.create({ baseURL: apiBaseUrl });
 
 api.interceptors.request.use((config) => {
   const { accessToken, companyId, branchId } = useAuthStore.getState();
+  const deviceState = useDeviceStore.getState();
 
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`;
@@ -35,6 +37,14 @@ api.interceptors.request.use((config) => {
   }
   if (branchId) {
     config.headers["X-Branch-ID"] = branchId;
+  }
+  if (
+    window.location.pathname.startsWith("/counter")
+    && deviceState.isAuthenticated()
+    && deviceState.device?.device_type === "counter"
+    && deviceState.device.branch_id === branchId
+  ) {
+    config.headers["X-Device-Authorization"] = `Bearer ${deviceState.accessToken}`;
   }
 
   return config;

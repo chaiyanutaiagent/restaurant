@@ -38,6 +38,10 @@ export type WapMenu = {
   queue_prefix: string;
   promptpay_name?: string | null;
   promptpay_payload?: string | null;
+  offline_policy_version?: number;
+  offline_authorization?: string;
+  offline_authorization_expires_at?: string;
+  offline_device_id?: string | null;
   categories: { id: string; name: string }[];
   products: WapMenuProduct[];
 };
@@ -91,6 +95,8 @@ export type WapPaidOrderPayload = {
   local_created_at?: string;
   local_customer_slip_printed_at?: string;
   local_kitchen_slip_printed_at?: string;
+  offline_policy_version?: number;
+  offline_authorization?: string;
   is_offline?: boolean;
 };
 

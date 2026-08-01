@@ -436,6 +436,8 @@ class WapPaidOrderRequest(BaseSchema):
     local_created_at: datetime | None = None
     local_customer_slip_printed_at: datetime | None = None
     local_kitchen_slip_printed_at: datetime | None = None
+    offline_policy_version: int | None = Field(default=None, ge=1, le=100)
+    offline_authorization: str | None = Field(default=None, min_length=1, max_length=4096)
     is_offline: bool = False
 
 

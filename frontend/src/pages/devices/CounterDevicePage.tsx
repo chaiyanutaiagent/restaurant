@@ -11,6 +11,7 @@ import type { DeviceWorkspaceBootstrap } from "@/types/device";
 export default function CounterDevicePage(): JSX.Element {
   const user = useAuthStore((state) => state.user);
   const userBranchId = useAuthStore((state) => state.branchId);
+  const hasPermission = useAuthStore((state) => state.hasPermission);
   const clearDevice = useDeviceStore((state) => state.clearSession);
   const bootstrapQuery = useQuery({
     queryKey: ["device-workspace", "counter"],
@@ -18,7 +19,12 @@ export default function CounterDevicePage(): JSX.Element {
     retry: false,
   });
   const bootstrap = bootstrapQuery.data;
-  const staffReady = Boolean(user && bootstrap && userBranchId === bootstrap.branch.id);
+  const staffReady = Boolean(
+    user
+    && bootstrap
+    && userBranchId === bootstrap.branch.id
+    && hasPermission("fb.order.create"),
+  );
 
   if (bootstrapQuery.isLoading) {
     return <div className="flex min-h-[100dvh] items-center justify-center bg-slate-950 text-white"><Loader2 className="h-10 w-10 animate-spin text-emerald-400" /></div>;
@@ -50,7 +56,7 @@ export default function CounterDevicePage(): JSX.Element {
               <p className="mt-3 text-2xl font-black">{staffReady ? `พร้อมใช้งานโดย ${user?.display_name ?? user?.username}` : user ? "Branch ของพนักงานไม่ตรงกับเครื่อง" : "กรุณาลงชื่อพนักงาน"}</p>
               <p className="mt-2 text-sm text-slate-400">ยอดขายจะใช้สิทธิ์และ Branch จากพนักงาน และต้องตรงกับ Branch ที่จับคู่เครื่องนี้</p>
               {staffReady ? (
-                <Button asChild className="mt-7 h-14 bg-emerald-500 text-lg font-black text-slate-950 hover:bg-emerald-400"><Link to="/pos"><LogIn className="h-5 w-5" />เปิดหน้าขาย</Link></Button>
+                <Button asChild className="mt-7 h-14 bg-emerald-500 text-lg font-black text-slate-950 hover:bg-emerald-400"><Link to="/counter/orders"><LogIn className="h-5 w-5" />เปิดหน้าขาย</Link></Button>
               ) : (
                 <Button asChild className="mt-7 h-14 bg-white text-lg font-black text-slate-950 hover:bg-slate-200"><Link to="/login?next=/counter"><LogIn className="h-5 w-5" />ลงชื่อพนักงาน</Link></Button>
               )}

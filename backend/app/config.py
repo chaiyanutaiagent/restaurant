@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     device_pairing_lock_minutes: int = Field(default=15, ge=1, le=60)
     device_access_token_expire_days: int = Field(default=30, ge=1, le=90)
     device_last_seen_write_interval_seconds: int = Field(default=60, ge=10, le=300)
+    offline_sale_authorization_expire_hours: int = Field(default=12, ge=1, le=24)
     default_admin_password: str | None = None
     environment: Literal["development", "staging", "production", "test"]
     cors_origins: list[str]

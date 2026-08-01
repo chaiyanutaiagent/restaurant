@@ -13,10 +13,12 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.business_context import RESTAURANT
-from app.database import get_db, get_restaurant_service_db
+from app.database import get_db, get_identity_db, get_restaurant_service_db
 from app.dependencies import (
+    DeviceTokenData,
     TokenData,
     get_current_user,
+    get_optional_counter_device,
     require_any_permission,
     require_business_type,
     require_permission,
@@ -57,6 +59,10 @@ from app.services.brand_navigation_service import BrandNavigationService
 from app.schemas.product import ProductCreate, ProductListItem
 from app.schemas.stock import StockBalanceRead, StockMovementRead
 from app.services.dining_service import DiningService
+from app.services.offline_sale_authorization import (
+    OFFLINE_POLICY_VERSION,
+    OfflineSaleAuthorizationService,
+)
 from app.services.staff_scope_policy import normalized_station_key
 from app.services.fb_setup import (
     DiningTableZonePlan,
@@ -1996,8 +2002,9 @@ def _branch_promptpay_payload(settings_row: BranchSettings | None) -> str | None
 
 async def _wap_get_menu_data(
     brand_slug: str | None,
-    current: TokenData = Depends(require_permission("fb.order.create")),
-    db: AsyncSession = Depends(get_db),
+    current: TokenData,
+    db: AsyncSession,
+    counter_device: DeviceTokenData | None,
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -2007,24 +2014,27 @@ async def _wap_get_menu_data(
     branch = await db.get(BranchModel, current.branch_id)
     if not branch or branch.company_id != current.company_id:
         raise HTTPException(status_code=404, detail="ไม่พบสาขา")
+    if counter_device is not None and (
+        counter_device.company_id != current.company_id
+        or counter_device.branch_id != current.branch_id
+    ):
+        raise HTTPException(status_code=403, detail="Counter device Branch does not match staff Branch")
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
     brand_branch = await _ensure_brand_branch(db, current.company_id, current.branch_id, brand)
     if brand is not None and (brand_branch is None or brand_branch.store_location_id is None):
         raise HTTPException(status_code=400, detail="กรุณาตั้งค่าคลัง STORE-STOCK ของสาขาก่อนขาย")
     settings = await db.scalar(select(BranchSettings).where(BranchSettings.branch_id == current.branch_id))
-    shift_id: uuid.UUID | None = None
     location_id: uuid.UUID | None = brand_branch.store_location_id if brand_branch else None
-    if brand is not None and location_id is not None:
-        shift_id, location_id = await DiningService(db)._resolve_shift_and_location(
-            current.company_id,
-            current.branch_id,
-            current.user_id,
-            None,
-            location_id,
-            location_id,
-        )
-        await db.commit()
+    shift_id, location_id = await DiningService(db)._resolve_shift_and_location(
+        current.company_id,
+        current.branch_id,
+        current.user_id,
+        None,
+        location_id,
+        location_id if brand is not None else None,
+    )
+    await db.commit()
     product_filters = [
             Product.company_id == current.company_id,
             Product.product_type == "menu_item",
@@ -2074,6 +2084,15 @@ async def _wap_get_menu_data(
         ).order_by(CategoryModel.sort_order, CategoryModel.name)
     )).all())
     cat_map = {item.id: item.name for item in categories}
+    offline_authorization, offline_authorization_expires_at = (
+        OfflineSaleAuthorizationService.issue(
+            current,
+            shift_id=shift_id,
+            location_id=location_id,
+            brand_id=brand.id if brand else None,
+            device=counter_device,
+        )
+    )
 
     def _serialize_store_menu_recipe(recipe: Recipe | None) -> dict[str, Any] | None:
         if not recipe:
@@ -2105,6 +2124,10 @@ async def _wap_get_menu_data(
         "queue_prefix": settings.fb_queue_prefix if settings else "",
         "promptpay_name": settings.promptpay_name if settings else None,
         "promptpay_payload": _branch_promptpay_payload(settings),
+        "offline_policy_version": OFFLINE_POLICY_VERSION,
+        "offline_authorization": offline_authorization,
+        "offline_authorization_expires_at": offline_authorization_expires_at.isoformat(),
+        "offline_device_id": str(counter_device.device_id) if counter_device else None,
         "categories": [{"id": str(item.id), "name": item.name} for item in categories],
         "products": [
             {
@@ -2128,8 +2151,9 @@ async def _wap_get_menu_data(
 async def wap_get_menu(
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
-    return await _wap_get_menu_data(None, current, db)
+    return await _wap_get_menu_data(None, current, db, counter_device)
 
 
 @router.get("/store/{brand_slug}/menu")
@@ -2137,8 +2161,9 @@ async def store_get_menu(
     brand_slug: str,
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
-    return await _wap_get_menu_data(brand_slug, current, db)
+    return await _wap_get_menu_data(brand_slug, current, db, counter_device)
 
 
 @router.get("/store/{brand_slug}/stock/daily")
@@ -5283,6 +5308,7 @@ async def store_sync_offline_orders(
     payload: WapOfflineSyncRequest,
     current: TokenData = Depends(require_any_permission("brand.store.order.create", "fb.order.create")),
     db: AsyncSession = Depends(get_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -5310,6 +5336,20 @@ async def store_sync_offline_orders(
     svc = DiningService(db)
     results: list[WapOfflineSyncItemRead] = []
     for offline_order in payload.orders:
+        try:
+            await OfflineSaleAuthorizationService.validate(
+                identity_db,
+                current,
+                offline_order,
+                brand_id=brand.id,
+            )
+        except ValueError as exc:
+            results.append(WapOfflineSyncItemRead(
+                client_order_id=offline_order.client_order_id,
+                status="needs_review",
+                error=str(exc),
+            ))
+            continue
         order_product_ids = {item.product_id for item in offline_order.items}
         if not order_product_ids.issubset(valid_product_ids):
             results.append(WapOfflineSyncItemRead(
@@ -5358,6 +5398,7 @@ async def wap_sync_offline_orders(
     payload: WapOfflineSyncRequest,
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -5381,6 +5422,20 @@ async def wap_sync_offline_orders(
     svc = DiningService(db)
     results: list[WapOfflineSyncItemRead] = []
     for offline_order in payload.orders:
+        try:
+            await OfflineSaleAuthorizationService.validate(
+                identity_db,
+                current,
+                offline_order,
+                brand_id=None,
+            )
+        except ValueError as exc:
+            results.append(WapOfflineSyncItemRead(
+                client_order_id=offline_order.client_order_id,
+                status="needs_review",
+                error=str(exc),
+            ))
+            continue
         order_product_ids = {item.product_id for item in offline_order.items}
         if not order_product_ids.issubset(valid_product_ids):
             results.append(WapOfflineSyncItemRead(

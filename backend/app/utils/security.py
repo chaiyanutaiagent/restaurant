@@ -142,6 +142,55 @@ def create_device_access_token(
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
+def create_offline_sale_authorization(
+    *,
+    user_id: uuid.UUID,
+    company_id: uuid.UUID,
+    branch_id: uuid.UUID,
+    shift_id: uuid.UUID | None,
+    location_id: uuid.UUID | None,
+    brand_id: uuid.UUID | None,
+    device_id: uuid.UUID | None,
+    device_credential_version: int | None,
+    expires_delta: timedelta | None = None,
+) -> str:
+    now = datetime.now(timezone.utc)
+    expire = now + (
+        expires_delta
+        or timedelta(hours=settings.offline_sale_authorization_expire_hours)
+    )
+    payload = {
+        "sub": str(user_id),
+        "company_id": str(company_id),
+        "branch_id": str(branch_id),
+        "shift_id": str(shift_id) if shift_id else None,
+        "location_id": str(location_id) if location_id else None,
+        "brand_id": str(brand_id) if brand_id else None,
+        "device_id": str(device_id) if device_id else None,
+        "device_credential_version": device_credential_version,
+        "policy_version": 1,
+        "type": "offline_sale_authorization",
+        "exp": expire,
+        "iat": now,
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
+
+def decode_offline_sale_authorization(token: str) -> dict:
+    try:
+        return jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.algorithm],
+            options={"verify_exp": False},
+        )
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid offline sale authorization",
+        ) from exc
+
+
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])

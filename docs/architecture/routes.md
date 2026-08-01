@@ -62,7 +62,7 @@ Planned POS Admin pages:
 - `GET/PATCH /api/v1/device-workspaces/kitchen/...` - Station-locked Kitchen ticket workspace
 - `GET/POST /api/v1/device-workspaces/pickup/...` - Branch-locked Pickup queue workspace
 
-Dedicated browser routes are `/counter`, `/kitchen`, and `/pickup`; `/device/pair` exchanges the
+Dedicated browser routes are `/counter`, `/counter/orders`, `/kitchen`, and `/pickup`; `/device/pair` exchanges the
 one-time pairing credential, while `/devices` is the scoped Manager console. Existing
 `/restaurant/kitchen` and `/restaurant/pickup` user-session routes remain available.
 

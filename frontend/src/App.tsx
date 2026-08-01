@@ -92,6 +92,9 @@ export default function App(): JSX.Element {
           <Route path="/device/pair" element={<DevicePairingPage />} />
           <Route element={<DeviceProtectedRoute type="counter" />}>
             <Route path="/counter" element={<CounterDevicePage />} />
+            <Route element={<ProtectedRoute permission="fb.order.create" />}>
+              <Route path="/counter/orders" element={<WapOrderPage />} />
+            </Route>
           </Route>
           <Route element={<DeviceProtectedRoute type="kitchen" />}>
             <Route path="/kitchen" element={<KitchenDisplayPage />} />

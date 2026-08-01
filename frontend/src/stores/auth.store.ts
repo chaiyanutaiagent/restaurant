@@ -7,6 +7,7 @@ import type { User } from "@/types/user";
 
 type JwtPayload = {
   branch_id?: string | null;
+  station_key?: string | null;
   permissions?: string[];
 };
 
@@ -16,6 +17,7 @@ type AuthState = {
   user: User | null;
   companyId: string | null;
   branchId: string | null;
+  stationKey: string | null;
   permissions: string[];
   setSession: (tokens: TokenResponse, companyId: string) => void;
   setBranchId: (branchId: string) => void;
@@ -47,6 +49,7 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
   user: null,
   companyId: null,
   branchId: null,
+  stationKey: null,
   permissions: [],
   setSession: (tokens, companyId) => {
     const payload = parseJwtPayload(tokens.access_token);
@@ -56,6 +59,7 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
       state.user = tokens.user;
       state.companyId = companyId;
       state.branchId = payload?.branch_id ?? null;
+      state.stationKey = payload?.station_key ?? null;
       state.permissions = payload?.permissions ?? [];
     });
   },
@@ -71,6 +75,7 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
       state.user = null;
       state.companyId = null;
       state.branchId = null;
+      state.stationKey = null;
       state.permissions = [];
     });
     window.localStorage.removeItem("erp-auth");

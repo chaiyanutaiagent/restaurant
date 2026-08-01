@@ -37,8 +37,13 @@ from app.schemas.user_access import (
     UserAccessRejectRequest,
     UserAccessRequestCreate,
 )
+from app.schemas.staff_assignment import (
+    StaffRoleAssignmentCreate,
+    StaffRoleAssignmentRevoke,
+)
 from app.services.admin_service import AdminService
 from app.services.role_preset_service import RolePresetService
+from app.services.staff_scope_service import StaffScopeService
 from app.services.upload_service import UploadService
 from app.services.user_access_service import UserAccessService
 from app.utils.health_check import get_system_health
@@ -58,15 +63,26 @@ async def _require_branch_access(
 ) -> None:
     if "*" in current.permissions:
         return
+    if current.branch_id == branch_id:
+        return
     if await service.can_access_branch(current.company_id, current.user_id, branch_id):
         return
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
 
 
+def _require_company_assignment_admin(current: TokenData) -> None:
+    if "*" in current.permissions or "company" in current.scope_types:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Company scope is required to manage staff assignments",
+    )
+
+
 @router.get("/permissions")
 async def get_permissions(
     _: TokenData = Depends(require_permission("system.role.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     rows = await db.scalars(select(Permission).order_by(Permission.module, Permission.code))
     data = [PermissionRead.model_validate(permission).model_dump() for permission in rows.all()]
@@ -76,24 +92,78 @@ async def get_permissions(
 @router.get("/me/branches")
 async def my_branches(
     current: TokenData = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
-    service = AdminService(db)
-    detail = await service.get_user_detail(current.user_id, current.company_id)
-    data = [
-        {
-            "branch_id": item.branch_id,
-            "branch_name": item.branch_name,
-            "branch_code": item.branch_code,
-            "brand_id": item.brand_id,
-            "business_type": item.business_type,
-            "target_database": item.target_database,
-            "role_name": item.role_name,
-            "is_default": item.is_default,
-        }
-        for item in detail.branches
-    ]
+    data = await StaffScopeService(db).list_accessible_branches(
+        current.company_id,
+        current.user_id,
+        is_superuser="*" in current.permissions,
+    )
     return ok(data)
+
+
+@router.get("/staff-assignment-options")
+async def get_staff_assignment_options(
+    current: TokenData = Depends(require_permission("system.user.edit")),
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    data = await StaffScopeService(db, restaurant_db=restaurant_db).list_options(current.company_id)
+    return ok(data.model_dump())
+
+
+@router.get("/users/{user_id}/role-assignments")
+async def get_user_role_assignments(
+    user_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("system.user.edit")),
+    db: AsyncSession = Depends(get_identity_db),
+    include_revoked: bool = Query(default=False),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    rows = await StaffScopeService(db).list_assignments(
+        current.company_id,
+        user_id,
+        include_revoked=include_revoked,
+    )
+    return ok([row.model_dump() for row in rows])
+
+
+@router.post("/users/{user_id}/role-assignments", status_code=status.HTTP_201_CREATED)
+async def create_user_role_assignment(
+    user_id: uuid.UUID,
+    payload: StaffRoleAssignmentCreate,
+    current: TokenData = Depends(require_permission("system.user.edit")),
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    row = await StaffScopeService(db, restaurant_db=restaurant_db).create_assignment(
+        current.company_id,
+        user_id,
+        current.user_id,
+        payload,
+    )
+    return ok(row.model_dump())
+
+
+@router.post("/users/{user_id}/role-assignments/{assignment_id}/revoke")
+async def revoke_user_role_assignment(
+    user_id: uuid.UUID,
+    assignment_id: uuid.UUID,
+    payload: StaffRoleAssignmentRevoke,
+    current: TokenData = Depends(require_permission("system.user.edit")),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    row = await StaffScopeService(db).revoke_assignment(
+        current.company_id,
+        user_id,
+        assignment_id,
+        current.user_id,
+        payload.reason,
+    )
+    return ok(row.model_dump())
 
 
 @router.get("/users")
@@ -108,7 +178,7 @@ async def get_users(
 ) -> dict[str, Any]:
     service = AdminService(db)
     effective_branch_id = branch_id
-    if "*" not in current.permissions:
+    if "*" not in current.permissions and "company" not in current.scope_types:
         if branch_id and branch_id != current.branch_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch access denied")
         effective_branch_id = current.branch_id
@@ -145,7 +215,11 @@ async def get_user_detail(
 ) -> dict[str, Any]:
     service = AdminService(db)
     detail = await service.get_user_detail(user_id, current.company_id)
-    if "*" not in current.permissions and current.branch_id not in {item.branch_id for item in detail.branches}:
+    if (
+        "*" not in current.permissions
+        and "company" not in current.scope_types
+        and current.branch_id not in {item.branch_id for item in detail.branches}
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return ok(detail.model_dump())
 
@@ -158,7 +232,7 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
-    if "*" not in current.permissions:
+    if "*" not in current.permissions and "company" not in current.scope_types:
         detail = await service.get_user_detail(user_id, current.company_id)
         if current.branch_id not in {item.branch_id for item in detail.branches}:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -219,7 +293,7 @@ async def remove_user_branch(
 @router.get("/roles")
 async def get_roles(
     current: TokenData = Depends(require_permission("system.role.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
     data = [role.model_dump() for role in await service.list_roles(current.company_id)]
@@ -229,7 +303,7 @@ async def get_roles(
 @router.get("/role-presets")
 async def get_role_presets(
     _: TokenData = Depends(require_permission("system.role.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     data = [preset.model_dump() for preset in await RolePresetService(db).list_presets()]
     return ok(data)
@@ -239,7 +313,7 @@ async def get_role_presets(
 async def create_role(
     payload: RoleCreateFull,
     current: TokenData = Depends(require_permission("system.role.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
     role = await service.create_role(current.company_id, payload)
@@ -252,7 +326,7 @@ async def update_role(
     role_id: uuid.UUID,
     payload: RoleUpdateFull,
     current: TokenData = Depends(require_permission("system.role.edit")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
     role = await service.update_role(role_id, current.company_id, payload)
@@ -264,7 +338,7 @@ async def update_role(
 async def delete_role(
     role_id: uuid.UUID,
     current: TokenData = Depends(require_permission("system.role.delete")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> Response:
     service = AdminService(db)
     await service.delete_role(role_id, current.company_id)

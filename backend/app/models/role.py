@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Table, UniqueConstraint, Column, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, Table, UniqueConstraint, Column, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +40,11 @@ class Role(SoftDeleteMixin, Base):
         Boolean,
         nullable=False,
         server_default=text("false"),
+    )
+    allowed_scope_types: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        server_default=text("'[\"branch\"]'::json"),
     )
 
     company: Mapped["Company"] = relationship("Company")

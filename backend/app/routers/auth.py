@@ -75,6 +75,7 @@ async def login(
     access_token, refresh_token = await auth_service.create_session(
         user=user,
         branch_id=payload.branch_id,
+        station_key=payload.station_key,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
@@ -124,6 +125,9 @@ async def me(
         brand_id=current.brand_id,
         business_type=current.business_type,
         target_database=current.target_database,
+        station_key=current.station_key,
+        assignment_ids=current.assignment_ids,
+        scope_types=current.scope_types,
         permissions=current.permissions,
     )
     return ok(data.model_dump())
@@ -136,7 +140,11 @@ async def switch_branch(
     user: User = Depends(get_current_user_db),
 ) -> dict[str, Any]:
     auth_service = AuthService(db)
-    access_token, refresh_token = await auth_service.switch_branch(user, payload.branch_id)
+    access_token, refresh_token = await auth_service.switch_branch(
+        user,
+        payload.branch_id,
+        station_key=payload.station_key,
+    )
     return ok(_token_response(access_token, refresh_token, user).model_dump())
 
 

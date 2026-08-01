@@ -31,7 +31,7 @@ class RolePresetPolicyTests(unittest.TestCase):
                 "kitchen-staff",
             ],
         )
-        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-08-01")
+        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-08-01.2")
 
     def test_every_preset_uses_registered_permissions_without_duplicates(self) -> None:
         for policy in ROLE_PRESET_POLICIES:
@@ -67,7 +67,10 @@ class RolePresetPolicyTests(unittest.TestCase):
         policy = self.policies["kitchen-staff"]
         self.assertEqual(policy.default_scope, "station")
         self.assertEqual(policy.allowed_scopes, ("station",))
-        self.assertEqual(set(policy.permission_codes), {"fb.menu.view", "fb.kitchen.manage"})
+        self.assertEqual(
+            set(policy.permission_codes),
+            {"fb.menu.view", "fb.kitchen.ticket.manage"},
+        )
 
     def test_missing_catalog_codes_disable_only_affected_presets(self) -> None:
         kitchen_permissions = [

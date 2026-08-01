@@ -62,7 +62,7 @@ def run() -> None:
     kitchen = by_key["kitchen-staff"]
     if kitchen["default_scope"] != "station":
         raise RuntimeError(f"Kitchen Staff scope is not station: {kitchen}")
-    if set(kitchen["permission_codes"]) != {"fb.menu.view", "fb.kitchen.manage"}:
+    if set(kitchen["permission_codes"]) != {"fb.menu.view", "fb.kitchen.ticket.manage"}:
         raise RuntimeError(f"Kitchen Staff permissions escaped kitchen boundary: {kitchen}")
 
     print(

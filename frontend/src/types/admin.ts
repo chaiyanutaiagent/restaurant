@@ -1,5 +1,7 @@
 import type { Permission } from "@/types/user";
 
+export type RoleScope = "company" | "brand" | "branch" | "station";
+
 export interface UserBranchDetail {
   branch_id: string;
   branch_name: string;
@@ -35,6 +37,7 @@ export interface RoleDetail {
   description: string | null;
   is_system: boolean;
   is_branch_assignable: boolean;
+  allowed_scope_types: RoleScope[];
   created_at: string;
   permissions: Permission[];
   user_count: number;
@@ -44,14 +47,48 @@ export interface RolePreset {
   key: string;
   name: string;
   description: string;
-  default_scope: "company" | "brand" | "branch" | "station";
-  allowed_scopes: Array<"company" | "brand" | "branch" | "station">;
+  default_scope: RoleScope;
+  allowed_scopes: RoleScope[];
   is_branch_assignable: boolean;
   permission_ids: string[];
   permission_codes: string[];
   missing_permission_codes: string[];
   is_available: boolean;
   policy_version: string;
+}
+
+export interface StaffRoleAssignment {
+  id: string;
+  company_id: string;
+  user_id: string;
+  role_id: string;
+  role_name: string;
+  scope_type: RoleScope;
+  scope_key: string;
+  scope_label: string;
+  brand_id: string | null;
+  brand_name: string | null;
+  branch_id: string | null;
+  branch_name: string | null;
+  station_key: string | null;
+  assignment_reason: string;
+  assigned_by: string;
+  assigned_at: string;
+  revoked_by: string | null;
+  revoked_at: string | null;
+  revocation_reason: string | null;
+}
+
+export interface StaffAssignmentOptions {
+  company: { id: string; name: string };
+  brands: Array<{ id: string; name: string; business_type: string }>;
+  branches: Array<{
+    id: string;
+    code: string;
+    name: string;
+    brand_id: string;
+    stations: string[];
+  }>;
 }
 
 export interface BranchSettings {

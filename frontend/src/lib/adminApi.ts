@@ -7,6 +7,9 @@ import type {
   InviteResponse,
   RoleDetail,
   RolePreset,
+  RoleScope,
+  StaffAssignmentOptions,
+  StaffRoleAssignment,
   UserAccessApprovalResult,
   UserAccessRequest,
   UserAccessRequestStatus,
@@ -33,7 +36,32 @@ export const userApi = {
   assignBranch: (id: string, data: { branch_id: string; role_id: string; is_default?: boolean }) =>
     api.post<ApiResponse<UserDetail>>(`/system/users/${id}/branches`, data),
   removeBranch: (userId: string, branchId: string) =>
-    api.delete(`/system/users/${userId}/branches/${branchId}`)
+    api.delete(`/system/users/${userId}/branches/${branchId}`),
+  listRoleAssignments: (userId: string, includeRevoked = false) =>
+    api.get<ApiResponse<StaffRoleAssignment[]>>(`/system/users/${userId}/role-assignments`, {
+      params: { include_revoked: includeRevoked }
+    }),
+  createRoleAssignment: (
+    userId: string,
+    data: {
+      role_id: string;
+      scope_type: RoleScope;
+      brand_id?: string | null;
+      branch_id?: string | null;
+      station_key?: string | null;
+      reason: string;
+    }
+  ) => api.post<ApiResponse<StaffRoleAssignment>>(`/system/users/${userId}/role-assignments`, data),
+  revokeRoleAssignment: (userId: string, assignmentId: string, reason: string) =>
+    api.post<ApiResponse<StaffRoleAssignment>>(
+      `/system/users/${userId}/role-assignments/${assignmentId}/revoke`,
+      { reason }
+    )
+};
+
+export const staffAssignmentApi = {
+  options: () =>
+    api.get<ApiResponse<StaffAssignmentOptions>>("/system/staff-assignment-options")
 };
 
 export const roleApi = {
@@ -44,6 +72,7 @@ export const roleApi = {
     description?: string;
     permission_ids: string[];
     is_branch_assignable?: boolean;
+    allowed_scope_types?: Array<"company" | "brand" | "branch" | "station">;
   }) =>
     api.post<ApiResponse<RoleDetail>>("/system/roles", data),
   update: (id: string, data: object) => api.patch<ApiResponse<RoleDetail>>(`/system/roles/${id}`, data),

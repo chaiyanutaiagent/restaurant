@@ -7,7 +7,7 @@ import uuid
 from pydantic import ConfigDict, Field, field_validator
 
 from app.schemas import BaseSchema
-from app.schemas.role import PermissionRead
+from app.schemas.role import PermissionRead, RoleScope, unique_role_scopes
 from app.utils.promptpay import generate_promptpay_payload
 
 
@@ -83,6 +83,9 @@ class RoleCreateFull(BaseSchema):
     description: str | None = None
     permission_ids: list[uuid.UUID]
     is_branch_assignable: bool = False
+    allowed_scope_types: list[RoleScope] = Field(default_factory=lambda: ["branch"], min_length=1)
+
+    _validate_scopes = field_validator("allowed_scope_types")(unique_role_scopes)
 
 
 class RoleUpdateFull(BaseSchema):
@@ -90,6 +93,9 @@ class RoleUpdateFull(BaseSchema):
     description: str | None = None
     permission_ids: list[uuid.UUID] | None = None
     is_branch_assignable: bool | None = None
+    allowed_scope_types: list[RoleScope] | None = Field(default=None, min_length=1)
+
+    _validate_scopes = field_validator("allowed_scope_types")(unique_role_scopes)
 
 
 class RoleDetailRead(BaseSchema):
@@ -99,6 +105,7 @@ class RoleDetailRead(BaseSchema):
     description: str | None = None
     is_system: bool
     is_branch_assignable: bool
+    allowed_scope_types: list[RoleScope]
     created_at: datetime
     permissions: list[PermissionRead]
     user_count: int

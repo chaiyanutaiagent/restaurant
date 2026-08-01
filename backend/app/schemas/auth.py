@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.user import UserRead
 
@@ -12,6 +12,7 @@ class LoginRequest(BaseModel):
     password: str
     branch_id: uuid.UUID | None = None
     company_id: uuid.UUID | None = None
+    station_key: str | None = None
 
 
 class TokenResponse(BaseModel):
@@ -32,6 +33,7 @@ class LogoutRequest(BaseModel):
 
 class BranchSwitchRequest(BaseModel):
     branch_id: uuid.UUID
+    station_key: str | None = None
 
 
 class MeResponse(BaseModel):
@@ -41,4 +43,7 @@ class MeResponse(BaseModel):
     brand_id: uuid.UUID | None = None
     business_type: str | None = None
     target_database: str | None = None
+    station_key: str | None = None
+    assignment_ids: list[uuid.UUID] = Field(default_factory=list)
+    scope_types: list[str] = Field(default_factory=list)
     permissions: list[str]

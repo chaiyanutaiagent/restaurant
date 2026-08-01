@@ -252,11 +252,13 @@ export default function App(): JSX.Element {
             <Route path="/restaurant/setup" element={<FBSetupWizard />} />
           </Route>
           {/* Kitchen & Pickup — fullscreen, no AppShell */}
-          <Route element={<ProtectedRoute permission="fb.kitchen.manage" />}>
+          <Route element={<ProtectedRoute permissions={["fb.kitchen.ticket.manage", "fb.kitchen.manage"]} />}>
             <Route path="/restaurant/kitchen" element={<KitchenDisplayPage />} />
+          </Route>
+          <Route element={<ProtectedRoute permission="fb.kitchen.manage" />}>
             <Route path="/restaurant/pickup" element={<PickupDisplayPage />} />
           </Route>
-          <Route element={<ProtectedRoute permissions={["fb.menu.view", "fb.table.manage", "fb.order.create", "fb.kitchen.manage", "fb.recipe.manage", "fb.report.view", "fb.settings.manage"]} />}>
+          <Route element={<ProtectedRoute permissions={["fb.menu.view", "fb.table.manage", "fb.order.create", "fb.kitchen.ticket.manage", "fb.kitchen.manage", "fb.recipe.manage", "fb.report.view", "fb.settings.manage"]} />}>
             <Route element={<AppShell workspace="restaurant" />}>
               <Route path="/restaurant" element={<RestaurantIndexPage />} />
               <Route path="/restaurant/admin" element={<RestaurantAdminPage />} />

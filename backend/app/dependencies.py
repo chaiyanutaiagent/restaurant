@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import uuid
 
 from fastapi import Depends, HTTPException, status
@@ -26,6 +26,9 @@ class TokenData:
     brand_id: uuid.UUID | None = None
     business_type: str | None = None
     target_database: str | None = None
+    station_key: str | None = None
+    assignment_ids: list[uuid.UUID] = field(default_factory=list)
+    scope_types: list[str] = field(default_factory=list)
 
 
 async def get_current_user(
@@ -56,7 +59,12 @@ async def get_current_user(
     branch_id = uuid.UUID(payload["branch_id"]) if payload.get("branch_id") else None
     context = None
     if branch_id is not None:
-        context = await resolve_user_branch_context(db, user, branch_id)
+        context = await resolve_user_branch_context(
+            db,
+            user,
+            branch_id,
+            station_key=payload.get("station_key"),
+        )
     return TokenData(
         user_id=user_id,
         company_id=company_id,
@@ -65,6 +73,9 @@ async def get_current_user(
         brand_id=context.brand_id if context else None,
         business_type=context.business_type if context else None,
         target_database=context.target_database if context else None,
+        station_key=payload.get("station_key"),
+        assignment_ids=[uuid.UUID(value) for value in payload.get("assignment_ids", [])],
+        scope_types=list(payload.get("scope_types", [])),
     )
 
 

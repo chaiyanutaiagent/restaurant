@@ -41,7 +41,15 @@ export default function RestaurantIndexPage(): JSX.Element {
 
   const hasTables = settings.fb_service_mode !== "quick_service";
 
-  const cards = [
+  const cards: Array<{
+    to: string;
+    permission?: string;
+    permissions?: string[];
+    icon: JSX.Element;
+    title: string;
+    desc: string;
+    color: string;
+  }> = [
     {
       to: "/restaurant/wap",
       permission: "fb.order.create",
@@ -70,7 +78,7 @@ export default function RestaurantIndexPage(): JSX.Element {
     },
     {
       to: "/restaurant/kitchen",
-      permission: "fb.kitchen.manage",
+      permissions: ["fb.kitchen.ticket.manage", "fb.kitchen.manage"],
       icon: <ChefHat className="h-7 w-7" />,
       title: "Kitchen Display",
       desc: "หน้าจอครัว — รับและอัปเดตสถานะออเดอร์",
@@ -110,7 +118,11 @@ export default function RestaurantIndexPage(): JSX.Element {
       desc: "ต้นทุน ปริมาณใช้ และ variance รายวัน/รายกะ",
       color: "bg-indigo-500",
     },
-  ].filter((card) => hasPermission(card.permission));
+  ].filter((card) =>
+    card.permission
+      ? hasPermission(card.permission)
+      : card.permissions?.some((permission) => hasPermission(permission))
+  );
 
   return (
     <div>

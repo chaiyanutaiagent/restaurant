@@ -21,9 +21,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { usePermission } from "@/hooks/usePermission";
-import { branchApi, invitationApi, roleApi, userApi } from "@/lib/adminApi";
+import { branchApi, invitationApi, roleApi, staffAssignmentApi, userApi } from "@/lib/adminApi";
 import { formatDateTimeTh } from "@/lib/utils";
-import type { BranchDetail, InviteResponse, RoleDetail, UserDetail } from "@/types/admin";
+import type { BranchDetail, InviteResponse, RoleDetail, RoleScope, UserDetail } from "@/types/admin";
 import UserAccessRequestsPanel from "./UserAccessRequestsPanel";
 
 type UserFormState = {
@@ -1009,6 +1009,9 @@ function UserDetailDialog(props: UserDetailDialogProps): JSX.Element {
                 </select>
                 <Button onClick={onAssignBranch}>เพิ่มสาขา</Button>
               </div>
+              {canEdit ? (
+                <ScopedAssignmentsPanel userId={user.id} roles={roles} canEdit={canEdit} />
+              ) : null}
             </TabsContent>
 
             <TabsContent value="security" className="space-y-5">
@@ -1060,6 +1063,240 @@ function UserDetailDialog(props: UserDetailDialogProps): JSX.Element {
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+type ScopedAssignmentForm = {
+  role_id: string;
+  scope_type: RoleScope;
+  brand_id: string;
+  branch_id: string;
+  station_key: string;
+  reason: string;
+};
+
+const emptyScopedAssignmentForm: ScopedAssignmentForm = {
+  role_id: "",
+  scope_type: "branch",
+  brand_id: "",
+  branch_id: "",
+  station_key: "",
+  reason: ""
+};
+
+function ScopedAssignmentsPanel({
+  userId,
+  roles,
+  canEdit
+}: {
+  userId: string;
+  roles: RoleDetail[];
+  canEdit: boolean;
+}): JSX.Element {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [form, setForm] = useState<ScopedAssignmentForm>(emptyScopedAssignmentForm);
+  const assignmentsQuery = useQuery({
+    queryKey: ["admin", "users", userId, "role-assignments"],
+    queryFn: async () => (await userApi.listRoleAssignments(userId)).data.data
+  });
+  const optionsQuery = useQuery({
+    queryKey: ["admin", "staff-assignment-options"],
+    queryFn: async () => (await staffAssignmentApi.options()).data.data,
+    enabled: canEdit
+  });
+  const assignments = assignmentsQuery.data ?? [];
+  const options = optionsQuery.data;
+  const eligibleRoles = roles.filter((role) => role.allowed_scope_types.includes(form.scope_type));
+  const selectedBranch = options?.branches.find((branch) => branch.id === form.branch_id);
+  const targetReady =
+    form.scope_type === "company" ||
+    (form.scope_type === "brand" && Boolean(form.brand_id)) ||
+    (form.scope_type === "branch" && Boolean(form.branch_id)) ||
+    (form.scope_type === "station" && Boolean(form.branch_id) && Boolean(form.station_key));
+
+  const invalidate = async (): Promise<void> => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["admin", "users", userId, "role-assignments"] }),
+      queryClient.invalidateQueries({ queryKey: ["system", "my-branches"] })
+    ]);
+  };
+
+  const createMutation = useMutation({
+    mutationFn: async () =>
+      userApi.createRoleAssignment(userId, {
+        role_id: form.role_id,
+        scope_type: form.scope_type,
+        brand_id: form.scope_type === "brand" ? form.brand_id : null,
+        branch_id: ["branch", "station"].includes(form.scope_type) ? form.branch_id : null,
+        station_key: form.scope_type === "station" ? form.station_key : null,
+        reason: form.reason
+      }),
+    onSuccess: async () => {
+      setForm(emptyScopedAssignmentForm);
+      await invalidate();
+      toast({ title: "เพิ่ม Role scope แล้ว" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "เพิ่ม Role scope ไม่สำเร็จ", description: error.message, variant: "destructive" });
+    }
+  });
+
+  const revokeMutation = useMutation({
+    mutationFn: async ({ assignmentId, reason }: { assignmentId: string; reason: string }) =>
+      userApi.revokeRoleAssignment(userId, assignmentId, reason),
+    onSuccess: async () => {
+      await invalidate();
+      toast({ title: "ยกเลิก Role scope แล้ว" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "ยกเลิก Role scope ไม่สำเร็จ", description: error.message, variant: "destructive" });
+    }
+  });
+
+  return (
+    <div className="space-y-4 border-t border-gray-200 pt-5">
+      <div>
+        <p className="font-medium text-gray-900">Role + Scope assignments</p>
+        <p className="text-sm text-gray-500">
+          สิทธิ์ใหม่ระดับ Company, Brand, Branch หรือ Kitchen station; รายการสาขาด้านบนยังเป็น compatibility เดิม
+        </p>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>บทบาท</TableHead>
+            <TableHead>ระดับ</TableHead>
+            <TableHead>ขอบเขต</TableHead>
+            <TableHead>เหตุผล</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {assignments.map((assignment) => (
+            <TableRow key={assignment.id}>
+              <TableCell>{assignment.role_name}</TableCell>
+              <TableCell><Badge variant="outline">{assignment.scope_type}</Badge></TableCell>
+              <TableCell>{assignment.scope_label}</TableCell>
+              <TableCell>{assignment.assignment_reason}</TableCell>
+              <TableCell className="text-right">
+                {canEdit ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const reason = window.prompt("ระบุเหตุผลที่ยกเลิก assignment");
+                      if (reason?.trim()) {
+                        revokeMutation.mutate({ assignmentId: assignment.id, reason: reason.trim() });
+                      }
+                    }}
+                  >
+                    ยกเลิก
+                  </Button>
+                ) : null}
+              </TableCell>
+            </TableRow>
+          ))}
+          {assignments.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={5} className="text-center text-gray-500">ยังไม่มี scoped assignment</TableCell>
+            </TableRow>
+          ) : null}
+        </TableBody>
+      </Table>
+
+      {canEdit ? (
+        <div className="grid gap-3 rounded-xl border border-dashed border-blue-300 bg-blue-50/40 p-4 md:grid-cols-2">
+          <Field label="ระดับ Scope">
+            <select
+              className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm"
+              value={form.scope_type}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  role_id: "",
+                  scope_type: event.target.value as RoleScope,
+                  brand_id: "",
+                  branch_id: "",
+                  station_key: ""
+                }))
+              }
+            >
+              <option value="company">Company</option>
+              <option value="brand">Brand</option>
+              <option value="branch">Branch</option>
+              <option value="station">Kitchen station</option>
+            </select>
+          </Field>
+          <Field label="บทบาท">
+            <select
+              className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm"
+              value={form.role_id}
+              onChange={(event) => setForm((current) => ({ ...current, role_id: event.target.value }))}
+            >
+              <option value="">เลือกบทบาท</option>
+              {eligibleRoles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
+            </select>
+          </Field>
+          {form.scope_type === "company" ? (
+            <Field label="Company"><Input value={options?.company.name ?? ""} disabled /></Field>
+          ) : null}
+          {form.scope_type === "brand" ? (
+            <Field label="Brand">
+              <select
+                className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm"
+                value={form.brand_id}
+                onChange={(event) => setForm((current) => ({ ...current, brand_id: event.target.value }))}
+              >
+                <option value="">เลือก Brand</option>
+                {options?.brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+              </select>
+            </Field>
+          ) : null}
+          {["branch", "station"].includes(form.scope_type) ? (
+            <Field label="Branch">
+              <select
+                className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm"
+                value={form.branch_id}
+                onChange={(event) => setForm((current) => ({ ...current, branch_id: event.target.value, station_key: "" }))}
+              >
+                <option value="">เลือก Branch</option>
+                {options?.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.code} · {branch.name}</option>)}
+              </select>
+            </Field>
+          ) : null}
+          {form.scope_type === "station" ? (
+            <Field label="Kitchen station">
+              <select
+                className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm"
+                value={form.station_key}
+                onChange={(event) => setForm((current) => ({ ...current, station_key: event.target.value }))}
+              >
+                <option value="">เลือก station</option>
+                {selectedBranch?.stations.map((station) => <option key={station} value={station}>{station}</option>)}
+              </select>
+            </Field>
+          ) : null}
+          <Field label="เหตุผล">
+            <Input
+              value={form.reason}
+              placeholder="เช่น รับผิดชอบสาขานี้ตั้งแต่ 1 ส.ค."
+              onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))}
+            />
+          </Field>
+          <div className="flex items-end justify-end">
+            <Button
+              onClick={() => createMutation.mutate()}
+              disabled={
+                !form.role_id || !targetReady || !form.reason.trim() || createMutation.isPending
+              }
+            >
+              เพิ่ม Role scope
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

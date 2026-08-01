@@ -28,6 +28,7 @@ export default function TopBar({ title, onMenuClick, workspace = "admin" }: TopB
   const { toast } = useToast();
   const user = useAuthStore((state) => state.user);
   const branchId = useAuthStore((state) => state.branchId);
+  const stationKey = useAuthStore((state) => state.stationKey);
   const companyId = useAuthStore((state) => state.companyId);
   const setSession = useAuthStore((state) => state.setSession);
 
@@ -44,14 +45,20 @@ export default function TopBar({ title, onMenuClick, workspace = "admin" }: TopB
     [branchesQuery.data]
   );
   const currentBranch =
-    branchesQuery.data?.find((branch) => branch.branch_id === branchId) ?? defaultBranch;
+    branchesQuery.data?.find(
+      (branch) => branch.branch_id === branchId && branch.station_key === stationKey
+    ) ?? defaultBranch;
 
-  const handleSwitchBranch = useCallback(async (nextBranchId: string, notify = true): Promise<void> => {
+  const handleSwitchBranch = useCallback(async (
+    nextBranchId: string,
+    nextStationKey: string | null = null,
+    notify = true
+  ): Promise<void> => {
     if (!companyId) {
       return;
     }
 
-    const response = await authApi.switchBranch(nextBranchId);
+    const response = await authApi.switchBranch(nextBranchId, nextStationKey);
     setSession(response.data.data, companyId);
     if (notify) {
       toast({
@@ -63,7 +70,7 @@ export default function TopBar({ title, onMenuClick, workspace = "admin" }: TopB
 
   useEffect(() => {
     if (!branchId && defaultBranch) {
-      void handleSwitchBranch(defaultBranch.branch_id, false);
+      void handleSwitchBranch(defaultBranch.branch_id, defaultBranch.station_key, false);
     }
   }, [branchId, defaultBranch, handleSwitchBranch]);
 
@@ -101,13 +108,16 @@ export default function TopBar({ title, onMenuClick, workspace = "admin" }: TopB
             <DropdownMenuSeparator />
             {branchesQuery.data?.map((branch) => (
               <DropdownMenuItem
-                key={branch.branch_id}
+                key={`${branch.branch_id}:${branch.station_key ?? "branch"}`}
                 onClick={() => {
-                  void handleSwitchBranch(branch.branch_id);
+                  void handleSwitchBranch(branch.branch_id, branch.station_key);
                 }}
               >
                 <div className="flex flex-col">
-                  <span>{branch.branch_name}</span>
+                  <span>
+                    {branch.branch_name}
+                    {branch.station_key ? ` / ${branch.station_key}` : ""}
+                  </span>
                   <span className="text-xs text-gray-500">{branch.role_name}</span>
                 </div>
               </DropdownMenuItem>

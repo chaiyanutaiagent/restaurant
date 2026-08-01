@@ -18,6 +18,15 @@ from app.schemas.auth import (
 )
 from app.schemas.company import CompanyBase, CompanyCreate, CompanyRead, CompanyUpdate
 from app.schemas.role import PermissionRead, RoleBase, RoleCreate, RolePresetRead, RoleRead, RoleUpdate
+from app.schemas.staff_assignment import (
+    AssignmentBranchOption,
+    AssignmentBrandOption,
+    AssignmentCompanyOption,
+    StaffAssignmentOptionsRead,
+    StaffRoleAssignmentCreate,
+    StaffRoleAssignmentRead,
+    StaffRoleAssignmentRevoke,
+)
 from app.schemas.product import (
     CategoryBase,
     CategoryCreate,
@@ -292,6 +301,13 @@ __all__ = [
     "RoleCreate",
     "RoleUpdate",
     "RoleRead",
+    "AssignmentBranchOption",
+    "AssignmentBrandOption",
+    "AssignmentCompanyOption",
+    "StaffAssignmentOptionsRead",
+    "StaffRoleAssignmentCreate",
+    "StaffRoleAssignmentRead",
+    "StaffRoleAssignmentRevoke",
     "UnitBase",
     "UnitCreate",
     "UnitUpdate",

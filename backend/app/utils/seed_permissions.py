@@ -320,6 +320,12 @@ PERMISSIONS: list[dict[str, str]] = [
         "description": "Update kitchen ticket status (cooking/done/served).",
     },
     {
+        "code": "fb.kitchen.ticket.manage",
+        "name": "Manage Kitchen Tickets",
+        "module": "fb",
+        "description": "View and update kitchen tickets within the assigned branch or station.",
+    },
+    {
         "code": "fb.table.manage",
         "name": "Manage Tables",
         "module": "fb",

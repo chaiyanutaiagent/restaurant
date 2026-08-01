@@ -58,4 +58,5 @@ export interface UserBranch {
   target_database: "restaurant" | "retail_pos" | "takeaway" | null;
   role_name: string;
   is_default: boolean;
+  station_key: string | null;
 }

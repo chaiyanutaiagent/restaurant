@@ -61,15 +61,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         platform_database_name=platform_database_name,
         restaurant_database_name=restaurant_database_name,
     )
-    async with AsyncSessionLocal() as db:
-        permissions_table_exists = await db.scalar(
-            text("SELECT 1 FROM information_schema.tables WHERE table_name = 'permissions' LIMIT 1")
-        )
-        if permissions_table_exists:
-            await seed_default_permissions(db)
-            # FIX S3-D-verify: bootstrap the documented company/admin seed so source-based docker compose matches the verification environment
-            await ensure_default_company_seed_in_session(db)
-            await db.commit()
+    permission_catalog_factories = [AsyncSessionLocal]
+    if platform_database_name != legacy_database_name:
+        permission_catalog_factories.append(PlatformSessionLocal)
+    for session_factory in permission_catalog_factories:
+        async with session_factory() as db:
+            permissions_table_exists = await db.scalar(
+                text("SELECT 1 FROM information_schema.tables WHERE table_name = 'permissions' LIMIT 1")
+            )
+            if permissions_table_exists:
+                await seed_default_permissions(db)
+                if session_factory is AsyncSessionLocal:
+                    # Keep the documented local company/admin bootstrap on the legacy source only.
+                    await ensure_default_company_seed_in_session(db)
+                await db.commit()
 
     projector_stop: asyncio.Event | None = None
     projector_task: asyncio.Task[None] | None = None

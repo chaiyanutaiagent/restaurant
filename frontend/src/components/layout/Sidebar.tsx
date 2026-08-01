@@ -113,7 +113,7 @@ const settingsItems: NavItem[] = [
 ]
 
 const fbItems: NavItem[] = [
-  { label: "ภาพรวม F&B", to: "/restaurant", icon: UtensilsCrossed, permissions: ["fb.menu.view", "fb.table.manage", "fb.order.create", "fb.kitchen.manage", "fb.recipe.manage", "fb.report.view", "fb.settings.manage"] },
+  { label: "ภาพรวม F&B", to: "/restaurant", icon: UtensilsCrossed, permissions: ["fb.menu.view", "fb.table.manage", "fb.order.create", "fb.kitchen.ticket.manage", "fb.kitchen.manage", "fb.recipe.manage", "fb.report.view", "fb.settings.manage"] },
 ]
 
 const fbSubItems: NavItem[] = [
@@ -121,13 +121,13 @@ const fbSubItems: NavItem[] = [
   { label: "ขายหน้าร้าน", to: "/restaurant/wap", icon: ShoppingCart, permission: "fb.order.create" },
   { label: "ออเดอร์", to: "/restaurant/orders", icon: ClipboardList, permission: "fb.order.create" },
   { label: "โต๊ะ", to: "/restaurant/tables", icon: Table2, permission: "fb.table.manage", feature: "tables" },
-  { label: "ครัว", to: "/restaurant/kitchen", icon: ChefHat, permission: "fb.kitchen.manage" },
+  { label: "ครัว", to: "/restaurant/kitchen", icon: ChefHat, permissions: ["fb.kitchen.ticket.manage", "fb.kitchen.manage"] },
   { label: "เมนูและสูตรอาหาร", to: "/restaurant/recipes", icon: BookOpen, permission: "fb.recipe.manage" },
   { label: "รายงาน", to: "/restaurant/reports/ingredients", icon: BarChart2, permission: "fb.report.view" },
   { label: "ตั้งค่า F&B", to: "/restaurant/settings", icon: Settings, permission: "fb.settings.manage" },
 ];
 
-const fbPermissionCodes = ["fb.menu.view", "fb.table.manage", "fb.order.create", "fb.kitchen.manage", "fb.recipe.manage", "fb.report.view", "fb.settings.manage"];
+const fbPermissionCodes = ["fb.menu.view", "fb.table.manage", "fb.order.create", "fb.kitchen.ticket.manage", "fb.kitchen.manage", "fb.recipe.manage", "fb.report.view", "fb.settings.manage"];
 
 function canShowItem(item: NavItem, hasPermission: (code: string) => boolean): boolean {
   if (item.permission && !hasPermission(item.permission)) return false;

@@ -25,6 +25,7 @@ Platform-owned tables for the data-cutover design:
 - `permissions`
 - `role_permissions`
 - `user_branches`
+- `staff_role_assignments`
 - `refresh_tokens`
 - `user_access_requests`
 - `user_invitations`
@@ -37,6 +38,9 @@ Restaurant-owned tables include Restaurant menu/recipe, dining, kitchen, central
 - No SQL foreign key may point across physical databases.
 - Restaurant rows retain immutable `company_id`, `brand_id`, `branch_id` and actor IDs as scalar references.
 - Authentication and assignment validation use the Platform connection.
+- Station names remain Restaurant-owned settings. Scoped-assignment writes stay in the identity
+  transaction while Station validation reads through the active Restaurant service connection; no
+  cross-database foreign key or two-database commit is introduced.
 - Restaurant writes use only the Restaurant connection in a request transaction.
 - Cross-domain propagation must use a versioned API or idempotent outbox/event; a request must not commit one SQLAlchemy transaction across two engines.
 - A router moves away from the legacy connection only after its table set, cross-boundary references, migration, rollback and UAT are documented in a separate Scope ID.

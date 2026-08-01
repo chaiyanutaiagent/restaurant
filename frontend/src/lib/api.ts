@@ -132,8 +132,11 @@ export const authApi = Object.assign(api, {
       refresh_token: refreshToken
     }),
   me: () => api.get<ApiResponse<MeResponse>>("/auth/me"),
-  switchBranch: (branchId: string) =>
-    api.post<ApiResponse<TokenResponse>>("/auth/switch-branch", { branch_id: branchId }),
+  switchBranch: (branchId: string, stationKey?: string | null) =>
+    api.post<ApiResponse<TokenResponse>>("/auth/switch-branch", {
+      branch_id: branchId,
+      station_key: stationKey || null
+    }),
   myBranches: () => api.get<ApiResponse<UserBranch[]>>("/system/me/branches")
 });
 

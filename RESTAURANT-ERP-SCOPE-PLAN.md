@@ -510,17 +510,22 @@ legacy shared compatibility API และไม่ใช่ Retail Database API 
 
 Acceptance Criteria:
 
-- [ ] ทดสอบผู้ใช้จำลองอย่างน้อย Company Owner, Brand Manager, Branch Manager, Cashier และ Kitchen Staff
+- [x] ทดสอบผู้ใช้จำลองอย่างน้อย Company Owner, Brand Manager, Branch Manager, Cashier และ Kitchen Staff
 - [ ] Cashier ทำรายการเกิน limit ไม่ได้โดยไม่มี approval
-- [ ] Kitchen Staff เข้าหน้าการเงินหรือ settings ไม่ได้
+- [x] Kitchen Staff เข้าหน้าการเงินหรือ settings ไม่ได้
 - [ ] Audit Log ระบุผู้ทำ ผู้อนุมัติ สาขา เวลา และเหตุผลได้
 
 ไม่รวม: HR/payroll engine ใหม่
 
 Progress record: เริ่ม Phase 2 ด้วย `P2-ROLE-PRESETS-01` เมื่อ 1 สิงหาคม 2026 โดยย้าย preset
 Company Owner, Brand Manager, Branch Manager, Cashier และ Kitchen Staff ไปเป็น versioned backend
-policy/API และให้หน้า Roles ใช้ server contract เดียวกัน งาน assignment ระดับ Company/Brand/Station,
-Manager PIN, Limit และ approval/audit ยังต้องทำใน Scope ID ถัดไปก่อนปิด Phase 2 gate
+policy/API และให้หน้า Roles ใช้ server contract เดียวกัน
+
+`P2-SCOPE-ASSIGNMENTS-02` เพิ่ม Role scope contract และ assignment ระดับ
+Company/Brand/Branch/Station พร้อม Station-locked token, granular kitchen-ticket permission,
+create/revoke audit และ compatibility กับ `user_branches` เดิม โดยผ่าน isolated API matrix และ
+Legacy/Platform migration rehearsal แล้ว งาน Manager PIN, Limit และ approval session ยังต้องทำใน
+Scope ID ถัดไปก่อนปิด Phase 2 gate
 
 ### Phase 3 — Dedicated Counter, Kitchen และ Device Pairing
 

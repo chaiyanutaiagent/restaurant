@@ -57,6 +57,7 @@ from app.services.brand_navigation_service import BrandNavigationService
 from app.schemas.product import ProductCreate, ProductListItem
 from app.schemas.stock import StockBalanceRead, StockMovementRead
 from app.services.dining_service import DiningService
+from app.services.staff_scope_policy import normalized_station_key
 from app.services.fb_setup import (
     DiningTableZonePlan,
     plan_dining_table_zones,
@@ -1886,11 +1887,19 @@ async def close_session(
 @router.get("/kitchen")
 async def list_kitchen_tickets(
     station: str | None = Query(default=None),
-    current: TokenData = Depends(require_permission("fb.kitchen.manage")),
+    current: TokenData = Depends(
+        require_any_permission("fb.kitchen.ticket.manage", "fb.kitchen.manage")
+    ),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
+    if current.station_key is not None:
+        if station is not None and normalized_station_key(station) != normalized_station_key(
+            current.station_key
+        ):
+            raise HTTPException(status_code=403, detail="Kitchen station scope mismatch")
+        station = current.station_key
     svc = DiningService(db)
     tickets = await svc.list_kitchen_tickets(current.branch_id, station)
     return ok([{
@@ -1913,11 +1922,21 @@ async def list_kitchen_tickets(
 async def update_ticket(
     ticket_id: uuid.UUID,
     payload: TicketStatusUpdate,
-    current: TokenData = Depends(require_permission("fb.kitchen.manage")),
+    current: TokenData = Depends(
+        require_any_permission("fb.kitchen.ticket.manage", "fb.kitchen.manage")
+    ),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     ticket = await db.get(KitchenTicket, ticket_id)
-    if not ticket or ticket.company_id != current.company_id:
+    if (
+        not ticket
+        or ticket.company_id != current.company_id
+        or ticket.branch_id != current.branch_id
+    ):
+        raise HTTPException(status_code=404, detail="ไม่พบ ticket")
+    if current.station_key is not None and normalized_station_key(
+        ticket.station
+    ) != normalized_station_key(current.station_key):
         raise HTTPException(status_code=404, detail="ไม่พบ ticket")
     valid = ["pending", "cooking", "done", "served"]
     if payload.status not in valid:

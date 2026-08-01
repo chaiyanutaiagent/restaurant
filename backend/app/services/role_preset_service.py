@@ -10,7 +10,7 @@ from app.models.role import Permission
 from app.schemas.role import RolePresetRead, RoleScope
 
 
-ROLE_PRESET_POLICY_VERSION = "2026-08-01"
+ROLE_PRESET_POLICY_VERSION = "2026-08-01.2"
 
 
 @dataclass(frozen=True)
@@ -77,6 +77,7 @@ COMPANY_OWNER_PERMISSION_CODES = (
     "fb.menu.view",
     "fb.order.create",
     "fb.kitchen.manage",
+    "fb.kitchen.ticket.manage",
     "fb.table.manage",
     "fb.recipe.manage",
     "fb.report.view",
@@ -174,7 +175,7 @@ ROLE_PRESET_POLICIES = (
             "inventory.transfer.create",
             "fb.menu.view",
             "fb.order.create",
-            "fb.kitchen.manage",
+            "fb.kitchen.ticket.manage",
             "fb.table.manage",
             "fb.recipe.manage",
             "fb.report.view",
@@ -213,7 +214,7 @@ ROLE_PRESET_POLICIES = (
         is_branch_assignable=True,
         permission_codes=(
             "fb.menu.view",
-            "fb.kitchen.manage",
+            "fb.kitchen.ticket.manage",
         ),
     ),
 )

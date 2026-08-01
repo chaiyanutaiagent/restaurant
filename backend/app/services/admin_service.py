@@ -16,8 +16,10 @@ from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.branch import Branch
 from app.models.product import BranchProductReplacementRule, Product
+from app.models.restaurant import BrandBranch
 from app.models.role import Permission, Role, role_permissions_table
 from app.models.settings import BranchSettings, UserInvitation
+from app.models.staff_assignment import StaffRoleAssignment
 from app.models.stock import StockLocation
 from app.models.user import User, UserBranch
 from app.services.business_context_service import load_branch_business_context
@@ -350,11 +352,13 @@ class AdminService:
 
         permissions = await self._get_permissions(data.permission_ids)
         self._validate_branch_assignable_role(data.is_branch_assignable, permissions)
+        self._validate_role_scope_types(data.allowed_scope_types)
         role = Role(
             company_id=company_id,
             name=data.name,
             description=data.description,
             is_branch_assignable=data.is_branch_assignable,
+            allowed_scope_types=list(data.allowed_scope_types),
         )
         role.permissions = permissions
         self.db.add(role)
@@ -396,9 +400,30 @@ class AdminService:
             if data.is_branch_assignable is not None
             else role.is_branch_assignable
         )
+        next_scope_types = (
+            data.allowed_scope_types
+            if data.allowed_scope_types is not None
+            else role.allowed_scope_types
+        )
         self._validate_branch_assignable_role(next_branch_assignable, next_permissions)
+        self._validate_role_scope_types(next_scope_types)
+        removed_scopes = set(role.allowed_scope_types) - set(next_scope_types)
+        if removed_scopes:
+            active_assignment = await self.db.scalar(
+                select(StaffRoleAssignment.id).where(
+                    StaffRoleAssignment.role_id == role.id,
+                    StaffRoleAssignment.scope_type.in_(removed_scopes),
+                    StaffRoleAssignment.revoked_at.is_(None),
+                )
+            )
+            if active_assignment is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Role scope is in use by an active staff assignment",
+                )
         role.permissions = next_permissions
         role.is_branch_assignable = next_branch_assignable
+        role.allowed_scope_types = list(next_scope_types)
 
         self._audit(company_id, None, "system.role.update", "Role", role.id)
         await self.db.commit()
@@ -418,6 +443,14 @@ class AdminService:
         )
         if in_use:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Role is in use")
+        active_assignment = await self.db.scalar(
+            select(StaffRoleAssignment.id).where(
+                StaffRoleAssignment.role_id == role_id,
+                StaffRoleAssignment.revoked_at.is_(None),
+            )
+        )
+        if active_assignment is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Role is in use")
 
         role.deleted_at = self._now()
         self._audit(company_id, None, "system.role.delete", "Role", role.id)
@@ -433,7 +466,19 @@ class AdminService:
             .where(Branch.company_id == company_id, Branch.deleted_at.is_(None))
             .order_by(Branch.sort_order.asc(), Branch.name.asc())
         )
-        if "*" not in current_user.permissions:
+        if "*" in current_user.permissions or "company" in current_user.scope_types:
+            pass
+        elif "brand" in current_user.scope_types and current_user.brand_id is not None:
+            statement = statement.join(
+                BrandBranch,
+                (BrandBranch.branch_id == Branch.id)
+                & (BrandBranch.company_id == company_id)
+                & (BrandBranch.brand_id == current_user.brand_id)
+                & BrandBranch.is_active.is_(True),
+            )
+        elif current_user.scope_types:
+            statement = statement.where(Branch.id == current_user.branch_id)
+        else:
             statement = statement.join(
                 UserBranch,
                 (UserBranch.branch_id == Branch.id)
@@ -445,11 +490,15 @@ class AdminService:
         counts = await self._branch_user_counts(company_id)
         settings_map = await self._branch_settings_map([branch.id for branch in branches])
         context_map = {
-            branch.id: await load_branch_business_context(
-                self.db,
-                company_id,
-                branch.id,
-                required=False,
+            branch.id: (
+                await load_branch_business_context(
+                    self.db,
+                    company_id,
+                    branch.id,
+                    required=False,
+                )
+                if branch.is_active
+                else None
             )
             for branch in branches
         }
@@ -851,6 +900,7 @@ class AdminService:
             description=role.description,
             is_system=role.is_system,
             is_branch_assignable=role.is_branch_assignable,
+            allowed_scope_types=role.allowed_scope_types,
             created_at=role.created_at,
             permissions=[PermissionRead.model_validate(permission) for permission in permissions],
             user_count=user_count,
@@ -957,6 +1007,21 @@ class AdminService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Branch-assignable role contains restricted permissions: {', '.join(forbidden)}",
+            )
+
+    @staticmethod
+    def _validate_role_scope_types(scope_types: list[str]) -> None:
+        supported = {"company", "brand", "branch", "station"}
+        if not scope_types or len(scope_types) != len(set(scope_types)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Role must have unique allowed scope types",
+            )
+        unsupported = sorted(set(scope_types) - supported)
+        if unsupported:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported role scopes: {', '.join(unsupported)}",
             )
 
     async def _ensure_username_available(self, company_id: uuid.UUID, username: str) -> None:

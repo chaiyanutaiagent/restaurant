@@ -23,7 +23,8 @@ Scope นี้วาง Role layer ก่อน โดยยังไม่ร�
 - ใช้ branch-assignable guard เดิมกับ Branch Manager, Cashier และ Kitchen Staff
 - ให้หน้า Roles โหลด preset จาก backend แทน hardcode ใน browser
 - จำกัด Cashier ไม่ให้ void, refund, override discount, ปรับ stock หรือเปิด finance/settings
-- จำกัด Kitchen Staff ให้เหลือ `fb.menu.view` และ `fb.kitchen.manage`
+- จำกัด Kitchen Staff ให้เหลือ `fb.menu.view` และ `fb.kitchen.manage` ใน foundation revision;
+  follow-up `P2-SCOPE-ASSIGNMENTS-02` แยก granular kitchen-ticket permission ออกจาก legacy code
 - unit regression และ authenticated read-only API smoke
 - อัปเดต architecture, roadmap และ Scope record
 
@@ -82,3 +83,9 @@ Scope นี้วาง Role layer ก่อน โดยยังไม่ร�
   runtime เป็น identity `legacy`, Restaurant service `legacy`, projector disabled และ projector errors เป็น 0
 - Schema/data impact: ไม่มี migration; API smoke อ่าน permission catalog และไม่มี Role mutation
 - Commit: บันทึกใน Git history ของ Scope ID นี้โดยไม่ push
+
+## Follow-up
+
+`P2-SCOPE-ASSIGNMENTS-02` เปลี่ยน policy เป็น `2026-08-01.2` และแทนสิทธิ์ Kitchen Staff เดิมด้วย
+`fb.kitchen.ticket.manage` เพื่อไม่ให้ Station-scoped staff ได้สิทธิ์ central production ที่ reuse
+`fb.kitchen.manage`

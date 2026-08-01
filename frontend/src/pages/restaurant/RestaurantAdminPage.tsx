@@ -4,7 +4,14 @@ import PageHeader from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/stores/auth.store";
 
-const adminItems = [
+const adminItems: Array<{
+  title: string;
+  to: string;
+  permission?: string;
+  permissions?: string[];
+  icon: typeof Settings;
+  tone: string;
+}> = [
   {
     title: "ตั้งค่าร้านอาหาร",
     to: "/restaurant/settings",
@@ -43,7 +50,7 @@ const adminItems = [
   {
     title: "Kitchen",
     to: "/restaurant/kitchen",
-    permission: "fb.kitchen.manage",
+    permissions: ["fb.kitchen.ticket.manage", "fb.kitchen.manage"],
     icon: ChefHat,
     tone: "bg-red-600",
   },
@@ -58,7 +65,10 @@ const adminItems = [
 
 export default function RestaurantAdminPage(): JSX.Element {
   const hasPermission = useAuthStore((state) => state.hasPermission);
-  const visibleItems = adminItems.filter((item) => hasPermission(item.permission));
+  const visibleItems = adminItems.filter((item) =>
+    item.permissions?.some((permission) => hasPermission(permission))
+    ?? (item.permission ? hasPermission(item.permission) : false)
+  );
 
   return (
     <div>

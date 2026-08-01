@@ -71,15 +71,18 @@ export default function RestaurantShell(): JSX.Element {
     [branchesQuery.data]
   );
 
-  const handleSwitchBranch = useCallback(async (nextBranchId: string): Promise<void> => {
+  const handleSwitchBranch = useCallback(async (
+    nextBranchId: string,
+    nextStationKey: string | null = null
+  ): Promise<void> => {
     if (!companyId) return;
-    const response = await authApi.switchBranch(nextBranchId);
+    const response = await authApi.switchBranch(nextBranchId, nextStationKey);
     setSession(response.data.data, companyId);
   }, [companyId, setSession]);
 
   useEffect(() => {
     if (!branchId && defaultBranch) {
-      void handleSwitchBranch(defaultBranch.branch_id);
+      void handleSwitchBranch(defaultBranch.branch_id, defaultBranch.station_key);
     }
   }, [branchId, defaultBranch, handleSwitchBranch]);
 

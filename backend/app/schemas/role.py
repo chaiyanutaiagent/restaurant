@@ -3,12 +3,20 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field, field_validator
 
 from app.schemas import BaseSchema
 
 
 RoleScope = Literal["company", "brand", "branch", "station"]
+
+
+def unique_role_scopes(scopes: list[RoleScope] | None) -> list[RoleScope] | None:
+    if scopes is None:
+        return None
+    if len(scopes) != len(set(scopes)):
+        raise ValueError("allowed_scope_types contains duplicate scopes")
+    return scopes
 
 
 class PermissionRead(BaseSchema):
@@ -42,6 +50,9 @@ class RoleBase(BaseSchema):
 class RoleCreate(RoleBase):
     permission_ids: list[uuid.UUID]
     is_branch_assignable: bool = False
+    allowed_scope_types: list[RoleScope] = Field(default_factory=lambda: ["branch"], min_length=1)
+
+    _validate_scopes = field_validator("allowed_scope_types")(unique_role_scopes)
 
 
 class RoleUpdate(BaseSchema):
@@ -49,6 +60,9 @@ class RoleUpdate(BaseSchema):
     description: str | None = None
     permission_ids: list[uuid.UUID] | None = None
     is_branch_assignable: bool | None = None
+    allowed_scope_types: list[RoleScope] | None = Field(default=None, min_length=1)
+
+    _validate_scopes = field_validator("allowed_scope_types")(unique_role_scopes)
 
 
 class RoleRead(RoleBase):
@@ -56,6 +70,7 @@ class RoleRead(RoleBase):
     company_id: uuid.UUID
     is_system: bool
     is_branch_assignable: bool
+    allowed_scope_types: list[RoleScope]
     permissions: list[PermissionRead]
 
     model_config = ConfigDict(from_attributes=True)

@@ -21,7 +21,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { usePermission } from "@/hooks/usePermission";
 import { roleApi } from "@/lib/adminApi";
 import { systemApi } from "@/lib/api";
-import type { RoleDetail, RolePreset } from "@/types/admin";
+import type { RoleDetail, RolePreset, RoleScope } from "@/types/admin";
 import type { Permission } from "@/types/user";
 
 const moduleLabels: Record<string, string> = {
@@ -46,13 +46,15 @@ type RoleFormState = {
   description: string;
   permission_ids: string[];
   is_branch_assignable: boolean;
+  allowed_scope_types: RoleScope[];
 };
 
 const emptyRoleForm: RoleFormState = {
   name: "",
   description: "",
   permission_ids: [],
-  is_branch_assignable: false
+  is_branch_assignable: false,
+  allowed_scope_types: ["branch"]
 };
 
 export default function RolesPage(): JSX.Element {
@@ -138,7 +140,8 @@ export default function RolesPage(): JSX.Element {
       name: role.name,
       description: role.description ?? "",
       permission_ids: role.permissions.map((permission) => permission.id),
-      is_branch_assignable: role.is_branch_assignable
+      is_branch_assignable: role.is_branch_assignable,
+      allowed_scope_types: role.allowed_scope_types
     });
     setDialogOpen(true);
   };
@@ -174,6 +177,7 @@ export default function RolesPage(): JSX.Element {
                 <TableHead>จำนวนสิทธิ์</TableHead>
                 <TableHead>System Role</TableHead>
                 <TableHead>สาขาขอได้</TableHead>
+                <TableHead>Scope</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -193,6 +197,13 @@ export default function RolesPage(): JSX.Element {
                   </TableCell>
                   <TableCell>
                     {role.is_branch_assignable ? <Badge variant="success">อนุญาต</Badge> : "-"}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {role.allowed_scope_types.map((scope) => (
+                        <Badge key={scope} variant="outline">{scopeLabels[scope]}</Badge>
+                      ))}
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
@@ -309,7 +320,8 @@ function RoleDialog({
       name: preset.name,
       description: preset.description,
       permission_ids: preset.permission_ids,
-      is_branch_assignable: preset.is_branch_assignable
+      is_branch_assignable: preset.is_branch_assignable,
+      allowed_scope_types: preset.allowed_scopes
     });
   };
 
@@ -388,6 +400,27 @@ function RoleDialog({
               </span>
             </span>
           </label>
+          <Field label="ขอบเขตที่ Role นี้ใช้ได้">
+            <div className="grid gap-2 sm:grid-cols-4">
+              {(Object.keys(scopeLabels) as RoleScope[]).map((scope) => (
+                <label key={scope} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.allowed_scope_types.includes(scope)}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        allowed_scope_types: event.target.checked
+                          ? [...current.allowed_scope_types, scope]
+                          : current.allowed_scope_types.filter((item) => item !== scope)
+                      }))
+                    }
+                  />
+                  {scopeLabels[scope]}
+                </label>
+              ))}
+            </div>
+          </Field>
           <div className="grid gap-4 md:grid-cols-2">
             {Object.entries(groupedPermissions).map(([module, items]) => {
               const allSelected = items.every((permission) => form.permission_ids.includes(permission.id));

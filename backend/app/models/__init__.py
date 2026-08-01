@@ -3,6 +3,7 @@ from app.models.company import Company
 from app.models.branch import Branch
 from app.models.role import Role, Permission, role_permissions_table
 from app.models.user import User, UserBranch
+from app.models.staff_assignment import StaffRoleAssignment
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.product import (
@@ -79,6 +80,7 @@ __all__ = [
     "role_permissions_table",
     "User",
     "UserBranch",
+    "StaffRoleAssignment",
     "AuditLog",
     "RefreshToken",
     "Unit",

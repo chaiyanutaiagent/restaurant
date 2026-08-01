@@ -30,7 +30,7 @@ const CENTRAL_NAV = [
   },
   { label: "Credits", path: "credits", permissions: ["fb.kitchen.manage"] },
   { label: "Recipes", path: "recipes", permissions: ["fb.recipe.manage"] },
-  { label: "Reports", path: "reports", permissions: ["fb.kitchen.manage"] },
+  { label: "Reports", path: "reports", permissions: ["fb.report.view"] },
   {
     label: "Cutover",
     path: "cutover",

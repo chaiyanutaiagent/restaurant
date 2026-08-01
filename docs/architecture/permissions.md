@@ -62,6 +62,11 @@ to the identity audit log. Kitchen ticket access accepts the granular
 `fb.kitchen.ticket.manage` permission, locks reads and mutations to the token Station, and does not
 grant the legacy `fb.kitchen.manage` permission used by central production.
 
+Report permission does not widen assignment scope. `pos.report.view` uses Company aggregate only for a
+Company-scoped token; Brand/Branch/Station tokens remain locked to their current Branch on generic reports.
+The consolidated Restaurant Brand report uses `fb.report.view` and additionally requires Company scope or
+the matching Brand scope. A Branch Manager with `fb.report.view` cannot read the Brand aggregate.
+
 Additional roadmap roles such as Company Admin, Area Manager, Service Staff, Kitchen Manager,
 Warehouse Staff, Purchasing, Accountant, HR, and Auditor remain deferred until their assignment and
 limit contracts are implemented.

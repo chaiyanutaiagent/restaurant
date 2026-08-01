@@ -78,6 +78,15 @@ credentials, validates the same Company/Branch, records the counted cash plus st
 the outgoing shift. The frontend then clears only the staff session while retaining the paired device for the
 next operator. Generic `/pos` shift open/close also records staff and optional Counter-device evidence.
 
+## Phase 4 Report Scope
+
+- `GET /api/v1/reports/dashboard` and `/api/v1/reports/sales/...` use Company aggregate scope only for
+  Company-scoped tokens. Brand/Branch/Station tokens are locked to the Branch in their signed staff context;
+  a different `branch_id` query returns `404`.
+- `GET /api/v1/reports/shifts/:id` and its PDF route apply the same Branch boundary.
+- `GET /api/v1/restaurant/central/:brandSlug/reports/operations` requires `fb.report.view` plus a Company
+  scope or matching Brand scope. Branch/Station assignments cannot use the consolidated route.
+
 ## Migration Rule
 
 Keep legacy routes working while new canonical routes are introduced. Prefer redirects first, then move screens when each module admin is fully split.

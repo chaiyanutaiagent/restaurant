@@ -13,6 +13,7 @@ from app.database import get_db
 from app.dependencies import TokenData, require_permission
 from app.schemas.report import DashboardStats
 from app.services.report_service import ReportService
+from app.services.report_scope_policy import resolve_report_branch_id
 from app.utils.thai_date import format_thai_date
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
@@ -82,7 +83,8 @@ async def get_dashboard(
     current: TokenData = Depends(require_permission("pos.report.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    stats = await ReportService(db).get_dashboard_stats(current.company_id, branch_id)
+    resolved_branch_id = resolve_report_branch_id(current, branch_id)
+    stats = await ReportService(db).get_dashboard_stats(current.company_id, resolved_branch_id)
     return ok(DashboardStats.model_validate(stats).model_dump())
 
 
@@ -93,7 +95,12 @@ async def get_daily_sales(
     current: TokenData = Depends(require_permission("pos.report.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    summary = await ReportService(db).get_daily_summary(current.company_id, date_value or bkk_today(), branch_id)
+    resolved_branch_id = resolve_report_branch_id(current, branch_id)
+    summary = await ReportService(db).get_daily_summary(
+        current.company_id,
+        date_value or bkk_today(),
+        resolved_branch_id,
+    )
     return ok(summary.model_dump())
 
 
@@ -105,7 +112,13 @@ async def get_sales_range(
     current: TokenData = Depends(require_permission("pos.report.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    summary = await ReportService(db).get_sales_range(current.company_id, date_from, date_to, branch_id)
+    resolved_branch_id = resolve_report_branch_id(current, branch_id)
+    summary = await ReportService(db).get_sales_range(
+        current.company_id,
+        date_from,
+        date_to,
+        resolved_branch_id,
+    )
     return ok(summary.model_dump())
 
 
@@ -116,7 +129,12 @@ async def get_hourly_sales(
     current: TokenData = Depends(require_permission("pos.report.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    rows = await ReportService(db).get_hourly_sales(current.company_id, date_value or bkk_today(), branch_id)
+    resolved_branch_id = resolve_report_branch_id(current, branch_id)
+    rows = await ReportService(db).get_hourly_sales(
+        current.company_id,
+        date_value or bkk_today(),
+        resolved_branch_id,
+    )
     return ok([row.model_dump() for row in rows])
 
 
@@ -129,7 +147,14 @@ async def get_top_products(
     current: TokenData = Depends(require_permission("pos.report.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    report = await ReportService(db).get_top_products(current.company_id, date_from, date_to, branch_id, limit)
+    resolved_branch_id = resolve_report_branch_id(current, branch_id)
+    report = await ReportService(db).get_top_products(
+        current.company_id,
+        date_from,
+        date_to,
+        resolved_branch_id,
+        limit,
+    )
     return ok(report.model_dump())
 
 
@@ -139,7 +164,12 @@ async def get_shift_summary(
     current: TokenData = Depends(require_permission("pos.report.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    summary = await ReportService(db).get_shift_summary(shift_id, current.company_id)
+    resolved_branch_id = resolve_report_branch_id(current, None)
+    summary = await ReportService(db).get_shift_summary(
+        shift_id,
+        current.company_id,
+        resolved_branch_id,
+    )
     return ok(summary.model_dump())
 
 
@@ -149,7 +179,12 @@ async def get_shift_summary_pdf(
     current: TokenData = Depends(require_permission("pos.report.view")),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    summary = await ReportService(db).get_shift_summary(shift_id, current.company_id)
+    resolved_branch_id = resolve_report_branch_id(current, None)
+    summary = await ReportService(db).get_shift_summary(
+        shift_id,
+        current.company_id,
+        resolved_branch_id,
+    )
     html = shift_summary_html(summary)
     filename = f"shift_{summary.shift.shift_number}"
     try:

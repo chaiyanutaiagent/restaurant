@@ -139,6 +139,7 @@ export default function App(): JSX.Element {
             "brand.central.production.manage",
             "fb.kitchen.manage",
             "fb.recipe.manage",
+            "fb.report.view",
             "system.user.approve"
           ]} />}>
             <Route element={<RestaurantShell />}>
@@ -166,7 +167,7 @@ export default function App(): JSX.Element {
               <Route element={<ProtectedRoute permission="fb.kitchen.manage" />}>
                 <Route path="/central/:brandSlug/credits" element={<RestaurantCentralCreditsPage />} />
               </Route>
-              <Route element={<ProtectedRoute permission="fb.kitchen.manage" />}>
+              <Route element={<ProtectedRoute permission="fb.report.view" />}>
                 <Route path="/central/:brandSlug/reports" element={<RestaurantCentralReportsPage />} />
               </Route>
               <Route element={<ProtectedRoute permissions={[

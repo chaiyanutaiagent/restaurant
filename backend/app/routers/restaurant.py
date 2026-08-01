@@ -65,6 +65,7 @@ from app.services.offline_sale_authorization import (
     OFFLINE_POLICY_VERSION,
     OfflineSaleAuthorizationService,
 )
+from app.services.report_scope_policy import require_brand_report_scope
 from app.services.staff_scope_policy import normalized_station_key
 from app.services.fb_setup import (
     DiningTableZonePlan,
@@ -4326,11 +4327,12 @@ async def get_brand_operations_report(
     brand_slug: str,
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
-    current: TokenData = Depends(require_permission("fb.kitchen.manage")),
+    current: TokenData = Depends(require_permission("fb.report.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
+    require_brand_report_scope(current, brand.id)
     today = datetime.now(ZoneInfo("Asia/Bangkok")).date()
     from_value = date_from or today.replace(day=1)
     to_value = date_to or today

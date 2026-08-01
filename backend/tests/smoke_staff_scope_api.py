@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import os
 import secrets
 import uuid
@@ -14,6 +15,7 @@ from app.main import app
 from app.models.audit import AuditLog
 from app.models.branch import Branch
 from app.models.company import Company
+from app.models.pos import CashierShift
 from app.models.product import Product
 from app.models.restaurant import (
     Brand,
@@ -24,6 +26,7 @@ from app.models.restaurant import (
     KitchenTicket,
 )
 from app.models.settings import BranchSettings
+from app.models.stock import StockLocation
 from app.models.user import User
 from app.utils.create_superuser import DEFAULT_COMPANY_ID
 from app.utils.security import decode_token, hash_password
@@ -37,7 +40,9 @@ TEST_PASSWORD = f"Aa1!{secrets.token_urlsafe(24)}"
 class ScopeContext:
     company_id: uuid.UUID
     brand_a_id: uuid.UUID
+    brand_a_slug: str
     brand_b_id: uuid.UUID
+    brand_b_slug: str
     branch_a1_id: uuid.UUID
     branch_a2_id: uuid.UUID
     branch_b1_id: uuid.UUID
@@ -51,6 +56,8 @@ class ScopeContext:
     usernames: dict[str, str]
     main_ticket_id: uuid.UUID
     other_ticket_id: uuid.UUID
+    branch_a1_shift_id: uuid.UUID
+    branch_a2_shift_id: uuid.UUID
 
 
 def expect(response, expected: int, label: str):
@@ -275,12 +282,52 @@ async def seed_scope_context() -> ScopeContext:
             status="pending",
         )
         db.add_all([main_ticket, other_ticket])
+        location_a1 = StockLocation(
+            company_id=company.id,
+            branch_id=branch_a1.id,
+            code=f"P2RA-{marker}"[:20],
+            name="P2 Report Branch A1",
+            is_active=True,
+        )
+        location_a2 = StockLocation(
+            company_id=company.id,
+            branch_id=branch_a2.id,
+            code=f"P2RB-{marker}"[:20],
+            name="P2 Report Branch A2",
+            is_active=True,
+        )
+        db.add_all([location_a1, location_a2])
+        await db.flush()
+        now = datetime.now(timezone.utc)
+        branch_a1_shift = CashierShift(
+            company_id=company.id,
+            branch_id=branch_a1.id,
+            location_id=location_a1.id,
+            user_id=users["branch"].id,
+            shift_number=f"P2RA{marker}"[:20],
+            status="closed",
+            opened_at=now,
+            closed_at=now,
+        )
+        branch_a2_shift = CashierShift(
+            company_id=company.id,
+            branch_id=branch_a2.id,
+            location_id=location_a2.id,
+            user_id=users["company"].id,
+            shift_number=f"P2RB{marker}"[:20],
+            status="closed",
+            opened_at=now,
+            closed_at=now,
+        )
+        db.add_all([branch_a1_shift, branch_a2_shift])
         await db.commit()
 
         return ScopeContext(
             company_id=company.id,
             brand_a_id=brand_a.id,
+            brand_a_slug=brand_a.slug,
             brand_b_id=brand_b.id,
+            brand_b_slug=brand_b.slug,
             branch_a1_id=branch_a1.id,
             branch_a2_id=branch_a2.id,
             branch_b1_id=branch_b1.id,
@@ -294,6 +341,8 @@ async def seed_scope_context() -> ScopeContext:
             usernames=usernames,
             main_ticket_id=main_ticket.id,
             other_ticket_id=other_ticket.id,
+            branch_a1_shift_id=branch_a1_shift.id,
+            branch_a2_shift_id=branch_a2_shift.id,
         )
 
 
@@ -613,12 +662,35 @@ def run() -> None:
         for branch_id in (context.branch_a2_id, context.branch_b1_id):
             login(client, context, "company", branch_id)
         login(client, context, "company", context.foreign_branch_id, expected=404)
+        expect(
+            client.get("/api/v1/reports/dashboard", headers=company_headers),
+            200,
+            "company aggregate dashboard",
+        )
+        expect(
+            client.get(
+                "/api/v1/reports/dashboard",
+                headers=company_headers,
+                params={"branch_id": str(context.branch_b1_id)},
+            ),
+            200,
+            "company selected-branch dashboard",
+        )
+        expect(
+            client.get(
+                f"/api/v1/reports/shifts/{context.branch_a2_shift_id}",
+                headers=company_headers,
+            ),
+            200,
+            "company cross-branch shift report",
+        )
 
         brand_login = login(client, context, "brand", context.branch_a1_id)
+        brand_headers = {"Authorization": f"Bearer {brand_login['access_token']}"}
         brand_branches = expect(
             client.get(
                 "/api/v1/system/branches",
-                headers={"Authorization": f"Bearer {brand_login['access_token']}"},
+                headers=brand_headers,
             ),
             200,
             "brand branch list",
@@ -631,12 +703,43 @@ def run() -> None:
             raise RuntimeError(f"Brand scope branch list escaped Brand A: {brand_branches}")
         login(client, context, "brand", context.branch_a2_id)
         login(client, context, "brand", context.branch_b1_id, expected=403)
+        expect(
+            client.get("/api/v1/reports/dashboard", headers=brand_headers),
+            200,
+            "brand current-branch dashboard",
+        )
+        expect(
+            client.get(
+                "/api/v1/reports/dashboard",
+                headers=brand_headers,
+                params={"branch_id": str(context.branch_a2_id)},
+            ),
+            404,
+            "brand generic dashboard cannot switch branch by query",
+        )
+        expect(
+            client.get(
+                f"/api/v1/restaurant/central/{context.brand_a_slug}/reports/operations",
+                headers=brand_headers,
+            ),
+            200,
+            "brand consolidated operations report",
+        )
+        expect(
+            client.get(
+                f"/api/v1/restaurant/central/{context.brand_b_slug}/reports/operations",
+                headers=brand_headers,
+            ),
+            404,
+            "brand consolidated report assignment boundary",
+        )
 
         branch_login = login(client, context, "branch", context.branch_a1_id)
+        branch_headers = {"Authorization": f"Bearer {branch_login['access_token']}"}
         branch_rows = expect(
             client.get(
                 "/api/v1/system/branches",
-                headers={"Authorization": f"Bearer {branch_login['access_token']}"},
+                headers=branch_headers,
             ),
             200,
             "branch scope branch list",
@@ -646,12 +749,62 @@ def run() -> None:
         expect(
             client.get(
                 f"/api/v1/system/users/{context.company_user_id}/role-assignments",
-                headers={"Authorization": f"Bearer {branch_login['access_token']}"},
+                headers=branch_headers,
             ),
             403,
             "branch manager cannot inspect company assignments",
         )
         login(client, context, "branch", context.branch_a2_id, expected=403)
+        expect(
+            client.get(
+                "/api/v1/reports/dashboard",
+                headers=branch_headers,
+                params={"branch_id": str(context.branch_a1_id)},
+            ),
+            200,
+            "branch own dashboard",
+        )
+        expect(
+            client.get(
+                "/api/v1/reports/dashboard",
+                headers=branch_headers,
+                params={"branch_id": str(context.branch_a2_id)},
+            ),
+            404,
+            "branch cross-branch dashboard",
+        )
+        expect(
+            client.get(
+                f"/api/v1/restaurant/central/{context.brand_a_slug}/reports/operations",
+                headers=branch_headers,
+            ),
+            404,
+            "branch cannot open consolidated Brand report",
+        )
+        expect(
+            client.get(
+                f"/api/v1/reports/shifts/{context.branch_a1_shift_id}",
+                headers=branch_headers,
+            ),
+            200,
+            "branch own shift report",
+        )
+        expect(
+            client.get(
+                f"/api/v1/reports/shifts/{context.branch_a2_shift_id}",
+                headers=branch_headers,
+            ),
+            404,
+            "branch cross-branch shift report",
+        )
+        expect(
+            client.get(
+                f"/api/v1/reports/shifts/{context.branch_a2_shift_id}/pdf",
+                headers=branch_headers,
+            ),
+            404,
+            "branch cross-branch shift PDF",
+        )
 
         login(client, context, "kitchen", context.branch_a1_id, station_key="Main")
         login(client, context, "kitchen", context.branch_a1_id, station_key="Bar", expected=403)
@@ -790,6 +943,7 @@ def run() -> None:
         print("p2_scope_multi_role_union=ok")
         print("p2_scope_audit_revoke=ok")
         print("p2_scope_kitchen_boundary=ok")
+        print("p4_report_scope=ok company=true brand=true branch=true shift=true")
 
 
 if __name__ == "__main__":

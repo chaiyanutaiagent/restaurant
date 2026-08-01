@@ -304,10 +304,17 @@ class ReportService:
         self,
         shift_id: uuid.UUID,
         company_id: uuid.UUID,
+        branch_id: uuid.UUID | None = None,
     ) -> ShiftSummary:
+        filters = [
+            CashierShift.id == shift_id,
+            CashierShift.company_id == company_id,
+        ]
+        if branch_id is not None:
+            filters.append(CashierShift.branch_id == branch_id)
         shift = await self.db.scalar(
             select(CashierShift)
-            .where(CashierShift.id == shift_id, CashierShift.company_id == company_id)
+            .where(*filters)
             .options(
                 selectinload(CashierShift.orders).selectinload(SaleOrder.items),
                 selectinload(CashierShift.orders).selectinload(SaleOrder.payments),

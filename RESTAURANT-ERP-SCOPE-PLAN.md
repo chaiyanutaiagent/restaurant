@@ -548,10 +548,10 @@ upgrade → downgrade → re-upgrade, backend 140 tests และ frontend type-
 
 Acceptance Criteria:
 
-- [ ] Tablet ครัวเข้าได้โดยไม่ใช้บัญชี Company Owner
-- [ ] Tablet ที่ถูก revoke ใช้งานต่อไม่ได้
-- [ ] Counter, Kitchen และ Pickup เห็นเฉพาะ Branch ที่จับคู่
-- [ ] ทดสอบ offline/reconnect ขั้นพื้นฐานโดยออเดอร์ไม่ซ้ำ
+- [x] Tablet ครัวเข้าได้โดยไม่ใช้บัญชี Company Owner
+- [x] Tablet ที่ถูก revoke ใช้งานต่อไม่ได้
+- [x] Counter, Kitchen และ Pickup เห็นเฉพาะ Branch ที่จับคู่
+- [x] ทดสอบ offline/reconnect ขั้นพื้นฐานโดยออเดอร์ไม่ซ้ำ
 
 ไม่รวม: Native mobile app และ MDM
 
@@ -559,6 +559,11 @@ Progress record: `P3-DEVICE-PAIRING-01` เพิ่ม Identity-owned device re
 Pickup, one-time PIN/QR, credential rotation, immediate revoke, last-seen และ server-owned
 Company/Brand/Branch/Station context โดยผ่าน isolated API matrix กับ Legacy/Platform migration
 rehearsal แล้ว Dedicated device workspaces และ offline/reconnect gate ยังทำต่อใน Scope ID ถัดไป
+
+Gate record: `P3-PHASE-GATE-06` ผ่าน durable pairing, dedicated Counter/Kitchen/Pickup,
+Counter staff handover/audit, signed offline authorization, migration rehearsal, backend 156 tests และ
+frontend type-check/build เมื่อ 1 สิงหาคม 2026 จึงเริ่ม Phase 4 ได้ Physical tablet/Android UAT ถูก
+Platform Owner เลื่อนไปเป็น follow-up และ production activation ยังคงต้องอนุมัติแยกต่างหาก
 
 ### Phase 4 — Restaurant ERP Core
 
@@ -582,6 +587,11 @@ Acceptance Criteria:
 - [ ] รายงานรวมเท่ากับผลรวมรายการต้นทาง
 
 ไม่รวม: AI forecast, advanced CRM และ franchise royalty
+
+Progress record: `P4-REPORT-SCOPE-01` บังคับ Company/Brand/Branch assignment บน dashboard/report เดิม
+แก้ Brand Manager consolidated-report permission, ป้องกัน Branch Manager ส่ง `branch_id` ข้าม assignment
+และล็อก shift/PDF ตาม Branch โดยผ่าน API matrix, backend 162 tests และ frontend type-check/build แล้ว
+Scope ถัดไปจึงขยาย Restaurant ERP dashboard/cost/reconciliation ต่อบน report boundary นี้ได้
 
 ### Phase 5 — Platform Onboarding และ Go-live
 

@@ -110,6 +110,38 @@ def create_approval_token(
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
+def create_device_access_token(
+    *,
+    device_id: uuid.UUID,
+    company_id: uuid.UUID,
+    brand_id: uuid.UUID,
+    branch_id: uuid.UUID,
+    device_type: str,
+    station_key: str | None,
+    credential_version: int,
+    expires_delta: timedelta | None = None,
+) -> str:
+    now = datetime.now(timezone.utc)
+    expire = now + (
+        expires_delta or timedelta(days=settings.device_access_token_expire_days)
+    )
+    payload = {
+        "sub": str(device_id),
+        "company_id": str(company_id),
+        "brand_id": str(brand_id),
+        "branch_id": str(branch_id),
+        "business_type": "restaurant",
+        "target_database": "restaurant",
+        "device_type": device_type,
+        "station_key": station_key,
+        "credential_version": credential_version,
+        "type": "device_access",
+        "exp": expire,
+        "iat": now,
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
+
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])

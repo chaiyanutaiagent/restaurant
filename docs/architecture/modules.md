@@ -8,6 +8,7 @@ Owns:
 
 - Company and branch settings
 - Users, roles, and permissions
+- Counter, Kitchen, and Pickup device registry and pairing lifecycle
 - Product catalog and categories
 - Inventory and stock movement
 - Accounting, tax, purchase, logistics, and consolidated reports
@@ -59,6 +60,7 @@ Uses ERP data:
 - Products as menu items
 - Inventory and raw materials
 - Payments and sale checkout
+- Branch/Station-bound device identity
 
 ## Integration Layer
 

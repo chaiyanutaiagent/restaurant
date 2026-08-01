@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     approval_token_expire_seconds: int = Field(default=120, ge=30, le=300)
     manager_pin_max_failed_attempts: int = Field(default=5, ge=3, le=10)
     manager_pin_lock_minutes: int = Field(default=15, ge=1, le=60)
+    device_pairing_pin_expire_minutes: int = Field(default=10, ge=2, le=60)
+    device_pairing_max_failed_attempts: int = Field(default=5, ge=3, le=10)
+    device_pairing_lock_minutes: int = Field(default=15, ge=1, le=60)
+    device_access_token_expire_days: int = Field(default=30, ge=1, le=90)
+    device_last_seen_write_interval_seconds: int = Field(default=60, ge=10, le=300)
     default_admin_password: str | None = None
     environment: Literal["development", "staging", "production", "test"]
     cors_origins: list[str]

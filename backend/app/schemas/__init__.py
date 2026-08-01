@@ -27,6 +27,15 @@ from app.schemas.staff_assignment import (
     StaffRoleAssignmentRead,
     StaffRoleAssignmentRevoke,
 )
+from app.schemas.device import (
+    DeviceActionReason,
+    DeviceContextRead,
+    DeviceCreate,
+    DevicePairRead,
+    DevicePairRequest,
+    DeviceProvisioningRead,
+    DeviceRead,
+)
 from app.schemas.product import (
     CategoryBase,
     CategoryCreate,

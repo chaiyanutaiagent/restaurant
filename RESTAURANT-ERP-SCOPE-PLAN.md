@@ -555,6 +555,11 @@ Acceptance Criteria:
 
 ไม่รวม: Native mobile app และ MDM
 
+Progress record: `P3-DEVICE-PAIRING-01` เพิ่ม Identity-owned device registry สำหรับ Counter/Kitchen/
+Pickup, one-time PIN/QR, credential rotation, immediate revoke, last-seen และ server-owned
+Company/Brand/Branch/Station context โดยผ่าน isolated API matrix กับ Legacy/Platform migration
+rehearsal แล้ว Dedicated device workspaces และ offline/reconnect gate ยังทำต่อใน Scope ID ถัดไป
+
 ### Phase 4 — Restaurant ERP Core
 
 ขอบเขต:

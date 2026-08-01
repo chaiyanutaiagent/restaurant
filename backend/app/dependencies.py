@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 import uuid
 
 from fastapi import Depends, HTTPException, status
@@ -9,9 +10,16 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_identity_db
+from app.config import settings
+from app.database import get_identity_db, get_restaurant_service_db
+from app.models.device import DeviceRegistration
+from app.models.settings import BranchSettings
 from app.models.user import User
-from app.services.business_context_service import resolve_user_branch_context
+from app.services.business_context_service import (
+    load_branch_business_context,
+    resolve_user_branch_context,
+)
+from app.services.staff_scope_policy import normalized_station_key
 from app.utils.security import decode_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -29,6 +37,30 @@ class TokenData:
     station_key: str | None = None
     assignment_ids: list[uuid.UUID] = field(default_factory=list)
     scope_types: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DeviceTokenData:
+    device_id: uuid.UUID
+    company_id: uuid.UUID
+    brand_id: uuid.UUID
+    branch_id: uuid.UUID
+    device_code: str
+    name: str
+    device_type: str
+    station_key: str | None
+    business_type: str
+    target_database: str
+    credential_version: int
+    paired_at: datetime
+    last_seen_at: datetime
+
+
+def _device_unauthorized() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Device credential is invalid or revoked",
+    )
 
 
 async def get_current_user(
@@ -76,6 +108,93 @@ async def get_current_user(
         station_key=payload.get("station_key"),
         assignment_ids=[uuid.UUID(value) for value in payload.get("assignment_ids", [])],
         scope_types=list(payload.get("scope_types", [])),
+    )
+
+
+async def get_current_device(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> DeviceTokenData:
+    payload = decode_token(token)
+    if payload.get("type") != "device_access":
+        raise _device_unauthorized()
+    try:
+        device_id = uuid.UUID(payload["sub"])
+        company_id = uuid.UUID(payload["company_id"])
+        branch_id = uuid.UUID(payload["branch_id"])
+        brand_id = uuid.UUID(payload["brand_id"])
+        credential_version = int(payload["credential_version"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _device_unauthorized() from exc
+
+    device = await db.scalar(
+        select(DeviceRegistration).where(
+            DeviceRegistration.id == device_id,
+            DeviceRegistration.company_id == company_id,
+            DeviceRegistration.branch_id == branch_id,
+        )
+    )
+    if (
+        device is None
+        or device.revoked_at is not None
+        or device.paired_at is None
+        or device.credential_version != credential_version
+        or device.device_type != payload.get("device_type")
+        or device.station_key != payload.get("station_key")
+    ):
+        raise _device_unauthorized()
+
+    try:
+        context = await load_branch_business_context(db, company_id, branch_id)
+    except HTTPException as exc:
+        raise _device_unauthorized() from exc
+    if (
+        context is None
+        or context.brand_id != brand_id
+        or context.business_type != "restaurant"
+        or context.target_database != "restaurant"
+        or payload.get("business_type") != "restaurant"
+        or payload.get("target_database") != "restaurant"
+    ):
+        raise _device_unauthorized()
+
+    if device.device_type == "kitchen":
+        settings_row = await restaurant_db.scalar(
+            select(BranchSettings).where(
+                BranchSettings.company_id == company_id,
+                BranchSettings.branch_id == branch_id,
+            )
+        )
+        configured_stations = settings_row.fb_kitchen_stations if settings_row else []
+        if not any(
+            normalized_station_key(value) == normalized_station_key(device.station_key)
+            for value in configured_stations or []
+        ):
+            raise _device_unauthorized()
+
+    now = datetime.now(timezone.utc)
+    last_seen_at = device.last_seen_at
+    if last_seen_at is None or last_seen_at <= now - timedelta(
+        seconds=settings.device_last_seen_write_interval_seconds
+    ):
+        device.last_seen_at = now
+        last_seen_at = now
+        await db.commit()
+    return DeviceTokenData(
+        device_id=device.id,
+        company_id=device.company_id,
+        brand_id=context.brand_id,
+        branch_id=device.branch_id,
+        device_code=device.device_code,
+        name=device.name,
+        device_type=device.device_type,
+        station_key=device.station_key,
+        business_type=context.business_type,
+        target_database=context.target_database,
+        credential_version=device.credential_version,
+        paired_at=device.paired_at,
+        last_seen_at=last_seen_at,
     )
 
 

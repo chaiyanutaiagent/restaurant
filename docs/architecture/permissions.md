@@ -12,9 +12,10 @@ Restaurant POS uses permission codes as the enforcement layer. Roles are company
 - `brand.*` - Brand storefront apps, replenishment, and delivery receive
 - `hr.*` - HR, attendance, and payroll
 
-## Phase 2 Canonical Starter Role Presets
+## Canonical Starter Role Presets
 
-Policy version: `2026-08-01.3`
+Current policy version: `2026-08-01.4` (`P3-DEVICE-PAIRING-01` adds scoped device management to
+Company Owner, Brand Manager, and Branch Manager; the Phase 2 gate was verified at `2026-08-01.3`.)
 
 The backend owns the preset definitions and exposes resolved permission IDs through
 `GET /api/v1/system/role-presets`. The Roles UI consumes that contract and must not keep a separate
@@ -22,9 +23,9 @@ permission-code list.
 
 | Preset | Default scope | Allowed scopes | Branch-request compatible | Boundary |
 |---|---|---|---|---|
-| Company Owner | Company | Company | No | Explicit full tenant permission catalog; no wildcard |
-| Brand Manager | Brand | Brand | No | Brand standards, menu, recipe, stock, production, and reports |
-| Branch Manager | Branch | Branch | Yes | Branch operations and staff requests; no central admin/approval permissions |
+| Company Owner | Company | Company | No | Explicit full tenant permission catalog, including device management; no wildcard |
+| Brand Manager | Brand | Brand | No | Brand standards, menu, recipe, stock, production, reports, and scoped devices |
+| Branch Manager | Branch | Branch | Yes | Branch operations, staff requests, and Branch devices; no central admin/approval permissions |
 | Cashier | Branch | Branch, Station | Yes | Sale, standard discount, approval requests for void/refund, cashier shift, product/stock view |
 | Kitchen Staff | Station | Station | Yes | `fb.menu.view` and `fb.kitchen.ticket.manage` only |
 
@@ -81,6 +82,23 @@ request fingerprint. The operational transaction consumes the grant once in
 
 Manager PIN hashes and lockout state are identity-owned. Operation audit rows record requester,
 approver, approval mode, reason, grant ID and request hash without storing the PIN or approval token.
+
+## Device Identity
+
+`device_registrations` is Identity-owned in legacy and Platform; it is not copied into the Restaurant
+operational database. Company Owner, Brand Manager, and Branch Manager presets may view and manage
+devices, while Cashier and Kitchen Staff presets do not receive device-administration permissions.
+
+Registration binds a device to a server-resolved Restaurant Branch. Kitchen devices additionally
+require a canonical Station from Restaurant Branch settings. A one-time six-digit PIN and equivalent
+QR payload expire after ten minutes, are stored only as a hash, lock after repeated failures, and are
+consumed under a row lock. Pairing returns a device token, not a User token.
+
+Every device-authenticated request reloads the live registry and verifies Company, Brand, Branch,
+device type, Station, credential version, active Brand context, and configured Kitchen Station.
+Pairing-code rotation and revoke increment the credential version, so previously issued tokens fail
+immediately. The dependency updates `last_seen_at`; lifecycle actions write audit evidence without
+persisting the PIN or token.
 
 ## Migration Rule
 

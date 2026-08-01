@@ -10,7 +10,7 @@ from app.models.role import Permission
 from app.schemas.role import RolePresetRead, RoleScope
 
 
-ROLE_PRESET_POLICY_VERSION = "2026-08-01.3"
+ROLE_PRESET_POLICY_VERSION = "2026-08-01.4"
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,8 @@ COMPANY_OWNER_PERMISSION_CODES = (
     "system.branch.view",
     "system.branch.create",
     "system.branch.edit",
+    "system.device.view",
+    "system.device.manage",
     "system.user.view",
     "system.user.create",
     "system.user.edit",
@@ -120,6 +122,8 @@ ROLE_PRESET_POLICIES = (
         permission_codes=(
             "system.company.view",
             "system.branch.view",
+            "system.device.view",
+            "system.device.manage",
             "system.user.view",
             "system.role.view",
             "pos.sale.view",
@@ -157,6 +161,8 @@ ROLE_PRESET_POLICIES = (
         is_branch_assignable=True,
         permission_codes=(
             "system.branch.view",
+            "system.device.view",
+            "system.device.manage",
             "system.user.view",
             "system.user.request",
             "system.role.view",

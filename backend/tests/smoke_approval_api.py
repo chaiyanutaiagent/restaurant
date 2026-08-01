@@ -159,6 +159,8 @@ async def prepare() -> dict[str, str]:
             "inventory.stock.adjust.request",
             "fb.order.create",
             "system.role.view",
+            "system.device.view",
+            "system.device.manage",
         }
         permissions = {
             permission.code: permission
@@ -384,7 +386,7 @@ def run() -> None:
         ]:
             raise RuntimeError("Phase 2 role preset order is invalid")
         if any(
-            preset["policy_version"] != "2026-08-01.3"
+            preset["policy_version"] != "2026-08-01.4"
             or not preset["is_available"]
             for preset in presets
         ):

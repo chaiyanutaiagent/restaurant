@@ -37,6 +37,18 @@ PERMISSIONS: list[dict[str, str]] = [
         "description": "Edit existing branch details.",
     },
     {
+        "code": "system.device.view",
+        "name": "View Devices",
+        "module": "system",
+        "description": "View registered Counter, Kitchen, and Pickup devices.",
+    },
+    {
+        "code": "system.device.manage",
+        "name": "Manage Devices",
+        "module": "system",
+        "description": "Register, pair, rotate, and revoke Branch devices.",
+    },
+    {
         "code": "system.user.view",
         "name": "View Users",
         "module": "system",

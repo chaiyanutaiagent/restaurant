@@ -104,3 +104,33 @@ databases. Signed access tokens continue to validate while the legacy User remai
 active, but Platform-issued refresh tokens require a new legacy login. Production
 activation remains a separate operator decision after a fresh identity parity
 check, backup and canary window.
+
+## Restaurant Service Runtime Canary
+
+`P1-RESTAURANT-RUNTIME-CANARY-07` adds the server-owned
+`RESTAURANT_SERVICE_DATABASE=legacy|restaurant` switch. The bounded Restaurant slice
+contains F&B settings/setup, tables, dining sessions, orders, kitchen, payment QR,
+pickup and public table/quick-service QR flows. System Branch Settings use Platform
+identity for access validation and the active Restaurant service connection for the
+settings/audit transaction.
+
+Brand administration, central production/credit/transfer, WAP/store and generic
+Product/Stock/POS/Accounting routes remain on legacy. Restaurant mode requires
+Platform identity, the reference projector and three distinct physical databases.
+The canary proved isolated Restaurant session/sale/settings writes and returned the
+runtime to `identity=legacy`, `restaurant_service=legacy`, projector disabled.
+
+## Phase 1 Gate
+
+`P1-PHASE-GATE-08` closes the local Phase 1 foundation gate with an isolated clone
+of the legacy database. It creates a second Retail tenant only in a database named
+`restaurant_p1_gate_<timestamp>`, verifies cross-company Branch/Settings/Table/Brand
+isolation, branch assignment enforcement and the Restaurant business-type guard,
+then drops the temporary database. A before/after live-source fingerprint prevents
+the gate itself from mutating the rollback source.
+
+The gate also verifies the canonical `ครัวป่า ปลาเขื่อน` → `BKK-01` mapping, retained
+operational records, legacy route compatibility and separate Platform/Restaurant
+backup/restore. Passing this gate permits separately scoped Phase 2 work; it does
+not activate production or make the canary databases the permanent system of
+record.

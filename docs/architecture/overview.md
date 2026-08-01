@@ -41,4 +41,4 @@ Restaurant handles dining tables, dining sessions, QR menu ordering, kitchen tic
 
 ERP stays the core platform. POS and Restaurant stay below ERP as modules. External systems integrate through APIs and webhooks rather than sharing code or database tables directly.
 
-Phase 1 is introducing explicit physical Control Plane and Restaurant database boundaries while the legacy database remains authoritative until a separately verified data cutover. See [Database Boundaries](./database-boundaries.md).
+Phase 1 established and locally verified explicit physical Control Plane and Restaurant database boundaries, reference projection, bounded runtime canaries and tenant/business-type isolation. The runtime remains on rollback-safe legacy defaults until a separately approved production activation. New Phase 2 work may begin only under its own Scope ID. See [Database Boundaries](./database-boundaries.md).

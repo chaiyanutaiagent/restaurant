@@ -483,12 +483,18 @@ Acceptance Criteria:
 
 Acceptance Criteria:
 
-- [ ] Company A อ่านหรือแก้ Company B ไม่ได้ทุก API ที่ทดสอบ
-- [ ] ผู้ใช้เข้าถึง Brand/Branch นอก assignment ไม่ได้
-- [ ] Brand/Branch ที่เป็น `restaurant` เปิด Retail/Takeaway operational API ไม่ได้
-- [ ] ครัวป่า ปลาเขื่อนเปิดสาขากรุงเทพและเห็นข้อมูลเดิมครบ
-- [ ] Control Plane และ Restaurant Database backup/restore แยกกันได้
-- [ ] Legacy URL ยังทำงาน
+- [x] Company A อ่านหรือแก้ Company B ไม่ได้ทุก API ที่ทดสอบ
+- [x] ผู้ใช้เข้าถึง Brand/Branch นอก assignment ไม่ได้
+- [x] Brand/Branch ที่เป็น `restaurant` เปิด Retail/Takeaway operational API ไม่ได้
+- [x] ครัวป่า ปลาเขื่อนเปิดสาขากรุงเทพและเห็นข้อมูลเดิมครบ
+- [x] Control Plane และ Restaurant Database backup/restore แยกกันได้
+- [x] Legacy URL ยังทำงาน
+
+Gate record: `P1-PHASE-GATE-08` ผ่าน isolated tenant/API matrix, retained-data check และ
+Platform/Restaurant restore drill เมื่อ 1 สิงหาคม 2026 จึงเริ่มงาน Phase 2 ได้ภายใต้ Scope ID ใหม่
+โดย production activation และการเปลี่ยน system of record ยังต้องอนุมัติแยกต่างหาก
+Standalone Retail/Takeaway operational routers ยังไม่ถูกเปิดใน Phase 1; `/api/v1/pos` ปัจจุบันเป็น
+legacy shared compatibility API และไม่ใช่ Retail Database API ของ Phase 7
 
 ไม่รวม: Device pairing, subscription billing และ custom domain
 

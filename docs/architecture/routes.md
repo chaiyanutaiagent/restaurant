@@ -58,8 +58,13 @@ Planned POS Admin pages:
 - `POST /api/v1/system/devices/:id/revoke` - revoke a device and invalidate its token
 - `POST /api/v1/device-auth/pair` - exchange a one-time credential for a device token
 - `GET /api/v1/device-auth/me` - validate the live registry and return server-owned device context
+- `GET /api/v1/device-workspaces/counter/bootstrap` - validate a Counter device and return its locked Branch plus staff-login gate
+- `GET/PATCH /api/v1/device-workspaces/kitchen/...` - Station-locked Kitchen ticket workspace
+- `GET/POST /api/v1/device-workspaces/pickup/...` - Branch-locked Pickup queue workspace
 
-Dedicated Counter, Kitchen, and Pickup device workspace routes remain in the next Phase 3 Scope.
+Dedicated browser routes are `/counter`, `/kitchen`, and `/pickup`; `/device/pair` exchanges the
+one-time pairing credential, while `/devices` is the scoped Manager console. Existing
+`/restaurant/kitchen` and `/restaurant/pickup` user-session routes remain available.
 
 ## Migration Rule
 

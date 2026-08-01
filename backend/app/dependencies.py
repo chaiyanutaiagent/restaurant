@@ -222,6 +222,18 @@ def require_any_permission(*codes: str) -> Callable:
     return checker
 
 
+def require_device_type(*device_types: str) -> Callable:
+    async def checker(current: DeviceTokenData = Depends(get_current_device)) -> DeviceTokenData:
+        if current.device_type in device_types:
+            return current
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Device type required: one of {', '.join(device_types)}",
+        )
+
+    return checker
+
+
 def require_business_type(expected: str) -> Callable:
     async def checker(current: TokenData = Depends(get_current_user)) -> TokenData:
         if current.business_type == expected:

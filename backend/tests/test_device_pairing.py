@@ -4,12 +4,20 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import unittest
 import uuid
+from unittest.mock import AsyncMock
 
 from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.dependencies import TokenData
-from app.schemas.device import DeviceActionReason, DeviceCreate, DevicePairRequest
+from app.schemas.device import (
+    DeviceActionReason,
+    DeviceContextRead,
+    DeviceCreate,
+    DevicePairRequest,
+    DeviceWorkspaceBootstrapRead,
+    DeviceWorkspaceBranchRead,
+)
 from app.services.device_service import DeviceService
 from app.utils.security import create_device_access_token, decode_token
 
@@ -63,6 +71,34 @@ class DevicePairingSchemaTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             DeviceActionReason(reason="   ")
 
+    def test_counter_workspace_requires_staff_identity_for_sales(self) -> None:
+        now = datetime.now(timezone.utc)
+        company_id = uuid.uuid4()
+        branch_id = uuid.uuid4()
+        workspace = DeviceWorkspaceBootstrapRead(
+            workspace="counter",
+            device=DeviceContextRead(
+                device_id=uuid.uuid4(),
+                company_id=company_id,
+                brand_id=uuid.uuid4(),
+                branch_id=branch_id,
+                device_code="C-ABCD234567",
+                name="Counter",
+                device_type="counter",
+                business_type="restaurant",
+                target_database="restaurant",
+                credential_version=1,
+                paired_at=now,
+                last_seen_at=now,
+            ),
+            branch=DeviceWorkspaceBranchRead(id=branch_id, code="BKK-01", name="Bangkok"),
+            requires_staff_login=True,
+            capabilities=["staff_login", "pos_handoff"],
+        )
+        self.assertTrue(workspace.requires_staff_login)
+        self.assertEqual(workspace.branch.id, workspace.device.branch_id)
+        self.assertNotIn("sale_create", workspace.capabilities)
+
 
 class DeviceCredentialPolicyTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -103,10 +139,8 @@ class DeviceCredentialPolicyTests(unittest.TestCase):
             permissions=["system.device.manage"],
             scope_types=["branch"],
         )
-        DeviceService._require_branch_access(current, self.branch_id)
-        with self.assertRaises(HTTPException) as raised:
-            DeviceService._require_branch_access(current, uuid.uuid4())
-        self.assertEqual(raised.exception.status_code, 404)
+        self.assertTrue(DeviceService._has_direct_branch_access(current, self.branch_id))
+        self.assertFalse(DeviceService._has_direct_branch_access(current, uuid.uuid4()))
 
     def test_device_status_distinguishes_pairing_pair_and_revoke(self) -> None:
         now = datetime.now(timezone.utc)
@@ -124,6 +158,29 @@ class DeviceCredentialPolicyTests(unittest.TestCase):
         self.assertEqual(DeviceService._status(device), "paired")
         device.revoked_at = now
         self.assertEqual(DeviceService._status(device), "revoked")
+
+
+class DeviceBrandScopeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_brand_manager_can_manage_only_branches_in_its_brand(self) -> None:
+        brand_id = uuid.uuid4()
+        current = TokenData(
+            user_id=uuid.uuid4(),
+            company_id=uuid.uuid4(),
+            branch_id=uuid.uuid4(),
+            brand_id=brand_id,
+            permissions=["system.device.manage"],
+            scope_types=["brand"],
+        )
+        db = AsyncMock()
+        service = DeviceService(db)
+        permitted_branch = uuid.uuid4()
+        db.scalar.return_value = uuid.uuid4()
+        await service._require_branch_access(current, permitted_branch)
+
+        db.scalar.return_value = None
+        with self.assertRaises(HTTPException) as raised:
+            await service._require_branch_access(current, uuid.uuid4())
+        self.assertEqual(raised.exception.status_code, 404)
 
 
 if __name__ == "__main__":

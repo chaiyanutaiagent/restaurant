@@ -124,3 +124,19 @@ class DevicePairRead(BaseSchema):
     token_type: Literal["bearer"] = "bearer"
     expires_in: int
     device: DeviceContextRead
+
+
+class DeviceWorkspaceBranchRead(BaseSchema):
+    id: uuid.UUID
+    code: str
+    name: str
+
+
+class DeviceWorkspaceBootstrapRead(BaseSchema):
+    workspace: DeviceType
+    device: DeviceContextRead
+    branch: DeviceWorkspaceBranchRead
+    station_key: str | None = None
+    queue_prefix: str = ""
+    requires_staff_login: bool = False
+    capabilities: list[str] = Field(default_factory=list)

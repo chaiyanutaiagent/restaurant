@@ -3,8 +3,12 @@ import { CheckCircle2, Clock, Loader2, RefreshCw, Volume2, VolumeX } from "lucid
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { authApi } from "@/lib/api";
+import { deviceApi } from "@/lib/deviceApi";
 import { fbApi } from "@/lib/fbApi";
 import { useAuthStore } from "@/stores/auth.store";
+import { useDeviceStore } from "@/stores/device.store";
+import type { ApiResponse } from "@/types/api";
+import type { DeviceWorkspaceBootstrap } from "@/types/device";
 
 type PickupQueue = {
   session_id: string;
@@ -34,33 +38,51 @@ function readyMinutes(readyAt: string | null): number {
 export default function PickupDisplayPage(): JSX.Element {
   const queryClient = useQueryClient();
   const location = useLocation();
-  const branchId = useAuthStore((s) => s.branchId);
+  const userBranchId = useAuthStore((s) => s.branchId);
+  const device = useDeviceStore((s) => s.device);
   const prevQueueRef = useRef<number[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const isRestaurantPickup = location.pathname.startsWith("/restaurant/");
+  const isDeviceWorkspace = location.pathname === "/pickup";
+  const branchId = isDeviceWorkspace ? device?.branch_id : userBranchId;
+
+  const bootstrapQuery = useQuery({
+    queryKey: ["device-workspace", "pickup"],
+    queryFn: async () => (await deviceApi.get<ApiResponse<DeviceWorkspaceBootstrap>>("/device-workspaces/pickup/bootstrap")).data.data,
+    enabled: isDeviceWorkspace,
+    retry: false,
+  });
 
   const settingsQuery = useQuery({
     queryKey: ["branch-settings", branchId],
-    queryFn: async () => (await fbApi.settings()).data.data,
+    queryFn: async () => isDeviceWorkspace
+      ? (await deviceApi.get<ApiResponse<DeviceWorkspaceBootstrap>>("/device-workspaces/pickup/bootstrap")).data.data
+      : (await fbApi.settings()).data.data,
     enabled: Boolean(branchId),
   });
 
   const queueQuery = useQuery({
     queryKey: ["pickup-queue", branchId],
     queryFn: async () =>
-      (await authApi.get("/restaurant/pickup-queue")).data.data as PickupQueue[],
+      isDeviceWorkspace
+        ? (await deviceApi.get("/device-workspaces/pickup/queue")).data.data as PickupQueue[]
+        : (await authApi.get("/restaurant/pickup-queue")).data.data as PickupQueue[],
     refetchInterval: 5_000,
     enabled: Boolean(branchId),
   });
 
   const readyQueue = queueQuery.data ?? [];
-  const prefix = settingsQuery.data?.fb_queue_prefix ?? "";
+  const prefix = isDeviceWorkspace
+    ? (settingsQuery.data as DeviceWorkspaceBootstrap | undefined)?.queue_prefix ?? ""
+    : (settingsQuery.data as { fb_queue_prefix?: string } | undefined)?.fb_queue_prefix ?? "";
   const primaryQueue = readyQueue[0];
   const secondaryQueues = readyQueue.slice(1);
   const servedMutation = useMutation({
     mutationFn: async (sessionId: string) =>
-      authApi.post(`/restaurant/pickup-queue/${sessionId}/served`),
+      isDeviceWorkspace
+        ? deviceApi.post(`/device-workspaces/pickup/queue/${sessionId}/served`)
+        : authApi.post(`/restaurant/pickup-queue/${sessionId}/served`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["pickup-queue"] });
       void queryClient.invalidateQueries({ queryKey: ["kitchen-tickets"] });
@@ -108,6 +130,7 @@ export default function PickupDisplayPage(): JSX.Element {
         <p className="text-lg font-semibold uppercase tracking-[0.4em] text-emerald-400">รับอาหาร</p>
         <p className="mt-2 text-4xl font-black sm:text-5xl">พร้อมรับแล้ว</p>
         <p className="mt-3 text-sm text-slate-400">โปรดตรวจเลขคิว แล้วติดต่อพนักงานที่เคาน์เตอร์</p>
+        {isDeviceWorkspace ? <p className="mt-2 text-sm font-semibold text-emerald-300">{bootstrapQuery.data?.branch.name ?? "กำลังตรวจอุปกรณ์"} · {device?.device_code}</p> : null}
         <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-slate-400">
           <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1.5">
             <RefreshCw className={`h-3.5 w-3.5 ${queueQuery.isFetching ? "animate-spin" : ""}`} />
@@ -168,7 +191,7 @@ export default function PickupDisplayPage(): JSX.Element {
                 </span>
                 {readyMinutes(primaryQueue.ready_at) >= 10 ? <span className="rounded-full bg-white/50 px-3 py-1">รอนาน</span> : null}
               </div>
-              {isRestaurantPickup ? (
+              {(isRestaurantPickup || isDeviceWorkspace) ? (
                 <button
                   type="button"
                   disabled={servedMutation.isPending}
@@ -195,7 +218,7 @@ export default function PickupDisplayPage(): JSX.Element {
                   <span className={`block text-xs font-semibold uppercase tracking-widest ${readyMinutes(queue.ready_at) >= 10 ? "text-slate-700" : "text-slate-400"}`}>{prefix || "คิว"}</span>
                   <span className="mt-1 block text-5xl font-black leading-none">{formatQueue(prefix, queue.queue_number)}</span>
                   <span className="mt-2 block text-xs opacity-75">{queue.item_count} รายการ · {readyAgo(queue.ready_at)}</span>
-                  {isRestaurantPickup ? (
+                  {(isRestaurantPickup || isDeviceWorkspace) ? (
                     <button
                       type="button"
                       disabled={servedMutation.isPending}

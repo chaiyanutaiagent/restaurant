@@ -6,6 +6,7 @@ import {
   ChefHat,
   ClipboardCheck,
   ClipboardList,
+  Cpu,
   Clock,
   CreditCard,
   Globe2,
@@ -62,7 +63,8 @@ const mainItems: NavItem[] = [
   { label: "ERP Admin", to: "/admin", icon: LayoutDashboard },
   { label: "ผู้ใช้งาน", to: "/users", icon: Users, permission: "system.user.view" },
   { label: "บทบาท", to: "/roles", icon: Shield, permission: "system.role.view" },
-  { label: "สาขา", to: "/branches", icon: Building2, permission: "system.branch.view" }
+  { label: "สาขา", to: "/branches", icon: Building2, permission: "system.branch.view" },
+  { label: "อุปกรณ์", to: "/devices", icon: Cpu, permission: "system.device.view" }
 ];
 
 const comingSoonItems: NavItem[] = [

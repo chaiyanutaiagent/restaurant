@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Capacitor } from "@capacitor/core";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
+import DeviceProtectedRoute from "@/components/auth/DeviceProtectedRoute";
 import AppShell from "@/components/layout/AppShell";
 import RestaurantShell from "@/components/layout/RestaurantShell";
 import { Toaster } from "@/components/ui/toaster";
@@ -69,6 +70,9 @@ import RestaurantStoreOrdersPage from "@/pages/restaurant/RestaurantStoreOrdersP
 import RestaurantStoreStockPage from "@/pages/restaurant/RestaurantStoreStockPage";
 import BranchStaffRequestsPage from "@/pages/restaurant/BranchStaffRequestsPage";
 import BrandStaffRequestsPage from "@/pages/restaurant/BrandStaffRequestsPage";
+import CounterDevicePage from "@/pages/devices/CounterDevicePage";
+import DevicePairingPage from "@/pages/devices/DevicePairingPage";
+import DevicesPage from "@/pages/devices/DevicesPage";
 import { useEffect } from "react";
 
 const queryClient = new QueryClient({
@@ -85,6 +89,16 @@ export default function App(): JSX.Element {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/device/pair" element={<DevicePairingPage />} />
+          <Route element={<DeviceProtectedRoute type="counter" />}>
+            <Route path="/counter" element={<CounterDevicePage />} />
+          </Route>
+          <Route element={<DeviceProtectedRoute type="kitchen" />}>
+            <Route path="/kitchen" element={<KitchenDisplayPage />} />
+          </Route>
+          <Route element={<DeviceProtectedRoute type="pickup" />}>
+            <Route path="/pickup" element={<PickupDisplayPage />} />
+          </Route>
           <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
           <Route path="/" element={Capacitor.isNativePlatform() ? <Navigate to="/restaurant" replace /> : <ModuleSelectorPage />} />
           <Route path="/store" element={<StorefrontPage />} />
@@ -181,6 +195,9 @@ export default function App(): JSX.Element {
               </Route>
               <Route element={<ProtectedRoute permission="system.branch.view" />}>
                 <Route path="/branches" element={<BranchesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="system.device.view" />}>
+                <Route path="/devices" element={<DevicesPage />} />
               </Route>
               <Route element={<ProtectedRoute permission="accounting.report.view" />}>
                 <Route path="/accounting" element={<AccountingPage />} />

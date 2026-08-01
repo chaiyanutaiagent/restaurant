@@ -3,7 +3,11 @@ import { ChefHat, Clock, Flame, Loader2, RefreshCw, Timer } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { authApi } from "@/lib/api";
+import { deviceApi } from "@/lib/deviceApi";
 import { useAuthStore } from "@/stores/auth.store";
+import { useDeviceStore } from "@/stores/device.store";
+import type { ApiResponse } from "@/types/api";
+import type { DeviceWorkspaceBootstrap } from "@/types/device";
 
 type Ticket = {
   id: string; session_id: string; product_name: string; qty: number;
@@ -37,23 +41,41 @@ function elapsed(createdAt: string): string {
 export default function KitchenDisplayPage(): JSX.Element {
   const queryClient = useQueryClient();
   const location = useLocation();
-  const branchId = useAuthStore((s) => s.branchId);
+  const userBranchId = useAuthStore((s) => s.branchId);
+  const device = useDeviceStore((s) => s.device);
   const [station, setStation] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const isRestaurantKitchen = location.pathname.startsWith("/restaurant/");
+  const isDeviceWorkspace = location.pathname === "/kitchen";
+  const branchId = isDeviceWorkspace ? device?.branch_id : userBranchId;
+
+  const bootstrapQuery = useQuery({
+    queryKey: ["device-workspace", "kitchen"],
+    queryFn: async () => (await deviceApi.get<ApiResponse<DeviceWorkspaceBootstrap>>("/device-workspaces/kitchen/bootstrap")).data.data,
+    enabled: isDeviceWorkspace,
+    retry: false,
+  });
 
   const ticketsQuery = useQuery({
     queryKey: ["kitchen-tickets", branchId, station],
     queryFn: async () => {
+      if (isDeviceWorkspace) {
+        return (await deviceApi.get("/device-workspaces/kitchen/tickets")).data.data as Ticket[];
+      }
       const params = station ? `?station=${encodeURIComponent(station)}` : "";
       return (await authApi.get(`/restaurant/kitchen${params}`)).data.data as Ticket[];
     },
     refetchInterval: 5_000,
+    enabled: Boolean(branchId),
   });
 
   const updateMutation = useMutation({
     mutationFn: async ({ ticket, status }: { ticket: Ticket; status: string }) => {
-      await authApi.patch(`/restaurant/kitchen/${ticket.id}`, { status });
+      if (isDeviceWorkspace) {
+        await deviceApi.patch(`/device-workspaces/kitchen/tickets/${ticket.id}`, { status });
+      } else {
+        await authApi.patch(`/restaurant/kitchen/${ticket.id}`, { status });
+      }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["kitchen-tickets"] });
@@ -89,7 +111,8 @@ export default function KitchenDisplayPage(): JSX.Element {
     dine_in: allTickets.filter((ticket) => (ticket.source_type ?? (ticket.table_name ? "dine_in" : "quick_service")) === "dine_in").length,
     quick_service: allTickets.filter((ticket) => (ticket.source_type ?? (ticket.table_name ? "dine_in" : "quick_service")) === "quick_service").length,
   };
-  const errorMessage = updateMutation.error instanceof Error ? updateMutation.error.message : ticketsQuery.error instanceof Error ? ticketsQuery.error.message : null;
+  const displayError = updateMutation.error ?? ticketsQuery.error ?? bootstrapQuery.error;
+  const errorMessage = displayError instanceof Error ? displayError.message : null;
 
   // unique stations from tickets
   const allStations = [...new Set(allTickets.map((t) => t.station).filter(Boolean))] as string[];
@@ -103,7 +126,9 @@ export default function KitchenDisplayPage(): JSX.Element {
             <div>
               <h1 className="text-lg font-bold xl:text-xl">Kitchen Display</h1>
               <p className="hidden text-xs text-slate-400 sm:block xl:text-sm">
-                {isRestaurantKitchen ? "กดเสร็จแล้วเพื่อส่งคิวไปจอรับอาหาร" : "รายการเก่าขึ้นก่อน แยกโต๊ะและรับเองได้"}
+                {isDeviceWorkspace
+                  ? `${bootstrapQuery.data?.branch.name ?? "กำลังตรวจอุปกรณ์"} · ${bootstrapQuery.data?.station_key ?? "Station"}`
+                  : isRestaurantKitchen ? "กดเสร็จแล้วเพื่อส่งคิวไปจอรับอาหาร" : "รายการเก่าขึ้นก่อน แยกโต๊ะและรับเองได้"}
               </p>
             </div>
           </div>
@@ -142,24 +167,32 @@ export default function KitchenDisplayPage(): JSX.Element {
               {item.label}
             </button>
           ))}
-          <span className="mx-1 h-6 w-px bg-slate-700" aria-hidden="true" />
-          <button
-            type="button"
-            onClick={() => setStation("")}
-            className={`h-9 rounded-full px-3 text-xs font-semibold xl:h-10 xl:px-4 xl:text-sm ${!station ? "bg-slate-100 text-slate-950" : "border border-slate-600 text-slate-300"}`}
-          >
-            ทุกสถานี
-          </button>
-          {allStations.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStation(s)}
-              className={`h-9 rounded-full px-3 text-xs font-semibold xl:h-10 xl:px-4 xl:text-sm ${station === s ? "bg-slate-100 text-slate-950" : "border border-slate-600 text-slate-300"}`}
-            >
-              {s}
-            </button>
-          ))}
+          {isDeviceWorkspace ? (
+            <span className="rounded-full border border-emerald-500/60 px-3 py-2 text-xs font-semibold text-emerald-300 xl:text-sm">
+              Station ล็อก: {device?.station_key}
+            </span>
+          ) : (
+            <>
+              <span className="mx-1 h-6 w-px bg-slate-700" aria-hidden="true" />
+              <button
+                type="button"
+                onClick={() => setStation("")}
+                className={`h-9 rounded-full px-3 text-xs font-semibold xl:h-10 xl:px-4 xl:text-sm ${!station ? "bg-slate-100 text-slate-950" : "border border-slate-600 text-slate-300"}`}
+              >
+                ทุกสถานี
+              </button>
+              {allStations.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setStation(s)}
+                  className={`h-9 rounded-full px-3 text-xs font-semibold xl:h-10 xl:px-4 xl:text-sm ${station === s ? "bg-slate-100 text-slate-950" : "border border-slate-600 text-slate-300"}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </>
+          )}
           {oldestPending ? (
             <span className="ml-auto inline-flex h-9 items-center gap-1 rounded-full bg-amber-400 px-3 text-xs font-semibold text-amber-950 xl:text-sm">
               <Timer className="h-4 w-4" /> รอนานสุด {elapsed(oldestPending.created_at)}
@@ -211,7 +244,7 @@ export default function KitchenDisplayPage(): JSX.Element {
                       </div>
                       <span className="flex-shrink-0 rounded-full bg-slate-900 px-2 py-1 text-xs text-slate-300">{elapsed(ticket.created_at)}</span>
                     </div>
-                    {NEXT_STATUS[statusKey] && !(isRestaurantKitchen && statusKey === "done") && (
+                    {NEXT_STATUS[statusKey] && !((isRestaurantKitchen || isDeviceWorkspace) && statusKey === "done") && (
                       <button
                         type="button"
                         disabled={updateMutation.isPending}

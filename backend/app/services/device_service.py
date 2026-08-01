@@ -13,6 +13,7 @@ from app.config import settings
 from app.dependencies import TokenData
 from app.models.audit import AuditLog
 from app.models.device import DeviceRegistration
+from app.models.restaurant import BrandBranch
 from app.models.settings import BranchSettings
 from app.schemas.device import (
     DeviceActionReason,
@@ -54,23 +55,30 @@ class DeviceService:
         *,
         branch_id: uuid.UUID | None = None,
     ) -> list[DeviceRead]:
-        effective_branch_id = branch_id
         company_wide = "*" in current.permissions or "company" in current.scope_types
-        if not company_wide:
+        if branch_id is not None:
+            await self._require_branch_access(current, branch_id)
+        elif not company_wide and "brand" not in current.scope_types:
             if current.branch_id is None:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Branch context is required to view devices",
                 )
-            if branch_id is not None and branch_id != current.branch_id:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
-            effective_branch_id = current.branch_id
+            branch_id = current.branch_id
 
         statement = select(DeviceRegistration).where(
             DeviceRegistration.company_id == current.company_id
         )
-        if effective_branch_id is not None:
-            statement = statement.where(DeviceRegistration.branch_id == effective_branch_id)
+        if branch_id is not None:
+            statement = statement.where(DeviceRegistration.branch_id == branch_id)
+        elif not company_wide and "brand" in current.scope_types and current.brand_id is not None:
+            statement = statement.join(
+                BrandBranch,
+                (BrandBranch.branch_id == DeviceRegistration.branch_id)
+                & (BrandBranch.company_id == current.company_id)
+                & (BrandBranch.brand_id == current.brand_id)
+                & BrandBranch.is_active.is_(True),
+            )
         rows = (
             await self.db.scalars(
                 statement.order_by(
@@ -89,7 +97,7 @@ class DeviceService:
         ip_address: str | None,
         user_agent: str | None,
     ) -> DeviceProvisioningRead:
-        self._require_branch_access(current, data.branch_id)
+        await self._require_branch_access(current, data.branch_id)
         context = await self._restaurant_context(current.company_id, data.branch_id)
         station_key = await self._canonical_station(
             current.company_id,
@@ -136,7 +144,7 @@ class DeviceService:
         user_agent: str | None,
     ) -> DeviceProvisioningRead:
         device = await self._get_device(current.company_id, device_id, for_update=True)
-        self._require_branch_access(current, device.branch_id)
+        await self._require_branch_access(current, device.branch_id)
         if device.revoked_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -183,7 +191,7 @@ class DeviceService:
         user_agent: str | None,
     ) -> DeviceRead:
         device = await self._get_device(current.company_id, device_id, for_update=True)
-        self._require_branch_access(current, device.branch_id)
+        await self._require_branch_access(current, device.branch_id)
         if device.revoked_at is not None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
 
@@ -370,11 +378,27 @@ class DeviceService:
         )
 
     @staticmethod
-    def _require_branch_access(current: TokenData, branch_id: uuid.UUID) -> None:
+    def _has_direct_branch_access(current: TokenData, branch_id: uuid.UUID) -> bool:
         if "*" in current.permissions or "company" in current.scope_types:
-            return
+            return True
         if current.branch_id == branch_id:
+            return True
+        return False
+
+    async def _require_branch_access(self, current: TokenData, branch_id: uuid.UUID) -> None:
+        if self._has_direct_branch_access(current, branch_id):
             return
+        if "brand" in current.scope_types and current.brand_id is not None:
+            brand_branch_id = await self.db.scalar(
+                select(BrandBranch.id).where(
+                    BrandBranch.company_id == current.company_id,
+                    BrandBranch.brand_id == current.brand_id,
+                    BrandBranch.branch_id == branch_id,
+                    BrandBranch.is_active.is_(True),
+                )
+            )
+            if brand_branch_id is not None:
+                return
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
 
     async def _new_device_code(self, company_id: uuid.UUID, device_type: str) -> str:

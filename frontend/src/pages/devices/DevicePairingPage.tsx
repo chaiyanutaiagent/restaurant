@@ -50,8 +50,8 @@ export default function DevicePairingPage(): JSX.Element {
           <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-500 text-slate-950">
             <Cpu className="h-8 w-8" />
           </div>
-          <CardTitle className="text-2xl">จับคู่อุปกรณ์ประจำร้าน</CardTitle>
-          <CardDescription className="text-slate-400">
+          <CardTitle className="text-2xl text-white">จับคู่อุปกรณ์ประจำร้าน</CardTitle>
+          <CardDescription className="text-slate-300">
             สแกน QR หรือกรอก Device Code และ PIN ที่ผู้จัดการสร้างให้
           </CardDescription>
         </CardHeader>
@@ -64,16 +64,16 @@ export default function DevicePairingPage(): JSX.Element {
             }}
           >
             <div className="space-y-2">
-              <Label htmlFor="device-company">Company ID</Label>
-              <Input id="device-company" value={companyId} onChange={(event) => setCompanyId(event.target.value)} required />
+              <Label className="text-slate-200" htmlFor="device-company">Company ID</Label>
+              <Input id="device-company" className="h-12 text-base" value={companyId} onChange={(event) => setCompanyId(event.target.value)} required />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="device-code">Device Code</Label>
-              <Input id="device-code" className="font-mono uppercase" value={deviceCode} onChange={(event) => setDeviceCode(event.target.value)} placeholder="K-XXXXXXXXXX" required />
+              <Label className="text-slate-200" htmlFor="device-code">Device Code</Label>
+              <Input id="device-code" className="h-12 font-mono text-base uppercase" value={deviceCode} onChange={(event) => setDeviceCode(event.target.value)} placeholder="K-XXXXXXXXXX" required />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="device-pin">Pairing PIN</Label>
-              <Input id="device-pin" className="text-center font-mono text-2xl tracking-[0.4em]" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" required />
+              <Label className="text-slate-200" htmlFor="device-pin">Pairing PIN</Label>
+              <Input id="device-pin" className="h-12 text-center font-mono text-2xl tracking-[0.4em]" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" required />
             </div>
             {pairMutation.isError ? (
               <div className="rounded-xl border border-rose-500/60 bg-rose-950/60 px-4 py-3 text-sm text-rose-100">
@@ -86,7 +86,7 @@ export default function DevicePairingPage(): JSX.Element {
             </Button>
             <button
               type="button"
-              className="mx-auto flex items-center gap-2 text-sm text-slate-400 hover:text-white"
+              className="mx-auto flex min-h-11 items-center gap-2 px-3 text-sm text-slate-300 hover:text-white"
               onClick={() => {
                 clearSession();
                 setDeviceCode("");

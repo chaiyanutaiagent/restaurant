@@ -2,6 +2,7 @@
 set -euo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+export RESTAURANT_BACKEND_IMAGE="${P3_BACKEND_IMAGE:-restaurant-pos-dev-backend:phase3-gate}"
 ARTIFACT_ROOT="${P3_OFFLINE_ARTIFACT_ROOT:-/private/tmp/restaurant-p3-artifacts}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LEGACY_PREFIX="restaurant_p3_offline_"
@@ -106,15 +107,15 @@ printf 'Building backend and applying existing Phase 3 Identity migrations to cl
 docker compose -f "$COMPOSE_FILE" build backend >/dev/null
 docker compose -f "$COMPOSE_FILE" run --rm --no-deps -e P3_OFFLINE_DATABASE_NAME="$LEGACY_DATABASE" backend sh -c '
   set -eu; case "$P3_OFFLINE_DATABASE_NAME" in restaurant_p3_offline_[0-9]*) ;; *) exit 2 ;; esac
-  export DATABASE_URL="${DATABASE_URL%/*}/$P3_OFFLINE_DATABASE_NAME"; alembic upgrade p3device0003
+  export DATABASE_URL="${DATABASE_URL%/*}/$P3_OFFLINE_DATABASE_NAME"; alembic upgrade p3device0004
 '
 docker compose -f "$COMPOSE_FILE" run --rm --no-deps -e P3_OFFLINE_PLATFORM_DATABASE_NAME="$PLATFORM_DATABASE" backend sh -c '
   set -eu; case "$P3_OFFLINE_PLATFORM_DATABASE_NAME" in restaurant_p3_offline_platform_[0-9]*) ;; *) exit 2 ;; esac
   export PLATFORM_DATABASE_URL="${PLATFORM_DATABASE_URL%/*}/$P3_OFFLINE_PLATFORM_DATABASE_NAME"
-  alembic -c alembic-boundaries.ini -n platform upgrade p3platform0006
+  alembic -c alembic-boundaries.ini -n platform upgrade p3platform0007
 '
-[[ "$(psql_database "$LEGACY_DATABASE" 'SELECT version_num FROM alembic_version')" = "p3device0003" ]] || fail "legacy clone migration failed"
-[[ "$(psql_database "$PLATFORM_DATABASE" 'SELECT version_num FROM alembic_version')" = "p3platform0006" ]] || fail "Platform clone migration failed"
+[[ "$(psql_database "$LEGACY_DATABASE" 'SELECT version_num FROM alembic_version')" = "p3device0004" ]] || fail "legacy clone migration failed"
+[[ "$(psql_database "$PLATFORM_DATABASE" 'SELECT version_num FROM alembic_version')" = "p3platform0007" ]] || fail "Platform clone migration failed"
 
 printf 'Running signed offline authorization API gate...\n'
 smoke_output=""

@@ -2,13 +2,14 @@
 set -euo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+export RESTAURANT_BACKEND_IMAGE="${P3_BACKEND_IMAGE:-restaurant-pos-dev-backend:phase3-gate}"
 ARTIFACT_ROOT="${P3_WORKSPACE_ARTIFACT_ROOT:-/private/tmp/restaurant-p3-artifacts}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXPECTED_LEGACY_HEAD="6b7c8d9e0f12"
 EXPECTED_PLATFORM_HEAD="p1platform0003"
 EXPECTED_RESTAURANT_HEAD="p1restaurant0003"
-TARGET_LEGACY_HEAD="p3device0003"
-TARGET_PLATFORM_HEAD="p3platform0006"
+TARGET_LEGACY_HEAD="p3device0004"
+TARGET_PLATFORM_HEAD="p3platform0007"
 LEGACY_PREFIX="restaurant_p3_workspace_"
 PLATFORM_PREFIX="restaurant_p3_workspace_platform_"
 LEGACY_DATABASE=""
@@ -157,13 +158,13 @@ docker compose -f "$COMPOSE_FILE" run --rm --no-deps -e P3_WORKSPACE_DATABASE_NA
   set -eu
   case "$P3_WORKSPACE_DATABASE_NAME" in restaurant_p3_workspace_[0-9]*) ;; *) exit 2 ;; esac
   export DATABASE_URL="${DATABASE_URL%/*}/$P3_WORKSPACE_DATABASE_NAME"
-  alembic upgrade p3device0003
+  alembic upgrade p3device0004
 '
 docker compose -f "$COMPOSE_FILE" run --rm --no-deps -e P3_WORKSPACE_PLATFORM_DATABASE_NAME="$PLATFORM_DATABASE" backend sh -c '
   set -eu
   case "$P3_WORKSPACE_PLATFORM_DATABASE_NAME" in restaurant_p3_workspace_platform_[0-9]*) ;; *) exit 2 ;; esac
   export PLATFORM_DATABASE_URL="${PLATFORM_DATABASE_URL%/*}/$P3_WORKSPACE_PLATFORM_DATABASE_NAME"
-  alembic -c alembic-boundaries.ini -n platform upgrade p3platform0006
+  alembic -c alembic-boundaries.ini -n platform upgrade p3platform0007
 '
 [[ "$(psql_database "$LEGACY_DATABASE" 'SELECT version_num FROM alembic_version')" = "$TARGET_LEGACY_HEAD" ]] || fail "legacy clone migration failed"
 [[ "$(psql_database "$PLATFORM_DATABASE" 'SELECT version_num FROM alembic_version')" = "$TARGET_PLATFORM_HEAD" ]] || fail "Platform clone migration failed"

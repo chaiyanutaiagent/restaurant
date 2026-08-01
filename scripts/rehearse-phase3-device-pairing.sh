@@ -2,14 +2,15 @@
 set -euo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+export RESTAURANT_BACKEND_IMAGE="${P3_BACKEND_IMAGE:-restaurant-pos-dev-backend:phase3-gate}"
 ARTIFACT_ROOT="${P3_DEVICE_ARTIFACT_ROOT:-/private/tmp/restaurant-p3-artifacts}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ASSUME_YES=0
 EXPECTED_LEGACY_HEAD="6b7c8d9e0f12"
 EXPECTED_PLATFORM_HEAD="p1platform0003"
 EXPECTED_RESTAURANT_HEAD="p1restaurant0003"
-TARGET_LEGACY_HEAD="p3device0003"
-TARGET_PLATFORM_HEAD="p3platform0006"
+TARGET_LEGACY_HEAD="p3device0004"
+TARGET_PLATFORM_HEAD="p3platform0007"
 LEGACY_PREFIX="restaurant_p3_device_"
 PLATFORM_PREFIX="restaurant_p3_device_platform_"
 LEGACY_DATABASE=""
@@ -185,9 +186,9 @@ docker compose -f "$COMPOSE_FILE" run --rm --no-deps \
     case "$P3_DEVICE_DATABASE_NAME" in restaurant_p3_device_[0-9]*) ;; *) exit 2 ;; esac
     database_server="${DATABASE_URL%/*}"
     export DATABASE_URL="$database_server/$P3_DEVICE_DATABASE_NAME"
-    alembic upgrade p3device0003
+    alembic upgrade p3device0004
     alembic downgrade p2approval0002
-    alembic upgrade p3device0003
+    alembic upgrade p3device0004
   '
 [[ "$(psql_database "$LEGACY_DATABASE" 'SELECT version_num FROM alembic_version')" = "$TARGET_LEGACY_HEAD" ]] \
   || fail "legacy temporary database did not reach $TARGET_LEGACY_HEAD"
@@ -200,19 +201,19 @@ docker compose -f "$COMPOSE_FILE" run --rm --no-deps \
     case "$P3_PLATFORM_DATABASE_NAME" in restaurant_p3_device_platform_[0-9]*) ;; *) exit 2 ;; esac
     database_server="${PLATFORM_DATABASE_URL%/*}"
     export PLATFORM_DATABASE_URL="$database_server/$P3_PLATFORM_DATABASE_NAME"
-    alembic -c alembic-boundaries.ini -n platform upgrade p3platform0006
+    alembic -c alembic-boundaries.ini -n platform upgrade p3platform0007
     alembic -c alembic-boundaries.ini -n platform downgrade p2platform0005
-    alembic -c alembic-boundaries.ini -n platform upgrade p3platform0006
+    alembic -c alembic-boundaries.ini -n platform upgrade p3platform0007
   '
 [[ "$(psql_database "$PLATFORM_DATABASE" 'SELECT version_num FROM alembic_version')" = "$TARGET_PLATFORM_HEAD" ]] \
   || fail "Platform temporary database did not reach $TARGET_PLATFORM_HEAD"
-[[ "$(psql_database "$PLATFORM_DATABASE" "SELECT schema_contract_version FROM database_boundary_metadata WHERE boundary_name = 'platform_core'")" = "4" ]] \
-  || fail "Platform schema contract version is not 4"
+[[ "$(psql_database "$PLATFORM_DATABASE" "SELECT schema_contract_version FROM database_boundary_metadata WHERE boundary_name = 'platform_core'")" = "5" ]] \
+  || fail "Platform schema contract version is not 5"
 
 for database_name in "$LEGACY_DATABASE" "$PLATFORM_DATABASE"; do
   [[ "$(psql_database "$database_name" "SELECT count(*) FROM information_schema.tables WHERE table_name = 'device_registrations'")" = "1" ]] \
     || fail "device registry table is missing from $database_name"
-  [[ "$(psql_database "$database_name" "SELECT count(*) FROM information_schema.columns WHERE table_name = 'device_registrations' AND column_name IN ('pairing_pin_hash', 'credential_version', 'last_seen_at', 'revoked_at')")" = "4" ]] \
+  [[ "$(psql_database "$database_name" "SELECT count(*) FROM information_schema.columns WHERE table_name = 'device_registrations' AND column_name IN ('pairing_pin_hash', 'credential_version', 'last_seen_at', 'revoked_at', 'refresh_credential_hash', 'refresh_credential_issued_at')")" = "6" ]] \
     || fail "device credential columns are incomplete in $database_name"
   [[ "$(psql_database "$database_name" "SELECT count(*) FROM pg_constraint WHERE conname = 'ck_device_registrations_device_station_shape'")" = "1" ]] \
     || fail "device station shape invariant is missing from $database_name"
@@ -261,7 +262,7 @@ source_platform_head=$EXPECTED_PLATFORM_HEAD
 source_restaurant_head=$EXPECTED_RESTAURANT_HEAD
 temporary_legacy_head=$TARGET_LEGACY_HEAD
 temporary_platform_head=$TARGET_PLATFORM_HEAD
-platform_schema_contract_version=4
+platform_schema_contract_version=5
 upgrade_downgrade_reupgrade=true
 device_registry_identity_owned=true
 restaurant_device_credential_table_absent=true

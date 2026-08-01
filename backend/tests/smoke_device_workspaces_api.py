@@ -22,6 +22,7 @@ from app.models.restaurant import (
 )
 from app.models.role import Permission, Role
 from app.models.settings import BranchSettings
+from app.models.stock import StockLocation
 from app.models.user import User, UserBranch
 from app.utils.create_superuser import DEFAULT_COMPANY_ID
 from app.utils.security import hash_password
@@ -110,7 +111,11 @@ async def prepare() -> dict[str, str]:
             (
                 await db.scalars(
                     select(Permission).where(
-                        Permission.code.in_(["system.device.view", "system.device.manage"])
+                        Permission.code.in_([
+                            "system.device.view",
+                            "system.device.manage",
+                            "fb.order.create",
+                        ])
                     )
                 )
             ).all()
@@ -118,8 +123,9 @@ async def prepare() -> dict[str, str]:
         if {permission.code for permission in permissions} != {
             "system.device.view",
             "system.device.manage",
+            "fb.order.create",
         }:
-            raise RuntimeError("Device permissions are not seeded")
+            raise RuntimeError("Device/staff permissions are not seeded")
         role = Role(
             company_id=DEFAULT_COMPANY_ID,
             name=f"P3 Workspace Manager {marker}",
@@ -148,6 +154,14 @@ async def prepare() -> dict[str, str]:
                 is_default=True,
             )
         )
+        location = StockLocation(
+            company_id=DEFAULT_COMPANY_ID,
+            branch_id=branch_a.id,
+            code=f"P3W-{marker}"[:20],
+            name=f"P3 Workspace Counter {marker}",
+            is_active=True,
+        )
+        db.add(location)
 
         product_id = await db.scalar(
             select(DiningOrderItem.product_id).where(DiningOrderItem.product_id.isnot(None)).limit(1)
@@ -249,7 +263,9 @@ async def prepare() -> dict[str, str]:
             "company_id": str(DEFAULT_COMPANY_ID),
             "branch_a_id": str(branch_a.id),
             "branch_b_id": str(branch_b.id),
+            "manager_id": str(manager.id),
             "manager_username": manager.username,
+            "location_id": str(location.id),
             "main_ticket_id": str(main_ticket.id),
             "bar_ticket_id": str(bar_ticket.id),
             "pickup_session_id": str(pickup_session.id),
@@ -258,6 +274,11 @@ async def prepare() -> dict[str, str]:
 
 
 async def verify_device_audit(
+    counter_device_id: str,
+    counter_device_code: str,
+    manager_id: str,
+    branch_id: str,
+    staff_shift_id: str,
     kitchen_device_id: str,
     pickup_device_id: str,
     ticket_id: str,
@@ -267,12 +288,16 @@ async def verify_device_audit(
         rows = list(
             (
                 await db.scalars(
-                    select(AuditLog).where(
+                    select(AuditLog)
+                    .where(
                         AuditLog.action.in_([
+                            "restaurant.staff_shift.open",
+                            "pos.shift.close",
                             "device.kitchen.ticket.update",
                             "device.pickup.queue.serve",
                         ])
                     )
+                    .order_by(AuditLog.created_at, AuditLog.id)
                 )
             ).all()
         )
@@ -289,8 +314,49 @@ async def verify_device_audit(
         ) or pickup_rows[0].new_value.get("device_id") != pickup_device_id:
             raise RuntimeError("Operational audit does not identify the device actor")
 
+        staff_rows = [row for row in rows if row.resource_id == staff_shift_id]
+        if [row.action for row in staff_rows] != [
+            "restaurant.staff_shift.open",
+            "pos.shift.close",
+        ]:
+            raise RuntimeError(f"Counter staff handover audit is incomplete: {staff_rows}")
+        expected_manager = uuid.UUID(manager_id)
+        expected_branch = uuid.UUID(branch_id)
+        for row in staff_rows:
+            evidence = {
+                "action": row.action,
+                "user_id": str(row.user_id) if row.user_id else None,
+                "branch_id": str(row.branch_id) if row.branch_id else None,
+                "new_value": row.new_value,
+                "ip_address": row.ip_address,
+                "user_agent": row.user_agent,
+            }
+            if (
+                row.user_id != expected_manager
+                or row.branch_id != expected_branch
+                or row.new_value.get("device_id") != counter_device_id
+                or row.new_value.get("device_code") != counter_device_code
+                # Starlette's in-process TestClient may omit the network peer.
+                # A real ASGI server supplies request.client.host; if the test
+                # transport does expose a peer, require a non-empty value.
+                or (row.ip_address is not None and not row.ip_address.strip())
+                or row.user_agent != "Codex-P3-Gate/1.0"
+            ):
+                raise RuntimeError(
+                    "Counter staff/device audit evidence is incomplete: "
+                    f"actual={evidence} expected_user_id={manager_id} "
+                    f"expected_branch_id={branch_id} "
+                    f"expected_device_id={counter_device_id} "
+                    f"expected_device_code={counter_device_code}"
+                )
 
-def pair_device(client: TestClient, headers: dict[str, str], context: dict[str, str], data: dict) -> tuple[str, str]:
+
+def pair_device(
+    client: TestClient,
+    headers: dict[str, str],
+    context: dict[str, str],
+    data: dict,
+) -> tuple[str, str, str]:
     provision = expect(
         client.post("/api/v1/system/devices", headers=headers, json=data),
         201,
@@ -308,7 +374,11 @@ def pair_device(client: TestClient, headers: dict[str, str], context: dict[str, 
         200,
         f"pair {data['device_type']} device",
     )
-    return provision["device"]["id"], paired["access_token"]
+    return (
+        provision["device"]["id"],
+        paired["access_token"],
+        provision["device"]["device_code"],
+    )
 
 
 def run() -> None:
@@ -333,7 +403,7 @@ def run() -> None:
             "manager login",
         )
         manager_headers = {"Authorization": f"Bearer {login['access_token']}"}
-        counter_id, counter_token = pair_device(
+        counter_id, counter_token, counter_code = pair_device(
             client,
             manager_headers,
             context,
@@ -344,7 +414,7 @@ def run() -> None:
                 "reason": "workspace smoke",
             },
         )
-        kitchen_id, kitchen_token = pair_device(
+        kitchen_id, kitchen_token, _ = pair_device(
             client,
             manager_headers,
             context,
@@ -356,7 +426,7 @@ def run() -> None:
                 "reason": "workspace smoke",
             },
         )
-        pickup_id, pickup_token = pair_device(
+        pickup_id, pickup_token, _ = pair_device(
             client,
             manager_headers,
             context,
@@ -391,6 +461,57 @@ def run() -> None:
             client.get("/api/v1/device-workspaces/counter/bootstrap", headers=manager_headers),
             401,
             "user token at Counter workspace",
+        )
+
+        staff_counter_headers = {
+            **manager_headers,
+            "X-Device-Authorization": f"Bearer {counter_token}",
+            "User-Agent": "Codex-P3-Gate/1.0",
+        }
+        menu = expect(
+            client.get("/api/v1/restaurant/wap/menu", headers=staff_counter_headers),
+            200,
+            "Counter staff menu and shift bootstrap",
+        )
+        if (
+            not menu["shift_id"]
+            or menu["location_id"] != context["location_id"]
+            or menu["offline_device_id"] != counter_id
+        ):
+            raise RuntimeError(f"Counter staff shift is not bound to the device: {menu}")
+        expect(
+            client.post(
+                "/api/v1/restaurant/wap/staff-shift/handover",
+                headers=manager_headers,
+                json={"closing_cash": "0.00", "note": "missing device gate"},
+            ),
+            403,
+            "handover without Counter device",
+        )
+        handover = expect(
+            client.post(
+                "/api/v1/restaurant/wap/staff-shift/handover",
+                headers=staff_counter_headers,
+                json={"closing_cash": "0.00", "note": "phase 3 gate handover"},
+            ),
+            200,
+            "Counter staff handover",
+        )
+        if (
+            handover["id"] != menu["shift_id"]
+            or handover["status"] != "closed"
+            or handover["user_id"] != context["manager_id"]
+            or handover["branch_id"] != context["branch_a_id"]
+        ):
+            raise RuntimeError(f"Counter staff handover result is invalid: {handover}")
+        expect(
+            client.post(
+                "/api/v1/restaurant/wap/staff-shift/handover",
+                headers=staff_counter_headers,
+                json={"closing_cash": "0.00", "note": "closed shift replay"},
+            ),
+            404,
+            "handover replay after shift close",
         )
 
         kitchen = expect(
@@ -476,6 +597,11 @@ def run() -> None:
 
         client.portal.call(
             verify_device_audit,
+            counter_id,
+            counter_code,
+            context["manager_id"],
+            context["branch_a_id"],
+            menu["shift_id"],
             kitchen_id,
             pickup_id,
             context["main_ticket_id"],
@@ -501,7 +627,8 @@ def run() -> None:
     print(
         "p3_device_workspaces_api=ok "
         "counter_staff_gate=true kitchen_station_scope=true pickup_branch_scope=true "
-        "type_guard=true revoke=true operational_audit=true"
+        "type_guard=true revoke=true operational_audit=true "
+        "staff_handover=true staff_device_audit=true"
     )
 
 

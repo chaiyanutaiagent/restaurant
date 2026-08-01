@@ -631,6 +631,12 @@ audited suspend/reactivate และ Company credential generation ที่ rev
 isolated Legacy/Platform/Restaurant migration rehearsal, backend `183` tests, lifecycle API smoke และ
 frontend type-check/build ผ่าน โดยไม่ migrate/deploy production หรือเปลี่ยนฐาน live
 
+Next action handoff (1 สิงหาคม 2026): หากกลับมาถามว่า “ทำอะไรต่อ” ให้เริ่ม
+`P5-TENANT-RESILIENCE-02` ตามลำดับ tenant export → isolated tenant backup/restore drill →
+monitoring/alerts → incident and recovery evidence จากนั้นจึงทำ full UAT ตั้งแต่ QR order ถึง
+ERP report และ production security review/owner sign-off ห้ามเริ่ม Phase 6, deploy production,
+migrate ฐาน live หรือสร้าง Platform Owner บนฐาน live จนกว่า Phase 5 gate ที่เหลือจะผ่านและมีคำสั่งชัดเจน
+
 ### Restaurant Completion Gate — ต้องผ่านก่อนเริ่มระบบอื่น
 
 Restaurant ถือว่าเสร็จสำหรับเริ่ม Phase 6 เมื่อครบทั้งหมด:

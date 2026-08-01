@@ -17,6 +17,7 @@ type CloseShiftDialogProps = {
   shift: CashierShift;
   expectedCashNow?: number;
   paymentSummary?: Array<{ method: string; amount: number }>;
+  operatorLabel?: string;
   onConfirm: (closingCash: number, note: string) => Promise<void>;
 };
 
@@ -26,6 +27,7 @@ export default function CloseShiftDialog({
   shift,
   expectedCashNow,
   paymentSummary = [],
+  operatorLabel,
   onConfirm,
 }: CloseShiftDialogProps): JSX.Element {
   const expectedCashValue = Number(expectedCashNow ?? shift.expected_cash ?? shift.opening_cash);
@@ -62,6 +64,7 @@ export default function CloseShiftDialog({
 
         <div className="space-y-3 text-sm">
           <div className="grid grid-cols-2 gap-2">
+            {operatorLabel ? <div className="col-span-2 rounded-lg bg-blue-50 p-3 font-medium text-blue-800">ผู้รับผิดชอบกะ: {operatorLabel}</div> : null}
             <div className="rounded-lg bg-gray-50 p-3">กะ: {shift.shift_number}</div>
             <div className="rounded-lg bg-gray-50 p-3">เปิดเมื่อ: {new Date(shift.opened_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.</div>
             <div className="rounded-lg bg-gray-50 p-3">ยอดขายรวม: {formatThaiCurrency(Number(shift.total_sales))}</div>

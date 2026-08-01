@@ -58,7 +58,7 @@ export function useLogin(): {
   };
 }
 
-export function useLogout(): () => void {
+export function useLogout(destination = "/login"): () => void {
   const navigate = useNavigate();
   const clearSession = useAuthStore((state) => state.clearSession);
 
@@ -79,7 +79,7 @@ export function useLogout(): () => void {
         void authApi.logout(refreshToken);
       }
       clearSession();
-      navigate("/login", { replace: true });
+      navigate(destination, { replace: true });
     })();
   };
 }

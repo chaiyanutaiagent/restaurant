@@ -66,6 +66,12 @@ Dedicated browser routes are `/counter`, `/counter/orders`, `/kitchen`, and `/pi
 one-time pairing credential, while `/devices` is the scoped Manager console. Existing
 `/restaurant/kitchen` and `/restaurant/pickup` user-session routes remain available.
 
+On `/counter/orders`, Restaurant menu bootstrap receives separate staff and Counter-device credentials and
+opens the staff-owned shift when needed. `POST /api/v1/restaurant/wap/staff-shift/handover` requires both
+credentials, validates the same Company/Branch, records the counted cash plus staff/device audit, and closes
+the outgoing shift. The frontend then clears only the staff session while retaining the paired device for the
+next operator. Generic `/pos` shift open/close also records staff and optional Counter-device evidence.
+
 ## Migration Rule
 
 Keep legacy routes working while new canonical routes are introduced. Prefer redirects first, then move screens when each module admin is fully split.

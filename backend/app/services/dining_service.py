@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.dependencies import TokenData
+from app.models.audit import AuditLog
 from app.models.pos import CashierShift, SaleOrder
 from app.models.product import Product, Category
 from app.models.restaurant import (
@@ -999,6 +1000,10 @@ class DiningService:
         location_id: uuid.UUID | None,
         required_location_id: uuid.UUID | None = None,
         strict_shift: bool = False,
+        device_id: uuid.UUID | None = None,
+        device_code: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> tuple[uuid.UUID, uuid.UUID]:
         """หา shift และ location อัตโนมัติถ้าไม่ได้ระบุ"""
         if required_location_id is not None and location_id is not None and location_id != required_location_id:
@@ -1083,6 +1088,27 @@ class DiningService:
                     shift_number=f"FB{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
                 )
                 self.db.add(resolved_shift)
+                await self.db.flush()
+                self.db.add(
+                    AuditLog(
+                        company_id=company_id,
+                        branch_id=branch_id,
+                        user_id=user_id,
+                        action="restaurant.staff_shift.open",
+                        resource="CashierShift",
+                        resource_id=str(resolved_shift.id),
+                        new_value={
+                            "shift_number": resolved_shift.shift_number,
+                            "operator_user_id": str(user_id),
+                            "location_id": str(first_location.id),
+                            "opening_cash": "0.00",
+                            "device_id": str(device_id) if device_id else None,
+                            "device_code": device_code,
+                        },
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                    )
+                )
                 await self.db.flush()
 
         resolved_location_id = required_location_id or location_id or resolved_shift.location_id

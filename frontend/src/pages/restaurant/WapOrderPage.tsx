@@ -1,12 +1,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { App } from "@capacitor/app";
 import { liveQuery } from "dexie";
-import { AlertTriangle, ChefHat, ClipboardCheck, CloudUpload, CreditCard, LogOut, Loader2, Menu, Minus, PackageCheck, PackageOpen, Plus, Printer, ReceiptText, Warehouse, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, ChefHat, ClipboardCheck, CloudUpload, CreditCard, LogOut, Loader2, Menu, Minus, PackageCheck, PackageOpen, Plus, Printer, ReceiptText, UserRoundCheck, Warehouse, Wifi, WifiOff } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -146,7 +147,8 @@ export default function WapOrderPage(): JSX.Element {
   const { brandSlug } = useParams<{ brandSlug?: string }>();
   const location = useLocation();
   const { toast } = useToast();
-  const logout = useLogout();
+  const isCounterWorkspace = location.pathname.startsWith("/counter/");
+  const logout = useLogout(isCounterWorkspace ? "/counter" : "/login");
   const isOnline = useOnlineStatus();
   const user = useAuthStore((state) => state.user);
   const customerSlipRef = useRef<HTMLDivElement | null>(null);
@@ -157,6 +159,9 @@ export default function WapOrderPage(): JSX.Element {
   const [showSummary, setShowSummary] = useState(false);
   const [pendingPrint, setPendingPrint] = useState<"customer" | "kitchen" | null>(null);
   const [outboxSummary, setOutboxSummary] = useState<RestaurantOutboxSummary>({ pending: 0, syncing: 0, needsReview: 0 });
+  const [handoverOpen, setHandoverOpen] = useState(false);
+  const [closingCash, setClosingCash] = useState(0);
+  const [handoverNote, setHandoverNote] = useState("");
 
   const customerPrint = useReactToPrint({ contentRef: customerSlipRef });
   const kitchenPrint = useReactToPrint({ contentRef: kitchenSlipRef });
@@ -168,7 +173,6 @@ export default function WapOrderPage(): JSX.Element {
     retry: false,
   });
   const storeBase = brandSlug ? `/store/${brandSlug}` : "/restaurant";
-  const isCounterWorkspace = location.pathname.startsWith("/counter/");
   const orderPath = isCounterWorkspace
     ? "/counter/orders"
     : brandSlug ? `${storeBase}/orders` : "/restaurant/wap";
@@ -176,6 +180,7 @@ export default function WapOrderPage(): JSX.Element {
   const closeShiftPath = `${storeBase}/close-shift`;
   const centralBase = brandSlug ? `/central/${brandSlug}` : null;
   const employeeName = user?.display_name || [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.username || "พนักงาน";
+  const employeeIdentifier = user?.employee_code?.trim() || user?.username || "-";
 
   useEffect(() => {
     let cancelled = false;
@@ -345,6 +350,40 @@ export default function WapOrderPage(): JSX.Element {
     },
   });
 
+  const handoverMutation = useMutation({
+    mutationFn: async () => (await wapApi.handoverCounterShift({
+      closing_cash: closingCash,
+      note: handoverNote.trim() || null,
+    })).data.data,
+    onSuccess: (shift) => {
+      setHandoverOpen(false);
+      toast({
+        title: "ส่งมอบ Counter แล้ว",
+        description: `ปิด ${shift.shift_number} โดย ID ${employeeIdentifier} · ส่วนต่าง ฿${money(shift.cash_difference ?? 0)}`,
+      });
+      logout();
+    },
+    onError: (error) => {
+      toast({ title: "เปลี่ยนกะไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  function startCounterHandover(): void {
+    if (!isOnline) {
+      toast({ title: "ต้องออนไลน์ก่อนเปลี่ยนกะ", description: "ระบบต้องตรวจยอดและบันทึกผู้ส่งมอบก่อน", variant: "destructive" });
+      return;
+    }
+    if (cart.length > 0) {
+      toast({ title: "ยังเปลี่ยนกะไม่ได้", description: "กรุณาจบหรือยกเลิกออเดอร์ในตะกร้าก่อน", variant: "destructive" });
+      return;
+    }
+    if (outboxSummary.pending + outboxSummary.syncing + outboxSummary.needsReview > 0) {
+      toast({ title: "ยังมีรายการที่ต้องซิงก์หรือตรวจสอบ", description: "จัดการ Outbox ให้เรียบร้อยก่อนเปลี่ยนพนักงาน", variant: "destructive" });
+      return;
+    }
+    setHandoverOpen(true);
+  }
+
   function addProduct(product: WapMenuProduct): void {
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
@@ -395,12 +434,19 @@ export default function WapOrderPage(): JSX.Element {
                       Stock หน้าร้าน
                     </Link>
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link to={closeShiftPath} className="flex items-center">
-                      <ClipboardCheck className="mr-2 h-4 w-4" />
-                      ปิดกะ
-                    </Link>
-                  </DropdownMenuItem>
+                  {isCounterWorkspace ? (
+                    <DropdownMenuItem onClick={startCounterHandover}>
+                      <ArrowRightLeft className="mr-2 h-4 w-4" />
+                      เปลี่ยนกะ / พนักงาน
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem asChild>
+                      <Link to={closeShiftPath} className="flex items-center">
+                        <ClipboardCheck className="mr-2 h-4 w-4" />
+                        ปิดกะ
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   {brandSlug ? (
                     <>
                       <DropdownMenuItem asChild>
@@ -423,16 +469,20 @@ export default function WapOrderPage(): JSX.Element {
                       </DropdownMenuItem>
                     </>
                   ) : null}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={logout}>
-                    <LogOut className="mr-2 h-4 w-4" />
-                    ออกจากระบบ
-                  </DropdownMenuItem>
+                  {!isCounterWorkspace ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={logout}>
+                        <LogOut className="mr-2 h-4 w-4" />
+                        ออกจากระบบ
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-slate-700">เมนูขายหน้าร้าน · {menuQuery.data?.branch_name ?? "สาขา"}</p>
-                <p className="truncate text-xs text-slate-500">พนักงาน: {employeeName}</p>
+                <p className="flex items-center gap-1 truncate text-xs text-slate-500"><UserRoundCheck className="h-3.5 w-3.5" />พนักงาน: {employeeName} · ID {employeeIdentifier}</p>
               </div>
               <div className="ml-auto flex shrink-0 items-center gap-2 text-xs">
                 <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 font-semibold ${isOnline ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
@@ -687,6 +737,50 @@ export default function WapOrderPage(): JSX.Element {
           ) : null}
         </aside>
       </div>
+
+      <Dialog open={handoverOpen} onOpenChange={setHandoverOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>เปลี่ยนกะ Counter</DialogTitle>
+            <DialogDescription>ปิดความรับผิดชอบของพนักงานคนปัจจุบัน แล้วให้คนถัดไปลงชื่อโดยไม่ Pair เครื่องใหม่</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              <p className="font-semibold">ผู้ส่งมอบ: {employeeName}</p>
+              <p className="mt-1 text-blue-700">Employee ID: {employeeIdentifier} · Shift {menuQuery.data?.shift_id ?? "-"}</p>
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="counter-closing-cash" className="text-sm font-medium text-slate-700">เงินสดที่นับได้</label>
+              <input
+                id="counter-closing-cash"
+                type="number"
+                min="0"
+                step="0.01"
+                className="h-12 w-full rounded-lg border border-slate-300 px-3 text-lg font-semibold"
+                value={closingCash}
+                onChange={(event) => setClosingCash(Math.max(Number(event.target.value || 0), 0))}
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="counter-handover-note" className="text-sm font-medium text-slate-700">หมายเหตุ (ถ้ามี)</label>
+              <textarea
+                id="counter-handover-note"
+                className="min-h-20 w-full rounded-lg border border-slate-300 px-3 py-2"
+                value={handoverNote}
+                onChange={(event) => setHandoverNote(event.target.value)}
+                placeholder="เช่น ส่งมอบกะเช้าให้กะบ่าย"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHandoverOpen(false)} disabled={handoverMutation.isPending}>ยกเลิก</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700" onClick={() => handoverMutation.mutate()} disabled={handoverMutation.isPending}>
+              {handoverMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />}
+              ปิดกะและเปลี่ยนพนักงาน
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="fixed -left-[9999px] top-0">
         <div ref={customerSlipRef} className="wap-print-slip">

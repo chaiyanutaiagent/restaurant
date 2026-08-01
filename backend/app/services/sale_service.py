@@ -99,6 +99,11 @@ class SaleService:
         branch_id: uuid.UUID,
         user_id: uuid.UUID,
         data: OpenShiftRequest,
+        *,
+        device_id: uuid.UUID | None = None,
+        device_code: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> CashierShift:
         existing = await self.get_open_shift(company_id, user_id, branch_id)
         if existing is not None:
@@ -128,6 +133,27 @@ class SaleService:
             opening_cash=q2(data.opening_cash),
         )
         self.db.add(shift)
+        await self.db.flush()
+        self.db.add(
+            AuditLog(
+                company_id=company_id,
+                branch_id=branch_id,
+                user_id=user_id,
+                action="pos.shift.open",
+                resource="CashierShift",
+                resource_id=str(shift.id),
+                new_value={
+                    "shift_number": shift.shift_number,
+                    "operator_user_id": str(user_id),
+                    "location_id": str(data.location_id),
+                    "opening_cash": str(q2(data.opening_cash)),
+                    "device_id": str(device_id) if device_id else None,
+                    "device_code": device_code,
+                },
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        )
         await self.db.commit()
         await self.db.refresh(shift)
         return shift
@@ -153,6 +179,11 @@ class SaleService:
         company_id: uuid.UUID,
         user_id: uuid.UUID,
         data: CloseShiftRequest,
+        *,
+        device_id: uuid.UUID | None = None,
+        device_code: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> CashierShift:
         shift = await self.db.scalar(
             select(CashierShift).where(
@@ -189,6 +220,35 @@ class SaleService:
         shift.note = data.note
         shift.status = "closed"
         shift.closed_at = datetime.now(timezone.utc)
+        self.db.add(
+            AuditLog(
+                company_id=company_id,
+                branch_id=shift.branch_id,
+                user_id=user_id,
+                action="pos.shift.close",
+                resource="CashierShift",
+                resource_id=str(shift.id),
+                old_value={
+                    "status": "open",
+                    "operator_user_id": str(shift.user_id),
+                    "opening_cash": str(q2(shift.opening_cash)),
+                    "total_sales": str(q2(shift.total_sales)),
+                    "total_orders": shift.total_orders,
+                },
+                new_value={
+                    "status": "closed",
+                    "closed_by_user_id": str(user_id),
+                    "closing_cash": str(closing_cash),
+                    "expected_cash": str(expected_cash),
+                    "cash_difference": str(shift.cash_difference),
+                    "device_id": str(device_id) if device_id else None,
+                    "device_code": device_code,
+                    "note": data.note,
+                },
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        )
         await self.db.commit()
         await self.db.refresh(shift)
         return shift

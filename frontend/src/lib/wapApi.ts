@@ -2,6 +2,7 @@ import api from "@/lib/api";
 import type { ApiResponse } from "@/types/api";
 import type { Branch } from "@/types/user";
 import type { StockLocation } from "@/types/stock";
+import type { CashierShift } from "@/types/pos";
 
 export type WapMenuProduct = {
   id: string;
@@ -725,6 +726,8 @@ export const wapApi = {
     ),
   closeShift: (brandSlug?: string) =>
     api.post<ApiResponse<WapShiftCloseSummary>>(brandSlug ? `/restaurant/store/${brandSlug}/shift-close` : "/restaurant/wap/shift-close"),
+  handoverCounterShift: (data: { closing_cash: number; note?: string | null }) =>
+    api.post<ApiResponse<CashierShift>>("/restaurant/wap/staff-shift/handover", data),
   shiftClosures: (brandSlug?: string) =>
     api.get<ApiResponse<WapShiftClosure[]>>(brandSlug ? `/restaurant/store/${brandSlug}/shift-closures` : "/restaurant/wap/shift-closures"),
   cashierSales: (date?: string, brandSlug?: string) =>

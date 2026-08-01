@@ -4,13 +4,13 @@ from decimal import Decimal
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import TokenData, require_any_permission, require_permission
+from app.dependencies import DeviceTokenData, TokenData, get_optional_counter_device, require_any_permission, require_permission
 from app.models.company import Company
 from app.models.settings import BranchSettings
 from app.schemas.pos import CloseShiftRequest, CreateSaleRequest, OpenShiftRequest, PartialRefundRequest, RefundRequest, SaleOrderRead, ShiftRead, SyncSalesRequest, VoidRequest
@@ -90,15 +90,41 @@ def _require_current_order_branch(current: TokenData, branch_id: uuid.UUID) -> N
         )
 
 
+def _require_matching_counter_device(
+    current: TokenData,
+    counter_device: DeviceTokenData | None,
+) -> None:
+    if counter_device is not None and (
+        counter_device.company_id != current.company_id
+        or counter_device.branch_id != current.branch_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Counter device Branch does not match staff Branch",
+        )
+
+
 @router.post("/shifts/open", status_code=status.HTTP_201_CREATED)
 async def open_shift(
     payload: OpenShiftRequest,
+    request: Request,
     current: TokenData = Depends(require_permission("pos.cashier.open_shift")),
     db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
-    shift = await SaleService(db).open_shift(current.company_id, current.branch_id, current.user_id, payload)
+    _require_matching_counter_device(current, counter_device)
+    shift = await SaleService(db).open_shift(
+        current.company_id,
+        current.branch_id,
+        current.user_id,
+        payload,
+        device_id=counter_device.device_id if counter_device else None,
+        device_code=counter_device.device_code if counter_device else None,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
     return ok(ShiftRead.model_validate(shift).model_dump())
 
 
@@ -106,9 +132,11 @@ async def open_shift(
 async def get_current_shift(
     current: TokenData = Depends(require_permission("pos.cashier.open_shift")),
     db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
     if current.branch_id is None:
         return ok(None)
+    _require_matching_counter_device(current, counter_device)
     shift = await SaleService(db).get_open_shift(current.company_id, current.user_id, current.branch_id)
     return ok(ShiftRead.model_validate(shift).model_dump() if shift else None)
 
@@ -117,10 +145,22 @@ async def get_current_shift(
 async def close_shift(
     shift_id: uuid.UUID,
     payload: CloseShiftRequest,
+    request: Request,
     current: TokenData = Depends(require_permission("pos.cashier.close_shift")),
     db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
-    shift = await SaleService(db).close_shift(shift_id, current.company_id, current.user_id, payload)
+    _require_matching_counter_device(current, counter_device)
+    shift = await SaleService(db).close_shift(
+        shift_id,
+        current.company_id,
+        current.user_id,
+        payload,
+        device_id=counter_device.device_id if counter_device else None,
+        device_code=counter_device.device_code if counter_device else None,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
     return ok(ShiftRead.model_validate(shift).model_dump())
 
 

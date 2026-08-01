@@ -1,5 +1,6 @@
 export interface User {
   id: string;
+  employee_code?: string | null;
   username: string;
   email: string | null;
   phone: string | null;

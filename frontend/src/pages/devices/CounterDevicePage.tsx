@@ -19,6 +19,7 @@ export default function CounterDevicePage(): JSX.Element {
     retry: false,
   });
   const bootstrap = bootstrapQuery.data;
+  const staffIdentifier = user?.employee_code?.trim() || user?.username || "-";
   const staffReady = Boolean(
     user
     && bootstrap
@@ -54,6 +55,7 @@ export default function CounterDevicePage(): JSX.Element {
             <section className="flex flex-col justify-center rounded-[2rem] border border-slate-700 bg-slate-900 p-8">
               <p className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">Staff session</p>
               <p className="mt-3 text-2xl font-black">{staffReady ? `พร้อมใช้งานโดย ${user?.display_name ?? user?.username}` : user ? "Branch ของพนักงานไม่ตรงกับเครื่อง" : "กรุณาลงชื่อพนักงาน"}</p>
+              {staffReady ? <p className="mt-2 font-mono text-sm font-semibold text-emerald-300">Employee ID: {staffIdentifier}</p> : null}
               <p className="mt-2 text-sm text-slate-400">ยอดขายจะใช้สิทธิ์และ Branch จากพนักงาน และต้องตรงกับ Branch ที่จับคู่เครื่องนี้</p>
               {staffReady ? (
                 <Button asChild className="mt-7 h-14 bg-emerald-500 text-lg font-black text-slate-950 hover:bg-emerald-400"><Link to="/counter/orders"><LogIn className="h-5 w-5" />เปิดหน้าขาย</Link></Button>

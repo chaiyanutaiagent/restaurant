@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { ArrowLeft, Camera, LayoutGrid, LayoutList, Loader2, Search, ShoppingCart, WifiOff } from "lucide-react";
+import { ArrowLeft, Camera, LayoutGrid, LayoutList, Loader2, Search, ShoppingCart, UserRoundCheck, WifiOff } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useReactToPrint } from "react-to-print";
@@ -181,7 +181,16 @@ export default function POSPage(): JSX.Element {
   const [scannerError, setScannerError] = useState("");
   const [currentShift, setCurrentShift] = useState<CashierShift | null>(() => {
     const raw = window.localStorage.getItem(SHIFT_CACHE_KEY);
-    return raw ? (JSON.parse(raw) as CashierShift) : null;
+    if (!raw) {
+      return null;
+    }
+    try {
+      const cached = JSON.parse(raw) as CashierShift;
+      return cached.user_id === user?.id && cached.branch_id === branchId ? cached : null;
+    } catch {
+      window.localStorage.removeItem(SHIFT_CACHE_KEY);
+      return null;
+    }
   });
   const [shiftGateOpen, setShiftGateOpen] = useState(false);
   const [openingCash, setOpeningCash] = useState(0);
@@ -362,6 +371,13 @@ export default function POSPage(): JSX.Element {
     }, 400);
     return () => window.clearTimeout(timeout);
   }, [customerSearch]);
+
+  useEffect(() => {
+    if (currentShift && (currentShift.user_id !== user?.id || currentShift.branch_id !== branchId)) {
+      setCurrentShift(null);
+      window.localStorage.removeItem(SHIFT_CACHE_KEY);
+    }
+  }, [branchId, currentShift, user?.id]);
 
   useEffect(() => {
     if (currentShiftQuery.data !== undefined) {
@@ -1258,6 +1274,9 @@ export default function POSPage(): JSX.Element {
   const replacementRules = replacementRulesQuery.data ?? [];
   const recentSales = recentSalesQuery.data ?? [];
   const branchSettings = branchSettingsQuery.data;
+  const staffIdentifier = user?.employee_code?.trim() || user?.username || "-";
+  const staffDisplayName = user?.display_name?.trim() || user?.username || "-";
+  const staffAuditLabel = `${staffDisplayName} · ID ${staffIdentifier}`;
   const canApplyDiscount = hasPermission("pos.discount.apply") || hasPermission("pos.discount.override");
   const canOverrideDiscount = hasPermission("pos.discount.override");
   const canVoidSale = hasPermission("pos.sale.void") || hasPermission("pos.sale.void.request");
@@ -1434,6 +1453,11 @@ export default function POSPage(): JSX.Element {
               {currentShift ? (
                 <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 font-medium text-emerald-700">
                   {currentShift.shift_number}
+                </span>
+              ) : null}
+              {user ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700">
+                  <UserRoundCheck className="h-3.5 w-3.5" /> ID {staffIdentifier}
                 </span>
               ) : null}
               {visibleLowStockCount > 0 && (
@@ -2179,6 +2203,10 @@ export default function POSPage(): JSX.Element {
             <DialogTitle>เปิดกะก่อนเริ่มขาย</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              <p className="font-semibold">ผู้เปิดกะ: {staffDisplayName}</p>
+              <p className="mt-1 text-blue-700">Employee ID: {staffIdentifier} · ระบบบันทึกเวลาและเครื่อง Counter ให้อัตโนมัติ</p>
+            </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">คลังสินค้า</label>
               <select
@@ -2215,6 +2243,7 @@ export default function POSPage(): JSX.Element {
           shift={currentShift}
           expectedCashNow={expectedCashNow}
           paymentSummary={paymentAuditSummary}
+          operatorLabel={staffAuditLabel}
           onConfirm={handleCloseShift}
         />
       ) : null}

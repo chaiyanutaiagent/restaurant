@@ -6,7 +6,7 @@ from typing import Any
 import uuid
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -58,7 +58,9 @@ from app.services.upload_service import UploadService
 from app.services.brand_navigation_service import BrandNavigationService
 from app.schemas.product import ProductCreate, ProductListItem
 from app.schemas.stock import StockBalanceRead, StockMovementRead
+from app.schemas.pos import CloseShiftRequest, ShiftRead
 from app.services.dining_service import DiningService
+from app.services.sale_service import SaleService
 from app.services.offline_sale_authorization import (
     OFFLINE_POLICY_VERSION,
     OfflineSaleAuthorizationService,
@@ -2005,6 +2007,7 @@ async def _wap_get_menu_data(
     current: TokenData,
     db: AsyncSession,
     counter_device: DeviceTokenData | None,
+    request: Request,
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -2033,6 +2036,10 @@ async def _wap_get_menu_data(
         None,
         location_id,
         location_id if brand is not None else None,
+        device_id=counter_device.device_id if counter_device else None,
+        device_code=counter_device.device_code if counter_device else None,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
     )
     await db.commit()
     product_filters = [
@@ -2149,21 +2156,23 @@ async def _wap_get_menu_data(
 
 @router.get("/wap/menu")
 async def wap_get_menu(
+    request: Request,
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_db),
     counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
-    return await _wap_get_menu_data(None, current, db, counter_device)
+    return await _wap_get_menu_data(None, current, db, counter_device, request)
 
 
 @router.get("/store/{brand_slug}/menu")
 async def store_get_menu(
     brand_slug: str,
+    request: Request,
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_db),
     counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
-    return await _wap_get_menu_data(brand_slug, current, db, counter_device)
+    return await _wap_get_menu_data(brand_slug, current, db, counter_device, request)
 
 
 @router.get("/store/{brand_slug}/stock/daily")
@@ -2724,11 +2733,17 @@ async def wap_shift_close_summary(
 
 async def _close_shift_for_brand(
     brand_slug: str | None,
-    current: TokenData = Depends(require_permission("fb.order.create")),
-    db: AsyncSession = Depends(get_db),
+    current: TokenData,
+    db: AsyncSession,
+    counter_device: DeviceTokenData | None = None,
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
+    if counter_device is not None and (
+        counter_device.company_id != current.company_id
+        or counter_device.branch_id != current.branch_id
+    ):
+        raise HTTPException(status_code=403, detail="Counter device Branch does not match staff Branch")
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     await _ensure_brand_branch(db, current.company_id, current.branch_id, brand)
     summary = await _build_wap_shift_close_summary(
@@ -2778,12 +2793,51 @@ async def _close_shift_for_brand(
     return ok(summary)
 
 
+@router.post("/wap/staff-shift/handover")
+async def wap_handover_staff_shift(
+    payload: CloseShiftRequest,
+    request: Request,
+    current: TokenData = Depends(require_permission("fb.order.create")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=400, detail="Branch context required")
+    if counter_device is None:
+        raise HTTPException(status_code=403, detail="Counter device required for shift handover")
+    if (
+        counter_device.company_id != current.company_id
+        or counter_device.branch_id != current.branch_id
+    ):
+        raise HTTPException(status_code=403, detail="Counter device Branch does not match staff Branch")
+    service = SaleService(db)
+    shift = await service.get_open_shift(
+        current.company_id,
+        current.user_id,
+        current.branch_id,
+    )
+    if shift is None:
+        raise HTTPException(status_code=404, detail="Open staff shift not found")
+    closed_shift = await service.close_shift(
+        shift.id,
+        current.company_id,
+        current.user_id,
+        payload,
+        device_id=counter_device.device_id,
+        device_code=counter_device.device_code,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    return ok(ShiftRead.model_validate(closed_shift).model_dump())
+
+
 @router.post("/wap/shift-close")
 async def wap_close_shift(
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
-    return await _close_shift_for_brand(None, current, db)
+    return await _close_shift_for_brand(None, current, db, counter_device)
 
 
 @router.get("/store/{brand_slug}/shift-close-summary")
@@ -2811,8 +2865,9 @@ async def store_close_shift(
     brand_slug: str,
     current: TokenData = Depends(require_any_permission("brand.store.shift.close", "fb.order.create")),
     db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
-    return await _close_shift_for_brand(brand_slug, current, db)
+    return await _close_shift_for_brand(brand_slug, current, db, counter_device)
 
 
 async def _list_shift_closures_for_brand(

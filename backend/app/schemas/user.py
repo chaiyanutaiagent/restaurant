@@ -41,6 +41,7 @@ class UserPasswordChange(BaseSchema):
 class UserRead(UserBase):
     id: uuid.UUID
     company_id: uuid.UUID
+    employee_code: str | None = None
     is_active: bool
     is_superuser: bool
     last_login_at: datetime | None = None

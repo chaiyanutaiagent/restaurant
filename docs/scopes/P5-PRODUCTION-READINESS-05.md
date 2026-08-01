@@ -2,7 +2,7 @@
 
 ## สถานะ
 
-`automated_gate_passed` — non-device production readiness และ fresh dependency audits ผ่านแล้ว; Draft PR CI, physical-device UAT และ owner sign-offs ยัง pending โดยยังไม่ activate production, ไม่ migrate ฐาน live, ไม่สร้าง Platform Owner บนฐาน live และไม่เริ่ม Phase 6
+`automated_gate_and_draft_pr_ci_passed` — non-device production readiness, fresh dependency audits และ Draft PR CI ผ่านแล้ว; physical-device UAT และ owner sign-offs ยัง pending โดยยังไม่ activate production, ไม่ migrate ฐาน live, ไม่สร้าง Platform Owner บนฐาน live และไม่เริ่ม Phase 6
 
 ## ปัญหาที่แก้
 
@@ -31,7 +31,7 @@ Gate ก่อนหน้านี้พิสูจน์ business chain, secu
 - [x] offline sync 100 orders และ replay หลัง lost acknowledgement ไม่สร้างข้อมูลซ้ำใน sale/payment/session/outbox/journal/stock
 - [x] frontend type-check/build, documentation validator และ repository safety ผ่าน
 - [x] backend audit ไม่มี known vulnerability และ frontend audit ไม่มี finding นอก reviewed exceptions เดิม
-- [ ] Draft PR CI ผ่าน
+- [x] Draft PR CI ผ่าน
 - [x] artifact manifest ระบุ physical/device และ owner sign-offs เป็น pending และ production/Phase 6 เป็น false
 
 ## คำสั่ง gate
@@ -52,9 +52,10 @@ Compose project ต้องขึ้นต้น `restaurant-p5-uat-readiness`;
 ## Evidence
 
 ```text
-final_commit:
+validated_change_commit: b60ff8b36f100d9080b2a871a5493102439b81a7
 draft_pr: https://github.com/chaiyanutaiagent/restaurant/pull/2
-ci_run:
+ci_push_run: https://github.com/chaiyanutaiagent/restaurant/actions/runs/30708414972
+ci_pull_request_run: https://github.com/chaiyanutaiagent/restaurant/actions/runs/30708416232
 artifact_manifest: /private/tmp/restaurant-p5-artifacts/p5-production-readiness-05-20260801T162909Z/manifest.txt
 physical_device_uat: pending
 security_owner_decision: pending

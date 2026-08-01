@@ -654,7 +654,8 @@ served → bill/payment → stock/accounting/outbox → central report, standalo
 โดยได้ canonical sale/payment/session/outbox/journal/stock เดิม, frontend type-check/build, backend audit
 ไม่มี known vulnerability, frontend findings ไม่เกิน reviewed exceptions เดิม, readiness documents และ
 repository safety เมื่อ 1 สิงหาคม 2026; physical-device UAT, security/operator/Platform Owner sign-off
-และ Draft PR CI ยัง pending โดยไม่มี production activation, live migration หรือ Phase 6 work
+ยัง pending ส่วน Draft PR CI ผ่านทั้ง push และ pull_request events แล้ว โดยไม่มี production activation,
+live migration หรือ Phase 6 work
 
 Owner สั่งเลื่อน physical/visual UAT จนกว่าอุปกรณ์จริงจะมาถึง งานที่เหลือคือ UAT ส่วนนั้น,
 dependency risk acceptance, production checklist และ controlled owner sign-off ห้ามเริ่ม Phase 6,

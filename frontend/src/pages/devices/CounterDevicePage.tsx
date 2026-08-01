@@ -65,7 +65,7 @@ export default function CounterDevicePage(): JSX.Element {
             </section>
           </main>
         )}
-        <footer className="flex justify-center pt-5"><button type="button" onClick={() => { clearDevice(); window.location.href = "/device/pair"; }} className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-rose-300"><Unplug className="h-4 w-4" />ยกเลิกการจับคู่เครื่องนี้</button></footer>
+        <footer className="flex justify-center pt-5"><button type="button" onClick={() => { void clearDevice().finally(() => { window.location.href = "/device/pair"; }); }} className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-rose-300"><Unplug className="h-4 w-4" />ยกเลิกการจับคู่เครื่องนี้</button></footer>
       </div>
     </div>
   );

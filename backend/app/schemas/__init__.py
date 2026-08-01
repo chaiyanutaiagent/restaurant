@@ -33,6 +33,7 @@ from app.schemas.device import (
     DeviceCreate,
     DevicePairRead,
     DevicePairRequest,
+    DeviceRenewRequest,
     DeviceProvisioningRead,
     DeviceRead,
 )

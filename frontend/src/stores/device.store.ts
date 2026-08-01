@@ -1,48 +1,89 @@
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
+import {
+  clearStoredDeviceSession,
+  loadStoredDeviceSession,
+  saveStoredDeviceSession,
+  type StoredDeviceSession,
+} from "@/lib/deviceCredentialStorage";
 import type { DeviceContext, DevicePairResponse } from "@/types/device";
 
-type DeviceState = {
-  accessToken: string | null;
-  device: DeviceContext | null;
-  expiresAt: number | null;
-  setSession: (session: DevicePairResponse) => void;
-  updateContext: (device: DeviceContext) => void;
-  clearSession: () => void;
+type DeviceState = StoredDeviceSession & {
+  hydrated: boolean;
+  hydrate: () => Promise<void>;
+  setSession: (session: DevicePairResponse) => Promise<void>;
+  updateContext: (device: DeviceContext) => Promise<void>;
+  clearSession: () => Promise<void>;
   isAuthenticated: () => boolean;
 };
 
-export const useDeviceStore = create<DeviceState>()(
-  persist(
-    (set, get) => ({
+let hydrationPromise: Promise<void> | null = null;
+
+export const useDeviceStore = create<DeviceState>()((set, get) => ({
+  accessToken: null,
+  refreshToken: null,
+  device: null,
+  expiresAt: null,
+  hydrated: false,
+  hydrate: async () => {
+    if (get().hydrated) return;
+    if (!hydrationPromise) {
+      hydrationPromise = (async () => {
+        let stored: StoredDeviceSession | null = null;
+        try {
+          stored = await loadStoredDeviceSession();
+        } catch {
+          await clearStoredDeviceSession().catch(() => undefined);
+        }
+        set({
+          accessToken: stored?.accessToken ?? null,
+          refreshToken: stored?.refreshToken ?? null,
+          device: stored?.device ?? null,
+          expiresAt: stored?.expiresAt ?? null,
+          hydrated: true,
+        });
+      })().finally(() => {
+        hydrationPromise = null;
+      });
+    }
+    await hydrationPromise;
+  },
+  setSession: async (session) => {
+    const stored: StoredDeviceSession = {
+      accessToken: session.access_token,
+      refreshToken: session.refresh_token,
+      device: session.device,
+      expiresAt: Date.now() + session.expires_in * 1000,
+    };
+    set({ ...stored, hydrated: true });
+    await saveStoredDeviceSession(stored);
+  },
+  updateContext: async (device) => {
+    set({ device });
+    const state = get();
+    await saveStoredDeviceSession({
+      accessToken: state.accessToken,
+      refreshToken: state.refreshToken,
+      device,
+      expiresAt: state.expiresAt,
+    });
+  },
+  clearSession: async () => {
+    set({
       accessToken: null,
+      refreshToken: null,
       device: null,
       expiresAt: null,
-      setSession: (session) => set({
-        accessToken: session.access_token,
-        device: session.device,
-        expiresAt: Date.now() + session.expires_in * 1000,
-      }),
-      updateContext: (device) => set({ device }),
-      clearSession: () => set({ accessToken: null, device: null, expiresAt: null }),
-      isAuthenticated: () => {
-        const state = get();
-        return Boolean(
-          state.accessToken
-          && state.device
-          && state.expiresAt
-          && state.expiresAt > Date.now(),
-        );
-      },
-    }),
-    {
-      name: "restaurant-device",
-      storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        accessToken: state.accessToken,
-        device: state.device,
-        expiresAt: state.expiresAt,
-      }),
-    },
-  ),
-);
+      hydrated: true,
+    });
+    await clearStoredDeviceSession();
+  },
+  isAuthenticated: () => {
+    const state = get();
+    return Boolean(
+      state.accessToken
+      && state.device
+      && state.expiresAt
+      && state.expiresAt > Date.now(),
+    );
+  },
+}));

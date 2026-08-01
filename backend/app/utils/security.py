@@ -136,6 +136,7 @@ def create_device_access_token(
         "station_key": station_key,
         "credential_version": credential_version,
         "type": "device_access",
+        "jti": str(uuid.uuid4()),
         "exp": expire,
         "iat": now,
     }

@@ -82,6 +82,11 @@ class DeviceRegistration(UUIDMixin, TimestampMixin, Base):
         nullable=False,
         server_default=text("1"),
     )
+    refresh_credential_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    refresh_credential_issued_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     paired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(

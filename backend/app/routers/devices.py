@@ -14,6 +14,7 @@ from app.schemas.device import (
     DeviceContextRead,
     DeviceCreate,
     DevicePairRequest,
+    DeviceRenewRequest,
 )
 from app.services.device_service import DeviceService
 
@@ -105,6 +106,21 @@ async def pair_device(
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     result = await DeviceService(db, restaurant_db=restaurant_db).pair_device(
+        payload,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    return ok(result.model_dump())
+
+
+@auth_router.post("/renew")
+async def renew_device(
+    payload: DeviceRenewRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    result = await DeviceService(db, restaurant_db=restaurant_db).renew_device(
         payload,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),

@@ -96,9 +96,13 @@ consumed under a row lock. Pairing returns a device token, not a User token.
 
 Every device-authenticated request reloads the live registry and verifies Company, Brand, Branch,
 device type, Station, credential version, active Brand context, and configured Kitchen Station.
-Pairing-code rotation and revoke increment the credential version, so previously issued tokens fail
-immediately. The dependency updates `last_seen_at`; lifecycle actions write audit evidence without
-persisting the PIN or token.
+Pairing also issues a high-entropy persistent refresh credential. Identity stores only its keyed SHA-256
+hash; Android stores the credential with AES-GCM and an Android Keystore key. Browser deployments use
+persistent origin storage as a fallback because web pages cannot access a native secure store or a stable
+MAC address. The refresh credential renews expiring access tokens without repeating Pair. Pairing-code
+rotation and revoke clear the refresh hash and increment the credential version, so both old access and
+refresh credentials fail immediately. The dependency updates `last_seen_at`; lifecycle actions write audit
+evidence without persisting a PIN, access token or refresh token.
 
 ## Migration Rule
 

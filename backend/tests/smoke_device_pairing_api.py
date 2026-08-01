@@ -18,6 +18,7 @@ from app.models.restaurant import Brand, BrandBranch
 from app.models.role import Permission, Role
 from app.models.settings import BranchSettings
 from app.models.user import User, UserBranch
+from app.services.device_service import DeviceService
 from app.utils.create_superuser import DEFAULT_COMPANY_ID
 from app.utils.security import hash_password, verify_password
 
@@ -205,6 +206,20 @@ async def verify_recent_last_seen(device_id: str) -> None:
             raise RuntimeError("Device heartbeat did not refresh last-seen evidence")
 
 
+async def verify_refresh_hash(device_id: str, refresh_token: str) -> None:
+    async with AsyncSessionLocal() as db:
+        device = await db.get(DeviceRegistration, uuid.UUID(device_id))
+        if (
+            device is None
+            or device.refresh_credential_hash is None
+            or device.refresh_credential_hash == refresh_token
+            or device.refresh_credential_hash
+            != DeviceService._hash_refresh_credential(refresh_token)
+            or device.refresh_credential_issued_at is None
+        ):
+            raise RuntimeError("Device refresh credential is not stored as a one-way hash")
+
+
 async def verify_evidence(context: dict[str, str], device_id: str) -> None:
     async with AsyncSessionLocal() as db:
         device = await db.get(DeviceRegistration, uuid.UUID(device_id))
@@ -215,6 +230,8 @@ async def verify_evidence(context: dict[str, str], device_id: str) -> None:
             or device.revoked_by != uuid.UUID(context["manager_id"])
             or device.revocation_reason != "tablet retired"
             or device.pairing_pin_hash is not None
+            or device.refresh_credential_hash is not None
+            or device.refresh_credential_issued_at is not None
             or device.last_seen_at is None
         ):
             raise RuntimeError(f"Final device lifecycle evidence is incomplete: {device}")
@@ -233,6 +250,7 @@ async def verify_evidence(context: dict[str, str], device_id: str) -> None:
             "system.device.create",
             "system.device.pairing.rotate",
             "device.pair",
+            "device.credential.renew",
             "system.device.pairing.rotate",
             "device.pair",
             "system.device.revoke",
@@ -242,7 +260,7 @@ async def verify_evidence(context: dict[str, str], device_id: str) -> None:
         manager_id = uuid.UUID(context["manager_id"])
         branch_id = uuid.UUID(context["branch_a_id"])
         for row in audit_rows:
-            expected_actor = None if row.action == "device.pair" else manager_id
+            expected_actor = None if row.action.startswith("device.") else manager_id
             if (
                 row.user_id != expected_actor
                 or row.company_id != DEFAULT_COMPANY_ID
@@ -395,7 +413,32 @@ def run() -> None:
             200,
             "pair Kitchen device",
         )
-        device_headers = {"Authorization": f"Bearer {paired['access_token']}"}
+        if not paired.get("refresh_token"):
+            raise RuntimeError("Pairing did not issue a persistent refresh credential")
+        client.portal.call(verify_refresh_hash, device_id, paired["refresh_token"])
+        renewed = expect(
+            client.post(
+                "/api/v1/device-auth/renew",
+                json={"refresh_token": paired["refresh_token"]},
+            ),
+            200,
+            "renew device access",
+        )
+        if (
+            renewed["refresh_token"] != paired["refresh_token"]
+            or renewed["access_token"] == paired["access_token"]
+            or renewed["device"]["device_id"] != device_id
+        ):
+            raise RuntimeError(f"Device renewal result is invalid: {renewed}")
+        expect(
+            client.post(
+                "/api/v1/device-auth/renew",
+                json={"refresh_token": f"{device_id}.{'x' * 64}"},
+            ),
+            401,
+            "invalid device refresh credential",
+        )
+        device_headers = {"Authorization": f"Bearer {renewed['access_token']}"}
         client.portal.call(age_last_seen, device_id)
         device_me = expect(
             client.get("/api/v1/device-auth/me", headers=device_headers),
@@ -438,6 +481,14 @@ def run() -> None:
             client.get("/api/v1/device-auth/me", headers=device_headers),
             401,
             "old token after credential rotation",
+        )
+        expect(
+            client.post(
+                "/api/v1/device-auth/renew",
+                json={"refresh_token": paired["refresh_token"]},
+            ),
+            401,
+            "old refresh credential after rotation",
         )
         paired_again = expect(
             client.post(
@@ -505,6 +556,14 @@ def run() -> None:
         )
         expect(
             client.post(
+                "/api/v1/device-auth/renew",
+                json={"refresh_token": paired_again["refresh_token"]},
+            ),
+            401,
+            "revoked refresh credential",
+        )
+        expect(
+            client.post(
                 "/api/v1/device-auth/pair",
                 json=pair_payload(context, rotated_again, rotated_again["pairing_pin"]),
             ),
@@ -516,7 +575,7 @@ def run() -> None:
     print(
         "p3_device_pairing_api=ok "
         "branch_scope=true station_scope=true pin_hash_expiry_lockout=true "
-        "single_use=true rotation=true revoke=true last_seen=true audit=true"
+        "single_use=true persistent_refresh=true rotation=true revoke=true last_seen=true audit=true"
     )
 
 

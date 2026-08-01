@@ -68,6 +68,15 @@ class DevicePairRequest(BaseSchema):
         return normalized
 
 
+class DeviceRenewRequest(BaseSchema):
+    refresh_token: str = Field(min_length=80, max_length=200)
+
+    @field_validator("refresh_token")
+    @classmethod
+    def strip_refresh_token(cls, value: str) -> str:
+        return _strip_required(value)
+
+
 class DeviceActionReason(BaseSchema):
     reason: str = Field(min_length=1, max_length=500)
 
@@ -121,6 +130,7 @@ class DeviceContextRead(BaseSchema):
 
 class DevicePairRead(BaseSchema):
     access_token: str
+    refresh_token: str
     token_type: Literal["bearer"] = "bearer"
     expires_in: int
     device: DeviceContextRead

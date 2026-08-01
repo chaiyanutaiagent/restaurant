@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
 import secrets
 from urllib.parse import urlencode
 import uuid
@@ -21,6 +23,7 @@ from app.schemas.device import (
     DeviceCreate,
     DevicePairRead,
     DevicePairRequest,
+    DeviceRenewRequest,
     DeviceProvisioningRead,
     DeviceRead,
 )
@@ -41,6 +44,13 @@ def invalid_pairing_credentials() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired device pairing credentials",
+    )
+
+
+def invalid_refresh_credential() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid device refresh credential",
     )
 
 
@@ -165,6 +175,8 @@ class DeviceService:
         device.failed_pairing_attempts = 0
         device.pairing_locked_until = None
         device.credential_version += 1
+        device.refresh_credential_hash = None
+        device.refresh_credential_issued_at = None
         device.paired_at = None
         device.last_seen_at = None
         self._audit(
@@ -200,6 +212,8 @@ class DeviceService:
         device.revoked_at = datetime.now(timezone.utc)
         device.revocation_reason = data.reason
         device.credential_version += 1
+        device.refresh_credential_hash = None
+        device.refresh_credential_issued_at = None
         device.pairing_pin_hash = None
         device.pairing_expires_at = None
         device.pairing_locked_until = None
@@ -279,15 +293,9 @@ class DeviceService:
         device.pairing_locked_until = None
         device.paired_at = now
         device.last_seen_at = now
-        access_token = create_device_access_token(
-            device_id=device.id,
-            company_id=device.company_id,
-            brand_id=context.brand_id,
-            branch_id=device.branch_id,
-            device_type=device.device_type,
-            station_key=device.station_key,
-            credential_version=device.credential_version,
-        )
+        refresh_token = self._new_refresh_credential(device.id)
+        device.refresh_credential_hash = self._hash_refresh_credential(refresh_token)
+        device.refresh_credential_issued_at = now
         self._audit(
             device=device,
             actor_id=None,
@@ -299,15 +307,108 @@ class DeviceService:
             user_agent=user_agent,
         )
         await self.db.commit()
+        return self._session_read(device, context.brand_id, refresh_token, now)
+
+    async def renew_device(
+        self,
+        data: DeviceRenewRequest,
+        *,
+        ip_address: str | None,
+        user_agent: str | None,
+    ) -> DevicePairRead:
+        device_id = self._refresh_device_id(data.refresh_token)
+        if device_id is None:
+            raise invalid_refresh_credential()
+        device = await self.db.scalar(
+            select(DeviceRegistration).where(
+                DeviceRegistration.id == device_id,
+            ).with_for_update()
+        )
+        if (
+            device is None
+            or device.revoked_at is not None
+            or device.paired_at is None
+            or device.refresh_credential_hash is None
+            or not hmac.compare_digest(
+                device.refresh_credential_hash,
+                self._hash_refresh_credential(data.refresh_token),
+            )
+        ):
+            raise invalid_refresh_credential()
+        try:
+            context = await self._restaurant_context(device.company_id, device.branch_id)
+            await self._canonical_station(
+                device.company_id,
+                device.branch_id,
+                device.device_type,
+                device.station_key,
+            )
+        except HTTPException as exc:
+            raise invalid_refresh_credential() from exc
+
+        now = datetime.now(timezone.utc)
+        device.last_seen_at = now
+        self._audit(
+            device=device,
+            actor_id=None,
+            action="device.credential.renew",
+            reason="automatic access renewal",
+            old_value=None,
+            new_value=self._snapshot(device, reason="automatic access renewal"),
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        await self.db.commit()
+        return self._session_read(device, context.brand_id, data.refresh_token, now)
+
+    @staticmethod
+    def _new_refresh_credential(device_id: uuid.UUID) -> str:
+        return f"{device_id}.{secrets.token_urlsafe(48)}"
+
+    @staticmethod
+    def _refresh_device_id(refresh_token: str) -> uuid.UUID | None:
+        raw_device_id, separator, _ = refresh_token.partition(".")
+        if separator != ".":
+            return None
+        try:
+            return uuid.UUID(raw_device_id)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _hash_refresh_credential(refresh_token: str) -> str:
+        return hmac.new(
+            settings.secret_key.encode("utf-8"),
+            refresh_token.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+    @staticmethod
+    def _session_read(
+        device: DeviceRegistration,
+        brand_id: uuid.UUID,
+        refresh_token: str,
+        now: datetime,
+    ) -> DevicePairRead:
+        access_token = create_device_access_token(
+            device_id=device.id,
+            company_id=device.company_id,
+            brand_id=brand_id,
+            branch_id=device.branch_id,
+            device_type=device.device_type,
+            station_key=device.station_key,
+            credential_version=device.credential_version,
+        )
         token_payload = decode_token(access_token)
         expires_in = max(int(token_payload["exp"] - now.timestamp()), 0)
         return DevicePairRead(
             access_token=access_token,
+            refresh_token=refresh_token,
             expires_in=expires_in,
             device=DeviceContextRead(
                 device_id=device.id,
                 company_id=device.company_id,
-                brand_id=context.brand_id,
+                brand_id=brand_id,
                 branch_id=device.branch_id,
                 device_code=device.device_code,
                 name=device.name,

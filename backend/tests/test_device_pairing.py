@@ -15,6 +15,7 @@ from app.schemas.device import (
     DeviceContextRead,
     DeviceCreate,
     DevicePairRequest,
+    DeviceRenewRequest,
     DeviceWorkspaceBootstrapRead,
     DeviceWorkspaceBranchRead,
 )
@@ -70,6 +71,15 @@ class DevicePairingSchemaTests(unittest.TestCase):
     def test_device_action_reason_cannot_be_blank(self) -> None:
         with self.assertRaises(ValidationError):
             DeviceActionReason(reason="   ")
+
+    def test_device_refresh_credential_requires_persistent_secret_shape(self) -> None:
+        device_id = uuid.uuid4()
+        token = DeviceService._new_refresh_credential(device_id)
+        request = DeviceRenewRequest(refresh_token=f"  {token}  ")
+        self.assertEqual(request.refresh_token, token)
+        self.assertEqual(DeviceService._refresh_device_id(token), device_id)
+        self.assertEqual(len(DeviceService._hash_refresh_credential(token)), 64)
+        self.assertIsNone(DeviceService._refresh_device_id("not-a-refresh-token"))
 
     def test_counter_workspace_requires_staff_identity_for_sales(self) -> None:
         now = datetime.now(timezone.utc)
@@ -127,6 +137,7 @@ class DeviceCredentialPolicyTests(unittest.TestCase):
         self.assertEqual(payload["device_type"], "kitchen")
         self.assertEqual(payload["station_key"], "ครัวหลัก")
         self.assertEqual(payload["credential_version"], 3)
+        self.assertIsInstance(payload["jti"], str)
         self.assertEqual(payload["business_type"], "restaurant")
         self.assertEqual(payload["target_database"], "restaurant")
         self.assertNotIn("permissions", payload)

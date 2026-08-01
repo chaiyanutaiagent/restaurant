@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { deviceApi, deviceErrorMessage } from "@/lib/deviceApi";
+import { assertDeviceCredentialStorageAvailable } from "@/lib/deviceCredentialStorage";
 import { useDeviceStore } from "@/stores/device.store";
 import type { ApiResponse } from "@/types/api";
 import type { DevicePairResponse, DeviceType } from "@/types/device";
@@ -29,15 +30,17 @@ export default function DevicePairingPage(): JSX.Element {
 
   const pairMutation = useMutation({
     mutationFn: async () => {
+      await assertDeviceCredentialStorageAvailable();
       const response = await deviceApi.post<ApiResponse<DevicePairResponse>>("/device-auth/pair", {
         company_id: companyId.trim(),
         device_code: deviceCode.trim().toUpperCase(),
         pairing_pin: pin.trim(),
       });
-      return response.data.data;
+      const session = response.data.data;
+      await setSession(session);
+      return session;
     },
     onSuccess: (session) => {
-      setSession(session);
       localStorage.setItem("last_company_id", session.device.company_id);
       navigate(WORKSPACE_PATH[session.device.device_type], { replace: true });
     },
@@ -88,7 +91,7 @@ export default function DevicePairingPage(): JSX.Element {
               type="button"
               className="mx-auto flex min-h-11 items-center gap-2 px-3 text-sm text-slate-300 hover:text-white"
               onClick={() => {
-                clearSession();
+                void clearSession();
                 setDeviceCode("");
                 setPin("");
               }}

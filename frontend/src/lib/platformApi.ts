@@ -5,6 +5,7 @@ import type {
   PlatformCompanyCreate,
   PlatformCompanyDetail,
   PlatformCompanyListItem,
+  PlatformDashboard,
   PlatformOperator,
   PlatformTenantExport,
   PlatformTokenResponse
@@ -54,6 +55,8 @@ export const platformApi = {
       password
     }),
   me: () => platformApiClient.get<PlatformApiResponse<PlatformOperator>>("/auth/me"),
+  dashboard: () =>
+    platformApiClient.get<PlatformApiResponse<PlatformDashboard>>("/dashboard"),
   companies: (search?: string) =>
     platformApiClient.get<PlatformApiResponse<PlatformCompanyListItem[]>>("/companies", {
       params: search ? { search } : undefined

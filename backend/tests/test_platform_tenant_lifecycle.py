@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 import unittest
 import uuid
@@ -170,6 +171,69 @@ class PlatformControlsCompatibilityTests(unittest.TestCase):
         controls = PlatformTenantService._controls(None)
         self.assertTrue(controls.feature_flags["restaurant"])
         self.assertEqual(controls.plan_limits["branches"], 0)
+
+
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class PlatformDashboardTests(unittest.IsolatedAsyncioTestCase):
+    async def test_dashboard_aggregates_control_plane_summary(self) -> None:
+        company_id = uuid.uuid4()
+        now = datetime.now(timezone.utc)
+        company = SimpleNamespace(
+            id=company_id,
+            name="ร้านทดสอบ",
+            name_en=None,
+            tax_id=None,
+            email=None,
+            is_active=True,
+            credential_version=1,
+            created_at=now,
+        )
+        profile = SimpleNamespace(
+            plan_code="starter",
+            feature_flags={"restaurant": True, "retail_pos": False, "takeaway": False},
+            plan_limits={"brands": 1},
+            suspended_at=None,
+        )
+        identity_db = AsyncMock()
+        identity_db.execute.side_effect = [
+            _Rows([(company, profile)]),
+            _Rows([(company_id, 1)]),
+            _Rows([(company_id, 2)]),
+            _Rows([(company_id, 3)]),
+            _Rows([(company_id, 2)]),
+            _Rows([(company_id, 1)]),
+        ]
+        identity_db.scalars.return_value = _Rows([])
+        restaurant_db = AsyncMock()
+        restaurant_db.execute.side_effect = [
+            _Rows([(company_id, 8)]),
+            _Rows([(company_id, 1)]),
+            _Rows([]),
+        ]
+
+        result = await PlatformTenantService(
+            identity_db,
+            restaurant_db=restaurant_db,
+            operator_id=uuid.uuid4(),
+        ).dashboard()
+
+        self.assertEqual(result.totals.companies, 1)
+        self.assertEqual(result.totals.branches, 2)
+        self.assertEqual(result.totals.active_users, 3)
+        self.assertEqual(result.totals.devices, 2)
+        self.assertEqual(result.totals.paired_devices, 1)
+        self.assertEqual(result.onboarding.ready_companies, 1)
+        self.assertEqual(result.feature_usage["restaurant"], 1)
+        self.assertEqual(result.feature_usage["takeaway"], 0)
+        self.assertEqual(result.plan_usage, {"starter": 1})
+        self.assertTrue(result.recent_companies[0].onboarding_complete)
 
 
 if __name__ == "__main__":

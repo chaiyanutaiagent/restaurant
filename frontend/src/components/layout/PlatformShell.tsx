@@ -1,4 +1,4 @@
-import { Building2, ClipboardList, LogOut, ShieldCheck } from "lucide-react";
+import { Building2, ClipboardList, LayoutDashboard, LogOut, ShieldCheck } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { usePlatformAuthStore } from "@/stores/platform-auth.store";
 
@@ -43,6 +43,16 @@ export default function PlatformShell(): JSX.Element {
       </header>
       <div className="mx-auto grid max-w-7xl gap-6 px-5 py-6 md:grid-cols-[220px_minmax(0,1fr)]">
         <nav className="flex gap-2 md:flex-col">
+          <NavLink
+            to="/platform/dashboard"
+            className={({ isActive }) =>
+              `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+                isActive ? "bg-emerald-400 text-slate-950" : "text-slate-300 hover:bg-slate-900"
+              }`
+            }
+          >
+            <LayoutDashboard className="h-5 w-5" /> ภาพรวมระบบ
+          </NavLink>
           <NavLink
             to="/platform/companies"
             className={({ isActive }) =>

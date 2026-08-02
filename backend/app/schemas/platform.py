@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 import re
 import uuid
 
@@ -237,3 +238,36 @@ class PlatformCompanyDetailRead(PlatformCompanyListItem):
     reactivated_at: datetime | None = None
     reactivation_reason: str | None = None
     updated_at: datetime
+
+
+class PlatformDashboardTotalsRead(BaseSchema):
+    companies: int
+    active_companies: int
+    suspended_companies: int
+    brands: int
+    branches: int
+    active_users: int
+    devices: int
+    paired_devices: int
+
+
+class PlatformDashboardOnboardingRead(BaseSchema):
+    ready_companies: int
+    pending_companies: int
+    total_active_companies: int
+
+
+class PlatformDashboardCompanyRead(PlatformCompanyListItem):
+    onboarding_complete: bool
+    completed_steps: int
+    total_steps: int
+
+
+class PlatformDashboardRead(BaseSchema):
+    generated_at: datetime
+    totals: PlatformDashboardTotalsRead
+    onboarding: PlatformDashboardOnboardingRead
+    feature_usage: dict[str, int]
+    plan_usage: dict[str, int]
+    recent_companies: list[PlatformDashboardCompanyRead]
+    recent_events: list[dict[str, Any]]

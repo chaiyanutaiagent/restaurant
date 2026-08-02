@@ -27,6 +27,10 @@ from app.schemas.platform import (
     PlatformCompanyCreate,
     PlatformCompanyDetailRead,
     PlatformCompanyListItem,
+    PlatformDashboardCompanyRead,
+    PlatformDashboardOnboardingRead,
+    PlatformDashboardRead,
+    PlatformDashboardTotalsRead,
     PlatformLifecycleAction,
     PlatformOnboardingRead,
     PlatformOnboardingStepRead,
@@ -126,6 +130,154 @@ class PlatformTenantService:
         self.restaurant_db = restaurant_db
         self.operator_id = operator_id
         self.emit_reference_events = emit_reference_events
+
+    async def dashboard(self) -> PlatformDashboardRead:
+        company_rows = (
+            await self.db.execute(
+                select(Company, PlatformTenantProfile)
+                .outerjoin(
+                    PlatformTenantProfile,
+                    PlatformTenantProfile.company_id == Company.id,
+                )
+                .order_by(Company.created_at.desc(), Company.id)
+            )
+        ).all()
+
+        async def grouped_counts(session: AsyncSession, model, *filters) -> dict[uuid.UUID, int]:
+            rows = (
+                await session.execute(
+                    select(model.company_id, func.count())
+                    .where(*filters)
+                    .group_by(model.company_id)
+                )
+            ).all()
+            return {company_id: int(count) for company_id, count in rows}
+
+        brand_counts = await grouped_counts(self.db, Brand, Brand.is_active.is_(True))
+        branch_counts = await grouped_counts(
+            self.db,
+            Branch,
+            Branch.deleted_at.is_(None),
+            Branch.is_active.is_(True),
+        )
+        user_counts = await grouped_counts(
+            self.db,
+            User,
+            User.deleted_at.is_(None),
+            User.is_active.is_(True),
+        )
+        device_counts = await grouped_counts(
+            self.db,
+            DeviceRegistration,
+            DeviceRegistration.revoked_at.is_(None),
+        )
+        paired_device_counts = await grouped_counts(
+            self.db,
+            DeviceRegistration,
+            DeviceRegistration.revoked_at.is_(None),
+            DeviceRegistration.paired_at.is_not(None),
+        )
+        menu_counts = await grouped_counts(
+            self.restaurant_db,
+            Product,
+            Product.deleted_at.is_(None),
+            Product.is_active.is_(True),
+            Product.is_for_sale.is_(True),
+        )
+        branch_payment_counts = await grouped_counts(
+            self.restaurant_db,
+            BranchSettings,
+            BranchSettings.promptpay_target.is_not(None),
+        )
+        gateway_payment_counts = await grouped_counts(
+            self.restaurant_db,
+            PaymentGatewayConfig,
+            or_(
+                PaymentGatewayConfig.promptpay_target.is_not(None),
+                PaymentGatewayConfig.omise_enabled.is_(True),
+                PaymentGatewayConfig.twoc2p_enabled.is_(True),
+                PaymentGatewayConfig.scb_enabled.is_(True),
+            ),
+        )
+
+        onboarding_by_company: dict[uuid.UUID, tuple[int, int]] = {}
+        for company, _profile in company_rows:
+            completed_steps = sum(
+                (
+                    1,
+                    int(brand_counts.get(company.id, 0) > 0),
+                    int(branch_counts.get(company.id, 0) > 0),
+                    int(menu_counts.get(company.id, 0) > 0),
+                    int(
+                        branch_payment_counts.get(company.id, 0)
+                        + gateway_payment_counts.get(company.id, 0)
+                        > 0
+                    ),
+                    int(user_counts.get(company.id, 0) > 0),
+                    int(paired_device_counts.get(company.id, 0) > 0),
+                )
+            )
+            onboarding_by_company[company.id] = (completed_steps, 7)
+
+        active_rows = [(company, profile) for company, profile in company_rows if company.is_active]
+        ready_companies = sum(
+            int(onboarding_by_company[company.id][0] == onboarding_by_company[company.id][1])
+            for company, _profile in active_rows
+        )
+
+        feature_keys = set(DEFAULT_FEATURE_FLAGS)
+        for _company, profile in company_rows:
+            if profile:
+                feature_keys.update(profile.feature_flags)
+        feature_usage = {
+            key: sum(
+                int(self._controls(profile).feature_flags.get(key, False))
+                for company, profile in active_rows
+            )
+            for key in sorted(feature_keys)
+        }
+
+        plan_usage: dict[str, int] = {}
+        for company, profile in active_rows:
+            plan_code = self._controls(profile).plan_code
+            plan_usage[plan_code] = plan_usage.get(plan_code, 0) + 1
+
+        recent_companies = []
+        for company, profile in company_rows[:6]:
+            completed_steps, total_steps = onboarding_by_company[company.id]
+            recent_companies.append(
+                PlatformDashboardCompanyRead(
+                    **self._list_item(company, profile).model_dump(),
+                    onboarding_complete=completed_steps == total_steps,
+                    completed_steps=completed_steps,
+                    total_steps=total_steps,
+                )
+            )
+
+        recent_events = await self.list_audit_events(company_id=None, limit=6)
+        active_companies = len(active_rows)
+        return PlatformDashboardRead(
+            generated_at=datetime.now(timezone.utc),
+            totals=PlatformDashboardTotalsRead(
+                companies=len(company_rows),
+                active_companies=active_companies,
+                suspended_companies=len(company_rows) - active_companies,
+                brands=sum(brand_counts.values()),
+                branches=sum(branch_counts.values()),
+                active_users=sum(user_counts.values()),
+                devices=sum(device_counts.values()),
+                paired_devices=sum(paired_device_counts.values()),
+            ),
+            onboarding=PlatformDashboardOnboardingRead(
+                ready_companies=ready_companies,
+                pending_companies=active_companies - ready_companies,
+                total_active_companies=active_companies,
+            ),
+            feature_usage=feature_usage,
+            plan_usage=dict(sorted(plan_usage.items())),
+            recent_companies=recent_companies,
+            recent_events=recent_events,
+        )
 
     async def list_companies(
         self,

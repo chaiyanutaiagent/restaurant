@@ -91,6 +91,16 @@ async def me(
     return ok(PlatformOperatorRead.model_validate(operator).model_dump(mode="json"))
 
 
+@router.get("/dashboard")
+async def dashboard(
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    summary = await _tenant_service(db, restaurant_db, current).dashboard()
+    return ok(summary.model_dump(mode="json"))
+
+
 @router.get("/companies")
 async def list_companies(
     search: str | None = Query(default=None, max_length=255),

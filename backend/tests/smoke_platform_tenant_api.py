@@ -199,6 +199,18 @@ def main() -> None:
         company_id = uuid.UUID(created["id"])
         if created["onboarding"]["completed_steps"] != 2:
             raise RuntimeError(f"Unexpected initial onboarding: {created['onboarding']}")
+        dashboard = expect(
+            client.get("/api/v1/platform/dashboard", headers=platform_headers),
+            200,
+            "Platform dashboard",
+        )
+        if (
+            dashboard["totals"]["companies"] < 1
+            or dashboard["totals"]["active_companies"] < 1
+            or dashboard["feature_usage"].get("restaurant", 0) < 1
+            or not dashboard["recent_companies"]
+        ):
+            raise RuntimeError(f"Unexpected Platform dashboard summary: {dashboard}")
 
         tenant_session = expect(
             client.post(

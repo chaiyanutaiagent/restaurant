@@ -122,3 +122,32 @@ export type PlatformAuditEvent = {
   ip_address: string | null;
   created_at: string;
 };
+
+export type PlatformDashboardCompany = PlatformCompanyListItem & {
+  onboarding_complete: boolean;
+  completed_steps: number;
+  total_steps: number;
+};
+
+export type PlatformDashboard = {
+  generated_at: string;
+  totals: {
+    companies: number;
+    active_companies: number;
+    suspended_companies: number;
+    brands: number;
+    branches: number;
+    active_users: number;
+    devices: number;
+    paired_devices: number;
+  };
+  onboarding: {
+    ready_companies: number;
+    pending_companies: number;
+    total_active_companies: number;
+  };
+  feature_usage: Record<string, number>;
+  plan_usage: Record<string, number>;
+  recent_companies: PlatformDashboardCompany[];
+  recent_events: PlatformAuditEvent[];
+};

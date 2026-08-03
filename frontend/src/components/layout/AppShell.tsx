@@ -14,6 +14,7 @@ const titleMap: Record<string, string> = {
   "/roles": "บทบาทและสิทธิ์",
   "/branches": "สาขา",
   "/billing": "แพ็กเกจและการเรียกเก็บเงิน",
+  "/privacy-support": "ความเป็นส่วนตัวและการช่วยเหลือ",
   "/403": "ไม่มีสิทธิ์เข้าถึง",
   "/pos/admin": "POS Admin",
   "/restaurant": "ภาพรวมร้านอาหาร",

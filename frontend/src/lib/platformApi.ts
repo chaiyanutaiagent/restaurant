@@ -1,5 +1,6 @@
 import axios, { type AxiosError } from "axios";
 import type { SaasBillingOverview, SaasBillingSummary, SaasInvoice, SaasPlan } from "@/types/billing";
+import type { PrivacyRequest, SupportAccessGrant, SupportContext, SupportMessage, SupportTicket } from "@/types/privacySupport";
 import { usePlatformAuthStore } from "@/stores/platform-auth.store";
 import type {
   PlatformAuditEvent,
@@ -143,6 +144,20 @@ export const platformApi = {
     is_active: boolean;
     reason: string;
   }) => platformApiClient.post<PlatformApiResponse<SaasPlan>>("/billing/plans", payload),
+  privacyRequests: () => platformApiClient.get<PlatformApiResponse<PrivacyRequest[]>>("/privacy/requests"),
+  updatePrivacyRequest: (requestId: string, payload: { status: "identity_verified" | "in_review" | "fulfilled" | "rejected" | "cancelled"; response_summary: string | null; reason: string }) =>
+    platformApiClient.put<PlatformApiResponse<PrivacyRequest>>(`/privacy/requests/${requestId}`, payload),
+  supportTickets: () => platformApiClient.get<PlatformApiResponse<SupportTicket[]>>("/support/tickets"),
+  updateSupportTicket: (ticketId: string, payload: { status: SupportTicket["status"]; priority: SupportTicket["priority"]; reason: string }) =>
+    platformApiClient.put<PlatformApiResponse<SupportTicket>>(`/support/tickets/${ticketId}`, payload),
+  addSupportMessage: (ticketId: string, body: string) =>
+    platformApiClient.post<PlatformApiResponse<SupportMessage>>(`/support/tickets/${ticketId}/messages`, { body }),
+  requestSupportAccess: (ticketId: string, payload: { requested_scopes: SupportAccessGrant["requested_scopes"]; purpose: string; duration_minutes: number; reason: string }) =>
+    platformApiClient.post<PlatformApiResponse<SupportAccessGrant>>(`/support/tickets/${ticketId}/access`, payload),
+  revokeSupportAccess: (grantId: string, reason: string) =>
+    platformApiClient.post<PlatformApiResponse<SupportAccessGrant>>(`/support/access/${grantId}/revoke`, { reason }),
+  supportContext: (grantId: string) =>
+    platformApiClient.get<PlatformApiResponse<SupportContext>>(`/support/access/${grantId}/context`),
   companies: (search?: string) =>
     platformApiClient.get<PlatformApiResponse<PlatformCompanyListItem[]>>("/companies", {
       params: search ? { search } : undefined

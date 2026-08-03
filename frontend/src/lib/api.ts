@@ -10,6 +10,7 @@ import type { LoginRequest, MeResponse, TokenResponse } from "@/types/auth";
 import type { Branch, Permission, User, UserBranch } from "@/types/user";
 import type { SaasActionResponse, SaasMembership, SaasSignupResponse } from "@/types/membership";
 import type { SaasBillingSummary } from "@/types/billing";
+import type { PrivacyRequest, SupportAccessGrant, SupportMessage, SupportTicket } from "@/types/privacySupport";
 
 type RetryableConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -183,4 +184,19 @@ export const membershipApi = {
     }),
   me: () => api.get<ApiResponse<SaasMembership>>("/membership/me"),
   billing: () => api.get<ApiResponse<SaasBillingSummary>>("/membership/billing")
+};
+
+export const privacySupportApi = {
+  privacyRequests: () => api.get<ApiResponse<PrivacyRequest[]>>("/privacy-support/privacy-requests"),
+  createPrivacyRequest: (payload: { request_type: PrivacyRequest["request_type"]; description: string | null }) =>
+    api.post<ApiResponse<PrivacyRequest>>("/privacy-support/privacy-requests", payload),
+  tickets: () => api.get<ApiResponse<SupportTicket[]>>("/privacy-support/tickets"),
+  createTicket: (payload: { category: SupportTicket["category"]; priority: SupportTicket["priority"]; subject: string; initial_message: string }) =>
+    api.post<ApiResponse<SupportTicket>>("/privacy-support/tickets", payload),
+  addMessage: (ticketId: string, body: string) =>
+    api.post<ApiResponse<SupportMessage>>(`/privacy-support/tickets/${ticketId}/messages`, { body }),
+  decideAccess: (grantId: string, decision: "approved" | "denied", reason: string) =>
+    api.post<ApiResponse<SupportAccessGrant>>(`/privacy-support/access/${grantId}/decision`, { decision, reason }),
+  revokeAccess: (grantId: string, reason: string) =>
+    api.post<ApiResponse<SupportAccessGrant>>(`/privacy-support/access/${grantId}/revoke`, { reason }),
 };

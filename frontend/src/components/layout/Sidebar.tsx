@@ -62,6 +62,7 @@ type NavItem = {
 const mainItems: NavItem[] = [
   { label: "ERP Admin", to: "/admin", icon: LayoutDashboard },
   { label: "แพ็กเกจ SaaS", to: "/billing", icon: CreditCard },
+  { label: "Privacy & Support", to: "/privacy-support", icon: Shield },
   { label: "ผู้ใช้งาน", to: "/users", icon: Users, permission: "system.user.view" },
   { label: "บทบาท", to: "/roles", icon: Shield, permission: "system.role.view" },
   { label: "สาขา", to: "/branches", icon: Building2, permission: "system.branch.view" },

@@ -45,7 +45,7 @@ phase7_started: false
 | 4 | `SAAS-PREP-MEMBERSHIP-04` | Self-service tenant signup, verification, reset, trial, and onboarding lifecycle | Scope 03 | Complete |
 | 5 | `SAAS-PREP-OPERATIONS-05` | Protected operations summary, health snapshots, alert and backup status | Scope 04 | Complete |
 | 6 | `SAAS-PREP-BILLING-06` | Provider-neutral subscription lifecycle and billing decision boundary | Scope 05; provider selection remains parked | Complete |
-| 7 | `SAAS-PREP-PDPA-SUPPORT-07` | Privacy lifecycle, data-subject requests, support tickets, and audited support access | Scope 06 | Pending |
+| 7 | `SAAS-PREP-PDPA-SUPPORT-07` | Privacy lifecycle, data-subject requests, support tickets, and audited support access | Scope 06 | Complete |
 | 8 | `SAAS-PREP-BETA-GATE-08` | Migration, authorization, security, load, browser, and recovery evidence | Scopes 01-07 | Pending |
 | 9 | `P5-PHYSICAL-UAT-SIGNOFF-06` | Real counter, kitchen, pickup, camera, printer, and network UAT | Hardware received | Parked |
 | 10 | Public launch decision | Owner-controlled go/no-go using both SaaS and Restaurant evidence | All gates and sign-offs | Blocked |
@@ -498,12 +498,101 @@ governed by Scope 04 and Restaurant payment records are unaffected.
 - Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-billing-06-20260803T075734Z/manifest.txt`.
 - Temporary databases remaining: `0`; local legacy and Platform migration heads unchanged.
 
+## SAAS-PREP-PDPA-SUPPORT-07
+
+### Problem
+
+The SaaS account owner has no controlled way to submit or track an account-level privacy
+request or support case. Platform operators have no tenant-approved, expiring access grant,
+so informal troubleshooting could become broad or unaudited access. Existing Tenant export
+and audit tools are Platform-only and are not a complete data-subject workflow.
+
+### In scope
+
+- Add authenticated account-owner privacy requests for access, export, correction,
+  deletion, restriction, objection, and consent withdrawal, isolated to the owner's Company.
+- Treat the configured response target as an internal operating target, not a legal opinion
+  or a guarantee of statutory compliance.
+- Let Platform Owner verify, review, fulfill, reject, or cancel requests with status history,
+  response summary, reason, and audit evidence; no request directly deletes data.
+- Add explicit retain/delete/anonymize retention decisions linked to a request, including
+  data category, rationale, optional retain-until date, and proposed/approved/rejected
+  lifecycle. Execution remains outside this Scope.
+- Add Tenant support tickets and conversation messages with category, priority, status,
+  requester identity, and Company isolation.
+- Let a Platform operator request an allow-listed support grant for one ticket and Company;
+  only that Tenant owner can approve or deny it.
+- Limit approved grants to named aggregate scopes, cap their lifetime, allow either side to
+  revoke them, and audit request, decision, context view, expiry, and revocation.
+- Expose only an allow-listed support context (account state, SaaS controls, onboarding,
+  aggregate usage/billing state) and never issue an impersonation token or return orders,
+  customers, staff records, credentials, or secrets.
+- Add Tenant Privacy & Support UI and Platform Support UI.
+- Add matching legacy and Platform-core migrations and isolated verification.
+
+### Out of scope
+
+- Legal advice, a compliance certification, automatic interpretation of PDPA obligations,
+  or hard-coded statutory exceptions/retention periods.
+- Automatic deletion/anonymization, database row mutation based on a request, legal hold
+  execution, consent/banner management, cookie scanning, or customer-facing DSAR forms for
+  a Tenant's own diners or loyalty customers.
+- Silent impersonation, password/session takeover, unrestricted SQL, order/customer/staff
+  detail access, file attachments, screen control, remote shell, or production access.
+- External help-desk providers, email/SMS notifications, production deployment, hardware
+  UAT, Takeaway Phase 6, and Retail Phase 7.
+
+### Acceptance criteria
+
+- A Tenant owner can create/list only its Company's privacy requests and support tickets;
+  another Tenant cannot view, message, decide, or approve them.
+- Privacy and retention mutations require a reason and create audit evidence. A retention
+  decision records intent only and performs no destructive data operation.
+- A Platform operator cannot view support context until the matching Tenant owner approves
+  a named-scope grant; pending, denied, revoked, or expired grants are rejected.
+- Grant lifetime is capped, context fields are allow-listed, and every successful context
+  view is audited without returning raw business records or credentials.
+- No route creates an impersonated Tenant token or changes a Tenant user's password/session.
+- Both migration paths rehearse upgrade/downgrade/re-upgrade on isolated databases.
+- Focused backend tests, API smoke, frontend type-check/build, and browser flows pass.
+
+### Verification
+
+- Schema/state/expiry/allow-list tests plus Company-isolation and authorization API smoke.
+- Database evidence proving grant decisions/views and privacy/retention changes are audited.
+- Sensitive-field scan of support-context/API artifacts and route contract.
+- Isolated migrations, `npm run type-check`, `npm run build`, and Platform/Tenant browser flows.
+
+### Rollback
+
+Revoke all active support grants, export request/ticket metadata that must be retained,
+revert only the Scope 07 commit, and downgrade its migration. No automatic deletion or
+Tenant session mutation must be unwound because neither is authorized in this Scope.
+
+### Completion evidence
+
+- Focused Privacy/Support suite: 4 tests passed; focused Platform regression suite: 38
+  tests passed.
+- Isolated legacy migration reached `p11privacy0013` and passed downgrade to
+  `p10bill0012` followed by re-upgrade.
+- Isolated Platform-core migration reached `p11platform0015` and passed downgrade to
+  `p10platform0014` followed by re-upgrade.
+- API smoke used two verified SaaS Tenants and two Platform operators. Cross-Tenant privacy,
+  ticket, message, and grant decisions were rejected; a grant was bound to its requesting
+  operator.
+- Pending, wrong-Tenant, wrong-operator, revoked, and expired access could not view support
+  context. An approved grant returned exactly its named account/control/billing scopes and
+  every successful view created audit evidence.
+- Support-context sensitive-marker scan passed; the grant schema has no password, token,
+  secret, or impersonation field, and the Platform exposes no impersonation route.
+- Retention proposal/approval and privacy fulfillment were audited while Company/User row
+  counts remained unchanged, proving the workflow performed no destructive execution.
+- Frontend TypeScript check, production build, and 10 Platform/public/Tenant browser tests
+  passed, including Tenant grant approval and Platform access-request flows.
+- Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-privacy-support-07-20260803T081908Z/manifest.txt`.
+- Temporary databases remaining: `0`; local legacy and Platform migration heads unchanged.
+
 ## Later-scope boundaries
-
-### SAAS-PREP-PDPA-SUPPORT-07
-
-Data-subject request tracking, retention decisions, support cases, and time-limited audited
-support access. It does not authorize silent tenant impersonation or unrestricted data reads.
 
 ### SAAS-PREP-BETA-GATE-08
 

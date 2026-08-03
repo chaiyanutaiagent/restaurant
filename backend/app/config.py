@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     saas_trial_days: int = Field(default=14, ge=1, le=90)
     saas_billing_provider: str = "unconfigured"
     saas_billing_live_charging_enabled: bool = False
+    saas_privacy_internal_target_days: int = Field(default=30, ge=1, le=90)
+    saas_support_access_max_minutes: int = Field(default=60, ge=5, le=60)
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env", "../../.env"),

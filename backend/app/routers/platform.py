@@ -28,7 +28,17 @@ from app.schemas.saas_billing import (
     SaasPlanUpsert,
     SaasSubscriptionUpdate,
 )
+from app.schemas.saas_privacy_support import (
+    PrivacyRequestUpdate,
+    RetentionDecisionCreate,
+    RetentionDecisionUpdate,
+    SupportAccessRequest,
+    SupportAccessRevoke,
+    SupportMessageCreate,
+    SupportTicketUpdate,
+)
 from app.services.saas_billing_service import SaasBillingService
+from app.services.saas_privacy_support_service import SaasPrivacySupportService
 from app.services.platform_service import PlatformAuthService, PlatformTenantService
 from app.services.platform_operations_service import PlatformOperationsService
 
@@ -109,6 +119,20 @@ def _operations_service(
 def _billing_service(db: AsyncSession, current: PlatformTokenData) -> SaasBillingService:
     _require_platform_owner(current)
     return SaasBillingService(db, operator_id=current.operator_id)
+
+
+def _privacy_support_service(
+    db: AsyncSession,
+    current: PlatformTokenData,
+    *,
+    restaurant_db: AsyncSession | None = None,
+) -> SaasPrivacySupportService:
+    _require_platform_owner(current)
+    return SaasPrivacySupportService(
+        db,
+        operator_id=current.operator_id,
+        restaurant_db=restaurant_db,
+    )
 
 
 @router.post("/auth/login")
@@ -351,6 +375,140 @@ async def import_billing_event(
         payload, ip_address=ip_address, user_agent=user_agent
     )
     return ok(result.model_dump(mode="json"))
+
+
+@router.get("/privacy/requests")
+async def platform_privacy_requests(
+    limit: int = Query(default=200, ge=1, le=500),
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    rows = await _privacy_support_service(db, current).platform_privacy_requests(limit)
+    return ok([row.model_dump(mode="json") for row in rows])
+
+
+@router.put("/privacy/requests/{request_id}")
+async def update_platform_privacy_request(
+    request_id: uuid.UUID,
+    payload: PrivacyRequestUpdate,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    row = await _privacy_support_service(db, current).update_privacy_request(request_id, payload, ip_address=ip_address, user_agent=user_agent)
+    return ok(row.model_dump(mode="json"))
+
+
+@router.get("/privacy/requests/{request_id}/retention")
+async def list_retention_decisions(
+    request_id: uuid.UUID,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    rows = await _privacy_support_service(db, current).retention_decisions(request_id)
+    return ok([row.model_dump(mode="json") for row in rows])
+
+
+@router.post("/privacy/requests/{request_id}/retention", status_code=status.HTTP_201_CREATED)
+async def create_retention_decision(
+    request_id: uuid.UUID,
+    payload: RetentionDecisionCreate,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    row = await _privacy_support_service(db, current).create_retention_decision(request_id, payload, ip_address=ip_address, user_agent=user_agent)
+    return ok(row.model_dump(mode="json"))
+
+
+@router.put("/privacy/retention/{decision_id}")
+async def update_retention_decision(
+    decision_id: uuid.UUID,
+    payload: RetentionDecisionUpdate,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    row = await _privacy_support_service(db, current).update_retention_decision(decision_id, payload, ip_address=ip_address, user_agent=user_agent)
+    return ok(row.model_dump(mode="json"))
+
+
+@router.get("/support/tickets")
+async def platform_support_tickets(
+    limit: int = Query(default=200, ge=1, le=500),
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    rows = await _privacy_support_service(db, current).tickets(limit=limit)
+    return ok([row.model_dump(mode="json") for row in rows])
+
+
+@router.put("/support/tickets/{ticket_id}")
+async def update_support_ticket(
+    ticket_id: uuid.UUID,
+    payload: SupportTicketUpdate,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    row = await _privacy_support_service(db, current).update_ticket(ticket_id, payload, ip_address=ip_address, user_agent=user_agent)
+    return ok(row.model_dump(mode="json"))
+
+
+@router.post("/support/tickets/{ticket_id}/messages", status_code=status.HTTP_201_CREATED)
+async def add_platform_support_message(
+    ticket_id: uuid.UUID,
+    payload: SupportMessageCreate,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    row = await _privacy_support_service(db, current).add_message(ticket_id, payload, company_id=None, ip_address=ip_address, user_agent=user_agent)
+    return ok(row.model_dump(mode="json"))
+
+
+@router.post("/support/tickets/{ticket_id}/access", status_code=status.HTTP_201_CREATED)
+async def request_support_access(
+    ticket_id: uuid.UUID,
+    payload: SupportAccessRequest,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    row = await _privacy_support_service(db, current).request_access(ticket_id, payload, ip_address=ip_address, user_agent=user_agent)
+    return ok(row.model_dump(mode="json"))
+
+
+@router.post("/support/access/{grant_id}/revoke")
+async def revoke_platform_support_access(
+    grant_id: uuid.UUID,
+    payload: SupportAccessRevoke,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    row = await _privacy_support_service(db, current).revoke_access(grant_id, payload.reason, company_id=None, ip_address=ip_address, user_agent=user_agent)
+    return ok(row.model_dump(mode="json"))
+
+
+@router.get("/support/access/{grant_id}/context")
+async def view_support_context(
+    grant_id: uuid.UUID,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    row = await _privacy_support_service(db, current, restaurant_db=restaurant_db).support_context(grant_id, ip_address=ip_address, user_agent=user_agent)
+    return ok(row.model_dump(mode="json"))
 
 
 @router.get("/operations/summary")

@@ -63,6 +63,62 @@ const billingSummary = {
   invoices: [],
 };
 
+const privacyRequest = {
+  id: "88888888-8888-4888-8888-888888888888",
+  company_id: companyId,
+  requester_user_id: "77777777-7777-4777-8777-777777777777",
+  request_type: "access",
+  subject_email: "tenant@example.com",
+  description: "ขอตรวจสอบข้อมูลระดับบัญชี",
+  status: "submitted",
+  identity_verification: "authenticated_owner",
+  target_at: "2026-09-02T08:00:00Z",
+  response_summary: null,
+  decision_reason: null,
+  reviewed_by: null,
+  completed_at: null,
+  created_at: "2026-08-03T08:00:00Z",
+  updated_at: "2026-08-03T08:00:00Z",
+};
+
+const supportGrant = {
+  id: "99999999-9999-4999-8999-999999999999",
+  ticket_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  company_id: companyId,
+  requested_by_operator_id: operator.id,
+  requested_scopes: ["account_state", "saas_controls", "billing_state"],
+  purpose: "ตรวจสอบ aggregate lifecycle เท่านั้น",
+  duration_minutes: 30,
+  status: "pending",
+  decided_by_user_id: null,
+  decision_reason: null,
+  decided_at: null,
+  expires_at: null,
+  last_accessed_at: null,
+  revoked_at: null,
+  revoked_by_type: null,
+  revoke_reason: null,
+  created_at: "2026-08-03T08:00:00Z",
+  updated_at: "2026-08-03T08:00:00Z",
+};
+
+const supportTicket = {
+  id: supportGrant.ticket_id,
+  ticket_number: "SUP-20260803-TEST0001",
+  company_id: companyId,
+  requester_user_id: privacyRequest.requester_user_id,
+  category: "technical",
+  priority: "high",
+  status: "open",
+  subject: "Account status differs from billing",
+  assigned_operator_id: null,
+  closed_at: null,
+  created_at: "2026-08-03T08:00:00Z",
+  updated_at: "2026-08-03T08:00:00Z",
+  messages: [],
+  access_grants: [],
+};
+
 function response<T>(data: T): { data: T; meta: { version: string; identity_database: string }; error: null } {
   return {
     data,
@@ -340,6 +396,70 @@ test("Tenant owner sees a read-only billing status without a payment action", as
   await expect(page.getByRole("heading", { name: "แพ็กเกจและการเรียกเก็บเงิน" })).toBeVisible();
   await expect(page.getByText("ระบบรับชำระค่าสมาชิกยังไม่เปิดใช้งาน", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /ชำระ|บัตร|checkout/i })).toHaveCount(0);
+});
+
+test("Platform requests named support access and cannot silently impersonate a Tenant", async ({ page }) => {
+  await installAuthenticatedSession(page);
+  let capturedAccess: Record<string, unknown> | null = null;
+  let tickets = [supportTicket];
+  await page.route("**/api/v1/platform/privacy/requests", async (route) => {
+    await fulfill(route, response([privacyRequest]));
+  });
+  await page.route("**/api/v1/platform/support/tickets", async (route) => {
+    await fulfill(route, response(tickets));
+  });
+  await page.route(`**/api/v1/platform/support/tickets/${supportTicket.id}/access`, async (route) => {
+    capturedAccess = route.request().postDataJSON() as Record<string, unknown>;
+    tickets = [{ ...supportTicket, access_grants: [supportGrant] }];
+    await fulfill(route, response(supportGrant), 201);
+  });
+
+  await page.goto("/platform/support");
+  await expect(page.getByRole("heading", { name: "Privacy & Support" })).toBeVisible();
+  await expect(page.getByText(/ไม่มี impersonation token/)).toBeVisible();
+  await page.getByLabel("เหตุผล / วัตถุประสงค์สำหรับ Audit Log").fill("ขอ aggregate context เพื่อแก้ ticket");
+  await page.getByRole("button", { name: "ขอ Access 30 นาที" }).click();
+  await expect.poll(() => capturedAccess?.duration_minutes).toBe(30);
+  await expect.poll(() => capturedAccess?.requested_scopes).toEqual(["account_state", "saas_controls", "billing_state"]);
+  await expect(page.getByText("รอ Tenant อนุมัติ", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Impersonate|สวมรอย|เข้าสู่ระบบแทน/i })).toHaveCount(0);
+});
+
+test("Tenant owner submits a privacy request and decides a time-limited support grant", async ({ page }) => {
+  await page.addInitScript(({ company, tenant }) => {
+    window.localStorage.setItem("erp-auth", JSON.stringify({ state: { accessToken: "tenant-access-token", refreshToken: "tenant-refresh-token", user: tenant, companyId: company, branchId: null, stationKey: null, permissions: [] }, version: 0 }));
+  }, { company: companyId, tenant: { id: privacyRequest.requester_user_id, username: "tenant.owner", display_name: "Tenant Owner" } });
+  let privacyRows: typeof privacyRequest[] = [];
+  let capturedDecision: Record<string, unknown> | null = null;
+  let ticketRows = [{ ...supportTicket, access_grants: [supportGrant] }];
+  await page.route("**/api/v1/privacy-support/privacy-requests", async (route) => {
+    if (route.request().method() === "POST") {
+      privacyRows = [privacyRequest];
+      await fulfill(route, { data: privacyRequest, meta: { version: "test" }, error: null }, 201);
+      return;
+    }
+    await fulfill(route, { data: privacyRows, meta: { version: "test" }, error: null });
+  });
+  await page.route("**/api/v1/privacy-support/tickets", async (route) => {
+    await fulfill(route, { data: ticketRows, meta: { version: "test" }, error: null });
+  });
+  await page.route(`**/api/v1/privacy-support/access/${supportGrant.id}/decision`, async (route) => {
+    capturedDecision = route.request().postDataJSON() as Record<string, unknown>;
+    ticketRows = [{ ...supportTicket, access_grants: [{ ...supportGrant, status: "approved", expires_at: "2026-08-03T09:00:00Z" }] }];
+    await fulfill(route, { data: ticketRows[0].access_grants[0], meta: { version: "test" }, error: null });
+  });
+  await page.route("**/api/v1/system/me/branches", async (route) => { await fulfill(route, { data: [], meta: { version: "test" }, error: null }); });
+  await page.route("**/api/v1/restaurant/me/brand-navigation", async (route) => { await fulfill(route, { data: [], meta: { version: "test" }, error: null }); });
+
+  await page.goto("/privacy-support");
+  await expect(page.getByRole("heading", { name: "ความเป็นส่วนตัวและการช่วยเหลือ" })).toBeVisible();
+  await page.getByLabel("รายละเอียด").first().fill("ขอตรวจสอบข้อมูลบัญชี");
+  await page.getByRole("button", { name: "ส่งคำขอ" }).click();
+  await expect(page.locator("article").getByText("access", { exact: true })).toBeVisible();
+  await page.getByLabel("เหตุผลการตัดสินใจ support access").fill("อนุมัติเฉพาะขอบเขตและเวลาที่ระบุ");
+  await page.getByRole("button", { name: "อนุมัติ" }).click();
+  await expect.poll(() => capturedDecision?.decision).toBe("approved");
+  await expect(page.getByText("คำขอสิทธิ์ช่วยเหลือรออนุมัติ", { exact: true })).toHaveCount(0);
 });
 
 test("dashboard presents error then recovers to an empty state", async ({ page }) => {

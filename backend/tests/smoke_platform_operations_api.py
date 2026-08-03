@@ -13,7 +13,7 @@ from app.models.platform import PlatformOperationsSnapshot, PlatformOperator
 from app.utils.security import hash_password
 
 
-DATABASE_PREFIX = "restaurant_saas_operations_"
+DATABASE_PREFIXES = ("restaurant_saas_operations_", "restaurant_saas_beta_")
 PLATFORM_USERNAME = "operations.platform.owner"
 PLATFORM_PASSWORD = "Operations-Platform-Password!"
 PRIVATE_MARKERS = ("/secure/private", "postgresql://", "password=private")
@@ -31,7 +31,7 @@ def expect(response, expected: int, label: str):
 
 async def prepare_operator() -> None:
     configured_database = os.environ.get("SAAS_OPERATIONS_DATABASE_NAME", "")
-    if not configured_database.startswith(DATABASE_PREFIX):
+    if not configured_database.startswith(DATABASE_PREFIXES):
         raise RuntimeError("Operations smoke refuses to write a non-isolated database")
     async with AsyncSessionLocal() as db:
         actual_database = await db.scalar(func.current_database())

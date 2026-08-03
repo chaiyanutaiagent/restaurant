@@ -106,7 +106,8 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
             is_active=True,
         )
         session = AsyncMock()
-        session.scalar.return_value = user
+        # User lookup succeeds; legacy Company has no SaaS membership row.
+        session.scalar.side_effect = [user, None]
 
         with (
             patch("app.services.auth_service.verify_password", return_value=True),
@@ -142,7 +143,8 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
             is_active=True,
         )
         session = AsyncMock()
-        session.scalar.return_value = user
+        # User lookup succeeds; legacy Company has no SaaS membership row.
+        session.scalar.side_effect = [user, None]
 
         with (
             patch("app.services.auth_service.verify_password", return_value=True),

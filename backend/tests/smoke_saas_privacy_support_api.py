@@ -19,7 +19,7 @@ from app.models.user import User
 from app.utils.security import hash_password
 
 
-DATABASE_PREFIX = "restaurant_saas_privacy_"
+DATABASE_PREFIXES = ("restaurant_saas_privacy_", "restaurant_saas_beta_")
 PLATFORM_USERNAME = "privacy.platform.owner"
 PLATFORM_PASSWORD = "Privacy-Platform-Password!"
 SECOND_OPERATOR = "privacy.second.owner"
@@ -39,7 +39,7 @@ def expect(response, expected: int, label: str):
 
 async def prepare_operators() -> None:
     configured = os.environ.get("SAAS_PRIVACY_DATABASE_NAME", "")
-    if not configured.startswith(DATABASE_PREFIX):
+    if not configured.startswith(DATABASE_PREFIXES):
         raise RuntimeError("Privacy/support smoke refuses to write a non-isolated database")
     async with AsyncSessionLocal() as db:
         if await db.scalar(func.current_database()) != configured:

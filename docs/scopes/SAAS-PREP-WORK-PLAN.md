@@ -46,7 +46,7 @@ phase7_started: false
 | 5 | `SAAS-PREP-OPERATIONS-05` | Protected operations summary, health snapshots, alert and backup status | Scope 04 | Complete |
 | 6 | `SAAS-PREP-BILLING-06` | Provider-neutral subscription lifecycle and billing decision boundary | Scope 05; provider selection remains parked | Complete |
 | 7 | `SAAS-PREP-PDPA-SUPPORT-07` | Privacy lifecycle, data-subject requests, support tickets, and audited support access | Scope 06 | Complete |
-| 8 | `SAAS-PREP-BETA-GATE-08` | Migration, authorization, security, load, browser, and recovery evidence | Scopes 01-07 | Pending |
+| 8 | `SAAS-PREP-BETA-GATE-08` | Migration, authorization, security, load, browser, and recovery evidence | Scopes 01-07 | Complete |
 | 9 | `P5-PHYSICAL-UAT-SIGNOFF-06` | Real counter, kitchen, pickup, camera, printer, and network UAT | Hardware received | Parked |
 | 10 | Public launch decision | Owner-controlled go/no-go using both SaaS and Restaurant evidence | All gates and sign-offs | Blocked |
 
@@ -592,13 +592,95 @@ Tenant session mutation must be unwound because neither is authorized in this Sc
 - Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-privacy-support-07-20260803T081908Z/manifest.txt`.
 - Temporary databases remaining: `0`; local legacy and Platform migration heads unchanged.
 
-## Later-scope boundaries
+## SAAS-PREP-BETA-GATE-08
 
-### SAAS-PREP-BETA-GATE-08
+### Problem
 
-Evidence only: migrations, authorization, tenant isolation, dependency review, load,
-browser flows, backup/restore, and operator handoff. Passing this gate still does not
-activate production without Restaurant physical UAT and owner sign-off.
+Scopes 01-07 each have focused evidence, but there is no single latest-schema rehearsal or
+handoff record proving that the combined SaaS preparation baseline can migrate, authorize,
+serve concurrent beta traffic, render its browser workflows, and recover isolated data
+without changing the live local source databases.
+
+### In scope
+
+- Produce one beta-readiness Markdown report linking the scope-control plan, current commit,
+  latest migration heads, test results, recovery evidence, load measurements, known warnings,
+  and remaining launch blockers.
+- Clone all three current local database boundaries and upgrade only the isolated legacy and
+  Platform clones to the latest SaaS preparation heads; leave the Restaurant clone on its
+  current release head.
+- Rehearse latest migration downgrade/re-upgrade for the two affected identity boundaries.
+- Run the full backend unit-test suite and a latest-schema multi-Tenant authorization/API
+  smoke on an isolated database.
+- Run a bounded concurrent load probe against protected aggregate Platform endpoints and
+  record request count, concurrency, errors, and latency percentiles with explicit thresholds.
+- Run Python dependency consistency, npm lockfile integrity/audit evidence, static sensitive
+  marker checks over SaaS surfaces, frontend type-check/build, and the complete Platform,
+  public-account, billing, privacy, and support browser suite.
+- Create a latest-schema three-boundary backup and run the existing isolated restore drill;
+  verify checksums and that source database fingerprints remain unchanged.
+- Gather the latest Scope 01-07 manifests where available and produce a machine-readable
+  Scope 08 manifest without copying secrets, raw database dumps, or Tenant records into Git.
+
+### Out of scope
+
+- New product behavior, schema/table changes, dependency upgrades, vulnerability remediation,
+  performance tuning, provider integration, production infrastructure, or production data.
+- Claiming legal certification, security certification, unlimited scale, or production SLA.
+- Applying migrations to the local source databases, deploying to production, completing
+  physical-device UAT, starting Takeaway Phase 6, or starting Retail Phase 7.
+
+### Acceptance criteria
+
+- No new Alembic revision is introduced by Scope 08, and isolated legacy/Platform paths
+  reach `p11privacy0013`/`p11platform0015` through downgrade/re-upgrade.
+- Full backend tests and latest-schema API authorization/isolation smoke pass.
+- The load probe completes with zero HTTP/application errors, records p50/p95/max, and stays
+  within the explicitly documented local-beta threshold.
+- Frontend type-check/build and all current browser flows pass.
+- Dependency consistency/integrity and sensitive-marker gates have recorded outcomes; any
+  third-party advisory that cannot be safely fixed inside this evidence Scope becomes a
+  named follow-up blocker rather than an unplanned upgrade.
+- Latest-schema backup/restore checksums pass and all three source fingerprints are unchanged.
+- The final report states that SaaS preparation is beta-ready only, while physical hardware
+  UAT, production activation, provider selection/live billing, and owner go/no-go remain
+  blocked or parked.
+
+### Verification
+
+- `scripts/rehearse-saas-beta-readiness.sh --yes` on isolated database clones.
+- Full backend unittest discovery plus latest-schema API and concurrent-load smoke scripts.
+- `npm ci`, local/offline `npm audit`, `npm run type-check`, `npm run build`, and Platform
+  Playwright suite. A current online advisory lookup remains a separately authorized release
+  follow-up because it discloses dependency/lock metadata to the registry service.
+- Existing three-boundary backup and isolated restore-drill scripts with checksum evidence.
+
+### Rollback
+
+Delete only temporary Scope 08 databases/artifacts and revert the Scope 08 report/gate
+commit. Since this Scope adds no migration or product behavior and never changes source
+databases, no application or production rollback is required.
+
+### Completion evidence
+
+- Full backend discovery: 223 tests passed; Python dependency consistency and static SaaS
+  boundary/sensitive-marker gates passed.
+- Isolated legacy and Platform clones reached `p11privacy0013` and `p11platform0015`, each
+  passed downgrade/re-upgrade, while the Restaurant clone remained at `p1restaurant0003`.
+- Latest-schema Platform operations and two-Tenant/two-operator privacy/support authorization
+  smokes passed.
+- Local aggregate-endpoint load probe: 120 requests at concurrency 10, zero errors,
+  p50 62.18 ms, p95 238.07 ms, max 311.06 ms, and 114.43 requests/second. The explicit
+  thresholds were p95 <= 3,000 ms, max <= 10,000 ms, and zero errors.
+- Clean frontend dependency install, TypeScript check, production build, and all 10 current
+  Platform/public/Tenant browser tests passed. Offline npm audit returned zero locally
+  cached findings; this is not a current online advisory guarantee.
+- Latest-schema three-boundary backup and isolated restore drill passed with matching content
+  checksums and a six-second measured local RTO. Live local source fingerprints were unchanged.
+- No Alembic revision, dependency upgrade, production deployment, hardware-UAT action,
+  Takeaway Phase 6 work, or Retail Phase 7 work was introduced by this Scope.
+- Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-beta-readiness-08-20260803T083225Z/manifest.txt`.
+- Handoff report: `docs/scopes/SAAS-BETA-READINESS.md`.
 
 ## Change control
 

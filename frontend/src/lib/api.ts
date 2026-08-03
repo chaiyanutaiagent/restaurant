@@ -8,6 +8,7 @@ import { useDeviceStore } from "@/stores/device.store";
 import type { ApiResponse } from "@/types/api";
 import type { LoginRequest, MeResponse, TokenResponse } from "@/types/auth";
 import type { Branch, Permission, User, UserBranch } from "@/types/user";
+import type { SaasActionResponse, SaasMembership, SaasSignupResponse } from "@/types/membership";
 
 type RetryableConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -155,4 +156,29 @@ export const systemApi = {
   users: (page = 1, limit = 20) =>
     api.get<ApiResponse<User[]>>("/system/users", { params: { page, limit } }),
   branches: () => api.get<ApiResponse<Branch[]>>("/system/branches")
+};
+
+export const membershipApi = {
+  signup: (data: {
+    company_name: string;
+    owner_display_name: string;
+    owner_email: string;
+    username: string;
+    password: string;
+    phone?: string | null;
+    terms_accepted: boolean;
+    privacy_accepted: boolean;
+  }) => api.post<ApiResponse<SaasSignupResponse>>("/membership/signup", data),
+  requestVerification: (email: string) =>
+    api.post<ApiResponse<SaasActionResponse>>("/membership/verification/request", { email }),
+  verifyEmail: (token: string) =>
+    api.post<ApiResponse<SaasActionResponse>>("/membership/verification/confirm", { token }),
+  requestPasswordReset: (email: string) =>
+    api.post<ApiResponse<SaasActionResponse>>("/membership/password-reset/request", { email }),
+  resetPassword: (token: string, newPassword: string) =>
+    api.post<ApiResponse<SaasActionResponse>>("/membership/password-reset/confirm", {
+      token,
+      new_password: newPassword
+    }),
+  me: () => api.get<ApiResponse<SaasMembership>>("/membership/me")
 };

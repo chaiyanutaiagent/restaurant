@@ -113,6 +113,8 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
         ) : null}
       </section>
 
+      {data.membership ? <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6"><p className="text-sm text-violet-300">SaaS membership</p><div className="mt-3 flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-xl font-semibold">{data.membership.status}</h3><p className="mt-1 text-sm text-slate-400">{data.membership.owner_email} · onboarding {data.membership.onboarding_state}</p></div><div className="text-right text-sm text-slate-400">{data.membership.trial_ends_at ? <>Trial สิ้นสุด {new Date(data.membership.trial_ends_at).toLocaleString("th-TH")}<br />คงเหลือ {data.membership.trial_days_remaining ?? 0} วัน</> : "ยังไม่เริ่ม Trial"}</div></div></section> : null}
+
       <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><p className="text-sm text-sky-300">Aggregate usage</p><h3 className="mt-1 text-xl font-semibold">การใช้ทรัพยากรตาม Plan</h3><p className="mt-1 text-xs text-slate-400">ไม่รวมรายละเอียดออเดอร์ ลูกค้า หรือข้อมูลพนักงาน</p></div>

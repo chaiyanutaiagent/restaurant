@@ -144,10 +144,10 @@ class PlatformTenantProfile(UUIDMixin, TimestampMixin, Base):
         nullable=False,
         server_default=text("'{}'::json"),
     )
-    created_by: Mapped[uuid.UUID] = mapped_column(
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("platform_operators.id"),
-        nullable=False,
+        nullable=True,
     )
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     suspended_by: Mapped[uuid.UUID | None] = mapped_column(
@@ -201,4 +201,98 @@ class PlatformTenantUsageSnapshot(UUIDMixin, TimestampMixin, Base):
         UUID(as_uuid=True),
         ForeignKey("platform_operators.id"),
         nullable=False,
+    )
+
+
+class SaasTenantMembership(UUIDMixin, TimestampMixin, Base):
+    """Public SaaS owner lifecycle; separate from staff and CRM memberships."""
+
+    __tablename__ = "saas_tenant_memberships"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending_verification', 'trial_active', 'trial_expired', "
+            "'active', 'suspended', 'cancelled')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "onboarding_state IN ('awaiting_verification', 'setup_required', 'ready')",
+            name="onboarding_state_valid",
+        ),
+        Index("ix_saas_memberships_status_trial", "status", "trial_ends_at"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    owner_email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        server_default=text("'pending_verification'"),
+    )
+    onboarding_state: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        server_default=text("'awaiting_verification'"),
+    )
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    trial_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    trial_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    terms_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    privacy_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SaasAccountCredential(UUIDMixin, Base):
+    """Single-use hashed credential for verification and password recovery."""
+
+    __tablename__ = "saas_account_credentials"
+    __table_args__ = (
+        CheckConstraint(
+            "purpose IN ('verify_email', 'reset_password')",
+            name="purpose_valid",
+        ),
+        Index(
+            "ix_saas_account_credentials_lookup",
+            "purpose",
+            "expires_at",
+            "used_at",
+        ),
+        Index("ix_saas_account_credentials_company", "company_id", "created_at"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    purpose: Mapped[str] = mapped_column(String(30), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    request_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )

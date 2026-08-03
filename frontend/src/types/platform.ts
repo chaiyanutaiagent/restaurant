@@ -75,6 +75,7 @@ export type PlatformCompanyDetail = PlatformCompanyListItem & {
     total_steps: number;
     steps: PlatformOnboardingStep[];
   };
+  membership: import("@/types/membership").SaasMembership | null;
   suspension_reason: string | null;
   reactivated_at: string | null;
   reactivation_reason: string | null;

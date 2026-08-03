@@ -141,6 +141,16 @@ test("Platform Owner login opens dashboard and can reach company and audit views
           { key: "staff", label: "Staff", complete: true, count: 1, target: 1 },
         ],
       },
+      membership: {
+        company_id: companyId,
+        owner_email: "public-owner@example.com",
+        status: "trial_active",
+        onboarding_state: "setup_required",
+        email_verified_at: "2026-08-03T08:00:00Z",
+        trial_started_at: "2026-08-03T08:00:00Z",
+        trial_ends_at: "2026-08-17T08:00:00Z",
+        trial_days_remaining: 14,
+      },
       suspension_reason: null,
       reactivated_at: null,
       reactivation_reason: null,
@@ -215,6 +225,7 @@ test("Platform Owner login opens dashboard and can reach company and audit views
   await expect(page.getByRole("heading", { name: company.name })).toBeVisible();
   await expect(page.getByText("Restaurant pilot", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "การใช้ทรัพยากรตาม Plan" })).toBeVisible();
+  await expect(page.getByText("trial_active", { exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: /Audit Log/ }).click();
   await expect(page.getByRole("heading", { name: "Platform Audit Log" })).toBeVisible();
@@ -306,4 +317,62 @@ test("Platform Owner can enroll MFA and receives one-time recovery codes", async
   await page.getByRole("button", { name: "ยืนยันและเปิด MFA" }).click();
   await expect(page.getByText("ABCD-EFGH-JKLM", { exact: true })).toBeVisible();
   await expect(page.getByText(/ระบบจะแสดงครั้งเดียว/)).toBeVisible();
+});
+
+test("public SaaS owner can complete signup, verification, and password recovery pages", async ({ page }) => {
+  await page.route("**/api/v1/membership/signup", async (route) => {
+    await fulfill(route, response({
+      company_id: companyId,
+      status: "pending_verification",
+      verification_required: true,
+      message: "Account created; check your email to verify the account",
+    }), 201);
+  });
+  await page.route("**/api/v1/membership/verification/confirm", async (route) => {
+    await fulfill(route, response({
+      message: "Email verified; the SaaS trial is active",
+      membership: {
+        company_id: companyId,
+        owner_email: "public-owner@example.com",
+        status: "trial_active",
+        onboarding_state: "setup_required",
+        email_verified_at: "2026-08-03T08:00:00Z",
+        trial_started_at: "2026-08-03T08:00:00Z",
+        trial_ends_at: "2026-08-17T08:00:00Z",
+        trial_days_remaining: 14,
+      },
+    }));
+  });
+  await page.route("**/api/v1/membership/password-reset/request", async (route) => {
+    await fulfill(route, response({ message: "If the account is eligible, an email has been accepted for delivery", membership: null }), 202);
+  });
+  await page.route("**/api/v1/membership/password-reset/confirm", async (route) => {
+    await fulfill(route, response({ message: "Password reset; previous refresh sessions were revoked", membership: null }));
+  });
+
+  await page.goto("/signup");
+  await page.locator("#company_name").fill("ร้านสมาชิก SaaS");
+  await page.locator("#owner_display_name").fill("เจ้าของร้าน");
+  await page.locator("#owner_email").fill("public-owner@example.com");
+  await page.locator("#username").fill("public.owner");
+  await page.locator("#password").fill("Public-Owner-Password!");
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "เริ่มทดลองใช้" }).click();
+  await expect(page.getByText("สร้างบัญชีแล้ว กรุณาตรวจอีเมลเพื่อยืนยัน")).toBeVisible();
+  await expect(page.getByText(companyId, { exact: true })).toBeVisible();
+
+  await page.goto("/verify-email#token=browser-verification-token-1234567890");
+  await page.getByRole("button", { name: "ยืนยันอีเมล" }).click();
+  await expect(page.getByText("ยืนยันสำเร็จและเริ่มช่วงทดลองใช้แล้ว")).toBeVisible();
+  await expect(page.getByRole("link", { name: "เข้าสู่ระบบ" })).toHaveAttribute("href", `/login?company_id=${companyId}`);
+
+  await page.goto("/forgot-password");
+  await page.locator("#email").fill("public-owner@example.com");
+  await page.getByRole("button", { name: "ขอลิงก์ตั้งรหัสผ่าน" }).click();
+  await expect(page.getByText(/หากอีเมลนี้มีสิทธิ์/)).toBeVisible();
+
+  await page.goto("/reset-password#token=browser-reset-token-1234567890");
+  await page.locator("#new-password").fill("Public-Owner-New-Password!");
+  await page.getByRole("button", { name: "บันทึกรหัสผ่านใหม่" }).click();
+  await expect(page.getByText(/session เดิมถูกเพิกถอน/)).toBeVisible();
 });

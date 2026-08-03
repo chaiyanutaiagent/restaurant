@@ -12,6 +12,10 @@ import { initAutoSync } from "@/lib/syncService";
 import AccountingPage from "@/pages/accounting/AccountingPage";
 import LoginPage from "@/pages/auth/LoginPage";
 import AcceptInvitationPage from "@/pages/auth/AcceptInvitationPage";
+import SignupPage from "@/pages/auth/SignupPage";
+import VerifyEmailPage from "@/pages/auth/VerifyEmailPage";
+import ForgotPasswordPage from "@/pages/auth/ForgotPasswordPage";
+import ResetPasswordPage from "@/pages/auth/ResetPasswordPage";
 import DashboardPage from "@/pages/dashboard/DashboardPage";
 import ModuleSelectorPage from "@/pages/ModuleSelectorPage";
 import StorefrontPage from "@/pages/storefront/StorefrontPage";
@@ -97,6 +101,10 @@ export default function App(): JSX.Element {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/platform/login" element={<PlatformLoginPage />} />
           <Route element={<PlatformProtectedRoute />}>
             <Route element={<PlatformShell />}>

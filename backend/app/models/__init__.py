@@ -5,6 +5,8 @@ from app.models.platform import (
     PlatformSession,
     PlatformTenantProfile,
     PlatformTenantUsageSnapshot,
+    SaasAccountCredential,
+    SaasTenantMembership,
 )
 from app.models.branch import Branch
 from app.models.role import Role, Permission, role_permissions_table
@@ -86,6 +88,9 @@ __all__ = [
     "Company",
     "PlatformOperator",
     "PlatformTenantProfile",
+    "PlatformTenantUsageSnapshot",
+    "SaasAccountCredential",
+    "SaasTenantMembership",
     "Branch",
     "Role",
     "Permission",

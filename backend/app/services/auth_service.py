@@ -13,12 +13,14 @@ from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.company import Company
 from app.models.role import Role
+from app.models.platform import SaasTenantMembership
 from app.models.staff_assignment import StaffRoleAssignment
 from app.models.user import User, UserBranch
 from app.services.business_context_service import resolve_user_branch_context
 from app.services.platform_reference_projection import enqueue_reference_event
 from app.business_context import CanonicalBusinessContext
 from app.services.staff_scope_policy import assignment_applies_to_context, normalized_station_key
+from app.services.saas_membership_service import membership_access_error
 from app.utils.security import (
     create_access_token,
     create_refresh_token,
@@ -55,6 +57,19 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",
             )
+
+        membership = await self.db.scalar(
+            select(SaasTenantMembership).where(
+                SaasTenantMembership.company_id == company_id
+            )
+        )
+        if membership is not None:
+            access_error = membership_access_error(membership)
+            if access_error:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=access_error,
+                )
 
         user.last_login_at = datetime.now(timezone.utc)
         await self.db.flush()
@@ -283,6 +298,16 @@ class AuthService:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Refresh token has been revoked",
+            )
+        membership = await self.db.scalar(
+            select(SaasTenantMembership).where(
+                SaasTenantMembership.company_id == company.id
+            )
+        )
+        if membership is not None and membership_access_error(membership):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="SaaS membership no longer authorizes this session",
             )
 
         refresh_record.revoked_at = now

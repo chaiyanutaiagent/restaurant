@@ -42,7 +42,7 @@ phase7_started: false
 | 1 | `SAAS-PREP-DASHBOARD-01` | Correct and verify the existing Platform Owner dashboard | Existing `d788d7d` baseline | Complete |
 | 2 | `SAAS-PREP-PLATFORM-AUTH-02` | MFA-ready Platform sessions, logout, revocation, and recovery controls | Scope 01 | Complete |
 | 3 | `SAAS-PREP-TENANT-USAGE-03` | Plan usage, conditional onboarding, last activity, and attention queue | Scope 02 | Complete |
-| 4 | `SAAS-PREP-MEMBERSHIP-04` | Self-service tenant signup, verification, reset, trial, and onboarding lifecycle | Scope 03 | Active |
+| 4 | `SAAS-PREP-MEMBERSHIP-04` | Self-service tenant signup, verification, reset, trial, and onboarding lifecycle | Scope 03 | Complete |
 | 5 | `SAAS-PREP-OPERATIONS-05` | Protected operations summary, health snapshots, alert and backup status | Scope 04 | Pending |
 | 6 | `SAAS-PREP-BILLING-06` | Provider-neutral subscription lifecycle and billing decision boundary | Scope 05 and provider decision | Pending |
 | 7 | `SAAS-PREP-PDPA-SUPPORT-07` | Privacy lifecycle, data-subject requests, support tickets, and audited support access | Scope 06 | Pending |
@@ -241,12 +241,93 @@ aggregate snapshots that must be retained. No Tenant operational record is chang
 - Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-tenant-usage-03-20260803T065817Z/manifest.txt`.
 - Temporary databases remaining: `0`; local legacy and Platform migration heads unchanged.
 
+## SAAS-PREP-MEMBERSHIP-04
+
+### Problem
+
+Staff accounts and CRM loyalty records exist, but a prospective Restaurant SaaS owner
+cannot create a Tenant, verify ownership of an email address, recover a forgotten password,
+or enter a controlled trial without a Platform operator creating the account manually.
+The current Tenant SMTP settings are not suitable for pre-Tenant account messages.
+
+### In scope
+
+- Add public self-service signup for one Restaurant pilot Tenant and one Company Owner.
+- Require terms/privacy acceptance and normalized unique owner email for public signup.
+- Store a provider-neutral Tenant membership lifecycle with pending verification, active
+  trial, expired trial, active, suspended, and cancelled states.
+- Use single-use, time-limited, hashed email-verification and password-reset credentials;
+  never persist or log a raw credential.
+- Add resend-verification and non-enumerating forgot-password endpoints with basic
+  application-level request throttling that remains safe when Redis is unavailable.
+- Add system-level SMTP delivery configuration for account messages. Production must use
+  configured SMTP and HTTPS public links; development/test may use an explicit console
+  transport that does not output raw credentials.
+- Start a 14-day trial only after email verification, block login/refresh before
+  verification and after trial expiry, and revoke existing refresh sessions after a
+  password reset.
+- Expose the current lifecycle to the authenticated Tenant owner and a protected summary
+  to the Platform owner without exposing raw credentials.
+- Add signup, verification, forgot/reset, and completion pages to the web application.
+- Add matching legacy and Platform-core Alembic migrations; rehearse only on isolated
+  databases and do not apply them to production.
+
+### Out of scope
+
+- Subscription charging, cards, bank accounts, QR payment, invoices, tax receipts, coupons,
+  payment-provider webhooks, or automatic paid-plan activation.
+- SMS/LINE OTP, social login, SSO, native-app signup, custom domains, or marketing journeys.
+- Staff invitation changes, CRM loyalty membership changes, production deployment,
+  hardware UAT, Takeaway Phase 6, and Retail Phase 7.
+
+### Acceptance criteria
+
+- A new owner can sign up, but cannot log in until a valid verification credential is used.
+- Verification credentials expire, are stored only as hashes, and can be consumed once.
+- Verification begins exactly one trial window and returns the Company ID required by the
+  existing Tenant login boundary.
+- Forgot-password responses do not reveal whether an email exists; reset credentials
+  expire, are single-use, and a successful reset revokes every prior Tenant refresh token.
+- Pending, expired, suspended, and cancelled memberships cannot create or refresh sessions;
+  legacy Companies without a membership record remain compatible.
+- Production configuration rejects console delivery, incomplete SMTP settings, or a
+  non-HTTPS public URL.
+- Both migration paths rehearse upgrade/downgrade/re-upgrade on isolated databases.
+- Focused backend tests, API smoke, frontend type-check/build, and browser flows pass.
+
+### Verification
+
+- Focused membership schema, credential, lifecycle, access-policy, and configuration tests.
+- Isolated public membership API smoke with an in-process mail capture that proves raw
+  credentials are absent from API responses and database credential columns.
+- Upgrade, downgrade, and re-upgrade both affected migration paths on isolated databases.
+- `npm run type-check`, `npm run build`, and public membership Playwright flow.
+
+### Rollback
+
+Disable public membership routes, revert only the Scope 04 commit, then downgrade the Scope
+04 migration after confirming no pending signup or reset action must be retained. Existing
+Platform-created Companies and legacy Tenant login behavior remain compatible.
+
+### Completion evidence
+
+- Focused membership suite: 5 tests passed; focused Platform regression suite: 35 tests
+  passed.
+- Isolated legacy migration reached `p8member0010` and passed downgrade to `p7usage0009`
+  followed by re-upgrade.
+- Isolated Platform-core migration reached `p8platform0012` and passed downgrade to
+  `p7platform0011` followed by re-upgrade.
+- Isolated membership API smoke passed pending/expired access blocks, verification and
+  reset credential single-use, hash-only persistence, forgot-password non-enumeration,
+  refresh revocation, new-password login, and protected Platform lifecycle visibility.
+- Account links carry credentials in the URL fragment so reverse-proxy request paths do
+  not receive them; console delivery logs only a one-way recipient reference.
+- Frontend TypeScript check, production build, and 5 Platform/public-account browser tests
+  passed.
+- Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-membership-04-20260803T072035Z/manifest.txt`.
+- Temporary databases remaining: `0`; local legacy and Platform migration heads unchanged.
+
 ## Later-scope boundaries
-
-### SAAS-PREP-MEMBERSHIP-04
-
-Public tenant-account lifecycle without subscription charging. Trial and verification
-states are allowed; provider-specific payment collection is not.
 
 ### SAAS-PREP-OPERATIONS-05
 

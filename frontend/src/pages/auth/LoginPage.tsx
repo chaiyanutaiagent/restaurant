@@ -2,6 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Capacitor } from "@capacitor/core";
 import { Eye, EyeOff, Loader2, LockKeyhole, ShieldCheck } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,7 @@ export default function LoginPage(): JSX.Element {
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      company_id: import.meta.env.VITE_COMPANY_ID ?? window.localStorage.getItem("last_company_id") ?? "1b8a1818-44d6-4d5f-9d22-e5e17b23c081",
+      company_id: new URLSearchParams(window.location.search).get("company_id") ?? import.meta.env.VITE_COMPANY_ID ?? window.localStorage.getItem("last_company_id") ?? "1b8a1818-44d6-4d5f-9d22-e5e17b23c081",
       username: isNativeApp ? "" : "admin",
       password: ""
     }
@@ -108,6 +109,7 @@ export default function LoginPage(): JSX.Element {
                 </>
               )}
             </Button>
+            {!isNativeApp ? <div className="flex justify-between text-sm"><Link className="text-blue-600" to="/signup">เริ่มทดลองใช้</Link><Link className="text-blue-600" to="/forgot-password">ลืมรหัสผ่าน</Link></div> : null}
           </form>
         </CardContent>
       </Card>

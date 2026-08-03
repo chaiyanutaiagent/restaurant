@@ -4,7 +4,7 @@ from functools import cached_property
 from typing import Literal
 
 from pydantic import computed_field
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +17,23 @@ def resolve_api_docs_enabled(environment: str, configured: bool | None) -> bool:
     if configured is not None:
         return configured
     return environment != "production"
+
+
+def validate_saas_email_delivery_config(
+    *,
+    environment: str,
+    mode: str,
+    public_base_url: str,
+    smtp_host: str | None,
+    smtp_from_email: str | None,
+) -> None:
+    if mode == "smtp" and (not smtp_host or not smtp_from_email):
+        raise ValueError("SaaS SMTP mode requires host and from email")
+    if environment == "production":
+        if mode != "smtp":
+            raise ValueError("Production SaaS account email delivery must use SMTP")
+        if not public_base_url.startswith("https://"):
+            raise ValueError("Production SaaS public base URL must use HTTPS")
 
 
 class Settings(BaseSettings):
@@ -62,6 +79,19 @@ class Settings(BaseSettings):
     allowed_image_types: list[str] = Field(
         default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
     )
+    saas_public_base_url: str = "http://localhost:4173"
+    saas_email_delivery_mode: Literal["console", "smtp"] = "console"
+    saas_smtp_host: str | None = None
+    saas_smtp_port: int = Field(default=587, ge=1, le=65535)
+    saas_smtp_username: str | None = None
+    saas_smtp_password: str | None = None
+    saas_smtp_from_email: str | None = None
+    saas_smtp_from_name: str = "Restaurant SaaS"
+    saas_smtp_use_tls: bool = False
+    saas_smtp_start_tls: bool = True
+    saas_verification_expire_hours: int = Field(default=24, ge=1, le=72)
+    saas_password_reset_expire_minutes: int = Field(default=30, ge=10, le=120)
+    saas_trial_days: int = Field(default=14, ge=1, le=90)
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env", "../../.env"),
@@ -71,6 +101,18 @@ class Settings(BaseSettings):
         # Compose. Service-specific bootstrap variables are not app settings.
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def validate_saas_delivery(self) -> "Settings":
+        validate_saas_email_delivery_config(
+            environment=self.environment,
+            mode=self.saas_email_delivery_mode,
+            public_base_url=self.saas_public_base_url,
+            smtp_host=self.saas_smtp_host,
+            smtp_from_email=self.saas_smtp_from_email,
+        )
+        self.saas_public_base_url = self.saas_public_base_url.rstrip("/")
+        return self
 
     @computed_field  # type: ignore[prop-decorator]
     @property

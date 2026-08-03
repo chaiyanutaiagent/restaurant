@@ -23,6 +23,7 @@ from app.models.platform import (
     PlatformSession,
     PlatformTenantProfile,
     PlatformTenantUsageSnapshot,
+    SaasTenantMembership,
 )
 from app.models.product import Product
 from app.models.restaurant import Brand
@@ -54,6 +55,7 @@ from app.schemas.platform import (
     PlatformTokenResponse,
 )
 from app.services.platform_reference_projection import enqueue_reference_event
+from app.services.saas_membership_service import SaasMembershipService
 from app.services.tenant_export_service import TenantExportBoundary, build_tenant_export
 from app.utils.platform_security import (
     build_totp_uri,
@@ -1232,6 +1234,11 @@ class PlatformTenantService:
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
         company, profile = row
+        membership = await self.db.scalar(
+            select(SaasTenantMembership).where(
+                SaasTenantMembership.company_id == company_id
+            )
+        )
         onboarding = await self._onboarding(company, profile)
         controls = self._controls(profile)
         return PlatformCompanyDetailRead(
@@ -1241,6 +1248,9 @@ class PlatformTenantService:
             timezone=company.timezone,
             controls=controls,
             onboarding=onboarding,
+            membership=(
+                SaasMembershipService.read(membership) if membership is not None else None
+            ),
             suspension_reason=profile.suspension_reason if profile else None,
             reactivated_at=profile.reactivated_at if profile else None,
             reactivation_reason=profile.reactivation_reason if profile else None,

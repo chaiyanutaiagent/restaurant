@@ -8,6 +8,7 @@ import uuid
 from pydantic import Field, field_validator
 
 from app.schemas import BaseSchema
+from app.schemas.membership import SaasMembershipRead
 
 
 USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,99}$")
@@ -279,6 +280,7 @@ class PlatformCompanyDetailRead(PlatformCompanyListItem):
     timezone: str
     controls: PlatformTenantControlsRead
     onboarding: PlatformOnboardingRead
+    membership: SaasMembershipRead | None = None
     suspension_reason: str | None = None
     reactivated_at: datetime | None = None
     reactivation_reason: str | None = None

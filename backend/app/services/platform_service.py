@@ -48,6 +48,11 @@ from app.utils.security import create_platform_access_token, decode_token, hash_
 DEFAULT_FEATURE_FLAGS = {"restaurant": True, "retail_pos": False, "takeaway": False}
 DEFAULT_PLAN_LIMITS = {"brands": 1, "branches": 1, "users": 10, "devices": 3}
 UNLIMITED_PLAN_LIMITS = {"brands": 0, "branches": 0, "users": 0, "devices": 0}
+PRODUCT_RELEASE_STATUS = {
+    "restaurant": "pilot",
+    "takeaway": "planned",
+    "retail_pos": "planned",
+}
 
 
 class PlatformAuthService:
@@ -187,37 +192,36 @@ class PlatformTenantService:
         branch_payment_counts = await grouped_counts(
             self.restaurant_db,
             BranchSettings,
-            BranchSettings.promptpay_target.is_not(None),
         )
         gateway_payment_counts = await grouped_counts(
             self.restaurant_db,
             PaymentGatewayConfig,
-            or_(
-                PaymentGatewayConfig.promptpay_target.is_not(None),
-                PaymentGatewayConfig.omise_enabled.is_(True),
-                PaymentGatewayConfig.twoc2p_enabled.is_(True),
-                PaymentGatewayConfig.scb_enabled.is_(True),
-            ),
         )
 
         onboarding_by_company: dict[uuid.UUID, tuple[int, int]] = {}
-        for company, _profile in company_rows:
-            completed_steps = sum(
-                (
-                    1,
-                    int(brand_counts.get(company.id, 0) > 0),
-                    int(branch_counts.get(company.id, 0) > 0),
-                    int(menu_counts.get(company.id, 0) > 0),
-                    int(
-                        branch_payment_counts.get(company.id, 0)
-                        + gateway_payment_counts.get(company.id, 0)
-                        > 0
-                    ),
-                    int(user_counts.get(company.id, 0) > 0),
-                    int(paired_device_counts.get(company.id, 0) > 0),
-                )
+        for company, profile in company_rows:
+            counts = {
+                "company": 1,
+                "brand": brand_counts.get(company.id, 0),
+                "branch": branch_counts.get(company.id, 0),
+                "menu": menu_counts.get(company.id, 0),
+                "payment": (
+                    branch_payment_counts.get(company.id, 0)
+                    + gateway_payment_counts.get(company.id, 0)
+                ),
+                "staff": user_counts.get(company.id, 0),
+                "device": paired_device_counts.get(company.id, 0),
+            }
+            steps = self._build_onboarding_steps(
+                controls=self._controls(profile),
+                counts=counts,
+                has_payment_configuration=counts["payment"] > 0,
+                registered_device_count=device_counts.get(company.id, 0),
             )
-            onboarding_by_company[company.id] = (completed_steps, 7)
+            onboarding_by_company[company.id] = (
+                sum(int(step.complete) for step in steps),
+                len(steps),
+            )
 
         active_rows = [(company, profile) for company, profile in company_rows if company.is_active]
         ready_companies = sum(
@@ -264,7 +268,7 @@ class PlatformTenantService:
                 suspended_companies=len(company_rows) - active_companies,
                 brands=sum(brand_counts.values()),
                 branches=sum(branch_counts.values()),
-                active_users=sum(user_counts.values()),
+                enabled_user_accounts=sum(user_counts.values()),
                 devices=sum(device_counts.values()),
                 paired_devices=sum(paired_device_counts.values()),
             ),
@@ -273,6 +277,7 @@ class PlatformTenantService:
                 pending_companies=active_companies - ready_companies,
                 total_active_companies=active_companies,
             ),
+            product_status=PRODUCT_RELEASE_STATUS,
             feature_usage=feature_usage,
             plan_usage=dict(sorted(plan_usage.items())),
             recent_companies=recent_companies,
@@ -434,7 +439,7 @@ class PlatformTenantService:
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
         company, profile = row
-        onboarding = await self._onboarding(company)
+        onboarding = await self._onboarding(company, profile)
         controls = self._controls(profile)
         return PlatformCompanyDetailRead(
             **self._list_item(company, profile).model_dump(),
@@ -687,7 +692,11 @@ class PlatformTenantService:
             payload={"source": source},
         )
 
-    async def _onboarding(self, company: Company) -> PlatformOnboardingRead:
+    async def _onboarding(
+        self,
+        company: Company,
+        profile: PlatformTenantProfile | None,
+    ) -> PlatformOnboardingRead:
         company_id = company.id
         identity_counts = {
             "company": 1,
@@ -720,6 +729,15 @@ class PlatformTenantService:
                 )
                 or 0
             ),
+            "registered_device": int(
+                await self.db.scalar(
+                    select(func.count()).select_from(DeviceRegistration).where(
+                        DeviceRegistration.company_id == company_id,
+                        DeviceRegistration.revoked_at.is_(None),
+                    )
+                )
+                or 0
+            ),
             "device": int(
                 await self.db.scalar(
                     select(func.count()).select_from(DeviceRegistration).where(
@@ -746,7 +764,6 @@ class PlatformTenantService:
             await self.restaurant_db.scalar(
                 select(func.count()).select_from(BranchSettings).where(
                     BranchSettings.company_id == company_id,
-                    BranchSettings.promptpay_target.is_not(None),
                 )
             )
             or 0
@@ -755,12 +772,6 @@ class PlatformTenantService:
             await self.restaurant_db.scalar(
                 select(func.count()).select_from(PaymentGatewayConfig).where(
                     PaymentGatewayConfig.company_id == company_id,
-                    or_(
-                        PaymentGatewayConfig.promptpay_target.is_not(None),
-                        PaymentGatewayConfig.omise_enabled.is_(True),
-                        PaymentGatewayConfig.twoc2p_enabled.is_(True),
-                        PaymentGatewayConfig.scb_enabled.is_(True),
-                    ),
                 )
             )
             or 0
@@ -770,25 +781,12 @@ class PlatformTenantService:
             "menu": menu_count,
             "payment": branch_payment_count + gateway_payment_count,
         }
-        labels = (
-            ("company", "Company"),
-            ("brand", "Brand"),
-            ("branch", "Branch"),
-            ("menu", "Menu"),
-            ("payment", "Payment"),
-            ("staff", "Staff"),
-            ("device", "Device"),
+        steps = self._build_onboarding_steps(
+            controls=self._controls(profile),
+            counts=counts,
+            has_payment_configuration=counts["payment"] > 0,
+            registered_device_count=identity_counts["registered_device"],
         )
-        steps = [
-            PlatformOnboardingStepRead(
-                key=key,
-                label=label,
-                complete=counts[key] >= 1,
-                count=counts[key],
-                target=1,
-            )
-            for key, label in labels
-        ]
         completed = sum(int(step.complete) for step in steps)
         return PlatformOnboardingRead(
             complete=completed == len(steps),
@@ -796,6 +794,42 @@ class PlatformTenantService:
             total_steps=len(steps),
             steps=steps,
         )
+
+    @staticmethod
+    def _build_onboarding_steps(
+        *,
+        controls: PlatformTenantControlsRead,
+        counts: dict[str, int],
+        has_payment_configuration: bool,
+        registered_device_count: int,
+    ) -> list[PlatformOnboardingStepRead]:
+        labels = [
+            ("product", "Restaurant pilot"),
+            ("company", "Company"),
+            ("brand", "Brand"),
+            ("branch", "Branch"),
+            ("menu", "Menu"),
+            ("staff", "Staff"),
+        ]
+        if has_payment_configuration:
+            labels.append(("payment", "Payment configuration"))
+        if registered_device_count > 0:
+            labels.append(("device", "Paired device"))
+
+        normalized_counts = {
+            **counts,
+            "product": int(controls.feature_flags.get("restaurant", False)),
+        }
+        return [
+            PlatformOnboardingStepRead(
+                key=key,
+                label=label,
+                complete=normalized_counts[key] >= 1,
+                count=normalized_counts[key],
+                target=1,
+            )
+            for key, label in labels
+        ]
 
     @staticmethod
     def _controls(profile: PlatformTenantProfile | None) -> PlatformTenantControlsRead:

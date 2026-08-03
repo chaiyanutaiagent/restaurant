@@ -93,6 +93,7 @@ export default function PlatformDashboardPage(): JSX.Element {
   const attentionCount = data.totals.suspended_companies + data.onboarding.pending_companies;
   const unpairedDevices = Math.max(data.totals.devices - data.totals.paired_devices, 0);
   const totalPlanCompanies = Object.values(data.plan_usage).reduce((sum, count) => sum + count, 0);
+  const productStatusLabel = (status: "pilot" | "planned") => status === "pilot" ? "PILOT" : "PLANNED";
 
   return (
     <div className="space-y-7">
@@ -116,6 +117,19 @@ export default function PlatformDashboardPage(): JSX.Element {
         </div>
       </header>
 
+      <section className="rounded-2xl border border-amber-800/70 bg-amber-950/30 px-5 py-4" aria-label="สถานะการเปิดระบบ">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+          <div>
+            <p className="font-semibold text-amber-100">Restaurant อยู่ในสถานะ Pilot — รอ Physical UAT</p>
+            <p className="mt-1 text-sm leading-6 text-amber-200/75">
+              ตัวเลขความพร้อมด้านล่างหมายถึงการตั้งค่าพื้นฐานของ Tenant ไม่ใช่การอนุมัติ Production;
+              Takeaway และ Retail POS ยังเป็นแผนงานและยังไม่เปิดใช้งาน
+            </p>
+          </div>
+        </div>
+      </section>
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="ตัวเลขสำคัญ">
         <MetricCard
           label="บริษัทลูกค้าทั้งหมด"
@@ -132,7 +146,7 @@ export default function PlatformDashboardPage(): JSX.Element {
           tone="sky"
         />
         <MetricCard
-          label="พร้อมเปิดใช้งาน"
+          label="ตั้งค่าพื้นฐานพร้อม"
           value={data.onboarding.ready_companies}
           hint={`${readinessPercent}% ของบริษัทที่ Active`}
           icon={<CheckCircle2 className="h-5 w-5" />}
@@ -152,17 +166,19 @@ export default function PlatformDashboardPage(): JSX.Element {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-slate-100">ความพร้อมของลูกค้า</p>
-              <p className="mt-1 text-xs text-slate-400">Company → Brand → Branch → Menu → Payment → Staff → Device</p>
+              <p className="mt-1 text-xs text-slate-400">
+                Restaurant → Company → Brand → Branch → Menu → Staff; Payment และ Device จะนับเมื่อมีการตั้งค่า
+              </p>
             </div>
             <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-sm font-semibold text-emerald-300">
-              {readinessPercent}% พร้อมใช้งาน
+              {readinessPercent}% ตั้งค่าพร้อม
             </span>
           </div>
           <div className="mt-5 h-3 overflow-hidden rounded-full bg-slate-800">
             <div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${readinessPercent}%` }} />
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <SummaryBlock label="พร้อมแล้ว" value={data.onboarding.ready_companies} accent="text-emerald-300" />
+            <SummaryBlock label="ตั้งค่าพร้อม" value={data.onboarding.ready_companies} accent="text-emerald-300" />
             <SummaryBlock label="กำลังตั้งค่า" value={data.onboarding.pending_companies} accent="text-amber-300" />
           </div>
         </div>
@@ -196,7 +212,7 @@ export default function PlatformDashboardPage(): JSX.Element {
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <ResourceCard icon={<Store className="h-5 w-5" />} label="แบรนด์" value={data.totals.brands} />
           <ResourceCard icon={<MapPin className="h-5 w-5" />} label="สาขา" value={data.totals.branches} />
-          <ResourceCard icon={<Users className="h-5 w-5" />} label="ผู้ใช้งาน" value={data.totals.active_users} />
+          <ResourceCard icon={<Users className="h-5 w-5" />} label="บัญชีผู้ใช้ที่เปิดใช้งาน" value={data.totals.enabled_user_accounts} />
           <ResourceCard
             icon={<Cpu className="h-5 w-5" />}
             label="อุปกรณ์"
@@ -209,20 +225,29 @@ export default function PlatformDashboardPage(): JSX.Element {
       <section>
         <div className="mb-3">
           <h3 className="text-lg font-semibold">ระบบที่เปิดให้ลูกค้า</h3>
-          <p className="mt-1 text-sm text-slate-400">จำนวน Company ที่ Active และเปิด Feature แต่ละประเภท</p>
+          <p className="mt-1 text-sm text-slate-400">จำนวน Company ที่ Active และตั้งค่า Feature ไว้ แยกจากสถานะการเปิดผลิตภัณฑ์</p>
         </div>
         <div className="grid gap-4 md:grid-cols-3">
           {Object.entries(featureMeta).map(([key, meta]) => {
             const Icon = meta.icon;
             const enabled = data.feature_usage[key] ?? 0;
+            const releaseStatus = data.product_status[key] ?? "planned";
             return (
               <article key={key} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className={`rounded-xl p-2.5 ${meta.color}`}><Icon className="h-5 w-5" /></div>
-                  <span className="text-3xl font-bold text-white">{formatNumber(enabled)}</span>
+                  <div className="text-right">
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold tracking-wide ${releaseStatus === "pilot" ? "bg-amber-400/15 text-amber-300" : "bg-slate-700 text-slate-300"}`}>
+                      {productStatusLabel(releaseStatus)}
+                    </span>
+                    <p className="mt-3 text-3xl font-bold text-white">{formatNumber(enabled)}</p>
+                  </div>
                 </div>
                 <h4 className="mt-5 font-semibold text-slate-100">{meta.label}</h4>
                 <p className="mt-1 text-sm leading-5 text-slate-400">{meta.description}</p>
+                <p className="mt-3 text-xs font-medium text-slate-500">
+                  {releaseStatus === "pilot" ? "เปิดเฉพาะ Pilot และยังไม่ผ่าน Production sign-off" : "ยังไม่เปิดใช้งาน — อยู่ในแผนงานอนาคต"}
+                </p>
               </article>
             );
           })}

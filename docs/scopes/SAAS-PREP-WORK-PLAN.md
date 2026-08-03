@@ -39,8 +39,8 @@ phase7_started: false
 
 | Order | Scope | Deliverable | Dependency | Status |
 | --- | --- | --- | --- | --- |
-| 1 | `SAAS-PREP-DASHBOARD-01` | Correct and verify the existing Platform Owner dashboard | Existing `d788d7d` baseline | Active |
-| 2 | `SAAS-PREP-PLATFORM-AUTH-02` | MFA-ready Platform sessions, logout, revocation, and recovery controls | Scope 01 | Pending |
+| 1 | `SAAS-PREP-DASHBOARD-01` | Correct and verify the existing Platform Owner dashboard | Existing `d788d7d` baseline | Complete |
+| 2 | `SAAS-PREP-PLATFORM-AUTH-02` | MFA-ready Platform sessions, logout, revocation, and recovery controls | Scope 01 | Active |
 | 3 | `SAAS-PREP-TENANT-USAGE-03` | Plan usage, conditional onboarding, last activity, and attention queue | Scope 02 | Pending |
 | 4 | `SAAS-PREP-MEMBERSHIP-04` | Self-service tenant signup, verification, reset, trial, and onboarding lifecycle | Scope 03 | Pending |
 | 5 | `SAAS-PREP-OPERATIONS-05` | Protected operations summary, health snapshots, alert and backup status | Scope 04 | Pending |
@@ -98,6 +98,14 @@ does not yet have browser-level coverage.
 
 Revert only the Scope 01 commit. The pre-existing tenant lifecycle, company management,
 audit, and export APIs remain the baseline.
+
+### Completion evidence
+
+- Backend focused Platform suite: 15 tests passed.
+- Frontend TypeScript check and production build: passed.
+- Platform browser suite: 3 tests passed covering login, dashboard, company, audit,
+  loading, error recovery, empty data, missing credentials, and rejected credentials.
+- Database migration: none.
 
 ## Later-scope boundaries
 

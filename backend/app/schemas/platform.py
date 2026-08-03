@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 import re
 import uuid
 
@@ -246,7 +246,7 @@ class PlatformDashboardTotalsRead(BaseSchema):
     suspended_companies: int
     brands: int
     branches: int
-    active_users: int
+    enabled_user_accounts: int
     devices: int
     paired_devices: int
 
@@ -267,6 +267,7 @@ class PlatformDashboardRead(BaseSchema):
     generated_at: datetime
     totals: PlatformDashboardTotalsRead
     onboarding: PlatformDashboardOnboardingRead
+    product_status: dict[str, Literal["pilot", "planned"]]
     feature_usage: dict[str, int]
     plan_usage: dict[str, int]
     recent_companies: list[PlatformDashboardCompanyRead]

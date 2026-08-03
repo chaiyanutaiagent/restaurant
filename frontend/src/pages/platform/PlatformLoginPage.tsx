@@ -15,7 +15,7 @@ export default function PlatformLoginPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const requested = new URLSearchParams(location.search).get("next");
-  const next = requested?.startsWith("/platform/") ? requested : "/platform/companies";
+  const next = requested?.startsWith("/platform/") ? requested : "/platform/dashboard";
   const login = useMutation({
     mutationFn: () => platformApi.login(username, password),
     onSuccess: (response) => {

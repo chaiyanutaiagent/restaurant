@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from app.dependencies import get_current_platform_operator
 from app.schemas.platform import (
     PlatformCompanyCreate,
     PlatformLifecycleAction,
@@ -135,6 +136,34 @@ class PlatformCredentialTests(unittest.TestCase):
         self.assertEqual(decode_token(device)["company_credential_version"], 4)
 
 
+class PlatformEndpointAuthorizationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tenant_and_device_credentials_are_rejected_by_platform_dependency(self) -> None:
+        company_id = uuid.uuid4()
+        tenant_token = create_access_token(
+            subject=str(uuid.uuid4()),
+            company_id=str(company_id),
+            branch_id=None,
+            permissions=["*"],
+            company_credential_version=1,
+        )
+        device_token = create_device_access_token(
+            device_id=uuid.uuid4(),
+            company_id=company_id,
+            brand_id=uuid.uuid4(),
+            branch_id=uuid.uuid4(),
+            device_type="counter",
+            station_key=None,
+            credential_version=1,
+            company_credential_version=1,
+        )
+
+        for token in (tenant_token, device_token):
+            with self.subTest(token_type=decode_token(token)["type"]):
+                with self.assertRaises(HTTPException) as raised:
+                    await get_current_platform_operator(token=token, db=AsyncMock())
+                self.assertEqual(raised.exception.status_code, 401)
+
+
 class TenantControlPolicyTests(unittest.IsolatedAsyncioTestCase):
     async def test_disabled_feature_is_denied(self) -> None:
         db = AsyncMock()
@@ -226,14 +255,64 @@ class PlatformDashboardTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.totals.companies, 1)
         self.assertEqual(result.totals.branches, 2)
-        self.assertEqual(result.totals.active_users, 3)
+        self.assertEqual(result.totals.enabled_user_accounts, 3)
         self.assertEqual(result.totals.devices, 2)
         self.assertEqual(result.totals.paired_devices, 1)
         self.assertEqual(result.onboarding.ready_companies, 1)
+        self.assertEqual(result.product_status["restaurant"], "pilot")
+        self.assertEqual(result.product_status["takeaway"], "planned")
         self.assertEqual(result.feature_usage["restaurant"], 1)
         self.assertEqual(result.feature_usage["takeaway"], 0)
         self.assertEqual(result.plan_usage, {"starter": 1})
         self.assertTrue(result.recent_companies[0].onboarding_complete)
+
+    async def test_optional_payment_and_device_steps_are_not_required_without_configuration(self) -> None:
+        controls = PlatformTenantService._controls(None)
+        steps = PlatformTenantService._build_onboarding_steps(
+            controls=controls,
+            counts={
+                "company": 1,
+                "brand": 1,
+                "branch": 1,
+                "menu": 1,
+                "payment": 0,
+                "staff": 1,
+                "device": 0,
+            },
+            has_payment_configuration=False,
+            registered_device_count=0,
+        )
+
+        self.assertEqual([step.key for step in steps], [
+            "product", "company", "brand", "branch", "menu", "staff"
+        ])
+        self.assertTrue(all(step.complete for step in steps))
+
+    async def test_unreleased_or_disabled_product_is_not_onboarding_ready(self) -> None:
+        controls = PlatformTenantService._controls(
+            SimpleNamespace(
+                plan_code="starter",
+                feature_flags={"restaurant": False, "takeaway": True},
+                plan_limits={},
+            )
+        )
+        steps = PlatformTenantService._build_onboarding_steps(
+            controls=controls,
+            counts={
+                "company": 1,
+                "brand": 1,
+                "branch": 1,
+                "menu": 1,
+                "payment": 0,
+                "staff": 1,
+                "device": 0,
+            },
+            has_payment_configuration=False,
+            registered_device_count=0,
+        )
+
+        product_step = next(step for step in steps if step.key == "product")
+        self.assertFalse(product_step.complete)
 
 
 if __name__ == "__main__":

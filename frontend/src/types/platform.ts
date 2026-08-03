@@ -28,7 +28,7 @@ export type PlatformCompanyListItem = {
 };
 
 export type PlatformOnboardingStep = {
-  key: "company" | "brand" | "branch" | "menu" | "payment" | "staff" | "device";
+  key: "product" | "company" | "brand" | "branch" | "menu" | "payment" | "staff" | "device";
   label: string;
   complete: boolean;
   count: number;
@@ -137,7 +137,7 @@ export type PlatformDashboard = {
     suspended_companies: number;
     brands: number;
     branches: number;
-    active_users: number;
+    enabled_user_accounts: number;
     devices: number;
     paired_devices: number;
   };
@@ -146,6 +146,7 @@ export type PlatformDashboard = {
     pending_companies: number;
     total_active_companies: number;
   };
+  product_status: Record<string, "pilot" | "planned">;
   feature_usage: Record<string, number>;
   plan_usage: Record<string, number>;
   recent_companies: PlatformDashboardCompany[];

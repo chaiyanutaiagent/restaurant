@@ -50,6 +50,14 @@ const actionLabels: Record<string, string> = {
   "platform.company.reactivate": "เปิด Company กลับมาใช้งาน",
   "platform.company.export": "ดาวน์โหลด Tenant export",
   "platform.operator.login": "Platform Owner เข้าสู่ระบบ",
+  "platform.operator.logout": "Platform Owner ออกจากระบบ",
+  "platform.operator.logout_all": "ออกจาก Platform ทุกเครื่อง",
+  "platform.operator.session.revoke": "เพิกถอน Platform session",
+  "platform.operator.mfa.enable": "เปิด Platform MFA",
+  "platform.operator.mfa.disable": "ปิด Platform MFA",
+  "platform.operator.mfa.recovery_codes.rotate": "สร้าง MFA recovery codes ใหม่",
+  "platform.operator.password.change": "เปลี่ยนรหัสผ่าน Platform Owner",
+  "platform.operator.password.break_glass_reset": "Break-glass reset Platform Owner",
 };
 
 function formatNumber(value: number): string {

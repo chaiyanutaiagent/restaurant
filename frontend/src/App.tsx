@@ -80,6 +80,7 @@ import PlatformDashboardPage from "@/pages/platform/PlatformDashboardPage";
 import PlatformCompaniesPage from "@/pages/platform/PlatformCompaniesPage";
 import PlatformCompanyDetailPage from "@/pages/platform/PlatformCompanyDetailPage";
 import PlatformAuditPage from "@/pages/platform/PlatformAuditPage";
+import PlatformSecurityPage from "@/pages/platform/PlatformSecurityPage";
 import { useEffect } from "react";
 
 const queryClient = new QueryClient({
@@ -104,6 +105,7 @@ export default function App(): JSX.Element {
               <Route path="/platform/companies" element={<PlatformCompaniesPage />} />
               <Route path="/platform/companies/:companyId" element={<PlatformCompanyDetailPage />} />
               <Route path="/platform/audit" element={<PlatformAuditPage />} />
+              <Route path="/platform/security" element={<PlatformSecurityPage />} />
             </Route>
           </Route>
           <Route path="/device/pair" element={<DevicePairingPage />} />

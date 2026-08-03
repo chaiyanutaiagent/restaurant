@@ -153,6 +153,7 @@ def create_device_access_token(
 def create_platform_access_token(
     *,
     operator_id: uuid.UUID,
+    session_id: uuid.UUID,
     credential_version: int,
     is_superuser: bool,
     expires_delta: timedelta | None = None,
@@ -163,6 +164,7 @@ def create_platform_access_token(
     )
     payload = {
         "sub": str(operator_id),
+        "sid": str(session_id),
         "credential_version": credential_version,
         "is_superuser": is_superuser,
         "type": "platform_access",

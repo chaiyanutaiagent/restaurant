@@ -1,6 +1,6 @@
 from app.models.base import TimestampMixin, UUIDMixin, SoftDeleteMixin
 from app.models.company import Company
-from app.models.platform import PlatformOperator, PlatformTenantProfile
+from app.models.platform import PlatformOperator, PlatformSession, PlatformTenantProfile
 from app.models.branch import Branch
 from app.models.role import Role, Permission, role_permissions_table
 from app.models.user import User, UserBranch

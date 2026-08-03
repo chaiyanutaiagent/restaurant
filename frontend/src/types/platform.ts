@@ -4,6 +4,7 @@ export type PlatformOperator = {
   email: string | null;
   display_name: string;
   is_superuser: boolean;
+  mfa_enabled: boolean;
   last_login_at: string | null;
 };
 
@@ -11,6 +12,30 @@ export type PlatformTokenResponse = {
   access_token: string;
   token_type: "bearer";
   expires_in: number;
+  csrf_token: string;
+  session_id: string;
+  operator: PlatformOperator;
+};
+
+export type PlatformSession = {
+  id: string;
+  current: boolean;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  mfa_verified_at: string | null;
+  revoked_at: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+};
+
+export type PlatformMfaSetup = {
+  secret: string;
+  provisioning_uri: string;
+};
+
+export type PlatformMfaConfirm = {
+  recovery_codes: string[];
   operator: PlatformOperator;
 };
 

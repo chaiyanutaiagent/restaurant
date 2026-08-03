@@ -7,6 +7,7 @@ const operator = {
   email: "owner@example.com",
   display_name: "Platform Owner",
   is_superuser: true,
+  mfa_enabled: false,
   last_login_at: "2026-08-03T08:00:00Z",
 };
 
@@ -41,9 +42,17 @@ async function fulfill(route: Route, data: unknown, status = 200): Promise<void>
 
 async function installAuthenticatedSession(page: Page): Promise<void> {
   await page.addInitScript((operatorValue) => {
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       "restaurant-platform-auth",
-      JSON.stringify({ state: { accessToken: "platform-test-token", operator: operatorValue }, version: 0 }),
+      JSON.stringify({
+        state: {
+          accessToken: "platform-test-token",
+          csrfToken: "platform-csrf-token",
+          sessionId: "44444444-4444-4444-8444-444444444444",
+          operator: operatorValue,
+        },
+        version: 0,
+      }),
     );
   }, operator);
 }
@@ -85,6 +94,8 @@ test("Platform Owner login opens dashboard and can reach company and audit views
       access_token: "platform-test-token",
       token_type: "bearer",
       expires_in: 900,
+      csrf_token: "platform-csrf-token",
+      session_id: "44444444-4444-4444-8444-444444444444",
       operator,
     }));
   });
@@ -128,6 +139,19 @@ test("Platform Owner login opens dashboard and can reach company and audit views
   await page.route("**/api/v1/platform/audit", async (route) => {
     await fulfill(route, response(populatedDashboard.data.recent_events));
   });
+  await page.route("**/api/v1/platform/auth/sessions", async (route) => {
+    await fulfill(route, response([{
+      id: "44444444-4444-4444-8444-444444444444",
+      current: true,
+      created_at: "2026-08-03T08:00:00Z",
+      last_seen_at: "2026-08-03T08:30:00Z",
+      expires_at: "2026-09-02T08:00:00Z",
+      mfa_verified_at: null,
+      revoked_at: null,
+      ip_address: "127.0.0.1",
+      user_agent: "Chrome",
+    }]));
+  });
 
   await page.goto("/platform/login");
   await page.locator("#platform-username").fill("platform.owner");
@@ -150,6 +174,9 @@ test("Platform Owner login opens dashboard and can reach company and audit views
   await page.getByRole("link", { name: /Audit Log/ }).click();
   await expect(page.getByRole("heading", { name: "Platform Audit Log" })).toBeVisible();
   await expect(page.getByText("platform.company.create", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: /ความปลอดภัย/ }).click();
+  await expect(page.getByRole("heading", { name: "ความปลอดภัย" })).toBeVisible();
+  await expect(page.getByText("เครื่องนี้", { exact: true })).toBeVisible();
 });
 
 test("dashboard presents error then recovers to an empty state", async ({ page }) => {
@@ -199,7 +226,38 @@ test("missing or rejected Platform credentials return to the restricted login", 
   await page.route("**/api/v1/platform/dashboard", async (route) => {
     await fulfill(route, { detail: "Invalid token type" }, 401);
   });
+  await page.route("**/api/v1/platform/auth/refresh", async (route) => {
+    await fulfill(route, { detail: "Platform session is invalid or revoked" }, 401);
+  });
   await page.goto("/platform/dashboard");
   await expect(page).toHaveURL(/\/platform\/login\?next=/);
   await expect(page.getByText("Restricted workspace", { exact: true })).toBeVisible();
+});
+
+test("Platform Owner can enroll MFA and receives one-time recovery codes", async ({ page }) => {
+  await installAuthenticatedSession(page);
+  await page.route("**/api/v1/platform/auth/sessions", async (route) => {
+    await fulfill(route, response([]));
+  });
+  await page.route("**/api/v1/platform/auth/mfa/setup", async (route) => {
+    await fulfill(route, response({
+      secret: "JBSWY3DPEHPK3PXP",
+      provisioning_uri: "otpauth://totp/Restaurant%20Platform%3Aplatform.owner?secret=JBSWY3DPEHPK3PXP",
+    }));
+  });
+  await page.route("**/api/v1/platform/auth/mfa/confirm", async (route) => {
+    await fulfill(route, response({
+      recovery_codes: ["ABCD-EFGH-JKLM", "NPQR-STUV-WXYZ"],
+      operator: { ...operator, mfa_enabled: true },
+    }));
+  });
+
+  await page.goto("/platform/security");
+  await page.getByRole("button", { name: "เริ่มตั้งค่า MFA" }).click();
+  await expect(page.getByAltText("Platform MFA QR code")).toBeVisible();
+  await expect(page.getByText(/Secret: JBSWY3DPEHPK3PXP/)).toBeVisible();
+  await page.locator("#mfa-confirm-code").fill("123456");
+  await page.getByRole("button", { name: "ยืนยันและเปิด MFA" }).click();
+  await expect(page.getByText("ABCD-EFGH-JKLM", { exact: true })).toBeVisible();
+  await expect(page.getByText(/ระบบจะแสดงครั้งเดียว/)).toBeVisible();
 });

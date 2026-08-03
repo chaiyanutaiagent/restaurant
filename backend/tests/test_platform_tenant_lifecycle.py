@@ -102,14 +102,17 @@ class TenantExportSecurityTests(unittest.TestCase):
 class PlatformCredentialTests(unittest.TestCase):
     def test_platform_identity_token_cannot_be_confused_with_tenant_token(self) -> None:
         operator_id = uuid.uuid4()
+        session_id = uuid.uuid4()
         token = create_platform_access_token(
             operator_id=operator_id,
+            session_id=session_id,
             credential_version=3,
             is_superuser=True,
         )
         claims = decode_token(token)
         self.assertEqual(claims["type"], "platform_access")
         self.assertEqual(claims["sub"], str(operator_id))
+        self.assertEqual(claims["sid"], str(session_id))
         self.assertEqual(claims["credential_version"], 3)
         self.assertNotIn("company_id", claims)
 

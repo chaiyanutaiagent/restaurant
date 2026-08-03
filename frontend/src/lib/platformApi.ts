@@ -6,7 +6,10 @@ import type {
   PlatformCompanyDetail,
   PlatformCompanyListItem,
   PlatformDashboard,
+  PlatformMfaConfirm,
+  PlatformMfaSetup,
   PlatformOperator,
+  PlatformSession,
   PlatformTenantExport,
   PlatformTokenResponse
 } from "@/types/platform";
@@ -28,7 +31,10 @@ const apiBaseUrl = configuredApiOrigin
     : `${configuredApiOrigin}/api/v1`
   : "/api/v1";
 
-const platformApiClient = axios.create({ baseURL: `${apiBaseUrl}/platform` });
+const platformApiClient = axios.create({
+  baseURL: `${apiBaseUrl}/platform`,
+  withCredentials: true,
+});
 
 platformApiClient.interceptors.request.use((config) => {
   const token = usePlatformAuthStore.getState().accessToken;
@@ -36,10 +42,35 @@ platformApiClient.interceptors.request.use((config) => {
   return config;
 });
 
+let refreshRequest: Promise<PlatformTokenResponse> | null = null;
+
 platformApiClient.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
-    if (error.response?.status === 401 && !error.config?.url?.includes("/auth/login")) {
+  async (error: AxiosError) => {
+    const request = error.config;
+    const isAuthEndpoint = request?.url?.includes("/auth/login") || request?.url?.includes("/auth/refresh");
+    const alreadyRetried = Boolean((request as (typeof request & { _platformRetried?: boolean }) | undefined)?._platformRetried);
+    if (error.response?.status === 401 && request && !isAuthEndpoint && !alreadyRetried) {
+      const csrfToken = usePlatformAuthStore.getState().csrfToken;
+      if (csrfToken) {
+        try {
+          refreshRequest ??= platformApiClient
+            .post<PlatformApiResponse<PlatformTokenResponse>>(
+              "/auth/refresh",
+              null,
+              { headers: { "X-Platform-CSRF": csrfToken } },
+            )
+            .then((response) => response.data.data)
+            .finally(() => { refreshRequest = null; });
+          const session = await refreshRequest;
+          usePlatformAuthStore.getState().setSession(session);
+          (request as typeof request & { _platformRetried?: boolean })._platformRetried = true;
+          request.headers.Authorization = `Bearer ${session.access_token}`;
+          return platformApiClient(request);
+        } catch {
+          // The shared failure path below clears the browser session.
+        }
+      }
       usePlatformAuthStore.getState().clearSession();
       const current = `${window.location.pathname}${window.location.search}`;
       window.location.href = `/platform/login?next=${encodeURIComponent(current)}`;
@@ -49,10 +80,37 @@ platformApiClient.interceptors.response.use(
 );
 
 export const platformApi = {
-  login: (username: string, password: string) =>
+  login: (username: string, password: string, mfaCode?: string) =>
     platformApiClient.post<PlatformApiResponse<PlatformTokenResponse>>("/auth/login", {
       username,
-      password
+      password,
+      mfa_code: mfaCode || null,
+    }),
+  refresh: (csrfToken: string) =>
+    platformApiClient.post<PlatformApiResponse<PlatformTokenResponse>>(
+      "/auth/refresh",
+      null,
+      { headers: { "X-Platform-CSRF": csrfToken } },
+    ),
+  logout: () => platformApiClient.post("/auth/logout"),
+  logoutAll: () => platformApiClient.post("/auth/logout-all"),
+  sessions: () => platformApiClient.get<PlatformApiResponse<PlatformSession[]>>("/auth/sessions"),
+  revokeSession: (sessionId: string) => platformApiClient.delete(`/auth/sessions/${sessionId}`),
+  setupMfa: () => platformApiClient.post<PlatformApiResponse<PlatformMfaSetup>>("/auth/mfa/setup"),
+  confirmMfa: (code: string) =>
+    platformApiClient.post<PlatformApiResponse<PlatformMfaConfirm>>("/auth/mfa/confirm", { code }),
+  regenerateRecoveryCodes: (code: string) =>
+    platformApiClient.post<PlatformApiResponse<{ recovery_codes: string[] }>>(
+      "/auth/mfa/recovery-codes",
+      { code },
+    ),
+  disableMfa: (password: string, code: string) =>
+    platformApiClient.post<PlatformApiResponse<PlatformOperator>>("/auth/mfa/disable", { password, code }),
+  changePassword: (currentPassword: string, newPassword: string, mfaCode?: string) =>
+    platformApiClient.post("/auth/password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+      mfa_code: mfaCode || null,
     }),
   me: () => platformApiClient.get<PlatformApiResponse<PlatformOperator>>("/auth/me"),
   dashboard: () =>

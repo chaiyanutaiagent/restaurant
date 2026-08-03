@@ -19,7 +19,7 @@ from app.database import (
 )
 from app.models.device import DeviceRegistration
 from app.models.company import Company
-from app.models.platform import PlatformOperator
+from app.models.platform import PlatformOperator, PlatformSession
 from app.models.settings import BranchSettings
 from app.models.user import User
 from app.services.business_context_service import (
@@ -67,9 +67,11 @@ class DeviceTokenData:
 @dataclass
 class PlatformTokenData:
     operator_id: uuid.UUID
+    session_id: uuid.UUID
     username: str
     display_name: str
     is_superuser: bool
+    mfa_verified: bool
 
 
 def _device_unauthorized() -> HTTPException:
@@ -152,29 +154,50 @@ async def get_current_platform_operator(
         )
     try:
         operator_id = uuid.UUID(payload["sub"])
+        session_id = uuid.UUID(payload["sid"])
         credential_version = int(payload["credential_version"])
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Platform credential",
         ) from exc
-    operator = await db.scalar(
-        select(PlatformOperator).where(
-            PlatformOperator.id == operator_id,
-            PlatformOperator.is_active.is_(True),
-            PlatformOperator.credential_version == credential_version,
+    now = datetime.now(timezone.utc)
+    row = (
+        await db.execute(
+            select(PlatformOperator, PlatformSession)
+            .join(
+                PlatformSession,
+                PlatformSession.operator_id == PlatformOperator.id,
+            )
+            .where(
+                PlatformOperator.id == operator_id,
+                PlatformOperator.is_active.is_(True),
+                PlatformOperator.credential_version == credential_version,
+                PlatformSession.id == session_id,
+                PlatformSession.credential_version == credential_version,
+                PlatformSession.revoked_at.is_(None),
+                PlatformSession.expires_at > now,
+            )
         )
-    )
-    if operator is None:
+    ).one_or_none()
+    if row is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Platform operator is inactive or no longer exists",
+            detail="Platform session is inactive or no longer exists",
+        )
+    operator, session = row
+    if operator.mfa_enabled and session.mfa_verified_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Platform MFA verification is required",
         )
     return PlatformTokenData(
         operator_id=operator.id,
+        session_id=session.id,
         username=operator.username,
         display_name=operator.display_name,
         is_superuser=operator.is_superuser,
+        mfa_verified=session.mfa_verified_at is not None,
     )
 
 

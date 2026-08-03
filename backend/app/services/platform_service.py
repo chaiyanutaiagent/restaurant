@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+import hmac
 import uuid
 
 from fastapi import HTTPException, status
@@ -16,7 +17,7 @@ from app.models.branch import Branch
 from app.models.company import Company
 from app.models.device import DeviceRegistration
 from app.models.payment_gateway import PaymentGatewayConfig
-from app.models.platform import PlatformOperator, PlatformTenantProfile
+from app.models.platform import PlatformOperator, PlatformSession, PlatformTenantProfile
 from app.models.product import Product
 from app.models.restaurant import Brand
 from app.models.role import Permission, Role
@@ -32,9 +33,12 @@ from app.schemas.platform import (
     PlatformDashboardRead,
     PlatformDashboardTotalsRead,
     PlatformLifecycleAction,
+    PlatformMfaConfirmRead,
+    PlatformMfaSetupRead,
     PlatformOnboardingRead,
     PlatformOnboardingStepRead,
     PlatformOperatorRead,
+    PlatformSessionRead,
     PlatformTenantControlsRead,
     PlatformTenantControlsUpdate,
     PlatformTenantExportRequest,
@@ -42,6 +46,17 @@ from app.schemas.platform import (
 )
 from app.services.platform_reference_projection import enqueue_reference_event
 from app.services.tenant_export_service import TenantExportBoundary, build_tenant_export
+from app.utils.platform_security import (
+    build_totp_uri,
+    decrypt_totp_secret,
+    encrypt_totp_secret,
+    generate_opaque_credential,
+    generate_recovery_codes,
+    generate_totp_secret,
+    hash_opaque_credential,
+    hash_recovery_code,
+    matching_totp_step,
+)
 from app.utils.security import create_platform_access_token, decode_token, hash_password, verify_password
 
 
@@ -64,9 +79,10 @@ class PlatformAuthService:
         username: str,
         password: str,
         *,
+        mfa_code: str | None,
         ip_address: str | None,
         user_agent: str | None,
-    ) -> PlatformTokenResponse:
+    ) -> tuple[PlatformTokenResponse, str]:
         now = datetime.now(timezone.utc)
         operator = await self.db.scalar(
             select(PlatformOperator).where(
@@ -80,25 +96,35 @@ class PlatformAuthService:
                 detail="Platform login is temporarily locked",
             )
         if operator is None or not verify_password(password, operator.hashed_password):
-            if operator is not None:
-                operator.failed_login_attempts += 1
-                if operator.failed_login_attempts >= settings.platform_login_max_failed_attempts:
-                    operator.locked_until = now + timedelta(
-                        minutes=settings.platform_login_lock_minutes
-                    )
-                await self.db.commit()
+            await self._record_failed_login(operator, now)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",
             )
 
+        mfa_verified = False
+        if operator.mfa_enabled:
+            if not mfa_code:
+                raise HTTPException(
+                    status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+                    detail="MFA code is required",
+                )
+            if not self._consume_mfa_code(operator, mfa_code):
+                await self._record_failed_login(operator, now)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid MFA or recovery code",
+                )
+            mfa_verified = True
+
         operator.failed_login_attempts = 0
         operator.locked_until = None
         operator.last_login_at = now
-        token = create_platform_access_token(
-            operator_id=operator.id,
-            credential_version=operator.credential_version,
-            is_superuser=operator.is_superuser,
+        token_response, refresh_token = await self._issue_session(
+            operator,
+            mfa_verified=mfa_verified,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
         self.db.add(
             AuditLog(
@@ -108,17 +134,466 @@ class PlatformAuthService:
                 action="platform.operator.login",
                 resource="PlatformOperator",
                 resource_id=str(operator.id),
+                new_value={
+                    "session_id": str(token_response.session_id),
+                    "mfa_verified": mfa_verified,
+                },
                 ip_address=ip_address,
                 user_agent=user_agent,
             )
         )
         await self.db.commit()
+        return token_response, refresh_token
+
+    async def refresh(
+        self,
+        raw_refresh_token: str,
+        csrf_token: str,
+        *,
+        ip_address: str | None,
+        user_agent: str | None,
+    ) -> tuple[PlatformTokenResponse, str]:
+        now = datetime.now(timezone.utc)
+        session = await self.db.scalar(
+            select(PlatformSession)
+            .where(
+                PlatformSession.refresh_token_hash
+                == hash_opaque_credential(raw_refresh_token)
+            )
+            .with_for_update()
+        )
+        if session is None or session.revoked_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Platform session is invalid or revoked",
+            )
+        if not hmac.compare_digest(
+            session.csrf_token_hash,
+            hash_opaque_credential(csrf_token),
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Platform CSRF validation failed",
+            )
+        if session.expires_at <= now:
+            session.revoked_at = now
+            session.revocation_reason = "expired"
+            await self.db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Platform session has expired",
+            )
+        operator = await self.db.get(PlatformOperator, session.operator_id)
+        if (
+            operator is None
+            or not operator.is_active
+            or operator.credential_version != session.credential_version
+            or (operator.mfa_enabled and session.mfa_verified_at is None)
+        ):
+            session.revoked_at = now
+            session.revocation_reason = "operator-credential-changed"
+            await self.db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Platform operator credential is no longer valid",
+            )
+
+        refresh_token = generate_opaque_credential()
+        next_csrf_token = generate_opaque_credential()
+        session.refresh_token_hash = hash_opaque_credential(refresh_token)
+        session.csrf_token_hash = hash_opaque_credential(next_csrf_token)
+        session.last_seen_at = now
+        session.ip_address = ip_address
+        session.user_agent = user_agent
+        token_response = self._token_response(operator, session, next_csrf_token)
+        await self.db.commit()
+        return token_response, refresh_token
+
+    async def logout(self, *, operator_id: uuid.UUID, session_id: uuid.UUID) -> None:
+        await self._revoke_session(
+            operator_id=operator_id,
+            session_id=session_id,
+            reason="operator-logout",
+        )
+        self._audit(
+            operator_id=operator_id,
+            action="platform.operator.logout",
+            resource="PlatformSession",
+            resource_id=session_id,
+        )
+        await self.db.commit()
+
+    async def logout_all(self, *, operator_id: uuid.UUID) -> None:
+        now = datetime.now(timezone.utc)
+        await self.db.execute(
+            update(PlatformSession)
+            .where(
+                PlatformSession.operator_id == operator_id,
+                PlatformSession.revoked_at.is_(None),
+            )
+            .values(revoked_at=now, revocation_reason="operator-logout-all")
+        )
+        self._audit(
+            operator_id=operator_id,
+            action="platform.operator.logout_all",
+            resource="PlatformSession",
+            resource_id=None,
+        )
+        await self.db.commit()
+
+    async def list_sessions(
+        self,
+        *,
+        operator_id: uuid.UUID,
+        current_session_id: uuid.UUID,
+    ) -> list[PlatformSessionRead]:
+        rows = (
+            await self.db.scalars(
+                select(PlatformSession)
+                .where(PlatformSession.operator_id == operator_id)
+                .order_by(PlatformSession.created_at.desc())
+                .limit(50)
+            )
+        ).all()
+        return [
+            PlatformSessionRead(
+                id=row.id,
+                current=row.id == current_session_id,
+                created_at=row.created_at,
+                last_seen_at=row.last_seen_at,
+                expires_at=row.expires_at,
+                mfa_verified_at=row.mfa_verified_at,
+                revoked_at=row.revoked_at,
+                ip_address=row.ip_address,
+                user_agent=row.user_agent,
+            )
+            for row in rows
+        ]
+
+    async def revoke_session(
+        self,
+        *,
+        operator_id: uuid.UUID,
+        session_id: uuid.UUID,
+    ) -> None:
+        revoked = await self._revoke_session(
+            operator_id=operator_id,
+            session_id=session_id,
+            reason="operator-revoked",
+        )
+        if not revoked:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Platform session not found",
+            )
+        self._audit(
+            operator_id=operator_id,
+            action="platform.operator.session.revoke",
+            resource="PlatformSession",
+            resource_id=session_id,
+        )
+        await self.db.commit()
+
+    async def setup_mfa(self, *, operator_id: uuid.UUID) -> PlatformMfaSetupRead:
+        operator = await self._operator(operator_id)
+        if operator.mfa_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Platform MFA is already enabled",
+            )
+        secret = generate_totp_secret()
+        operator.mfa_secret_ciphertext = encrypt_totp_secret(secret)
+        operator.mfa_last_verified_step = None
+        operator.mfa_recovery_code_hashes = []
+        await self.db.commit()
+        return PlatformMfaSetupRead(
+            secret=secret,
+            provisioning_uri=build_totp_uri(secret=secret, username=operator.username),
+        )
+
+    async def confirm_mfa(
+        self,
+        *,
+        operator_id: uuid.UUID,
+        session_id: uuid.UUID,
+        code: str,
+    ) -> PlatformMfaConfirmRead:
+        operator = await self._operator(operator_id)
+        if operator.mfa_enabled or not operator.mfa_secret_ciphertext:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Platform MFA setup is not pending",
+            )
+        secret = decrypt_totp_secret(operator.mfa_secret_ciphertext)
+        verified_step = matching_totp_step(secret, code)
+        if verified_step is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid MFA code",
+            )
+        now = datetime.now(timezone.utc)
+        recovery_codes = generate_recovery_codes()
+        operator.mfa_enabled_at = now
+        operator.mfa_last_verified_step = verified_step
+        operator.mfa_recovery_code_hashes = [
+            hash_recovery_code(item) for item in recovery_codes
+        ]
+        session = await self.db.get(PlatformSession, session_id)
+        if session is None or session.operator_id != operator_id or session.revoked_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Platform session is invalid or revoked",
+            )
+        session.mfa_verified_at = now
+        self._audit(
+            operator_id=operator_id,
+            action="platform.operator.mfa.enable",
+            resource="PlatformOperator",
+            resource_id=operator_id,
+        )
+        await self.db.commit()
+        return PlatformMfaConfirmRead(
+            recovery_codes=recovery_codes,
+            operator=PlatformOperatorRead.model_validate(operator),
+        )
+
+    async def regenerate_recovery_codes(
+        self,
+        *,
+        operator_id: uuid.UUID,
+        code: str,
+    ) -> list[str]:
+        operator = await self._operator(operator_id)
+        if not operator.mfa_enabled or not self._consume_mfa_code(operator, code):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid MFA or recovery code",
+            )
+        recovery_codes = generate_recovery_codes()
+        operator.mfa_recovery_code_hashes = [
+            hash_recovery_code(item) for item in recovery_codes
+        ]
+        self._audit(
+            operator_id=operator_id,
+            action="platform.operator.mfa.recovery_codes.rotate",
+            resource="PlatformOperator",
+            resource_id=operator_id,
+        )
+        await self.db.commit()
+        return recovery_codes
+
+    async def disable_mfa(
+        self,
+        *,
+        operator_id: uuid.UUID,
+        password: str,
+        code: str,
+        current_session_id: uuid.UUID,
+    ) -> PlatformOperatorRead:
+        operator = await self._operator(operator_id)
+        if (
+            not operator.mfa_enabled
+            or not verify_password(password, operator.hashed_password)
+            or not self._consume_mfa_code(operator, code)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Password and MFA verification failed",
+            )
+        operator.mfa_secret_ciphertext = None
+        operator.mfa_enabled_at = None
+        operator.mfa_last_verified_step = None
+        operator.mfa_recovery_code_hashes = []
+        now = datetime.now(timezone.utc)
+        await self.db.execute(
+            update(PlatformSession)
+            .where(
+                PlatformSession.operator_id == operator_id,
+                PlatformSession.id != current_session_id,
+                PlatformSession.revoked_at.is_(None),
+            )
+            .values(revoked_at=now, revocation_reason="mfa-disabled")
+        )
+        self._audit(
+            operator_id=operator_id,
+            action="platform.operator.mfa.disable",
+            resource="PlatformOperator",
+            resource_id=operator_id,
+        )
+        await self.db.commit()
+        return PlatformOperatorRead.model_validate(operator)
+
+    async def change_password(
+        self,
+        *,
+        operator_id: uuid.UUID,
+        current_password: str,
+        new_password: str,
+        mfa_code: str | None,
+    ) -> None:
+        operator = await self._operator(operator_id)
+        if not verify_password(current_password, operator.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Current password is invalid",
+            )
+        if operator.mfa_enabled and (
+            not mfa_code or not self._consume_mfa_code(operator, mfa_code)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="MFA verification failed",
+            )
+        operator.hashed_password = hash_password(new_password)
+        operator.password_changed_at = datetime.now(timezone.utc)
+        operator.credential_version += 1
+        await self.db.execute(
+            update(PlatformSession)
+            .where(
+                PlatformSession.operator_id == operator_id,
+                PlatformSession.revoked_at.is_(None),
+            )
+            .values(
+                revoked_at=datetime.now(timezone.utc),
+                revocation_reason="password-changed",
+            )
+        )
+        self._audit(
+            operator_id=operator_id,
+            action="platform.operator.password.change",
+            resource="PlatformOperator",
+            resource_id=operator_id,
+        )
+        await self.db.commit()
+
+    async def _issue_session(
+        self,
+        operator: PlatformOperator,
+        *,
+        mfa_verified: bool,
+        ip_address: str | None,
+        user_agent: str | None,
+    ) -> tuple[PlatformTokenResponse, str]:
+        now = datetime.now(timezone.utc)
+        refresh_token = generate_opaque_credential()
+        csrf_token = generate_opaque_credential()
+        session = PlatformSession(
+            operator_id=operator.id,
+            credential_version=operator.credential_version,
+            refresh_token_hash=hash_opaque_credential(refresh_token),
+            csrf_token_hash=hash_opaque_credential(csrf_token),
+            expires_at=now + timedelta(days=settings.refresh_token_expire_days),
+            last_seen_at=now,
+            mfa_verified_at=now if mfa_verified else None,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        self.db.add(session)
+        await self.db.flush()
+        return self._token_response(operator, session, csrf_token), refresh_token
+
+    @staticmethod
+    def _token_response(
+        operator: PlatformOperator,
+        session: PlatformSession,
+        csrf_token: str,
+    ) -> PlatformTokenResponse:
+        now = datetime.now(timezone.utc)
+        token = create_platform_access_token(
+            operator_id=operator.id,
+            session_id=session.id,
+            credential_version=operator.credential_version,
+            is_superuser=operator.is_superuser,
+        )
         claims = decode_token(token)
-        expires_in = max(int(claims["exp"] - now.timestamp()), 0)
         return PlatformTokenResponse(
             access_token=token,
-            expires_in=expires_in,
+            expires_in=max(int(claims["exp"] - now.timestamp()), 0),
+            csrf_token=csrf_token,
+            session_id=session.id,
             operator=PlatformOperatorRead.model_validate(operator),
+        )
+
+    async def _record_failed_login(
+        self,
+        operator: PlatformOperator | None,
+        now: datetime,
+    ) -> None:
+        if operator is None:
+            return
+        operator.failed_login_attempts += 1
+        if operator.failed_login_attempts >= settings.platform_login_max_failed_attempts:
+            operator.locked_until = now + timedelta(
+                minutes=settings.platform_login_lock_minutes
+            )
+        await self.db.commit()
+
+    @staticmethod
+    def _consume_mfa_code(operator: PlatformOperator, code: str) -> bool:
+        if not operator.mfa_secret_ciphertext:
+            return False
+        secret = decrypt_totp_secret(operator.mfa_secret_ciphertext)
+        verified_step = matching_totp_step(secret, code)
+        if verified_step is not None:
+            last_step = operator.mfa_last_verified_step
+            if last_step is None or verified_step > last_step:
+                operator.mfa_last_verified_step = verified_step
+                return True
+        candidate = hash_recovery_code(code)
+        hashes = list(operator.mfa_recovery_code_hashes or [])
+        for index, stored in enumerate(hashes):
+            if hmac.compare_digest(stored, candidate):
+                hashes.pop(index)
+                operator.mfa_recovery_code_hashes = hashes
+                return True
+        return False
+
+    async def _operator(self, operator_id: uuid.UUID) -> PlatformOperator:
+        operator = await self.db.get(PlatformOperator, operator_id)
+        if operator is None or not operator.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Platform operator is inactive or no longer exists",
+            )
+        return operator
+
+    async def _revoke_session(
+        self,
+        *,
+        operator_id: uuid.UUID,
+        session_id: uuid.UUID,
+        reason: str,
+    ) -> bool:
+        session = await self.db.scalar(
+            select(PlatformSession).where(
+                PlatformSession.id == session_id,
+                PlatformSession.operator_id == operator_id,
+            )
+        )
+        if session is None:
+            return False
+        if session.revoked_at is None:
+            session.revoked_at = datetime.now(timezone.utc)
+            session.revocation_reason = reason
+        return True
+
+    def _audit(
+        self,
+        *,
+        operator_id: uuid.UUID,
+        action: str,
+        resource: str,
+        resource_id: uuid.UUID | None,
+    ) -> None:
+        self.db.add(
+            AuditLog(
+                company_id=None,
+                branch_id=None,
+                user_id=operator_id,
+                action=action,
+                resource=resource,
+                resource_id=str(resource_id) if resource_id else None,
+            )
         )
 
 

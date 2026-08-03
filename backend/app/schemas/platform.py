@@ -28,6 +28,7 @@ def _required_text(value: str, *, field_name: str, max_length: int) -> str:
 class PlatformLoginRequest(BaseSchema):
     username: str
     password: str
+    mfa_code: str | None = Field(default=None, max_length=32)
 
     @field_validator("username")
     @classmethod
@@ -44,6 +45,7 @@ class PlatformOperatorRead(BaseSchema):
     email: str | None = None
     display_name: str
     is_superuser: bool
+    mfa_enabled: bool
     last_login_at: datetime | None = None
 
 
@@ -51,7 +53,50 @@ class PlatformTokenResponse(BaseSchema):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+    csrf_token: str
+    session_id: uuid.UUID
     operator: PlatformOperatorRead
+
+
+class PlatformSessionRead(BaseSchema):
+    id: uuid.UUID
+    current: bool
+    created_at: datetime
+    last_seen_at: datetime
+    expires_at: datetime
+    mfa_verified_at: datetime | None = None
+    revoked_at: datetime | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+
+
+class PlatformMfaSetupRead(BaseSchema):
+    secret: str
+    provisioning_uri: str
+
+
+class PlatformMfaCodeRequest(BaseSchema):
+    code: str = Field(min_length=6, max_length=32)
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        return _required_text(value, field_name="code", max_length=32)
+
+
+class PlatformMfaConfirmRead(BaseSchema):
+    recovery_codes: list[str]
+    operator: PlatformOperatorRead
+
+
+class PlatformMfaDisableRequest(PlatformMfaCodeRequest):
+    password: str = Field(min_length=1, max_length=128)
+
+
+class PlatformPasswordChangeRequest(BaseSchema):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)
+    mfa_code: str | None = Field(default=None, max_length=32)
 
 
 class PlatformCompanyOwnerCreate(BaseSchema):

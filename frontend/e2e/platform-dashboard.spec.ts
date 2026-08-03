@@ -71,9 +71,17 @@ const populatedDashboard = response({
   },
   onboarding: { ready_companies: 1, pending_companies: 0, total_active_companies: 1 },
   product_status: { restaurant: "pilot", takeaway: "planned", retail_pos: "planned" },
+  attention_summary: { companies: 1, unpaired_devices: 1 },
   feature_usage: { restaurant: 1, takeaway: 0, retail_pos: 0 },
   plan_usage: { starter: 1 },
-  recent_companies: [{ ...company, onboarding_complete: true, completed_steps: 7, total_steps: 7 }],
+  recent_companies: [{
+    ...company,
+    onboarding_complete: true,
+    completed_steps: 7,
+    total_steps: 7,
+    last_activity_at: "2026-08-03T08:25:00Z",
+    attention_codes: ["unpaired_devices"],
+  }],
   recent_events: [{
     id: "33333333-3333-4333-8333-333333333333",
     company_id: companyId,
@@ -102,6 +110,9 @@ test("Platform Owner login opens dashboard and can reach company and audit views
   await page.route("**/api/v1/platform/dashboard", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 250));
     await fulfill(route, populatedDashboard);
+  });
+  await page.route("**/api/v1/platform/usage/snapshots", async (route) => {
+    await fulfill(route, response([]));
   });
   await page.route("**/api/v1/platform/companies", async (route) => {
     await fulfill(route, response([company]));
@@ -136,6 +147,36 @@ test("Platform Owner login opens dashboard and can reach company and audit views
       updated_at: "2026-08-03T08:00:00Z",
     }));
   });
+  await page.route(`**/api/v1/platform/companies/${companyId}/usage`, async (route) => {
+    await fulfill(route, response({
+      company_id: companyId,
+      generated_at: "2026-08-03T08:30:00Z",
+      plan_code: "starter",
+      feature_flags: { restaurant: true, takeaway: false, retail_pos: false },
+      plan_limits: { brands: 1, branches: 1, users: 10, devices: 3 },
+      usage: {
+        brands: 1,
+        branches: 1,
+        enabled_user_accounts: 2,
+        registered_devices: 1,
+        paired_devices: 1,
+        active_menu_items: 8,
+      },
+      limit_state: {
+        brands: { resource_key: "brands", current: 1, limit: 1, unlimited: false, exceeded: false, remaining: 0, utilization_percent: 100 },
+        branches: { resource_key: "branches", current: 1, limit: 1, unlimited: false, exceeded: false, remaining: 0, utilization_percent: 100 },
+        users: { resource_key: "enabled_user_accounts", current: 2, limit: 10, unlimited: false, exceeded: false, remaining: 8, utilization_percent: 20 },
+        devices: { resource_key: "registered_devices", current: 1, limit: 3, unlimited: false, exceeded: false, remaining: 2, utilization_percent: 33 },
+      },
+      attention_codes: [],
+      last_activity_at: "2026-08-03T08:25:00Z",
+      onboarding_completed_steps: 7,
+      onboarding_total_steps: 7,
+    }));
+  });
+  await page.route(`**/api/v1/platform/companies/${companyId}/usage/history`, async (route) => {
+    await fulfill(route, response([]));
+  });
   await page.route("**/api/v1/platform/audit", async (route) => {
     await fulfill(route, response(populatedDashboard.data.recent_events));
   });
@@ -164,12 +205,16 @@ test("Platform Owner login opens dashboard and can reach company and audit views
   await expect(page.getByText("PILOT", { exact: true })).toBeVisible();
   await expect(page.getByText("PLANNED", { exact: true })).toHaveCount(2);
   await expect(page.getByText("บัญชีผู้ใช้ที่เปิดใช้งาน")).toBeVisible();
+  await expect(page.getByText(/มีอุปกรณ์รอจับคู่/).first()).toBeVisible();
+  await page.getByRole("button", { name: /บันทึก Usage วันนี้/ }).click();
+  await expect(page.getByText(/บันทึก aggregate usage snapshot วันนี้แล้ว/)).toBeVisible();
 
   await page.getByRole("link", { name: /จัดการบริษัทลูกค้า/ }).click();
   await expect(page.getByRole("heading", { name: "บริษัทลูกค้า" })).toBeVisible();
   await page.getByText(company.name, { exact: true }).click();
   await expect(page.getByRole("heading", { name: company.name })).toBeVisible();
   await expect(page.getByText("Restaurant pilot", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "การใช้ทรัพยากรตาม Plan" })).toBeVisible();
 
   await page.getByRole("link", { name: /Audit Log/ }).click();
   await expect(page.getByRole("heading", { name: "Platform Audit Log" })).toBeVisible();
@@ -202,6 +247,7 @@ test("dashboard presents error then recovers to an empty state", async ({ page }
       },
       onboarding: { ready_companies: 0, pending_companies: 0, total_active_companies: 0 },
       product_status: { restaurant: "pilot", takeaway: "planned", retail_pos: "planned" },
+      attention_summary: { companies: 0 },
       feature_usage: { restaurant: 0, takeaway: 0, retail_pos: 0 },
       plan_usage: {},
       recent_companies: [],

@@ -10,6 +10,8 @@ import type {
   PlatformMfaSetup,
   PlatformOperator,
   PlatformSession,
+  PlatformTenantUsage,
+  PlatformTenantUsageSnapshot,
   PlatformTenantExport,
   PlatformTokenResponse
 } from "@/types/platform";
@@ -115,12 +117,18 @@ export const platformApi = {
   me: () => platformApiClient.get<PlatformApiResponse<PlatformOperator>>("/auth/me"),
   dashboard: () =>
     platformApiClient.get<PlatformApiResponse<PlatformDashboard>>("/dashboard"),
+  captureUsageSnapshots: () =>
+    platformApiClient.post<PlatformApiResponse<PlatformTenantUsageSnapshot[]>>("/usage/snapshots"),
   companies: (search?: string) =>
     platformApiClient.get<PlatformApiResponse<PlatformCompanyListItem[]>>("/companies", {
       params: search ? { search } : undefined
     }),
   company: (companyId: string) =>
     platformApiClient.get<PlatformApiResponse<PlatformCompanyDetail>>(`/companies/${companyId}`),
+  companyUsage: (companyId: string) =>
+    platformApiClient.get<PlatformApiResponse<PlatformTenantUsage>>(`/companies/${companyId}/usage`),
+  companyUsageHistory: (companyId: string) =>
+    platformApiClient.get<PlatformApiResponse<PlatformTenantUsageSnapshot[]>>(`/companies/${companyId}/usage/history`),
   createCompany: (payload: PlatformCompanyCreate) =>
     platformApiClient.post<PlatformApiResponse<PlatformCompanyDetail>>("/companies", payload),
   suspendCompany: (companyId: string, reason: string) =>

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 import re
 import uuid
@@ -306,6 +306,8 @@ class PlatformDashboardCompanyRead(PlatformCompanyListItem):
     onboarding_complete: bool
     completed_steps: int
     total_steps: int
+    last_activity_at: datetime | None = None
+    attention_codes: list[str]
 
 
 class PlatformDashboardRead(BaseSchema):
@@ -313,7 +315,49 @@ class PlatformDashboardRead(BaseSchema):
     totals: PlatformDashboardTotalsRead
     onboarding: PlatformDashboardOnboardingRead
     product_status: dict[str, Literal["pilot", "planned"]]
+    attention_summary: dict[str, int]
     feature_usage: dict[str, int]
     plan_usage: dict[str, int]
     recent_companies: list[PlatformDashboardCompanyRead]
     recent_events: list[dict[str, Any]]
+
+
+class PlatformLimitStateRead(BaseSchema):
+    resource_key: str
+    current: int
+    limit: int | None
+    unlimited: bool
+    exceeded: bool
+    remaining: int | None
+    utilization_percent: int | None
+
+
+class PlatformTenantUsageRead(BaseSchema):
+    company_id: uuid.UUID
+    generated_at: datetime
+    plan_code: str
+    feature_flags: dict[str, bool]
+    plan_limits: dict[str, int]
+    usage: dict[str, int]
+    limit_state: dict[str, PlatformLimitStateRead]
+    attention_codes: list[str]
+    last_activity_at: datetime | None = None
+    onboarding_completed_steps: int
+    onboarding_total_steps: int
+
+
+class PlatformTenantUsageSnapshotRead(BaseSchema):
+    id: uuid.UUID
+    company_id: uuid.UUID
+    captured_on: date
+    plan_code: str
+    feature_flags: dict[str, bool]
+    plan_limits: dict[str, int]
+    usage: dict[str, int]
+    limit_state: dict[str, dict[str, Any]]
+    attention_codes: list[str]
+    last_activity_at: datetime | None = None
+    onboarding_completed_steps: int
+    onboarding_total_steps: int
+    created_at: datetime
+    updated_at: datetime

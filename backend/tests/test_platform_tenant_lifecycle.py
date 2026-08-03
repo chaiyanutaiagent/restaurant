@@ -226,6 +226,7 @@ class PlatformDashboardTests(unittest.IsolatedAsyncioTestCase):
             is_active=True,
             credential_version=1,
             created_at=now,
+            updated_at=now,
         )
         profile = SimpleNamespace(
             plan_code="starter",
@@ -241,6 +242,9 @@ class PlatformDashboardTests(unittest.IsolatedAsyncioTestCase):
             _Rows([(company_id, 3)]),
             _Rows([(company_id, 2)]),
             _Rows([(company_id, 1)]),
+            _Rows([(company_id, now)]),
+            _Rows([(company_id, now)]),
+            _Rows([(company_id, now)]),
         ]
         identity_db.scalars.return_value = _Rows([])
         restaurant_db = AsyncMock()
@@ -248,6 +252,7 @@ class PlatformDashboardTests(unittest.IsolatedAsyncioTestCase):
             _Rows([(company_id, 8)]),
             _Rows([(company_id, 1)]),
             _Rows([]),
+            _Rows([(company_id, now)]),
         ]
 
         result = await PlatformTenantService(
@@ -268,6 +273,8 @@ class PlatformDashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.feature_usage["takeaway"], 0)
         self.assertEqual(result.plan_usage, {"starter": 1})
         self.assertTrue(result.recent_companies[0].onboarding_complete)
+        self.assertEqual(result.recent_companies[0].attention_codes, ["unpaired_devices"])
+        self.assertEqual(result.attention_summary["companies"], 1)
 
     async def test_optional_payment_and_device_steps_are_not_required_without_configuration(self) -> None:
         controls = PlatformTenantService._controls(None)
@@ -316,6 +323,69 @@ class PlatformDashboardTests(unittest.IsolatedAsyncioTestCase):
 
         product_step = next(step for step in steps if step.key == "product")
         self.assertFalse(product_step.complete)
+
+    async def test_zero_plan_limit_is_unlimited_and_never_exceeded(self) -> None:
+        controls = PlatformTenantService._controls(
+            SimpleNamespace(
+                plan_code="legacy",
+                feature_flags={"restaurant": True},
+                plan_limits={"brands": 0, "branches": 1, "users": 10, "devices": 3},
+            )
+        )
+        state = PlatformTenantService._limit_state(
+            controls=controls,
+            usage=PlatformTenantService._usage_counts(
+                brands=999,
+                branches=1,
+                users=2,
+                devices=0,
+                paired_devices=0,
+                menu_items=4,
+            ),
+        )
+
+        self.assertTrue(state["brands"].unlimited)
+        self.assertIsNone(state["brands"].limit)
+        self.assertFalse(state["brands"].exceeded)
+        self.assertEqual(state["branches"].utilization_percent, 100)
+
+    async def test_attention_codes_explain_limit_and_planned_feature_findings(self) -> None:
+        now = datetime.now(timezone.utc)
+        company = SimpleNamespace(
+            is_active=True,
+            created_at=now,
+        )
+        controls = PlatformTenantService._controls(
+            SimpleNamespace(
+                plan_code="starter",
+                feature_flags={"restaurant": True, "takeaway": True},
+                plan_limits={"brands": 1, "branches": 1, "users": 1, "devices": 1},
+            )
+        )
+        usage = PlatformTenantService._usage_counts(
+            brands=1,
+            branches=1,
+            users=2,
+            devices=1,
+            paired_devices=0,
+            menu_items=1,
+        )
+
+        codes = PlatformTenantService._attention_codes(
+            company=company,
+            controls=controls,
+            usage=usage,
+            onboarding=(5, 7),
+            last_activity_at=now,
+            now=now,
+        )
+
+        self.assertEqual(codes, [
+            "limit_exceeded:users",
+            "onboarding_pending",
+            "planned_feature_configured",
+            "unpaired_devices",
+        ])
 
 
 if __name__ == "__main__":

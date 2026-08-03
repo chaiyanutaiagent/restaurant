@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   AlertTriangle,
@@ -6,6 +6,7 @@ import {
   Building2,
   CheckCircle2,
   Cpu,
+  Database,
   LayoutDashboard,
   MapPin,
   RefreshCw,
@@ -58,7 +59,24 @@ const actionLabels: Record<string, string> = {
   "platform.operator.mfa.recovery_codes.rotate": "สร้าง MFA recovery codes ใหม่",
   "platform.operator.password.change": "เปลี่ยนรหัสผ่าน Platform Owner",
   "platform.operator.password.break_glass_reset": "Break-glass reset Platform Owner",
+  "platform.usage.snapshot.capture": "บันทึก Tenant usage snapshot",
 };
+
+const attentionLabels: Record<string, string> = {
+  suspended: "ถูกระงับ",
+  onboarding_pending: "ตั้งค่ายังไม่ครบ",
+  unpaired_devices: "มีอุปกรณ์รอจับคู่",
+  planned_feature_configured: "ตั้งค่า Feature ที่ยัง Planned",
+  stale_activity: "ไม่มีกิจกรรมเกิน 14 วัน",
+  "limit_exceeded:brands": "แบรนด์เกิน Limit",
+  "limit_exceeded:branches": "สาขาเกิน Limit",
+  "limit_exceeded:users": "บัญชีผู้ใช้เกิน Limit",
+  "limit_exceeded:devices": "อุปกรณ์เกิน Limit",
+};
+
+function attentionLabel(code: string): string {
+  return attentionLabels[code] ?? code;
+}
 
 function formatNumber(value: number): string {
   return numberFormatter.format(value);
@@ -69,10 +87,15 @@ function eventLabel(event: PlatformAuditEvent): string {
 }
 
 export default function PlatformDashboardPage(): JSX.Element {
+  const queryClient = useQueryClient();
   const dashboard = useQuery({
     queryKey: ["platform", "dashboard"],
     queryFn: async () => (await platformApi.dashboard()).data.data,
     refetchInterval: 60_000,
+  });
+  const captureSnapshots = useMutation({
+    mutationFn: () => platformApi.captureUsageSnapshots(),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["platform", "dashboard"] }),
   });
 
   if (dashboard.isLoading) return <DashboardSkeleton />;
@@ -98,7 +121,7 @@ export default function PlatformDashboardPage(): JSX.Element {
   const readinessPercent = data.onboarding.total_active_companies
     ? Math.round((data.onboarding.ready_companies / data.onboarding.total_active_companies) * 100)
     : 0;
-  const attentionCount = data.totals.suspended_companies + data.onboarding.pending_companies;
+  const attentionCount = data.attention_summary.companies ?? 0;
   const unpairedDevices = Math.max(data.totals.devices - data.totals.paired_devices, 0);
   const totalPlanCompanies = Object.values(data.plan_usage).reduce((sum, count) => sum + count, 0);
   const productStatusLabel = (status: "pilot" | "planned") => status === "pilot" ? "PILOT" : "PLANNED";
@@ -122,8 +145,15 @@ export default function PlatformDashboardPage(): JSX.Element {
               จัดการบริษัทลูกค้า <ArrowRight className="h-4 w-4" />
             </Link>
           </Button>
+          <Button variant="outline" onClick={() => captureSnapshots.mutate()} disabled={captureSnapshots.isPending}>
+            <Database className="h-4 w-4" />
+            {captureSnapshots.isPending ? "กำลังบันทึก..." : "บันทึก Usage วันนี้"}
+          </Button>
         </div>
       </header>
+
+      {captureSnapshots.error ? <p className="rounded-xl border border-red-900 bg-red-950/40 p-3 text-sm text-red-200">{platformErrorMessage(captureSnapshots.error)}</p> : null}
+      {captureSnapshots.isSuccess ? <p className="rounded-xl border border-emerald-900 bg-emerald-950/30 p-3 text-sm text-emerald-200">บันทึก aggregate usage snapshot วันนี้แล้ว โดยไม่มีข้อมูลออเดอร์หรือลูกค้า</p> : null}
 
       <section className="rounded-2xl border border-amber-800/70 bg-amber-950/30 px-5 py-4" aria-label="สถานะการเปิดระบบ">
         <div className="flex items-start gap-3">
@@ -230,6 +260,22 @@ export default function PlatformDashboardPage(): JSX.Element {
         </div>
       </section>
 
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <h3 className="font-semibold">สาเหตุที่ต้องติดตาม</h3>
+        <p className="mt-1 text-xs text-slate-400">กฎจาก aggregate usage และสถานะการตั้งค่า ไม่อ่านรายละเอียดออเดอร์หรือลูกค้า</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {Object.entries(data.attention_summary).filter(([key, count]) => key !== "companies" && count > 0).length ? (
+            Object.entries(data.attention_summary)
+              .filter(([key, count]) => key !== "companies" && count > 0)
+              .map(([key, count]) => (
+                <span key={key} className="rounded-full bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-300">
+                  {attentionLabel(key)} · {formatNumber(count)}
+                </span>
+              ))
+          ) : <p className="text-sm text-emerald-300">ยังไม่มี Tenant ที่เข้าเงื่อนไขต้องติดตาม</p>}
+        </div>
+      </section>
+
       <section>
         <div className="mb-3">
           <h3 className="text-lg font-semibold">ระบบที่เปิดให้ลูกค้า</h3>
@@ -284,7 +330,12 @@ export default function PlatformDashboardPage(): JSX.Element {
                           {company.is_active ? "ACTIVE" : "SUSPENDED"}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">Plan {company.plan_code} · เปิดเมื่อ {new Date(company.created_at).toLocaleDateString("th-TH")}</p>
+                      <p className="mt-1 text-xs text-slate-500">Plan {company.plan_code} · กิจกรรมล่าสุด {company.last_activity_at ? new Date(company.last_activity_at).toLocaleString("th-TH") : "ยังไม่มี"}</p>
+                      {company.attention_codes.length ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {company.attention_codes.map((code) => <span key={code} className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-300">{attentionLabel(code)}</span>)}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="shrink-0 text-right">
                       <p className={`text-sm font-semibold ${company.onboarding_complete ? "text-emerald-300" : "text-amber-300"}`}>{progress}%</p>

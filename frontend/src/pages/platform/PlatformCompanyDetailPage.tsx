@@ -15,6 +15,16 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
     queryFn: async () => (await platformApi.company(companyId)).data.data,
     enabled: Boolean(companyId)
   });
+  const usage = useQuery({
+    queryKey: ["platform", "company", companyId, "usage"],
+    queryFn: async () => (await platformApi.companyUsage(companyId)).data.data,
+    enabled: Boolean(companyId),
+  });
+  const usageHistory = useQuery({
+    queryKey: ["platform", "company", companyId, "usage", "history"],
+    queryFn: async () => (await platformApi.companyUsageHistory(companyId)).data.data,
+    enabled: Boolean(companyId),
+  });
   const [reason, setReason] = useState("");
   const [planCode, setPlanCode] = useState("starter");
   const [features, setFeatures] = useState<Record<string, boolean>>({});
@@ -30,7 +40,8 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
   const refresh = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["platform", "company", companyId] }),
-      queryClient.invalidateQueries({ queryKey: ["platform", "companies"] })
+      queryClient.invalidateQueries({ queryKey: ["platform", "companies"] }),
+      queryClient.invalidateQueries({ queryKey: ["platform", "company", companyId, "usage"] }),
     ]);
   };
   const lifecycle = useMutation({
@@ -100,6 +111,34 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
             <p className="mt-1">เหตุผล: {data.suspension_reason || "ไม่ระบุ"} เมื่อเปิดใหม่ user ต้อง login ใหม่ และ tablet ต้องจับคู่ใหม่</p>
           </div>
         ) : null}
+      </section>
+
+      <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><p className="text-sm text-sky-300">Aggregate usage</p><h3 className="mt-1 text-xl font-semibold">การใช้ทรัพยากรตาม Plan</h3><p className="mt-1 text-xs text-slate-400">ไม่รวมรายละเอียดออเดอร์ ลูกค้า หรือข้อมูลพนักงาน</p></div>
+          {usage.data?.last_activity_at ? <p className="text-xs text-slate-500">กิจกรรมล่าสุด {new Date(usage.data.last_activity_at).toLocaleString("th-TH")}</p> : null}
+        </div>
+        {usage.isLoading ? <p className="mt-5 text-sm text-slate-400">กำลังคำนวณ usage...</p> : null}
+        {usage.error ? <p className="mt-5 text-sm text-red-300">{platformErrorMessage(usage.error)}</p> : null}
+        {usage.data ? (
+          <>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {Object.entries(usage.data.limit_state).map(([key, state]) => (
+                <article key={key} className={`rounded-xl border p-4 ${state.exceeded ? "border-red-800 bg-red-950/25" : "border-slate-700 bg-slate-950/40"}`}>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">{key}</p>
+                  <p className="mt-2 text-2xl font-bold">{state.current} <span className="text-sm font-normal text-slate-500">/ {state.unlimited ? "ไม่จำกัด" : state.limit}</span></p>
+                  <p className={`mt-2 text-xs ${state.exceeded ? "text-red-300" : "text-slate-400"}`}>{state.exceeded ? "เกิน Plan limit" : state.unlimited ? "Unlimited" : `คงเหลือ ${state.remaining}`}</p>
+                </article>
+              ))}
+            </div>
+            {usage.data.attention_codes.length ? <div className="mt-4 flex flex-wrap gap-2">{usage.data.attention_codes.map((code) => <span key={code} className="rounded-full bg-amber-400/10 px-3 py-1 text-xs text-amber-300">{code}</span>)}</div> : null}
+          </>
+        ) : null}
+        <div className="mt-6 border-t border-slate-800 pt-4">
+          <p className="text-sm font-semibold">Snapshot history</p>
+          {usageHistory.isLoading ? <p className="mt-2 text-xs text-slate-500">กำลังโหลด...</p> : null}
+          {usageHistory.data?.length ? <div className="mt-3 flex flex-wrap gap-2">{usageHistory.data.map((snapshot) => <span key={snapshot.id} className="rounded-lg bg-slate-800 px-3 py-2 text-xs text-slate-300">{new Date(snapshot.captured_on).toLocaleDateString("th-TH")} · {snapshot.attention_codes.length} จุดติดตาม</span>)}</div> : !usageHistory.isLoading ? <p className="mt-2 text-xs text-slate-500">ยังไม่มี snapshot — บันทึกได้จากหน้า Dashboard</p> : null}
+        </div>
       </section>
 
       <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6">

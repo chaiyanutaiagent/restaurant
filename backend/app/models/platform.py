@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, String, Text, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -163,3 +163,42 @@ class PlatformTenantProfile(UUIDMixin, TimestampMixin, Base):
         nullable=True,
     )
     reactivation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PlatformTenantUsageSnapshot(UUIDMixin, TimestampMixin, Base):
+    """PII-free daily aggregate used by Platform operations and later billing decisions."""
+
+    __tablename__ = "platform_tenant_usage_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "captured_on",
+            name="company_captured_on",
+        ),
+        Index("ix_platform_usage_snapshots_captured_on", "captured_on"),
+        Index("ix_platform_usage_snapshots_company_created", "company_id", "created_at"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    captured_on: Mapped[date] = mapped_column(Date, nullable=False)
+    plan_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    feature_flags: Mapped[dict[str, bool]] = mapped_column(JSON, nullable=False)
+    plan_limits: Mapped[dict[str, int]] = mapped_column(JSON, nullable=False)
+    usage: Mapped[dict[str, int]] = mapped_column(JSON, nullable=False)
+    limit_state: Mapped[dict[str, dict]] = mapped_column(JSON, nullable=False)
+    attention_codes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    last_activity_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    onboarding_completed_steps: Mapped[int] = mapped_column(Integer, nullable=False)
+    onboarding_total_steps: Mapped[int] = mapped_column(Integer, nullable=False)
+    captured_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("platform_operators.id"),
+        nullable=False,
+    )

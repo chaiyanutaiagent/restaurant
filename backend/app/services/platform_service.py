@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import settings
 from app.models.audit import AuditLog
@@ -17,7 +18,12 @@ from app.models.branch import Branch
 from app.models.company import Company
 from app.models.device import DeviceRegistration
 from app.models.payment_gateway import PaymentGatewayConfig
-from app.models.platform import PlatformOperator, PlatformSession, PlatformTenantProfile
+from app.models.platform import (
+    PlatformOperator,
+    PlatformSession,
+    PlatformTenantProfile,
+    PlatformTenantUsageSnapshot,
+)
 from app.models.product import Product
 from app.models.restaurant import Brand
 from app.models.role import Permission, Role
@@ -33,6 +39,7 @@ from app.schemas.platform import (
     PlatformDashboardRead,
     PlatformDashboardTotalsRead,
     PlatformLifecycleAction,
+    PlatformLimitStateRead,
     PlatformMfaConfirmRead,
     PlatformMfaSetupRead,
     PlatformOnboardingRead,
@@ -42,6 +49,8 @@ from app.schemas.platform import (
     PlatformTenantControlsRead,
     PlatformTenantControlsUpdate,
     PlatformTenantExportRequest,
+    PlatformTenantUsageRead,
+    PlatformTenantUsageSnapshotRead,
     PlatformTokenResponse,
 )
 from app.services.platform_reference_projection import enqueue_reference_event
@@ -633,6 +642,21 @@ class PlatformTenantService:
             ).all()
             return {company_id: int(count) for company_id, count in rows}
 
+        async def grouped_max(
+            session: AsyncSession,
+            model,
+            column,
+            *filters,
+        ) -> dict[uuid.UUID, datetime]:
+            rows = (
+                await session.execute(
+                    select(model.company_id, func.max(column))
+                    .where(*filters)
+                    .group_by(model.company_id)
+                )
+            ).all()
+            return {company_id: value for company_id, value in rows if value is not None}
+
         brand_counts = await grouped_counts(self.db, Brand, Brand.is_active.is_(True))
         branch_counts = await grouped_counts(
             self.db,
@@ -672,9 +696,38 @@ class PlatformTenantService:
             self.restaurant_db,
             PaymentGatewayConfig,
         )
+        audit_activity = await grouped_max(
+            self.db,
+            AuditLog,
+            AuditLog.created_at,
+            AuditLog.company_id.is_not(None),
+        )
+        user_activity = await grouped_max(
+            self.db,
+            User,
+            User.last_login_at,
+            User.deleted_at.is_(None),
+            User.last_login_at.is_not(None),
+        )
+        device_activity = await grouped_max(
+            self.db,
+            DeviceRegistration,
+            DeviceRegistration.last_seen_at,
+            DeviceRegistration.revoked_at.is_(None),
+            DeviceRegistration.last_seen_at.is_not(None),
+        )
+        menu_activity = await grouped_max(
+            self.restaurant_db,
+            Product,
+            Product.updated_at,
+            Product.deleted_at.is_(None),
+        )
 
         onboarding_by_company: dict[uuid.UUID, tuple[int, int]] = {}
+        last_activity_by_company: dict[uuid.UUID, datetime | None] = {}
+        attention_by_company: dict[uuid.UUID, list[str]] = {}
         for company, profile in company_rows:
+            controls = self._controls(profile)
             counts = {
                 "company": 1,
                 "brand": brand_counts.get(company.id, 0),
@@ -688,7 +741,7 @@ class PlatformTenantService:
                 "device": paired_device_counts.get(company.id, 0),
             }
             steps = self._build_onboarding_steps(
-                controls=self._controls(profile),
+                controls=controls,
                 counts=counts,
                 has_payment_configuration=counts["payment"] > 0,
                 registered_device_count=device_counts.get(company.id, 0),
@@ -696,6 +749,30 @@ class PlatformTenantService:
             onboarding_by_company[company.id] = (
                 sum(int(step.complete) for step in steps),
                 len(steps),
+            )
+            usage = self._usage_counts(
+                brands=brand_counts.get(company.id, 0),
+                branches=branch_counts.get(company.id, 0),
+                users=user_counts.get(company.id, 0),
+                devices=device_counts.get(company.id, 0),
+                paired_devices=paired_device_counts.get(company.id, 0),
+                menu_items=menu_counts.get(company.id, 0),
+            )
+            last_activity = self._latest_activity(
+                company.updated_at,
+                audit_activity.get(company.id),
+                user_activity.get(company.id),
+                device_activity.get(company.id),
+                menu_activity.get(company.id),
+            )
+            last_activity_by_company[company.id] = last_activity
+            attention_by_company[company.id] = self._attention_codes(
+                company=company,
+                controls=controls,
+                usage=usage,
+                onboarding=onboarding_by_company[company.id],
+                last_activity_at=last_activity,
+                now=datetime.now(timezone.utc),
             )
 
         active_rows = [(company, profile) for company, profile in company_rows if company.is_active]
@@ -730,11 +807,19 @@ class PlatformTenantService:
                     onboarding_complete=completed_steps == total_steps,
                     completed_steps=completed_steps,
                     total_steps=total_steps,
+                    last_activity_at=last_activity_by_company[company.id],
+                    attention_codes=attention_by_company[company.id],
                 )
             )
 
         recent_events = await self.list_audit_events(company_id=None, limit=6)
         active_companies = len(active_rows)
+        attention_summary: dict[str, int] = {
+            "companies": sum(int(bool(attention_by_company[company.id])) for company, _ in company_rows)
+        }
+        for codes in attention_by_company.values():
+            for code in codes:
+                attention_summary[code] = attention_summary.get(code, 0) + 1
         return PlatformDashboardRead(
             generated_at=datetime.now(timezone.utc),
             totals=PlatformDashboardTotalsRead(
@@ -753,11 +838,244 @@ class PlatformTenantService:
                 total_active_companies=active_companies,
             ),
             product_status=PRODUCT_RELEASE_STATUS,
+            attention_summary=dict(sorted(attention_summary.items())),
             feature_usage=feature_usage,
             plan_usage=dict(sorted(plan_usage.items())),
             recent_companies=recent_companies,
             recent_events=recent_events,
         )
+
+    async def current_usage(self, company_id: uuid.UUID) -> PlatformTenantUsageRead:
+        row = (
+            await self.db.execute(
+                select(Company, PlatformTenantProfile)
+                .outerjoin(
+                    PlatformTenantProfile,
+                    PlatformTenantProfile.company_id == Company.id,
+                )
+                .where(Company.id == company_id)
+            )
+        ).one_or_none()
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        company, profile = row
+
+        async def count(session: AsyncSession, model, *filters) -> int:
+            return int(
+                await session.scalar(
+                    select(func.count()).select_from(model).where(*filters)
+                )
+                or 0
+            )
+
+        brands = await count(
+            self.db,
+            Brand,
+            Brand.company_id == company_id,
+            Brand.is_active.is_(True),
+        )
+        branches = await count(
+            self.db,
+            Branch,
+            Branch.company_id == company_id,
+            Branch.deleted_at.is_(None),
+            Branch.is_active.is_(True),
+        )
+        users = await count(
+            self.db,
+            User,
+            User.company_id == company_id,
+            User.deleted_at.is_(None),
+            User.is_active.is_(True),
+        )
+        devices = await count(
+            self.db,
+            DeviceRegistration,
+            DeviceRegistration.company_id == company_id,
+            DeviceRegistration.revoked_at.is_(None),
+        )
+        paired_devices = await count(
+            self.db,
+            DeviceRegistration,
+            DeviceRegistration.company_id == company_id,
+            DeviceRegistration.revoked_at.is_(None),
+            DeviceRegistration.paired_at.is_not(None),
+        )
+        menu_items = await count(
+            self.restaurant_db,
+            Product,
+            Product.company_id == company_id,
+            Product.deleted_at.is_(None),
+            Product.is_active.is_(True),
+            Product.is_for_sale.is_(True),
+        )
+        payment_configurations = (
+            await count(
+                self.restaurant_db,
+                BranchSettings,
+                BranchSettings.company_id == company_id,
+            )
+            + await count(
+                self.restaurant_db,
+                PaymentGatewayConfig,
+                PaymentGatewayConfig.company_id == company_id,
+            )
+        )
+        usage = self._usage_counts(
+            brands=brands,
+            branches=branches,
+            users=users,
+            devices=devices,
+            paired_devices=paired_devices,
+            menu_items=menu_items,
+        )
+        controls = self._controls(profile)
+        steps = self._build_onboarding_steps(
+            controls=controls,
+            counts={
+                "company": 1,
+                "brand": brands,
+                "branch": branches,
+                "menu": menu_items,
+                "payment": payment_configurations,
+                "staff": users,
+                "device": paired_devices,
+            },
+            has_payment_configuration=payment_configurations > 0,
+            registered_device_count=devices,
+        )
+        onboarding = (
+            sum(int(step.complete) for step in steps),
+            len(steps),
+        )
+        audit_activity = await self.db.scalar(
+            select(func.max(AuditLog.created_at)).where(AuditLog.company_id == company_id)
+        )
+        user_activity = await self.db.scalar(
+            select(func.max(User.last_login_at)).where(
+                User.company_id == company_id,
+                User.deleted_at.is_(None),
+            )
+        )
+        device_activity = await self.db.scalar(
+            select(func.max(DeviceRegistration.last_seen_at)).where(
+                DeviceRegistration.company_id == company_id,
+                DeviceRegistration.revoked_at.is_(None),
+            )
+        )
+        menu_activity = await self.restaurant_db.scalar(
+            select(func.max(Product.updated_at)).where(
+                Product.company_id == company_id,
+                Product.deleted_at.is_(None),
+            )
+        )
+        generated_at = datetime.now(timezone.utc)
+        last_activity = self._latest_activity(
+            company.updated_at,
+            audit_activity,
+            user_activity,
+            device_activity,
+            menu_activity,
+        )
+        return PlatformTenantUsageRead(
+            company_id=company_id,
+            generated_at=generated_at,
+            plan_code=controls.plan_code,
+            feature_flags=controls.feature_flags,
+            plan_limits=controls.plan_limits,
+            usage=usage,
+            limit_state=self._limit_state(controls=controls, usage=usage),
+            attention_codes=self._attention_codes(
+                company=company,
+                controls=controls,
+                usage=usage,
+                onboarding=onboarding,
+                last_activity_at=last_activity,
+                now=generated_at,
+            ),
+            last_activity_at=last_activity,
+            onboarding_completed_steps=onboarding[0],
+            onboarding_total_steps=onboarding[1],
+        )
+
+    async def capture_usage_snapshots(
+        self,
+        *,
+        ip_address: str | None,
+        user_agent: str | None,
+    ) -> list[PlatformTenantUsageSnapshotRead]:
+        company_ids = list(await self.db.scalars(select(Company.id).order_by(Company.id)))
+        captured_on = datetime.now(timezone.utc).date()
+        snapshots: list[PlatformTenantUsageSnapshot] = []
+        for company_id in company_ids:
+            current = await self.current_usage(company_id)
+            limit_state = {
+                key: value.model_dump(mode="json")
+                for key, value in current.limit_state.items()
+            }
+            values = {
+                "company_id": company_id,
+                "captured_on": captured_on,
+                "plan_code": current.plan_code,
+                "feature_flags": current.feature_flags,
+                "plan_limits": current.plan_limits,
+                "usage": current.usage,
+                "limit_state": limit_state,
+                "attention_codes": current.attention_codes,
+                "last_activity_at": current.last_activity_at,
+                "onboarding_completed_steps": current.onboarding_completed_steps,
+                "onboarding_total_steps": current.onboarding_total_steps,
+                "captured_by": self.operator_id,
+            }
+            statement = pg_insert(PlatformTenantUsageSnapshot).values(**values)
+            snapshot_id = await self.db.scalar(
+                statement.on_conflict_do_update(
+                    index_elements=["company_id", "captured_on"],
+                    set_={**values, "updated_at": func.now()},
+                ).returning(PlatformTenantUsageSnapshot.id)
+            )
+            snapshot = await self.db.get(PlatformTenantUsageSnapshot, snapshot_id)
+            if snapshot is None:
+                raise RuntimeError("Captured Platform usage snapshot could not be reloaded")
+            snapshots.append(snapshot)
+        self._audit(
+            company_id=None,
+            action="platform.usage.snapshot.capture",
+            resource_id=None,
+            reason=f"Captured {len(snapshots)} aggregate Tenant usage snapshots for {captured_on}",
+            old_value=None,
+            new_value={
+                "captured_on": captured_on.isoformat(),
+                "company_count": len(snapshots),
+                "aggregate_only": True,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+            resource="PlatformTenantUsageSnapshot",
+        )
+        await self.db.commit()
+        return [self._usage_snapshot_read(snapshot) for snapshot in snapshots]
+
+    async def usage_history(
+        self,
+        company_id: uuid.UUID,
+        *,
+        limit: int = 31,
+    ) -> list[PlatformTenantUsageSnapshotRead]:
+        if await self.db.get(Company, company_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        rows = (
+            await self.db.scalars(
+                select(PlatformTenantUsageSnapshot)
+                .where(PlatformTenantUsageSnapshot.company_id == company_id)
+                .order_by(
+                    PlatformTenantUsageSnapshot.captured_on.desc(),
+                    PlatformTenantUsageSnapshot.created_at.desc(),
+                )
+                .limit(limit)
+            )
+        ).all()
+        return [self._usage_snapshot_read(row) for row in rows]
 
     async def list_companies(
         self,
@@ -1307,6 +1625,113 @@ class PlatformTenantService:
         ]
 
     @staticmethod
+    def _usage_counts(
+        *,
+        brands: int,
+        branches: int,
+        users: int,
+        devices: int,
+        paired_devices: int,
+        menu_items: int,
+    ) -> dict[str, int]:
+        return {
+            "brands": brands,
+            "branches": branches,
+            "enabled_user_accounts": users,
+            "registered_devices": devices,
+            "paired_devices": paired_devices,
+            "active_menu_items": menu_items,
+        }
+
+    @staticmethod
+    def _limit_state(
+        *,
+        controls: PlatformTenantControlsRead,
+        usage: dict[str, int],
+    ) -> dict[str, PlatformLimitStateRead]:
+        resources = {
+            "brands": "brands",
+            "branches": "branches",
+            "users": "enabled_user_accounts",
+            "devices": "registered_devices",
+        }
+        result: dict[str, PlatformLimitStateRead] = {}
+        for limit_key, resource_key in resources.items():
+            current = int(usage.get(resource_key, 0))
+            configured_limit = int(controls.plan_limits.get(limit_key, 0))
+            unlimited = configured_limit == 0
+            result[limit_key] = PlatformLimitStateRead(
+                resource_key=resource_key,
+                current=current,
+                limit=None if unlimited else configured_limit,
+                unlimited=unlimited,
+                exceeded=False if unlimited else current > configured_limit,
+                remaining=None if unlimited else max(configured_limit - current, 0),
+                utilization_percent=(
+                    None
+                    if unlimited
+                    else round((current / configured_limit) * 100)
+                    if configured_limit > 0
+                    else None
+                ),
+            )
+        return result
+
+    @staticmethod
+    def _latest_activity(*values: datetime | None) -> datetime | None:
+        normalized = [
+            value.replace(tzinfo=timezone.utc)
+            if value is not None and value.tzinfo is None
+            else value.astimezone(timezone.utc)
+            for value in values
+            if value is not None
+        ]
+        return max(normalized) if normalized else None
+
+    @classmethod
+    def _attention_codes(
+        cls,
+        *,
+        company: Company,
+        controls: PlatformTenantControlsRead,
+        usage: dict[str, int],
+        onboarding: tuple[int, int],
+        last_activity_at: datetime | None,
+        now: datetime,
+    ) -> list[str]:
+        codes: list[str] = []
+        if not company.is_active:
+            codes.append("suspended")
+        if onboarding[0] < onboarding[1]:
+            codes.append("onboarding_pending")
+        for key, state in cls._limit_state(controls=controls, usage=usage).items():
+            if state.exceeded:
+                codes.append(f"limit_exceeded:{key}")
+        if usage.get("registered_devices", 0) > usage.get("paired_devices", 0):
+            codes.append("unpaired_devices")
+        planned_enabled = any(
+            lifecycle == "planned" and controls.feature_flags.get(key, False)
+            for key, lifecycle in PRODUCT_RELEASE_STATUS.items()
+        )
+        if planned_enabled:
+            codes.append("planned_feature_configured")
+        stale_before = now - timedelta(days=14)
+        created_at = cls._latest_activity(company.created_at)
+        if (
+            created_at is not None
+            and created_at <= stale_before
+            and (last_activity_at is None or last_activity_at <= stale_before)
+        ):
+            codes.append("stale_activity")
+        return sorted(codes)
+
+    @staticmethod
+    def _usage_snapshot_read(
+        snapshot: PlatformTenantUsageSnapshot,
+    ) -> PlatformTenantUsageSnapshotRead:
+        return PlatformTenantUsageSnapshotRead.model_validate(snapshot)
+
+    @staticmethod
     def _controls(profile: PlatformTenantProfile | None) -> PlatformTenantControlsRead:
         return PlatformTenantControlsRead(
             plan_code=profile.plan_code if profile else "starter",
@@ -1337,14 +1762,15 @@ class PlatformTenantService:
     def _audit(
         self,
         *,
-        company_id: uuid.UUID,
+        company_id: uuid.UUID | None,
         action: str,
-        resource_id: uuid.UUID,
+        resource_id: uuid.UUID | None,
         reason: str,
         old_value: dict[str, Any] | None,
         new_value: dict[str, Any],
         ip_address: str | None,
         user_agent: str | None,
+        resource: str = "Company",
     ) -> None:
         self.db.add(
             AuditLog(
@@ -1352,8 +1778,8 @@ class PlatformTenantService:
                 branch_id=None,
                 user_id=self.operator_id,
                 action=action,
-                resource="Company",
-                resource_id=str(resource_id),
+                resource=resource,
+                resource_id=str(resource_id) if resource_id else None,
                 old_value=old_value,
                 new_value={**new_value, "reason": reason},
                 ip_address=ip_address,

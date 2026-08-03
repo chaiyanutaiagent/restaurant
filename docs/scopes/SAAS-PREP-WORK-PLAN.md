@@ -41,8 +41,8 @@ phase7_started: false
 | --- | --- | --- | --- | --- |
 | 1 | `SAAS-PREP-DASHBOARD-01` | Correct and verify the existing Platform Owner dashboard | Existing `d788d7d` baseline | Complete |
 | 2 | `SAAS-PREP-PLATFORM-AUTH-02` | MFA-ready Platform sessions, logout, revocation, and recovery controls | Scope 01 | Complete |
-| 3 | `SAAS-PREP-TENANT-USAGE-03` | Plan usage, conditional onboarding, last activity, and attention queue | Scope 02 | Active |
-| 4 | `SAAS-PREP-MEMBERSHIP-04` | Self-service tenant signup, verification, reset, trial, and onboarding lifecycle | Scope 03 | Pending |
+| 3 | `SAAS-PREP-TENANT-USAGE-03` | Plan usage, conditional onboarding, last activity, and attention queue | Scope 02 | Complete |
+| 4 | `SAAS-PREP-MEMBERSHIP-04` | Self-service tenant signup, verification, reset, trial, and onboarding lifecycle | Scope 03 | Active |
 | 5 | `SAAS-PREP-OPERATIONS-05` | Protected operations summary, health snapshots, alert and backup status | Scope 04 | Pending |
 | 6 | `SAAS-PREP-BILLING-06` | Provider-neutral subscription lifecycle and billing decision boundary | Scope 05 and provider decision | Pending |
 | 7 | `SAAS-PREP-PDPA-SUPPORT-07` | Privacy lifecycle, data-subject requests, support tickets, and audited support access | Scope 06 | Pending |
@@ -176,17 +176,72 @@ application. Existing tenant and device authentication tables are not modified.
 - Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-platform-auth-02-20260803T064239Z/manifest.txt`.
 - Temporary databases remaining: `0`; local legacy and Platform migration heads unchanged.
 
+## SAAS-PREP-TENANT-USAGE-03
+
+### Problem
+
+The Platform dashboard shows global resource totals but does not tell the owner which
+Tenant is approaching or exceeding a plan limit, when a Tenant last used the system, or
+why a Tenant needs attention. There is also no durable aggregate snapshot for later trend
+and billing decisions.
+
+### In scope
+
+- Compute Company-level usage for brands, branches, enabled user accounts, registered and
+  paired devices, and active menu items.
+- Compare usage to manual plan limits using the existing zero-as-unlimited convention.
+- Compute last activity only from aggregate timestamps such as operator audit, staff login,
+  device last-seen, configuration update, and menu update.
+- Add deterministic attention rules for suspension, incomplete setup, plan-limit breach,
+  unpaired devices, stale activity, and configured-but-planned product flags.
+- Store on-demand aggregate usage snapshots in legacy and Platform-core migration paths.
+- Add protected current usage/history and snapshot-capture APIs with audit evidence.
+- Add dashboard attention/last-activity UI and focused backend/browser verification.
+
+### Out of scope
+
+- Order lines, receipts, customer names, customer contact data, employee personal data, or
+  any Platform endpoint returning Tenant business records.
+- Automated scheduler, metered billing, invoices, payment providers, automatic suspension,
+  or changing plan limits.
+- Production migration execution, production monitoring, Takeaway Phase 6, or Retail Phase 7.
+
+### Acceptance criteria
+
+- Each active Company has current aggregate usage, limit state, last activity, and explainable
+  attention codes without exposing order/customer detail.
+- A limit of zero is reported as unlimited and never produces a limit-breach alert.
+- Snapshot capture is explicit, idempotent per Company/day, Platform-authorized, and audited.
+- Current usage and snapshot history remain isolated by requested Company.
+- Both migration paths rehearse upgrade/downgrade/re-upgrade on isolated databases.
+- Backend focused tests, frontend type-check/build, and Platform browser flow pass.
+
+### Verification
+
+- Focused aggregate/limit/attention unit and API tests.
+- Isolated migration rehearsal for legacy and Platform-core paths.
+- `npm run type-check`, `npm run build`, and Platform Playwright suite.
+
+### Rollback
+
+Revert only the Scope 03 commit and downgrade the Scope 03 migration after exporting any
+aggregate snapshots that must be retained. No Tenant operational record is changed.
+
+### Completion evidence
+
+- Focused Platform suite: 35 tests passed, including unlimited/limit breach and explainable
+  attention rules.
+- Isolated legacy migration reached `p7usage0009` and passed downgrade to `p6auth0008`
+  followed by re-upgrade.
+- Isolated Platform-core migration reached `p7platform0011` and passed downgrade to
+  `p6platform0010` followed by re-upgrade.
+- Isolated usage API smoke passed aggregate-only response, PII leak check, daily upsert
+  idempotency, snapshot audit, and Company isolation gates.
+- Frontend TypeScript check, production build, and 4 Platform browser tests passed.
+- Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-tenant-usage-03-20260803T065817Z/manifest.txt`.
+- Temporary databases remaining: `0`; local legacy and Platform migration heads unchanged.
+
 ## Later-scope boundaries
-
-### SAAS-PREP-PLATFORM-AUTH-02 boundary note
-
-Platform-only authentication hardening. It may add Platform session and recovery records,
-but must not change tenant staff authentication or create public signup.
-
-### SAAS-PREP-TENANT-USAGE-03
-
-Usage snapshots and attention rules. It must use aggregate operational data and must not
-expose order details or customer personal data in Platform overview responses.
 
 ### SAAS-PREP-MEMBERSHIP-04
 

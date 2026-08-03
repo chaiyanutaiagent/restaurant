@@ -279,6 +279,21 @@ async def dashboard(
     return ok(summary.model_dump(mode="json"))
 
 
+@router.post("/usage/snapshots")
+async def capture_usage_snapshots(
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    snapshots = await _tenant_service(db, restaurant_db, current).capture_usage_snapshots(
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok([snapshot.model_dump(mode="json") for snapshot in snapshots])
+
+
 @router.get("/companies")
 async def list_companies(
     search: str | None = Query(default=None, max_length=255),
@@ -328,6 +343,32 @@ async def get_company(
 ) -> dict[str, Any]:
     company = await _tenant_service(db, restaurant_db, current).get_company(company_id)
     return ok(company.model_dump(mode="json"))
+
+
+@router.get("/companies/{company_id}/usage")
+async def get_company_usage(
+    company_id: uuid.UUID,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    usage = await _tenant_service(db, restaurant_db, current).current_usage(company_id)
+    return ok(usage.model_dump(mode="json"))
+
+
+@router.get("/companies/{company_id}/usage/history")
+async def get_company_usage_history(
+    company_id: uuid.UUID,
+    limit: int = Query(default=31, ge=1, le=366),
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    history = await _tenant_service(db, restaurant_db, current).usage_history(
+        company_id,
+        limit=limit,
+    )
+    return ok([snapshot.model_dump(mode="json") for snapshot in history])
 
 
 @router.post("/companies/{company_id}/suspend")

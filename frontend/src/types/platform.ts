@@ -152,6 +152,39 @@ export type PlatformDashboardCompany = PlatformCompanyListItem & {
   onboarding_complete: boolean;
   completed_steps: number;
   total_steps: number;
+  last_activity_at: string | null;
+  attention_codes: string[];
+};
+
+export type PlatformLimitState = {
+  resource_key: string;
+  current: number;
+  limit: number | null;
+  unlimited: boolean;
+  exceeded: boolean;
+  remaining: number | null;
+  utilization_percent: number | null;
+};
+
+export type PlatformTenantUsage = {
+  company_id: string;
+  generated_at: string;
+  plan_code: string;
+  feature_flags: Record<string, boolean>;
+  plan_limits: Record<string, number>;
+  usage: Record<string, number>;
+  limit_state: Record<string, PlatformLimitState>;
+  attention_codes: string[];
+  last_activity_at: string | null;
+  onboarding_completed_steps: number;
+  onboarding_total_steps: number;
+};
+
+export type PlatformTenantUsageSnapshot = Omit<PlatformTenantUsage, "generated_at"> & {
+  id: string;
+  captured_on: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type PlatformDashboard = {
@@ -172,6 +205,7 @@ export type PlatformDashboard = {
     total_active_companies: number;
   };
   product_status: Record<string, "pilot" | "planned">;
+  attention_summary: Record<string, number>;
   feature_usage: Record<string, number>;
   plan_usage: Record<string, number>;
   recent_companies: PlatformDashboardCompany[];

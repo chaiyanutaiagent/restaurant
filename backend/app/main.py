@@ -5,8 +5,6 @@ from contextlib import asynccontextmanager
 
 import asyncio
 import os
-import tempfile
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi import status
@@ -41,9 +39,9 @@ from app.routers import router
 from app.utils.create_superuser import ensure_default_company_seed_in_session
 from app.utils.seed_permissions import seed_default_permissions
 from app.services.reference_projector_worker import (
-    reference_projector_state,
     run_reference_projector,
 )
+from app.services.platform_operations_service import collect_runtime_state
 
 
 @asynccontextmanager
@@ -168,74 +166,15 @@ async def health_live() -> dict[str, str]:
     return {"status": "ok", "version": settings.app_version}
 
 
-async def _check_database(session_factory) -> str:
-    async with session_factory() as db:
-        await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=5)
-    return "ok"
-
-
-async def _check_redis() -> str:
-    import redis.asyncio as aioredis
-
-    redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-    try:
-        await asyncio.wait_for(redis.ping(), timeout=5)
-    finally:
-        await redis.aclose()
-    return "ok"
-
-
-def _check_uploads() -> str:
-    upload_path = Path(settings.upload_dir)
-    upload_path.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=upload_path, prefix=".health-", delete=True):
-        pass
-    return "ok"
-
-
 @app.get("/health/ready")
 async def health_ready() -> JSONResponse:
-    checks: dict[str, dict[str, str]] = {}
-
-    for name, check in (
-        ("database", lambda: _check_database(AsyncSessionLocal)),
-        ("platform_database", lambda: _check_database(PlatformSessionLocal)),
-        ("restaurant_database", lambda: _check_database(RestaurantSessionLocal)),
-        ("redis", _check_redis),
-    ):
-        try:
-            await check()
-            checks[name] = {"status": "ok"}
-        except Exception:  # pragma: no cover - runtime dependency failure path
-            checks[name] = {"status": "error"}
-
-    try:
-        _check_uploads()
-        checks["uploads"] = {"status": "ok"}
-    except Exception:  # pragma: no cover - runtime dependency failure path
-        checks["uploads"] = {"status": "error"}
-
-    if settings.reference_projector_enabled:
-        checks["reference_projector"] = {
-            "status": "ok" if reference_projector_state.running else "error"
-        }
-
-    ready = all(check["status"] == "ok" for check in checks.values())
+    runtime = await collect_runtime_state()
+    ready = runtime.status == "ok"
     status_code = status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE
     return JSONResponse(
         status_code=status_code,
         content={
             "status": "ok" if ready else "error",
-            "checks": checks,
-            "runtime": {
-                "identity_database": settings.identity_database,
-                "restaurant_service_database": settings.restaurant_service_database,
-                "reference_projector_enabled": settings.reference_projector_enabled,
-                "reference_projector_running": reference_projector_state.running,
-                "reference_projector_failed_events": reference_projector_state.failed,
-                "reference_projector_loop_errors": reference_projector_state.loop_errors,
-                "reference_projector_last_error_type": reference_projector_state.last_error_type,
-            },
             "version": settings.app_version,
         },
     )

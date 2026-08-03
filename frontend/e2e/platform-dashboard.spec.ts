@@ -376,3 +376,67 @@ test("public SaaS owner can complete signup, verification, and password recovery
   await page.getByRole("button", { name: "บันทึกรหัสผ่านใหม่" }).click();
   await expect(page.getByText(/session เดิมถูกเพิกถอน/)).toBeVisible();
 });
+
+test("Platform Owner can review protected operations and capture a runtime snapshot", async ({ page }) => {
+  await installAuthenticatedSession(page);
+  let runtimeCaptured = false;
+  const operationsSnapshot = {
+    id: "55555555-5555-4555-8555-555555555555",
+    captured_at: "2026-08-03T09:00:00Z",
+    overall_status: "ok",
+    source: "resilience_import",
+    component_checks: { public_api: "ok", reference_projector: "ok" },
+    projector_failed_events: 0,
+    projector_loop_errors: 0,
+    disk_usage_percent: 35,
+    backup_status: "current",
+    backup_age_hours: 2,
+    restore_status: "passed",
+    restore_drill_at: "2026-08-03T08:00:00Z",
+    alert_delivery_status: "not_configured",
+    alert_codes: [],
+    evidence_sha256: "a".repeat(64),
+    captured_by: operator.id,
+    created_at: "2026-08-03T09:00:00Z",
+  };
+  await page.route("**/api/v1/platform/operations/summary", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await fulfill(route, response({
+      generated_at: "2026-08-03T09:00:00Z",
+      runtime: {
+        status: "ok",
+        component_checks: {
+          legacy_database: "ok",
+          platform_database: "ok",
+          restaurant_database: "ok",
+          redis: "ok",
+          uploads: "ok",
+          reference_projector: "disabled",
+        },
+        projector_failed_events: 0,
+        projector_loop_errors: 0,
+        disk_usage_percent: 35,
+      },
+      latest_snapshot: operationsSnapshot,
+      latest_backup: operationsSnapshot,
+      latest_restore: operationsSnapshot,
+      latest_alert: operationsSnapshot,
+    }));
+  });
+  await page.route("**/api/v1/platform/operations/history", async (route) => {
+    await fulfill(route, response(runtimeCaptured ? [{ ...operationsSnapshot, source: "operator_runtime" }] : [operationsSnapshot]));
+  });
+  await page.route("**/api/v1/platform/operations/capture", async (route) => {
+    runtimeCaptured = true;
+    await fulfill(route, response({ ...operationsSnapshot, source: "operator_runtime" }));
+  });
+
+  await page.goto("/platform/operations");
+  await expect(page.getByLabel("กำลังโหลดสถานะ Operations")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "สถานะระบบและ Recovery" })).toBeVisible();
+  await expect(page.getByText("Legacy database", { exact: true })).toBeVisible();
+  await expect(page.getByText("current", { exact: true })).toBeVisible();
+  await expect(page.getByText("passed", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "บันทึก Runtime snapshot" }).click();
+  await expect(page.getByText("operator_runtime", { exact: true })).toBeVisible();
+});

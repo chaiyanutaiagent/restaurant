@@ -43,7 +43,7 @@ phase7_started: false
 | 2 | `SAAS-PREP-PLATFORM-AUTH-02` | MFA-ready Platform sessions, logout, revocation, and recovery controls | Scope 01 | Complete |
 | 3 | `SAAS-PREP-TENANT-USAGE-03` | Plan usage, conditional onboarding, last activity, and attention queue | Scope 02 | Complete |
 | 4 | `SAAS-PREP-MEMBERSHIP-04` | Self-service tenant signup, verification, reset, trial, and onboarding lifecycle | Scope 03 | Complete |
-| 5 | `SAAS-PREP-OPERATIONS-05` | Protected operations summary, health snapshots, alert and backup status | Scope 04 | Pending |
+| 5 | `SAAS-PREP-OPERATIONS-05` | Protected operations summary, health snapshots, alert and backup status | Scope 04 | Complete |
 | 6 | `SAAS-PREP-BILLING-06` | Provider-neutral subscription lifecycle and billing decision boundary | Scope 05 and provider decision | Pending |
 | 7 | `SAAS-PREP-PDPA-SUPPORT-07` | Privacy lifecycle, data-subject requests, support tickets, and audited support access | Scope 06 | Pending |
 | 8 | `SAAS-PREP-BETA-GATE-08` | Migration, authorization, security, load, browser, and recovery evidence | Scopes 01-07 | Pending |
@@ -327,12 +327,92 @@ Platform-created Companies and legacy Tenant login behavior remain compatible.
 - Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-membership-04-20260803T072035Z/manifest.txt`.
 - Temporary databases remaining: `0`; local legacy and Platform migration heads unchanged.
 
+## SAAS-PREP-OPERATIONS-05
+
+### Problem
+
+Readiness checks, three-boundary backup/restore tooling, and a resilience monitor already
+exist, but the public readiness response exposes internal database routing and projector
+details. Platform Owner has no protected summary or durable, sanitized history of runtime,
+backup, restore-drill, disk, and alert-delivery status.
+
+### In scope
+
+- Reduce public liveness/readiness responses to status and version without database names,
+  routing mode, projector counters, paths, exception classes, or internal error details.
+- Reuse the existing dependency checks behind a protected Platform operations service.
+- Store sanitized operational snapshots containing component state, backup freshness,
+  restore-drill state, disk threshold state, alert codes, and evidence checksum only.
+- Add protected Platform summary, history, on-demand capture, and sanitized evidence-import
+  endpoints with operator audit records.
+- Add a scheduler-ready CLI that can capture runtime state or import a resilience evidence
+  JSON file without placing bearer credentials in cron arguments.
+- Extend the existing resilience evidence contract with optional restore-drill state while
+  excluding backup paths and raw error text from the database/API.
+- Add a Platform Operations page showing current dependency state, latest backup/restore,
+  alert delivery, history, loading, empty, and failure states.
+- Add matching legacy and Platform-core migrations and an isolated gate that exercises a
+  real local backup/restore drill; do not apply it to production.
+
+### Out of scope
+
+- Installing Prometheus, Grafana, Sentry, cloud monitoring, paging vendors, log aggregation,
+  or a production scheduler/cron job.
+- Exposing logs, environment variables, connection strings, database names, filesystem
+  paths, stack traces, Tenant records, or backup contents through Platform APIs.
+- Performing a production restore, production deployment, hardware UAT, Takeaway Phase 6,
+  or Retail Phase 7.
+
+### Acceptance criteria
+
+- Anonymous health responses reveal no internal topology or sensitive failure detail.
+- Only an active Platform session can view/capture/import operational evidence.
+- Stored/API snapshots use a fixed allow-list and never retain an evidence path, raw alert
+  body, exception text, secret, or Tenant business data.
+- Duplicate evidence checksum import is idempotent.
+- Runtime capture reports each required dependency as `ok` or `error` and stores no
+  exception details.
+- Backup freshness, restore-drill result, and alert-delivery state are explicit, including
+  `unknown` when evidence is absent.
+- Both migration paths rehearse upgrade/downgrade/re-upgrade on isolated databases.
+- Focused backend tests, API/backup/restore smoke, frontend type-check/build, and browser
+  flows pass.
+
+### Verification
+
+- Health sanitization, snapshot allow-list, evidence parsing/idempotency, and Platform
+  authorization tests.
+- Isolated migration rehearsal and protected API smoke.
+- Existing three-boundary local backup plus isolated restore drill, with checksum evidence.
+- `npm run type-check`, `npm run build`, and Platform Operations Playwright flow.
+
+### Rollback
+
+Revert only the Scope 05 commit and downgrade its migration after exporting any operational
+history that must be retained. Existing backup/restore and resilience scripts continue to
+operate independently; no production restore or scheduler change is part of this Scope.
+
+### Completion evidence
+
+- Focused Platform suite: 38 tests passed, including public health sanitization and
+  evidence allow-list parsing.
+- Isolated legacy migration reached `p9ops0011` and passed downgrade to `p8member0010`
+  followed by re-upgrade.
+- Isolated Platform-core migration reached `p9platform0013` and passed downgrade to
+  `p8platform0012` followed by re-upgrade.
+- Protected API smoke passed anonymous rejection, live runtime capture, extra-field
+  rejection, checksum-idempotent import, summary/history, audit, and sensitive-marker gates.
+- Three isolated database-boundary dumps passed checksums; the restore drill reconstructed
+  all three boundaries, reproduced the Tenant checksum, and completed in 5 seconds.
+- Scheduler CLI imported resilience/restore evidence after reducing it to approved states,
+  counters, and alert codes; no path or raw alert text entered the table/API.
+- Frontend TypeScript check, production build, and 6 Platform/public-account browser tests
+  passed, including Operations loading, summary, and capture flow.
+- Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-operations-05-20260803T073547Z/manifest.txt`.
+- Temporary databases remaining: `0`; local legacy, Platform, and Restaurant migration
+  heads unchanged.
+
 ## Later-scope boundaries
-
-### SAAS-PREP-OPERATIONS-05
-
-Protected operational summaries and scheduled evidence. Public health endpoints must not
-expose internal database routing or sensitive error details.
 
 ### SAAS-PREP-BILLING-06
 

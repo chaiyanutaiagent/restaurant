@@ -2,6 +2,7 @@ from app.models.base import TimestampMixin, UUIDMixin, SoftDeleteMixin
 from app.models.company import Company
 from app.models.platform import (
     PlatformOperator,
+    PlatformOperationsSnapshot,
     PlatformSession,
     PlatformTenantProfile,
     PlatformTenantUsageSnapshot,
@@ -87,6 +88,7 @@ __all__ = [
     "SoftDeleteMixin",
     "Company",
     "PlatformOperator",
+    "PlatformOperationsSnapshot",
     "PlatformTenantProfile",
     "PlatformTenantUsageSnapshot",
     "SaasAccountCredential",

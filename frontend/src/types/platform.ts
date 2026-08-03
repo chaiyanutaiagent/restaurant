@@ -188,6 +188,41 @@ export type PlatformTenantUsageSnapshot = Omit<PlatformTenantUsage, "generated_a
   updated_at: string;
 };
 
+export type PlatformOperationsSnapshot = {
+  id: string;
+  captured_at: string;
+  overall_status: "ok" | "degraded" | "critical";
+  source: "operator_runtime" | "scheduled_runtime" | "resilience_import";
+  component_checks: Record<string, "ok" | "error" | "disabled">;
+  projector_failed_events: number;
+  projector_loop_errors: number;
+  disk_usage_percent: number | null;
+  backup_status: "unknown" | "current" | "stale" | "failed";
+  backup_age_hours: number | null;
+  restore_status: "unknown" | "passed" | "stale" | "failed";
+  restore_drill_at: string | null;
+  alert_delivery_status: "unknown" | "not_configured" | "healthy" | "failed";
+  alert_codes: string[];
+  evidence_sha256: string;
+  captured_by: string | null;
+  created_at: string;
+};
+
+export type PlatformOperationsSummary = {
+  generated_at: string;
+  runtime: {
+    status: "ok" | "critical";
+    component_checks: Record<string, "ok" | "error" | "disabled">;
+    projector_failed_events: number;
+    projector_loop_errors: number;
+    disk_usage_percent: number | null;
+  };
+  latest_snapshot: PlatformOperationsSnapshot | null;
+  latest_backup: PlatformOperationsSnapshot | null;
+  latest_restore: PlatformOperationsSnapshot | null;
+  latest_alert: PlatformOperationsSnapshot | null;
+};
+
 export type PlatformDashboard = {
   generated_at: string;
   totals: {

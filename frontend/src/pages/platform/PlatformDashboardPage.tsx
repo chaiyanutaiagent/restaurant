@@ -60,6 +60,8 @@ const actionLabels: Record<string, string> = {
   "platform.operator.password.change": "เปลี่ยนรหัสผ่าน Platform Owner",
   "platform.operator.password.break_glass_reset": "Break-glass reset Platform Owner",
   "platform.usage.snapshot.capture": "บันทึก Tenant usage snapshot",
+  "platform.operations.snapshot.capture": "บันทึก Platform runtime snapshot",
+  "platform.operations.evidence.import": "นำเข้า Operations evidence",
 };
 
 const attentionLabels: Record<string, string> = {

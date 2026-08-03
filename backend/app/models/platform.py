@@ -296,3 +296,81 @@ class SaasAccountCredential(UUIDMixin, Base):
         nullable=False,
         server_default=text("now()"),
     )
+
+
+class PlatformOperationsSnapshot(UUIDMixin, Base):
+    """Sanitized Platform-only operational evidence; never stores logs or paths."""
+
+    __tablename__ = "platform_operations_snapshots"
+    __table_args__ = (
+        CheckConstraint(
+            "overall_status IN ('ok', 'degraded', 'critical')",
+            name="overall_status_valid",
+        ),
+        CheckConstraint(
+            "source IN ('operator_runtime', 'scheduled_runtime', 'resilience_import')",
+            name="source_valid",
+        ),
+        CheckConstraint(
+            "backup_status IN ('unknown', 'current', 'stale', 'failed')",
+            name="backup_status_valid",
+        ),
+        CheckConstraint(
+            "restore_status IN ('unknown', 'passed', 'stale', 'failed')",
+            name="restore_status_valid",
+        ),
+        CheckConstraint(
+            "alert_delivery_status IN ('unknown', 'not_configured', 'healthy', 'failed')",
+            name="alert_delivery_status_valid",
+        ),
+        CheckConstraint(
+            "disk_usage_percent IS NULL OR "
+            "(disk_usage_percent >= 0 AND disk_usage_percent <= 100)",
+            name="disk_usage_percent_valid",
+        ),
+        CheckConstraint(
+            "backup_age_hours IS NULL OR backup_age_hours >= 0",
+            name="backup_age_hours_valid",
+        ),
+        Index("ix_platform_operations_captured_at", "captured_at"),
+        Index("ix_platform_operations_status", "overall_status", "captured_at"),
+    )
+
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    overall_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
+    component_checks: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False)
+    projector_failed_events: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    projector_loop_errors: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    disk_usage_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    backup_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'unknown'")
+    )
+    backup_age_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    restore_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'unknown'")
+    )
+    restore_drill_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    alert_delivery_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, server_default=text("'unknown'")
+    )
+    alert_codes: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'::json")
+    )
+    evidence_sha256: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True
+    )
+    captured_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("platform_operators.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )

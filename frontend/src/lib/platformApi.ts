@@ -9,6 +9,8 @@ import type {
   PlatformMfaConfirm,
   PlatformMfaSetup,
   PlatformOperator,
+  PlatformOperationsSnapshot,
+  PlatformOperationsSummary,
   PlatformSession,
   PlatformTenantUsage,
   PlatformTenantUsageSnapshot,
@@ -119,6 +121,12 @@ export const platformApi = {
     platformApiClient.get<PlatformApiResponse<PlatformDashboard>>("/dashboard"),
   captureUsageSnapshots: () =>
     platformApiClient.post<PlatformApiResponse<PlatformTenantUsageSnapshot[]>>("/usage/snapshots"),
+  operationsSummary: () =>
+    platformApiClient.get<PlatformApiResponse<PlatformOperationsSummary>>("/operations/summary"),
+  operationsHistory: () =>
+    platformApiClient.get<PlatformApiResponse<PlatformOperationsSnapshot[]>>("/operations/history"),
+  captureOperations: () =>
+    platformApiClient.post<PlatformApiResponse<PlatformOperationsSnapshot>>("/operations/capture"),
   companies: (search?: string) =>
     platformApiClient.get<PlatformApiResponse<PlatformCompanyListItem[]>>("/companies", {
       params: search ? { search } : undefined

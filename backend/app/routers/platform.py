@@ -17,11 +17,13 @@ from app.schemas.platform import (
     PlatformMfaCodeRequest,
     PlatformMfaDisableRequest,
     PlatformOperatorRead,
+    PlatformOperationsEvidenceImport,
     PlatformPasswordChangeRequest,
     PlatformTenantControlsUpdate,
     PlatformTenantExportRequest,
 )
 from app.services.platform_service import PlatformAuthService, PlatformTenantService
+from app.services.platform_operations_service import PlatformOperationsService
 
 
 router = APIRouter(prefix="/api/v1/platform", tags=["platform"])
@@ -87,6 +89,14 @@ def _tenant_service(
         operator_id=current.operator_id,
         emit_reference_events=settings.identity_database == "platform_core",
     )
+
+
+def _operations_service(
+    db: AsyncSession,
+    current: PlatformTokenData,
+) -> PlatformOperationsService:
+    _require_platform_owner(current)
+    return PlatformOperationsService(db, operator_id=current.operator_id)
 
 
 @router.post("/auth/login")
@@ -292,6 +302,55 @@ async def capture_usage_snapshots(
         user_agent=user_agent,
     )
     return ok([snapshot.model_dump(mode="json") for snapshot in snapshots])
+
+
+@router.get("/operations/summary")
+async def operations_summary(
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    summary = await _operations_service(db, current).summary()
+    return ok(summary.model_dump(mode="json"))
+
+
+@router.get("/operations/history")
+async def operations_history(
+    limit: int = Query(default=50, ge=1, le=366),
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    rows = await _operations_service(db, current).history(limit=limit)
+    return ok([row.model_dump(mode="json") for row in rows])
+
+
+@router.post("/operations/capture")
+async def capture_operations(
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    row = await _operations_service(db, current).capture_runtime(
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(row.model_dump(mode="json"))
+
+
+@router.post("/operations/evidence")
+async def import_operations_evidence(
+    payload: PlatformOperationsEvidenceImport,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    row = await _operations_service(db, current).import_evidence(
+        payload,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(row.model_dump(mode="json"))
 
 
 @router.get("/companies")

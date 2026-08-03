@@ -256,9 +256,9 @@ def run() -> None:
         health = client.get("/health/ready")
         if health.status_code != 200:
             raise RuntimeError(f"readiness failed: {health.text}")
-        runtime = health.json()["runtime"]
-        if runtime["identity_database"] != "legacy" or runtime["restaurant_service_database"] != "legacy":
-            raise RuntimeError(f"unexpected gate runtime: {runtime}")
+        health_payload = health.json()
+        if set(health_payload) != {"status", "version"}:
+            raise RuntimeError(f"public readiness leaked internal runtime detail: {health_payload}")
 
         if client.portal is None:
             raise RuntimeError("TestClient portal is unavailable")

@@ -44,7 +44,7 @@ phase7_started: false
 | 3 | `SAAS-PREP-TENANT-USAGE-03` | Plan usage, conditional onboarding, last activity, and attention queue | Scope 02 | Complete |
 | 4 | `SAAS-PREP-MEMBERSHIP-04` | Self-service tenant signup, verification, reset, trial, and onboarding lifecycle | Scope 03 | Complete |
 | 5 | `SAAS-PREP-OPERATIONS-05` | Protected operations summary, health snapshots, alert and backup status | Scope 04 | Complete |
-| 6 | `SAAS-PREP-BILLING-06` | Provider-neutral subscription lifecycle and billing decision boundary | Scope 05 and provider decision | Pending |
+| 6 | `SAAS-PREP-BILLING-06` | Provider-neutral subscription lifecycle and billing decision boundary | Scope 05; provider selection remains parked | Complete |
 | 7 | `SAAS-PREP-PDPA-SUPPORT-07` | Privacy lifecycle, data-subject requests, support tickets, and audited support access | Scope 06 | Pending |
 | 8 | `SAAS-PREP-BETA-GATE-08` | Migration, authorization, security, load, browser, and recovery evidence | Scopes 01-07 | Pending |
 | 9 | `P5-PHYSICAL-UAT-SIGNOFF-06` | Real counter, kitchen, pickup, camera, printer, and network UAT | Hardware received | Parked |
@@ -412,12 +412,93 @@ operate independently; no production restore or scheduler change is part of this
 - Temporary databases remaining: `0`; local legacy, Platform, and Restaurant migration
   heads unchanged.
 
+## SAAS-PREP-BILLING-06
+
+### Problem
+
+Tenant profiles contain a manual `plan_code`, and verified SaaS owners have a trial window,
+but there is no durable plan catalog, subscription period, SaaS invoice lifecycle, or
+normalized event contract. Selecting or integrating a payment provider now would invent a
+commercial decision that the owner has not supplied.
+
+### In scope
+
+- Add a provider-neutral plan catalog whose price may remain explicitly undecided (`null`).
+- Add one SaaS subscription per Company with incomplete, trialing, active, past-due,
+  paused, and cancelled lifecycle states and period/cancellation timestamps.
+- Backfill existing self-service memberships to a starter subscription and keep new
+  signup/email-verification trial timestamps synchronized with that subscription.
+- Add SaaS invoice records using integer satang amounts, THB currency by default, and
+  draft/open/paid/void/uncollectible states; do not reuse Restaurant sale/payment records.
+- Add a normalized billing event envelope that stores only an idempotency key, fixed event
+  type, normalized references/amounts, and payload checksum—never a raw provider payload.
+- Add protected Platform plan, Company billing summary, manual subscription, invoice, and
+  normalized-event APIs with reasoned audit logs.
+- Add an authenticated owner billing summary that is read-only and explicitly reports that
+  payment collection is unavailable while the provider is unconfigured.
+- Add Platform billing UI and Tenant billing status UI without card/bank/QR forms.
+- Add configuration guards that keep live charging disabled while provider selection is
+  unconfigured.
+- Add matching legacy and Platform-core migrations and isolated verification.
+
+### Out of scope
+
+- Selecting Stripe, Omise, 2C2P, GB Prime Pay, a bank, PromptPay collection, or any other
+  provider; provider SDKs, secrets, webhooks, checkout, cards, mandates, refunds, payouts,
+  coupons, tax invoices, or revenue recognition.
+- Automatic charging, automatic suspension for non-payment, collections emails, dunning,
+  exchange rates, or production price decisions.
+- Restaurant POS payments, production deployment, hardware UAT, Takeaway Phase 6, and
+  Retail Phase 7.
+
+### Acceptance criteria
+
+- The default provider state is `unconfigured` and live charging is false in API/UI.
+- Production configuration cannot enable live charging without a non-empty provider
+  decision, and this Scope contains no provider adapter or secret field.
+- Existing/new verified memberships have one idempotently created starter subscription;
+  membership verification synchronizes one trial period without creating duplicates.
+- Monetary values are non-negative integer satang with one invoice currency and arithmetic
+  constraints (`subtotal + tax = total`, `paid <= total`).
+- Normalized event keys are unique; replay returns the original result and cannot apply a
+  transition twice. Raw payloads and credentials are rejected/not persisted.
+- Only Platform Owner may mutate plans, subscriptions, invoices, or events; Tenant owner
+  sees only its own read-only billing summary.
+- Both migration paths rehearse upgrade/downgrade/re-upgrade on isolated databases.
+- Focused backend tests, API smoke, frontend type-check/build, and browser flows pass.
+
+### Verification
+
+- Configuration, plan/amount validation, subscription transition, invoice arithmetic,
+  event allow-list/idempotency, authorization, and Tenant-isolation tests.
+- Isolated migrations plus Platform/Tenant billing API smoke with raw-payload rejection.
+- `npm run type-check`, `npm run build`, and Platform/Tenant billing browser flows.
+
+### Rollback
+
+Keep live charging disabled, export any manual billing records that must be retained, revert
+only the Scope 06 commit, and downgrade its migration. Membership trial access remains
+governed by Scope 04 and Restaurant payment records are unaffected.
+
+### Completion evidence
+
+- Focused billing suite: 6 tests passed; focused Platform regression suite: 38 tests passed.
+- Isolated legacy migration reached `p10bill0012` and passed downgrade to `p9ops0011`
+  followed by re-upgrade.
+- Isolated Platform-core migration reached `p10platform0014` and passed downgrade to
+  `p9platform0013` followed by re-upgrade.
+- Isolated API smoke passed signup-to-trial subscription synchronization, Tenant read-only
+  boundary, Platform-only mutations, integer-satang invoice arithmetic, allowed state
+  transitions, normalized raw-payload rejection, checksum persistence, idempotent replay,
+  conflicting-key rejection, and audit evidence.
+- Provider remains `unconfigured`; configuration rejects every attempt to enable live
+  charging because no provider adapter Scope has been approved.
+- Frontend TypeScript check, production build, and 8 Platform/public/Tenant browser tests
+  passed, including plan pricing conversion and absence of a Tenant payment action.
+- Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-billing-06-20260803T075734Z/manifest.txt`.
+- Temporary databases remaining: `0`; local legacy and Platform migration heads unchanged.
+
 ## Later-scope boundaries
-
-### SAAS-PREP-BILLING-06
-
-Provider-neutral subscription state, plans, invoices, and idempotent provider-event
-contracts. Live payment-provider integration requires a recorded provider decision.
 
 ### SAAS-PREP-PDPA-SUPPORT-07
 

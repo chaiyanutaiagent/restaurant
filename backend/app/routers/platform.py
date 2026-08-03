@@ -22,6 +22,13 @@ from app.schemas.platform import (
     PlatformTenantControlsUpdate,
     PlatformTenantExportRequest,
 )
+from app.schemas.saas_billing import (
+    SaasBillingEventImport,
+    SaasInvoiceCreate,
+    SaasPlanUpsert,
+    SaasSubscriptionUpdate,
+)
+from app.services.saas_billing_service import SaasBillingService
 from app.services.platform_service import PlatformAuthService, PlatformTenantService
 from app.services.platform_operations_service import PlatformOperationsService
 
@@ -97,6 +104,11 @@ def _operations_service(
 ) -> PlatformOperationsService:
     _require_platform_owner(current)
     return PlatformOperationsService(db, operator_id=current.operator_id)
+
+
+def _billing_service(db: AsyncSession, current: PlatformTokenData) -> SaasBillingService:
+    _require_platform_owner(current)
+    return SaasBillingService(db, operator_id=current.operator_id)
 
 
 @router.post("/auth/login")
@@ -304,6 +316,43 @@ async def capture_usage_snapshots(
     return ok([snapshot.model_dump(mode="json") for snapshot in snapshots])
 
 
+@router.get("/billing/overview")
+async def billing_overview(
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    result = await _billing_service(db, current).overview()
+    return ok(result.model_dump(mode="json"))
+
+
+@router.post("/billing/plans")
+async def upsert_billing_plan(
+    payload: SaasPlanUpsert,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    result = await _billing_service(db, current).upsert_plan(
+        payload, ip_address=ip_address, user_agent=user_agent
+    )
+    return ok(result.model_dump(mode="json"))
+
+
+@router.post("/billing/events")
+async def import_billing_event(
+    payload: SaasBillingEventImport,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    result = await _billing_service(db, current).apply_event(
+        payload, ip_address=ip_address, user_agent=user_agent
+    )
+    return ok(result.model_dump(mode="json"))
+
+
 @router.get("/operations/summary")
 async def operations_summary(
     current: PlatformTokenData = Depends(get_current_platform_operator),
@@ -413,6 +462,46 @@ async def get_company_usage(
 ) -> dict[str, Any]:
     usage = await _tenant_service(db, restaurant_db, current).current_usage(company_id)
     return ok(usage.model_dump(mode="json"))
+
+
+@router.get("/companies/{company_id}/billing")
+async def get_company_billing(
+    company_id: uuid.UUID,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    result = await _billing_service(db, current).summary(company_id)
+    return ok(result.model_dump(mode="json"))
+
+
+@router.put("/companies/{company_id}/billing/subscription")
+async def update_company_subscription(
+    company_id: uuid.UUID,
+    payload: SaasSubscriptionUpdate,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    result = await _billing_service(db, current).update_subscription(
+        company_id, payload, ip_address=ip_address, user_agent=user_agent
+    )
+    return ok(result.model_dump(mode="json"))
+
+
+@router.post("/companies/{company_id}/billing/invoices", status_code=status.HTTP_201_CREATED)
+async def create_company_invoice(
+    company_id: uuid.UUID,
+    payload: SaasInvoiceCreate,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    result = await _billing_service(db, current).create_invoice(
+        company_id, payload, ip_address=ip_address, user_agent=user_agent
+    )
+    return ok(result.model_dump(mode="json"))
 
 
 @router.get("/companies/{company_id}/usage/history")

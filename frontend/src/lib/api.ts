@@ -9,6 +9,7 @@ import type { ApiResponse } from "@/types/api";
 import type { LoginRequest, MeResponse, TokenResponse } from "@/types/auth";
 import type { Branch, Permission, User, UserBranch } from "@/types/user";
 import type { SaasActionResponse, SaasMembership, SaasSignupResponse } from "@/types/membership";
+import type { SaasBillingSummary } from "@/types/billing";
 
 type RetryableConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -180,5 +181,6 @@ export const membershipApi = {
       token,
       new_password: newPassword
     }),
-  me: () => api.get<ApiResponse<SaasMembership>>("/membership/me")
+  me: () => api.get<ApiResponse<SaasMembership>>("/membership/me"),
+  billing: () => api.get<ApiResponse<SaasBillingSummary>>("/membership/billing")
 };

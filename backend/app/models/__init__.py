@@ -42,6 +42,7 @@ from app.models.user_access import UserAccessRequest
 from app.models.accounting import Account, JournalEntry, JournalLine, AccountBalance
 from app.models.integration import OperationalOutboxEvent
 from app.models.entitlement import BrandModuleEntitlement
+from app.models.saas_billing import SaasBillingEvent, SaasInvoice, SaasPlan, SaasSubscription
 from app.models.etax import TaxDocument, TaxDocumentItem
 from app.models.payable import SupplierInvoice, APPayment, APPaymentAllocation, WHTCertificate
 from app.models.hr import (
@@ -93,6 +94,10 @@ __all__ = [
     "PlatformTenantUsageSnapshot",
     "SaasAccountCredential",
     "SaasTenantMembership",
+    "SaasBillingEvent",
+    "SaasInvoice",
+    "SaasPlan",
+    "SaasSubscription",
     "Branch",
     "Role",
     "Permission",

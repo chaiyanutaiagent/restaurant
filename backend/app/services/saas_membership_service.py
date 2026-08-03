@@ -24,6 +24,7 @@ from app.models.staff_assignment import StaffRoleAssignment
 from app.models.user import User
 from app.schemas.membership import SaasMembershipRead, SaasSignupRequest
 from app.utils.security import hash_password
+from app.services.saas_billing_service import ensure_starter_subscription
 
 
 TERMS_VERSION = "2026-08-03"
@@ -139,6 +140,11 @@ class SaasMembershipService:
             )
             self.db.add(membership)
             await self.db.flush()
+            await ensure_starter_subscription(
+                self.db,
+                company_id=company.id,
+                subscription_status="incomplete",
+            )
             raw_token = await self._issue_credential(
                 membership,
                 purpose="verify_email",
@@ -209,6 +215,15 @@ class SaasMembershipService:
         membership.trial_ends_at = now + timedelta(days=settings.saas_trial_days)
         membership.status = "trial_active"
         membership.onboarding_state = "setup_required"
+        subscription = await ensure_starter_subscription(
+            self.db,
+            company_id=membership.company_id,
+        )
+        subscription.status = "trialing"
+        subscription.trial_started_at = membership.trial_started_at
+        subscription.trial_ends_at = membership.trial_ends_at
+        subscription.current_period_start = membership.trial_started_at
+        subscription.current_period_end = membership.trial_ends_at
         self.db.add(
             AuditLog(
                 company_id=membership.company_id,

@@ -13,6 +13,7 @@ const titleMap: Record<string, string> = {
   "/users": "ผู้ใช้งาน",
   "/roles": "บทบาทและสิทธิ์",
   "/branches": "สาขา",
+  "/billing": "แพ็กเกจและการเรียกเก็บเงิน",
   "/403": "ไม่มีสิทธิ์เข้าถึง",
   "/pos/admin": "POS Admin",
   "/restaurant": "ภาพรวมร้านอาหาร",

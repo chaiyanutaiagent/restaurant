@@ -24,6 +24,45 @@ const company = {
   suspended_at: null,
 };
 
+const starterPlan = {
+  id: "55555555-5555-4555-8555-555555555555",
+  code: "starter",
+  name: "Starter",
+  description: "Price decision pending",
+  currency: "THB",
+  billing_interval: "month",
+  unit_amount_satang: null,
+  feature_flags: { restaurant: true, retail_pos: false, takeaway: false },
+  plan_limits: { brands: 1, branches: 1, users: 10, devices: 3 },
+  is_public: false,
+  is_active: true,
+  created_at: "2026-08-03T08:00:00Z",
+  updated_at: "2026-08-03T08:00:00Z",
+};
+
+const billingSummary = {
+  company_id: companyId,
+  provider: "unconfigured",
+  live_charging_enabled: false,
+  collection_available: false,
+  plan: starterPlan,
+  subscription: {
+    id: "66666666-6666-4666-8666-666666666666",
+    company_id: companyId,
+    plan_id: starterPlan.id,
+    status: "trialing",
+    current_period_start: "2026-08-03T08:00:00Z",
+    current_period_end: "2026-08-17T08:00:00Z",
+    trial_started_at: "2026-08-03T08:00:00Z",
+    trial_ends_at: "2026-08-17T08:00:00Z",
+    cancel_at_period_end: false,
+    cancelled_at: null,
+    created_at: "2026-08-03T08:00:00Z",
+    updated_at: "2026-08-03T08:00:00Z",
+  },
+  invoices: [],
+};
+
 function response<T>(data: T): { data: T; meta: { version: string; identity_database: string }; error: null } {
   return {
     data,
@@ -187,6 +226,9 @@ test("Platform Owner login opens dashboard and can reach company and audit views
   await page.route(`**/api/v1/platform/companies/${companyId}/usage/history`, async (route) => {
     await fulfill(route, response([]));
   });
+  await page.route(`**/api/v1/platform/companies/${companyId}/billing`, async (route) => {
+    await fulfill(route, response(billingSummary));
+  });
   await page.route("**/api/v1/platform/audit", async (route) => {
     await fulfill(route, response(populatedDashboard.data.recent_events));
   });
@@ -226,6 +268,7 @@ test("Platform Owner login opens dashboard and can reach company and audit views
   await expect(page.getByText("Restaurant pilot", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "การใช้ทรัพยากรตาม Plan" })).toBeVisible();
   await expect(page.getByText("trial_active", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Subscription และ Invoice" })).toBeVisible();
 
   await page.getByRole("link", { name: /Audit Log/ }).click();
   await expect(page.getByRole("heading", { name: "Platform Audit Log" })).toBeVisible();
@@ -233,6 +276,70 @@ test("Platform Owner login opens dashboard and can reach company and audit views
   await page.getByRole("link", { name: /ความปลอดภัย/ }).click();
   await expect(page.getByRole("heading", { name: "ความปลอดภัย" })).toBeVisible();
   await expect(page.getByText("เครื่องนี้", { exact: true })).toBeVisible();
+});
+
+test("Platform billing keeps live collection closed and records plan pricing in satang", async ({ page }) => {
+  await installAuthenticatedSession(page);
+  let savedPlan = starterPlan;
+  let capturedPayload: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/platform/billing/overview", async (route) => {
+    await fulfill(route, response({
+      provider: "unconfigured",
+      live_charging_enabled: false,
+      collection_available: false,
+      plans: [savedPlan],
+      subscription_counts: { trialing: 1 },
+      invoice_counts: {},
+    }));
+  });
+  await page.route("**/api/v1/platform/billing/plans", async (route) => {
+    capturedPayload = route.request().postDataJSON() as Record<string, unknown>;
+    savedPlan = { ...starterPlan, unit_amount_satang: capturedPayload.unit_amount_satang as number };
+    await fulfill(route, response(savedPlan));
+  });
+
+  await page.goto("/platform/billing");
+  await expect(page.getByRole("heading", { name: "Plan และ Billing" })).toBeVisible();
+  await expect(page.getByText("ยังไม่เปิดรับเงินจริง", { exact: true })).toBeVisible();
+  await page.getByLabel("ราคาต่อรอบ (บาท)").fill("990.00");
+  await page.getByLabel("เหตุผล").fill("กำหนดราคา beta catalog");
+  await page.getByRole("button", { name: /บันทึก Plan/ }).click();
+  await expect.poll(() => capturedPayload?.unit_amount_satang).toBe(99000);
+  await expect(page.getByText(/฿990.00/)).toBeVisible();
+});
+
+test("Tenant owner sees a read-only billing status without a payment action", async ({ page }) => {
+  await page.addInitScript(({ company, tenant }) => {
+    window.localStorage.setItem("erp-auth", JSON.stringify({
+      state: {
+        accessToken: "tenant-access-token",
+        refreshToken: "tenant-refresh-token",
+        user: tenant,
+        companyId: company,
+        branchId: null,
+        stationKey: null,
+        permissions: [],
+      },
+      version: 0,
+    }));
+  }, {
+    company: companyId,
+    tenant: { id: "77777777-7777-4777-8777-777777777777", username: "tenant.owner", display_name: "Tenant Owner" },
+  });
+  await page.route("**/api/v1/membership/billing", async (route) => {
+    await fulfill(route, { data: billingSummary, meta: { version: "test" }, error: null });
+  });
+  await page.route("**/api/v1/system/me/branches", async (route) => {
+    await fulfill(route, { data: [], meta: { version: "test" }, error: null });
+  });
+  await page.route("**/api/v1/restaurant/me/brand-navigation", async (route) => {
+    await fulfill(route, { data: [], meta: { version: "test" }, error: null });
+  });
+
+  await page.goto("/billing");
+  await expect(page.getByRole("heading", { name: "แพ็กเกจและการเรียกเก็บเงิน" })).toBeVisible();
+  await expect(page.getByText("ระบบรับชำระค่าสมาชิกยังไม่เปิดใช้งาน", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /ชำระ|บัตร|checkout/i })).toHaveCount(0);
 });
 
 test("dashboard presents error then recovers to an empty state", async ({ page }) => {

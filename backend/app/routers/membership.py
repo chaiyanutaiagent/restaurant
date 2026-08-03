@@ -19,6 +19,7 @@ from app.schemas.membership import (
 )
 from app.services.saas_email_service import deliver_membership_email
 from app.services.saas_membership_service import SaasMembershipService
+from app.services.saas_billing_service import SaasBillingService
 from app.utils.public_rate_limit import check_public_rate_limit
 
 
@@ -198,3 +199,18 @@ async def my_membership(
             detail="SaaS membership not found",
         )
     return ok(service.read(membership).model_dump())
+
+
+@router.get("/billing")
+async def my_billing(
+    current: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    membership = await SaasMembershipService(db).membership_for_company(current.company_id)
+    if membership is None or membership.owner_user_id != current.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="SaaS membership not found",
+        )
+    summary = await SaasBillingService(db, operator_id=None).summary(current.company_id)
+    return ok(summary.model_dump(mode="json"))

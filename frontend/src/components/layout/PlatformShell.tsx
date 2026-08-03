@@ -1,4 +1,4 @@
-import { Activity, Building2, ClipboardList, KeyRound, LayoutDashboard, LogOut, ShieldCheck } from "lucide-react";
+import { Activity, Building2, ClipboardList, CreditCard, KeyRound, LayoutDashboard, LogOut, ShieldCheck } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { usePlatformAuthStore } from "@/stores/platform-auth.store";
 import { platformApi } from "@/lib/platformApi";
@@ -67,6 +67,16 @@ export default function PlatformShell(): JSX.Element {
             }
           >
             <Building2 className="h-5 w-5" /> บริษัทลูกค้า
+          </NavLink>
+          <NavLink
+            to="/platform/billing"
+            className={({ isActive }) =>
+              `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+                isActive ? "bg-emerald-400 text-slate-950" : "text-slate-300 hover:bg-slate-900"
+              }`
+            }
+          >
+            <CreditCard className="h-5 w-5" /> Billing
           </NavLink>
           <NavLink
             to="/platform/audit"

@@ -1,4 +1,5 @@
 import axios, { type AxiosError } from "axios";
+import type { SaasBillingOverview, SaasBillingSummary, SaasInvoice, SaasPlan } from "@/types/billing";
 import { usePlatformAuthStore } from "@/stores/platform-auth.store";
 import type {
   PlatformAuditEvent,
@@ -127,6 +128,21 @@ export const platformApi = {
     platformApiClient.get<PlatformApiResponse<PlatformOperationsSnapshot[]>>("/operations/history"),
   captureOperations: () =>
     platformApiClient.post<PlatformApiResponse<PlatformOperationsSnapshot>>("/operations/capture"),
+  billingOverview: () =>
+    platformApiClient.get<PlatformApiResponse<SaasBillingOverview>>("/billing/overview"),
+  upsertBillingPlan: (payload: {
+    code: string;
+    name: string;
+    description: string | null;
+    currency: string;
+    billing_interval: "month" | "year";
+    unit_amount_satang: number | null;
+    feature_flags: Record<string, boolean>;
+    plan_limits: Record<string, number>;
+    is_public: boolean;
+    is_active: boolean;
+    reason: string;
+  }) => platformApiClient.post<PlatformApiResponse<SaasPlan>>("/billing/plans", payload),
   companies: (search?: string) =>
     platformApiClient.get<PlatformApiResponse<PlatformCompanyListItem[]>>("/companies", {
       params: search ? { search } : undefined
@@ -137,6 +153,28 @@ export const platformApi = {
     platformApiClient.get<PlatformApiResponse<PlatformTenantUsage>>(`/companies/${companyId}/usage`),
   companyUsageHistory: (companyId: string) =>
     platformApiClient.get<PlatformApiResponse<PlatformTenantUsageSnapshot[]>>(`/companies/${companyId}/usage/history`),
+  companyBilling: (companyId: string) =>
+    platformApiClient.get<PlatformApiResponse<SaasBillingSummary>>(`/companies/${companyId}/billing`),
+  updateSubscription: (companyId: string, payload: {
+    plan_code: string;
+    status: "incomplete" | "trialing" | "active" | "past_due" | "paused" | "cancelled";
+    current_period_start: string | null;
+    current_period_end: string | null;
+    cancel_at_period_end: boolean;
+    reason: string;
+  }) => platformApiClient.put<PlatformApiResponse<SaasBillingSummary>>(
+    `/companies/${companyId}/billing/subscription`, payload
+  ),
+  createInvoice: (companyId: string, payload: {
+    status: "draft" | "open";
+    currency: string;
+    subtotal_satang: number;
+    tax_satang: number;
+    memo: string | null;
+    reason: string;
+  }) => platformApiClient.post<PlatformApiResponse<SaasInvoice>>(
+    `/companies/${companyId}/billing/invoices`, payload
+  ),
   createCompany: (payload: PlatformCompanyCreate) =>
     platformApiClient.post<PlatformApiResponse<PlatformCompanyDetail>>("/companies", payload),
   suspendCompany: (companyId: string, reason: string) =>

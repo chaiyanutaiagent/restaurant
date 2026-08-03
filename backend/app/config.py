@@ -36,6 +36,16 @@ def validate_saas_email_delivery_config(
             raise ValueError("Production SaaS public base URL must use HTTPS")
 
 
+def validate_saas_billing_config(*, provider: str, live_charging_enabled: bool) -> None:
+    normalized = provider.strip().lower()
+    if not normalized:
+        raise ValueError("SaaS billing provider decision must not be empty")
+    if live_charging_enabled:
+        raise ValueError(
+            "Live SaaS charging is unavailable until a provider adapter Scope is approved"
+        )
+
+
 class Settings(BaseSettings):
     postgres_db: str
     postgres_user: str
@@ -92,6 +102,8 @@ class Settings(BaseSettings):
     saas_verification_expire_hours: int = Field(default=24, ge=1, le=72)
     saas_password_reset_expire_minutes: int = Field(default=30, ge=10, le=120)
     saas_trial_days: int = Field(default=14, ge=1, le=90)
+    saas_billing_provider: str = "unconfigured"
+    saas_billing_live_charging_enabled: bool = False
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env", "../../.env"),
@@ -111,7 +123,12 @@ class Settings(BaseSettings):
             smtp_host=self.saas_smtp_host,
             smtp_from_email=self.saas_smtp_from_email,
         )
+        validate_saas_billing_config(
+            provider=self.saas_billing_provider,
+            live_charging_enabled=self.saas_billing_live_charging_enabled,
+        )
         self.saas_public_base_url = self.saas_public_base_url.rstrip("/")
+        self.saas_billing_provider = self.saas_billing_provider.strip().lower()
         return self
 
     @computed_field  # type: ignore[prop-decorator]

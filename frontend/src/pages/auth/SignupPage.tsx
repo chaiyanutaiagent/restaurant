@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Loader2, Store } from "lucide-react";
+import { ArrowLeft, Loader2, Store } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,7 @@ export default function SignupPage(): JSX.Element {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
       <Card className="w-full max-w-xl shadow-lg">
-        <CardHeader className="text-center"><Store className="mx-auto h-10 w-10 text-blue-600" /><CardTitle>เริ่มทดลอง Restaurant SaaS</CardTitle><CardDescription>สร้าง Company Owner สำหรับระบบร้านอาหารและคาเฟ่</CardDescription></CardHeader>
+        <CardHeader className="text-center"><Link className="mb-2 inline-flex items-center justify-center gap-1 text-sm text-slate-500 hover:text-blue-700" to="/signup"><ArrowLeft className="h-4 w-4" />เลือกประเภทระบบอีกครั้ง</Link><Store className="mx-auto h-10 w-10 text-blue-600" /><CardTitle>เริ่มทดลอง Restaurant SaaS</CardTitle><CardDescription>สร้าง Company Owner สำหรับระบบร้านอาหารและคาเฟ่</CardDescription></CardHeader>
         <CardContent>
           {companyId ? (
             <div className="space-y-4 text-center"><p className="text-lg font-semibold text-emerald-700">สร้างบัญชีแล้ว กรุณาตรวจอีเมลเพื่อยืนยัน</p><div className="rounded-lg bg-slate-100 p-4"><p className="text-xs text-slate-500">URL ธุรกิจ</p><p className="mt-1 break-all font-mono text-sm">/{form.business_slug}</p></div><Button asChild><Link to={`/${form.business_slug}/login`}>ไปหน้าเข้าสู่ระบบของธุรกิจ</Link></Button></div>

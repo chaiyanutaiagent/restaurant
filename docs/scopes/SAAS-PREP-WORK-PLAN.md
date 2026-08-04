@@ -48,8 +48,9 @@ phase7_started: false
 | 7 | `SAAS-PREP-PDPA-SUPPORT-07` | Privacy lifecycle, data-subject requests, support tickets, and audited support access | Scope 06 | Complete |
 | 8 | `SAAS-PREP-BETA-GATE-08` | Migration, authorization, security, load, browser, and recovery evidence | Scopes 01-07 | Complete |
 | 9 | `SAAS-PREP-TENANT-ROUTING-09` | Canonical business-slug storefront, login, and Tenant admin routes | Scope 08 | Complete |
-| 10 | `P5-PHYSICAL-UAT-SIGNOFF-06` | Real counter, kitchen, pickup, camera, printer, and network UAT | Hardware received | Parked |
-| 11 | Public launch decision | Owner-controlled go/no-go using both SaaS and Restaurant evidence | All gates and sign-offs | Blocked |
+| 10 | `SAAS-PREP-SIGNUP-SELECTOR-10` | Product-first signup selector with only Restaurant enrollment enabled | Scope 09 | Complete |
+| 11 | `P5-PHYSICAL-UAT-SIGNOFF-06` | Real counter, kitchen, pickup, camera, printer, and network UAT | Hardware received | Parked |
+| 12 | Public launch decision | Owner-controlled go/no-go using both SaaS and Restaurant evidence | All gates and sign-offs | Blocked |
 
 ## SAAS-PREP-DASHBOARD-01
 
@@ -777,6 +778,67 @@ link. This Scope does not authorize any production rollback or data operation.
 - Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-tenant-routing-09-20260804T045530Z/manifest.txt`.
 - No production migration/deployment was run; physical-device UAT remains parked pending
   hardware, and Takeaway Phase 6 / Retail Phase 7 remain out of scope.
+
+## SAAS-PREP-SIGNUP-SELECTOR-10
+
+### Problem
+
+The public `/signup` route opens the Restaurant enrollment form immediately, so a prospective
+subscriber cannot first see which SaaS product they are choosing. Showing future products
+without a release status could also imply that Retail POS or Takeaway Shop is already open.
+
+### In scope
+
+- Make `/signup` the public product-selection page.
+- Show Restaurant & Cafe, Retail POS, and Takeaway Shop as distinct choices.
+- Keep Restaurant & Cafe as the only available enrollment and move its existing form to
+  `/signup/restaurant` without changing the membership API or trial lifecycle.
+- Mark Retail POS and Takeaway Shop clearly as planned and unavailable for signup.
+- Add a return path from the Restaurant form to the selector and browser verification for
+  route/status behavior and the existing Restaurant signup flow.
+
+### Out of scope
+
+- Retail POS signup, entitlements, onboarding, operational development, or Phase 7 work.
+- Takeaway Shop signup, entitlements, onboarding, operational development, or Phase 6 work.
+- Waitlists, lead capture, product pricing, backend/schema/migration changes, production
+  deployment, hardware UAT, or changes to existing Tenant routes.
+
+### Acceptance criteria
+
+- `/signup` presents exactly the three requested SaaS product choices and their release state.
+- Only Restaurant & Cafe exposes an active signup action, which opens `/signup/restaurant`.
+- Retail POS and Takeaway Shop cannot submit or reach the Restaurant membership form.
+- The existing Restaurant signup, verification, canonical business URL, and login return
+  flow remain unchanged.
+- TypeScript, production build, and browser coverage pass with no backend or migration change.
+
+### Verification
+
+- `npm run type-check` and `npm run build` in `frontend/`.
+- Platform/public Playwright suite covering the selector, planned-product lock, and existing
+  Restaurant signup lifecycle.
+- Static SaaS scope boundary and `git diff --check`.
+
+### Rollback
+
+Revert only the Scope 10 frontend, browser-test, and plan commit. `/signup/restaurant` may be
+removed while restoring the Restaurant form directly at `/signup`; no data rollback applies.
+
+### Completion evidence
+
+- `/signup` now presents Restaurant & Cafe, Retail POS, and Takeaway Shop before any
+  enrollment form is shown.
+- Restaurant & Cafe is the only active choice and opens `/signup/restaurant`; Retail POS is
+  labeled `Phase 7` and Takeaway Shop is labeled `Phase 6`, both with `aria-disabled=true`
+  and no signup navigation.
+- The Restaurant form includes a return link to the selector and retains the existing
+  membership API, verification, canonical business URL, and Tenant login flow.
+- Frontend TypeScript check and production build passed.
+- All 13 Platform/public/Tenant Playwright tests passed, including selector visibility,
+  planned-product lock, Restaurant routing, and the complete public signup lifecycle.
+- Static SaaS boundary check and `git diff --check` passed. No backend, schema, migration,
+  production, Retail Phase 7, or Takeaway Phase 6 change was introduced.
 
 ## Change control
 

@@ -582,6 +582,14 @@ test("public SaaS owner can complete signup, verification, and password recovery
   });
 
   await page.goto("/signup");
+  await expect(page.getByRole("heading", { name: "เลือกประเภทระบบสำหรับธุรกิจของคุณ" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Restaurant & Cafe" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Retail POS" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Takeaway Shop" })).toBeVisible();
+  await expect(page.getByTestId("signup-product-retail")).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByTestId("signup-product-takeaway")).toHaveAttribute("aria-disabled", "true");
+  await page.getByTestId("signup-product-restaurant").click();
+  await expect(page).toHaveURL(/\/signup\/restaurant$/);
   await page.locator("#company_name").fill("ร้านสมาชิก SaaS");
   await page.locator("#business_slug").fill("public-saas-restaurant");
   await page.locator("#owner_display_name").fill("เจ้าของร้าน");

@@ -14,6 +14,7 @@ import AccountingPage from "@/pages/accounting/AccountingPage";
 import LoginPage from "@/pages/auth/LoginPage";
 import AcceptInvitationPage from "@/pages/auth/AcceptInvitationPage";
 import SignupPage from "@/pages/auth/SignupPage";
+import SignupProductSelectorPage from "@/pages/auth/SignupProductSelectorPage";
 import VerifyEmailPage from "@/pages/auth/VerifyEmailPage";
 import ForgotPasswordPage from "@/pages/auth/ForgotPasswordPage";
 import ResetPasswordPage from "@/pages/auth/ResetPasswordPage";
@@ -108,7 +109,8 @@ export default function App(): JSX.Element {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/:businessSlug/login" element={<LoginPage />} />
-          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/signup" element={<SignupProductSelectorPage />} />
+          <Route path="/signup/restaurant" element={<SignupPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />

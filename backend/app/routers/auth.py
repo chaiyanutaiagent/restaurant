@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import get_identity_db
 from app.dependencies import TokenData, get_current_user, get_current_user_db
 from app.models.user import User
+from app.models.company import Company
 from app.schemas.auth import (
     BranchSwitchRequest,
     LoginRequest,
@@ -38,16 +39,25 @@ def ok(data: Any) -> dict[str, Any]:
     }
 
 
-def _token_response(access_token: str, refresh_token: str, user: User) -> TokenResponse:
+async def _token_response(
+    access_token: str,
+    refresh_token: str,
+    user: User,
+    db: AsyncSession,
+) -> TokenResponse:
     payload = decode_token(access_token)
     expires_in = int(
         datetime.fromtimestamp(payload["exp"], tz=timezone.utc).timestamp()
         - datetime.now(timezone.utc).timestamp()
     )
+    company = await db.get(Company, user.company_id)
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Company not found")
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=max(expires_in, 0),
+        business_slug=company.business_slug,
         user=UserRead.model_validate(user),
     )
 
@@ -79,7 +89,7 @@ async def login(
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
-    return ok(_token_response(access_token, refresh_token, user).model_dump())
+    return ok((await _token_response(access_token, refresh_token, user, db)).model_dump())
 
 
 @router.post("/refresh")
@@ -100,7 +110,7 @@ async def refresh(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
-    return ok(_token_response(access_token, refresh_token, user).model_dump())
+    return ok((await _token_response(access_token, refresh_token, user, db)).model_dump())
 
 
 @router.post("/logout")
@@ -117,10 +127,15 @@ async def logout(
 async def me(
     current: TokenData = Depends(get_current_user),
     user: User = Depends(get_current_user_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
+    company = await db.get(Company, current.company_id)
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Company not found")
     data = MeResponse(
         user=UserRead.model_validate(user),
         company_id=current.company_id,
+        business_slug=company.business_slug,
         branch_id=current.branch_id,
         brand_id=current.brand_id,
         business_type=current.business_type,
@@ -145,7 +160,7 @@ async def switch_branch(
         payload.branch_id,
         station_key=payload.station_key,
     )
-    return ok(_token_response(access_token, refresh_token, user).model_dump())
+    return ok((await _token_response(access_token, refresh_token, user, db)).model_dump())
 
 
 @router.get("/permissions")

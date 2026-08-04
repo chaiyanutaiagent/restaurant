@@ -8,7 +8,7 @@ import { useDeviceStore } from "@/stores/device.store";
 import type { ApiResponse } from "@/types/api";
 import type { LoginRequest, MeResponse, TokenResponse } from "@/types/auth";
 import type { Branch, Permission, User, UserBranch } from "@/types/user";
-import type { SaasActionResponse, SaasMembership, SaasSignupResponse } from "@/types/membership";
+import type { SaasActionResponse, SaasBusiness, SaasMembership, SaasSignupResponse } from "@/types/membership";
 import type { SaasBillingSummary } from "@/types/billing";
 import type { PrivacyRequest, SupportAccessGrant, SupportMessage, SupportTicket } from "@/types/privacySupport";
 
@@ -58,8 +58,13 @@ let failedQueue: QueueItem[] = [];
 
 function loginRedirectForCurrentPage(): string {
   const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  if (window.location.pathname === "/login") {
+  if (window.location.pathname === "/login" || /^\/[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\/login$/.test(window.location.pathname)) {
     return current;
+  }
+
+  const canonicalTenant = window.location.pathname.match(/^\/([a-z0-9][a-z0-9-]{1,61}[a-z0-9])\/admin(?:\/|$)/);
+  if (canonicalTenant) {
+    return `/${canonicalTenant[1]}/login?next=${encodeURIComponent(current)}`;
   }
 
   return `/login?next=${encodeURIComponent(current)}`;
@@ -163,6 +168,7 @@ export const systemApi = {
 export const membershipApi = {
   signup: (data: {
     company_name: string;
+    business_slug?: string | null;
     owner_display_name: string;
     owner_email: string;
     username: string;
@@ -171,6 +177,8 @@ export const membershipApi = {
     terms_accepted: boolean;
     privacy_accepted: boolean;
   }) => api.post<ApiResponse<SaasSignupResponse>>("/membership/signup", data),
+  business: (businessSlug: string) =>
+    api.get<ApiResponse<SaasBusiness>>(`/membership/businesses/${encodeURIComponent(businessSlug)}`),
   requestVerification: (email: string) =>
     api.post<ApiResponse<SaasActionResponse>>("/membership/verification/request", { email }),
   verifyEmail: (token: string) =>

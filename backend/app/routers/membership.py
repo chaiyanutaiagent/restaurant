@@ -9,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_identity_db
 from app.dependencies import TokenData, get_current_user
+from app.models.company import Company
 from app.schemas.membership import (
     SaasActionRead,
+    SaasBusinessRead,
     SaasCredentialRequest,
     SaasEmailRequest,
     SaasPasswordResetConfirm,
@@ -20,6 +22,7 @@ from app.schemas.membership import (
 from app.services.saas_email_service import deliver_membership_email
 from app.services.saas_membership_service import SaasMembershipService
 from app.services.saas_billing_service import SaasBillingService
+from app.services.business_directory_service import resolve_active_business
 from app.utils.public_rate_limit import check_public_rate_limit
 
 
@@ -75,8 +78,12 @@ async def signup(
         purpose="verify_email",
         token=raw_token,
     )
+    company = await db.get(Company, membership.company_id)
+    if company is None:  # pragma: no cover - the signup transaction creates both rows
+        raise RuntimeError("Signup Company is missing")
     response = SaasSignupRead(
         company_id=membership.company_id,
+        business_slug=company.business_slug,
         status=membership.status,
         message=(
             "Account created; check your email to verify the account"
@@ -85,6 +92,22 @@ async def signup(
         ),
     )
     return ok(response.model_dump())
+
+
+@router.get("/businesses/{business_slug}")
+async def get_public_business(
+    business_slug: str,
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    company = await resolve_active_business(db, business_slug)
+    return ok(
+        SaasBusinessRead(
+            company_id=company.id,
+            business_slug=company.business_slug,
+            name=company.name,
+            logo_url=company.logo_url,
+        ).model_dump()
+    )
 
 
 @router.post("/verification/request", status_code=status.HTTP_202_ACCEPTED)

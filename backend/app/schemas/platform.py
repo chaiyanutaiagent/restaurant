@@ -9,6 +9,7 @@ from pydantic import ConfigDict, Field, field_validator
 
 from app.schemas import BaseSchema
 from app.schemas.membership import SaasMembershipRead
+from app.utils.business_slug import normalize_business_slug
 
 
 USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,99}$")
@@ -151,6 +152,7 @@ class PlatformCompanyOwnerCreate(BaseSchema):
 
 class PlatformCompanyCreate(BaseSchema):
     name: str = Field(min_length=1, max_length=255)
+    business_slug: str | None = None
     name_en: str | None = Field(default=None, max_length=255)
     tax_id: str | None = Field(default=None, max_length=20)
     email: str | None = Field(default=None, max_length=255)
@@ -171,6 +173,11 @@ class PlatformCompanyCreate(BaseSchema):
     @classmethod
     def normalize_required_text(cls, value: str, info) -> str:
         return _required_text(value, field_name=info.field_name, max_length=500)
+
+    @field_validator("business_slug")
+    @classmethod
+    def validate_business_slug(cls, value: str | None) -> str | None:
+        return normalize_business_slug(value) if value and value.strip() else None
 
     @field_validator("name_en", "tax_id", "email", "phone")
     @classmethod
@@ -273,6 +280,7 @@ class PlatformTenantControlsRead(BaseSchema):
 class PlatformCompanyListItem(BaseSchema):
     id: uuid.UUID
     name: str
+    business_slug: str
     name_en: str | None = None
     tax_id: str | None = None
     email: str | None = None

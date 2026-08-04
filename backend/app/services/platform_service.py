@@ -55,6 +55,7 @@ from app.schemas.platform import (
     PlatformTokenResponse,
 )
 from app.services.platform_reference_projection import enqueue_reference_event
+from app.services.business_directory_service import allocate_business_slug
 from app.services.saas_membership_service import SaasMembershipService
 from app.services.tenant_export_service import TenantExportBoundary, build_tenant_export
 from app.utils.platform_security import (
@@ -1093,6 +1094,7 @@ class PlatformTenantService:
             filters.append(
                 or_(
                     Company.name.ilike(pattern),
+                    Company.business_slug.ilike(pattern),
                     Company.name_en.ilike(pattern),
                     Company.tax_id.ilike(pattern),
                     Company.email.ilike(pattern),
@@ -1120,8 +1122,17 @@ class PlatformTenantService:
         return [self._list_item(company, profile) for company, profile in rows], total
 
     async def create_company(self, data: PlatformCompanyCreate, *, ip_address: str | None, user_agent: str | None) -> PlatformCompanyDetailRead:
+        company_id = uuid.uuid4()
+        business_slug = await allocate_business_slug(
+            self.db,
+            requested_slug=data.business_slug,
+            business_name=data.name,
+            company_id=company_id,
+        )
         company = Company(
+            id=company_id,
             name=data.name,
+            business_slug=business_slug,
             name_en=data.name_en,
             tax_id=data.tax_id,
             email=data.email,
@@ -1186,6 +1197,7 @@ class PlatformTenantService:
                 old_value=None,
                 new_value={
                     "name": company.name,
+                    "business_slug": company.business_slug,
                     "tax_id": company.tax_id,
                     "owner_username": owner.username,
                     "plan_code": profile.plan_code,
@@ -1759,6 +1771,7 @@ class PlatformTenantService:
         return PlatformCompanyListItem(
             id=company.id,
             name=company.name,
+            business_slug=company.business_slug,
             name_en=company.name_en,
             tax_id=company.tax_id,
             email=company.email,

@@ -11,9 +11,17 @@ export type SaasMembership = {
 
 export type SaasSignupResponse = {
   company_id: string;
+  business_slug: string;
   status: string;
   verification_required: boolean;
   message: string;
+};
+
+export type SaasBusiness = {
+  company_id: string;
+  business_slug: string;
+  name: string;
+  logo_url: string | null;
 };
 
 export type SaasActionResponse = {

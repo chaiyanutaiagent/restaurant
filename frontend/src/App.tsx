@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Capacitor } from "@capacitor/core";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
+import BusinessAdminGuard from "@/components/auth/BusinessAdminGuard";
 import PlatformProtectedRoute from "@/components/auth/PlatformProtectedRoute";
 import DeviceProtectedRoute from "@/components/auth/DeviceProtectedRoute";
 import AppShell from "@/components/layout/AppShell";
@@ -106,6 +107,7 @@ export default function App(): JSX.Element {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/:businessSlug/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -124,6 +126,11 @@ export default function App(): JSX.Element {
               <Route path="/platform/support" element={<PlatformSupportPage />} />
             </Route>
           </Route>
+          <Route element={<BusinessAdminGuard />}>
+            <Route element={<AppShell />}>
+              <Route path="/:businessSlug/admin" element={<DashboardPage />} />
+            </Route>
+          </Route>
           <Route path="/device/pair" element={<DevicePairingPage />} />
           <Route element={<DeviceProtectedRoute type="counter" />}>
             <Route path="/counter" element={<CounterDevicePage />} />
@@ -140,6 +147,7 @@ export default function App(): JSX.Element {
           <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
           <Route path="/" element={Capacitor.isNativePlatform() ? <Navigate to="/restaurant" replace /> : <ModuleSelectorPage />} />
           <Route path="/store" element={<StorefrontPage />} />
+          <Route path="/:businessSlug" element={<StorefrontPage />} />
           <Route path="/erp" element={<Navigate to="/admin" replace />} />
           <Route element={<ProtectedRoute permission="pos.sale.create" />}>
             <Route path="/pos" element={<POSPage />} />

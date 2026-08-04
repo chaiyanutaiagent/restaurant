@@ -14,6 +14,7 @@ const operator = {
 const company = {
   id: companyId,
   name: "ร้านทดสอบ SaaS",
+  business_slug: "saas-test-restaurant",
   name_en: "SaaS Test Restaurant",
   tax_id: null,
   email: "tenant@example.com",
@@ -23,6 +24,8 @@ const company = {
   created_at: "2026-08-03T08:00:00Z",
   suspended_at: null,
 };
+
+const tenantAccessToken = `header.${Buffer.from(JSON.stringify({ permissions: [], branch_id: null })).toString("base64url")}.signature`;
 
 const starterPlan = {
   id: "55555555-5555-4555-8555-555555555555",
@@ -550,6 +553,7 @@ test("public SaaS owner can complete signup, verification, and password recovery
   await page.route("**/api/v1/membership/signup", async (route) => {
     await fulfill(route, response({
       company_id: companyId,
+      business_slug: "public-saas-restaurant",
       status: "pending_verification",
       verification_required: true,
       message: "Account created; check your email to verify the account",
@@ -579,6 +583,7 @@ test("public SaaS owner can complete signup, verification, and password recovery
 
   await page.goto("/signup");
   await page.locator("#company_name").fill("ร้านสมาชิก SaaS");
+  await page.locator("#business_slug").fill("public-saas-restaurant");
   await page.locator("#owner_display_name").fill("เจ้าของร้าน");
   await page.locator("#owner_email").fill("public-owner@example.com");
   await page.locator("#username").fill("public.owner");
@@ -586,12 +591,13 @@ test("public SaaS owner can complete signup, verification, and password recovery
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "เริ่มทดลองใช้" }).click();
   await expect(page.getByText("สร้างบัญชีแล้ว กรุณาตรวจอีเมลเพื่อยืนยัน")).toBeVisible();
-  await expect(page.getByText(companyId, { exact: true })).toBeVisible();
+  await expect(page.getByText("/public-saas-restaurant", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "ไปหน้าเข้าสู่ระบบของธุรกิจ" })).toHaveAttribute("href", "/public-saas-restaurant/login");
 
   await page.goto("/verify-email#token=browser-verification-token-1234567890");
   await page.getByRole("button", { name: "ยืนยันอีเมล" }).click();
   await expect(page.getByText("ยืนยันสำเร็จและเริ่มช่วงทดลองใช้แล้ว")).toBeVisible();
-  await expect(page.getByRole("link", { name: "เข้าสู่ระบบ" })).toHaveAttribute("href", `/login?company_id=${companyId}`);
+  await expect(page.getByRole("link", { name: "เข้าสู่ระบบ" })).toHaveAttribute("href", "/public-saas-restaurant/login");
 
   await page.goto("/forgot-password");
   await page.locator("#email").fill("public-owner@example.com");
@@ -666,4 +672,136 @@ test("Platform Owner can review protected operations and capture a runtime snaps
   await expect(page.getByText("passed", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "บันทึก Runtime snapshot" }).click();
   await expect(page.getByText("operator_runtime", { exact: true })).toBeVisible();
+});
+
+test("business slug opens only its canonical public storefront", async ({ page }) => {
+  await page.route("**/api/public/storefront/businesses/alpha-cafe", async (route) => {
+    await fulfill(route, response({
+      company: {
+        id: companyId,
+        name: "Alpha Cafe",
+        business_slug: "alpha-cafe",
+        name_en: null,
+        tax_id: null,
+        vat_registered: false,
+        address: null,
+        phone: null,
+        email: null,
+        logo_url: null,
+        website: null,
+        currency: "THB",
+        timezone: "Asia/Bangkok",
+      },
+      featured_products: [],
+      branches: [],
+    }));
+  });
+  await page.route("**/api/public/storefront/businesses/alpha-cafe/products**", async (route) => {
+    await fulfill(route, {
+      data: [{
+        id: "aaaaaaaa-1111-4111-8111-111111111111",
+        sku: "ALPHA-COFFEE",
+        barcode: null,
+        name: "Alpha Signature Coffee",
+        name_en: null,
+        description: "Only Alpha catalog",
+        selling_price: 120,
+        vat_type: "included",
+        vat_rate: 7,
+        category_id: null,
+        category_name: null,
+        unit_code: null,
+        image_url: null,
+        is_active: true,
+        total_qty_available: 5,
+        in_stock: true,
+      }],
+      meta: { version: "test", total: 1, page: 1, limit: 24 },
+      error: null,
+    });
+  });
+
+  await page.goto("/alpha-cafe");
+  await expect(page.getByRole("heading", { name: "Alpha Cafe" })).toBeVisible();
+  await expect(page.getByText("Alpha Signature Coffee", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "เข้าสู่ระบบแอดมิน" })).toHaveAttribute("href", "/alpha-cafe/admin");
+  await expect(page.getByText("Beta Bistro", { exact: true })).toHaveCount(0);
+});
+
+test("business admin resolves Company ID, hides UUID entry, and keeps the canonical URL", async ({ page }) => {
+  let loginCompanyHeader: string | undefined;
+  await page.route("**/api/v1/membership/businesses/alpha-cafe", async (route) => {
+    await fulfill(route, response({
+      company_id: companyId,
+      business_slug: "alpha-cafe",
+      name: "Alpha Cafe",
+      logo_url: null,
+    }));
+  });
+  await page.route("**/api/v1/auth/login", async (route) => {
+    loginCompanyHeader = route.request().headers()["x-company-id"];
+    await fulfill(route, response({
+      access_token: tenantAccessToken,
+      refresh_token: "tenant-refresh-token",
+      token_type: "bearer",
+      expires_in: 900,
+      business_slug: "alpha-cafe",
+      user: {
+        id: "77777777-7777-4777-8777-777777777777",
+        company_id: companyId,
+        username: "alpha.owner",
+        email: "alpha@example.com",
+        phone: null,
+        first_name: null,
+        last_name: null,
+        display_name: "Alpha Owner",
+        is_active: true,
+        is_superuser: false,
+        last_login_at: null,
+      },
+    }));
+  });
+  await page.route("**/api/v1/reports/dashboard**", async (route) => {
+    await fulfill(route, response({ today_orders: 0, today_sales: 0, today_vat: 0, today_avg_order: 0, compared_yesterday_pct: null, low_stock_count: 0, total_products: 0, open_shifts_count: 0 }));
+  });
+  await page.route("**/api/v1/reports/sales/hourly**", async (route) => { await fulfill(route, response([])); });
+  await page.route("**/api/v1/stock/balances**", async (route) => { await fulfill(route, response([])); });
+  await page.route("**/api/v1/restaurant/me/brand-navigation", async (route) => { await fulfill(route, response([])); });
+
+  await page.goto("/alpha-cafe/admin");
+  await expect(page).toHaveURL(/\/alpha-cafe\/login\?next=/);
+  await expect(page.getByText("พื้นที่ธุรกิจ /alpha-cafe", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Company ID")).toBeHidden();
+  await page.getByLabel("Username").fill("alpha.owner");
+  await page.getByLabel("Password").fill("Routing-Owner-Password!");
+  await page.getByRole("button", { name: "เข้าสู่ระบบ" }).click();
+
+  await expect(page).toHaveURL(/\/alpha-cafe\/admin$/);
+  await expect.poll(() => loginCompanyHeader).toBe(companyId);
+  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "ERP Admin" }).first()).toHaveAttribute("href", "/alpha-cafe/admin");
+});
+
+test("business admin rejects a session belonging to another Tenant", async ({ page }) => {
+  await page.addInitScript(({ token, tenantCompanyId }) => {
+    window.localStorage.setItem("erp-auth", JSON.stringify({
+      state: {
+        accessToken: token,
+        refreshToken: "beta-refresh-token",
+        user: { id: "88888888-8888-4888-8888-888888888888", company_id: tenantCompanyId, username: "beta.owner", display_name: "Beta Owner" },
+        companyId: tenantCompanyId,
+        businessSlug: "beta-bistro",
+        branchId: null,
+        stationKey: null,
+        permissions: [],
+      },
+      version: 0,
+    }));
+  }, { token: tenantAccessToken, tenantCompanyId: "99999999-9999-4999-8999-999999999999" });
+  await page.route("**/api/v1/membership/businesses/alpha-cafe", async (route) => {
+    await fulfill(route, response({ company_id: companyId, business_slug: "alpha-cafe", name: "Alpha Cafe", logo_url: null }));
+  });
+
+  await page.goto("/alpha-cafe/admin");
+  await expect(page).toHaveURL(/\/403$/);
 });

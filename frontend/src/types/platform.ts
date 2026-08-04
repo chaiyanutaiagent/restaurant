@@ -42,6 +42,7 @@ export type PlatformMfaConfirm = {
 export type PlatformCompanyListItem = {
   id: string;
   name: string;
+  business_slug: string;
   name_en: string | null;
   tax_id: string | null;
   email: string | null;
@@ -84,6 +85,7 @@ export type PlatformCompanyDetail = PlatformCompanyListItem & {
 
 export type PlatformCompanyCreate = {
   name: string;
+  business_slug?: string | null;
   name_en?: string | null;
   tax_id?: string | null;
   email?: string | null;

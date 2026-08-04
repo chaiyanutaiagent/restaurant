@@ -207,7 +207,7 @@ async def seed_scope_context() -> ScopeContext:
             ]
         )
 
-        foreign_company = Company(name=f"P2 Foreign Tenant {marker}", is_active=True)
+        foreign_company = Company(name=f"P2 Foreign Tenant {marker}", business_slug=f"p2-foreign-{marker}", is_active=True)
         db.add(foreign_company)
         await db.flush()
         foreign_branch = Branch(

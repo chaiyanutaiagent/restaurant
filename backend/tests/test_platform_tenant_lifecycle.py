@@ -220,6 +220,7 @@ class PlatformDashboardTests(unittest.IsolatedAsyncioTestCase):
         company = SimpleNamespace(
             id=company_id,
             name="ร้านทดสอบ",
+            business_slug="test-restaurant",
             name_en=None,
             tax_id=None,
             email=None,

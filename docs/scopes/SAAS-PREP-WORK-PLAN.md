@@ -47,8 +47,9 @@ phase7_started: false
 | 6 | `SAAS-PREP-BILLING-06` | Provider-neutral subscription lifecycle and billing decision boundary | Scope 05; provider selection remains parked | Complete |
 | 7 | `SAAS-PREP-PDPA-SUPPORT-07` | Privacy lifecycle, data-subject requests, support tickets, and audited support access | Scope 06 | Complete |
 | 8 | `SAAS-PREP-BETA-GATE-08` | Migration, authorization, security, load, browser, and recovery evidence | Scopes 01-07 | Complete |
-| 9 | `P5-PHYSICAL-UAT-SIGNOFF-06` | Real counter, kitchen, pickup, camera, printer, and network UAT | Hardware received | Parked |
-| 10 | Public launch decision | Owner-controlled go/no-go using both SaaS and Restaurant evidence | All gates and sign-offs | Blocked |
+| 9 | `SAAS-PREP-TENANT-ROUTING-09` | Canonical business-slug storefront, login, and Tenant admin routes | Scope 08 | Complete |
+| 10 | `P5-PHYSICAL-UAT-SIGNOFF-06` | Real counter, kitchen, pickup, camera, printer, and network UAT | Hardware received | Parked |
+| 11 | Public launch decision | Owner-controlled go/no-go using both SaaS and Restaurant evidence | All gates and sign-offs | Blocked |
 
 ## SAAS-PREP-DASHBOARD-01
 
@@ -681,6 +682,101 @@ databases, no application or production rollback is required.
   Takeaway Phase 6 work, or Retail Phase 7 work was introduced by this Scope.
 - Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-beta-readiness-08-20260803T083225Z/manifest.txt`.
 - Handoff report: `docs/scopes/SAAS-BETA-READINESS.md`.
+
+## SAAS-PREP-TENANT-ROUTING-09
+
+### Problem
+
+The Platform Owner uses `/platform`, but every Tenant currently shares `/store`, `/login`,
+and `/admin`. The public storefront resolves the first active Company rather than a Company
+named by the URL, so adding only a frontend `/:name` route could expose the wrong Tenant's
+public catalog. Company identity has no durable, globally unique URL slug.
+
+### In scope
+
+- Keep `/platform` as the Platform Owner boundary.
+- Add one normalized, globally unique, non-reserved `business_slug` to Company identity and
+  the Restaurant reference boundary.
+- Accept an optional requested slug during public signup and Platform-created onboarding;
+  generate a safe deterministic alternative when omitted, and return the canonical slug.
+- Add a minimal public business resolver by slug and slug-scoped storefront summary,
+  product, and branch APIs that always filter by the resolved active Company.
+- Add canonical `/:businessSlug`, `/:businessSlug/login`, and
+  `/:businessSlug/admin` browser routes. The slug login must resolve and bind Company ID
+  server-side; the admin guard must reject a session belonging to another Tenant.
+- Keep `/store`, `/login`, `/admin`, and existing operational routes working for backwards
+  compatibility. New slug-aware navigation should preserve the canonical Tenant admin URL.
+- Add matching legacy, Platform-core, and Restaurant-reference migrations, projection
+  coverage, focused backend tests, isolated API/migration rehearsal, and browser verification.
+
+### Out of scope
+
+- Custom domains, subdomains, DNS, TLS certificates, slug aliases/history, automatic URL
+  forwarding after a future rename, SEO/marketing pages, and native deep links.
+- Moving every ERP/POS/Restaurant child route beneath the slug in this Scope; only the
+  canonical storefront, login, and admin entry are changed.
+- Production migration/deployment, live data mutation, hardware UAT, Takeaway Phase 6, or
+  Retail Phase 7.
+
+### Acceptance criteria
+
+- Slugs use lowercase ASCII letters, numbers, and internal hyphens; reserved application
+  route names and duplicates are rejected.
+- Existing Companies receive deterministic collision-free slugs during isolated migration.
+- `/:businessSlug` returns only that active Tenant's public storefront data; unknown or
+  inactive slugs return not found without falling back to another Company.
+- `/:businessSlug/login` does not ask for Company UUID, and successful login goes to
+  `/:businessSlug/admin`.
+- `/:businessSlug/admin` accepts only an authenticated session whose Company matches the
+  resolved slug; cross-Tenant slug/session combinations are rejected.
+- Legacy routes remain available, all three migration paths rehearse upgrade/downgrade/
+  re-upgrade on isolated databases, and focused backend/frontend/browser gates pass.
+
+### Verification
+
+- Slug validation, reserved-name, collision, auth-binding, storefront-isolation, and
+  projection tests.
+- Isolated legacy, Platform, and Restaurant migration rehearsal plus API smoke using two
+  Companies with different slugs and products.
+- `npm run type-check`, `npm run build`, and slug-routing Playwright coverage.
+
+### Rollback
+
+Keep legacy routes enabled, revert only the Scope 09 application commit, then downgrade the
+three Scope 09 migrations after confirming no newly created Company depends on a slug-only
+link. This Scope does not authorize any production rollback or data operation.
+
+### Route contract
+
+- Platform Owner: `/platform` (login remains `/platform/login`).
+- Public business page: `/:businessSlug`.
+- Tenant login: `/:businessSlug/login`; Company UUID is resolved by the server-facing
+  business directory and is not requested from the user.
+- Tenant admin entry: `/:businessSlug/admin`; a session for a different Company is rejected.
+- Compatibility routes: `/store`, `/login`, `/admin`, and existing operational child routes
+  remain available. Moving every child route under the slug requires a future Scope.
+
+### Completion evidence
+
+- Added normalized, globally unique, reserved-name-safe `business_slug` Company identity,
+  public business resolution, slug-scoped storefront APIs, auth-session slug binding, and
+  Restaurant reference projection coverage.
+- Isolated legacy migration reached `p12route0014`, Platform-core reached
+  `p12platform0016`, and Restaurant-reference reached `p6restaurant0007`; each path passed
+  upgrade, downgrade, and re-upgrade with complete unique slug backfill.
+- Full backend regression: 229 tests passed. Two-Tenant API smoke passed signup collision,
+  reserved-name rejection, exact public resolution, storefront product/branch isolation,
+  unknown-slug handling, verification, and canonical login binding.
+- Platform-to-Restaurant Company, Branch, Brand, Brand-Branch, and User projection parity
+  passed with zero mismatches.
+- Frontend TypeScript check and production build passed. Platform/browser suite: 13 tests
+  passed, including canonical storefront, UUID-free Tenant login, canonical admin URL,
+  signup/verification return path, and cross-Tenant rejection.
+- Static SaaS boundary check passed. Source database fingerprints remained unchanged and
+  isolated temporary databases were cleaned automatically.
+- Gate manifest: `/private/tmp/restaurant-saas-artifacts/saas-tenant-routing-09-20260804T045530Z/manifest.txt`.
+- No production migration/deployment was run; physical-device UAT remains parked pending
+  hardware, and Takeaway Phase 6 / Retail Phase 7 remain out of scope.
 
 ## Change control
 

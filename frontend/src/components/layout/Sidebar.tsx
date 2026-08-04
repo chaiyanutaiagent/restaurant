@@ -144,7 +144,8 @@ export default function Sidebar({
   isSidebarOpen,
   onClose
 }: SidebarProps): JSX.Element {
-  const logout = useLogout();
+  const businessSlug = useAuthStore((state) => state.businessSlug);
+  const logout = useLogout(businessSlug ? `/${businessSlug}` : "/login");
   const user = useAuthStore((state) => state.user);
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasFbAccess = fbPermissionCodes.some((code) => hasPermission(code));
@@ -256,7 +257,7 @@ export default function Sidebar({
                 .map((item) => (
                   <NavLink
                     key={item.to}
-                    to={item.to}
+                    to={item.to === "/admin" && businessSlug ? `/${businessSlug}/admin` : item.to}
                     onClick={onClose}
                     className={({ isActive }) =>
                       cn(
@@ -283,7 +284,7 @@ export default function Sidebar({
                 .map((item) => (
                   <NavLink
                     key={item.to}
-                    to={item.to}
+                    to={item.to === "/admin" && businessSlug ? `/${businessSlug}/admin` : item.to}
                     onClick={onClose}
                     className={({ isActive }) =>
                       cn(
@@ -306,7 +307,7 @@ export default function Sidebar({
             .map((item) => (
               <NavLink
                 key={item.to}
-                to={item.to}
+                to={item.to === "/admin" && businessSlug ? `/${businessSlug}/admin` : item.to}
                 onClick={onClose}
                 className={({ isActive }) =>
                   cn(

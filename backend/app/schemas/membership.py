@@ -7,6 +7,7 @@ import uuid
 from pydantic import Field, field_validator, model_validator
 
 from app.schemas import BaseSchema
+from app.utils.business_slug import normalize_business_slug
 
 
 USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,99}$")
@@ -22,6 +23,7 @@ def normalize_email(value: str) -> str:
 
 class SaasSignupRequest(BaseSchema):
     company_name: str = Field(min_length=1, max_length=255)
+    business_slug: str | None = None
     owner_display_name: str = Field(min_length=1, max_length=200)
     owner_email: str
     username: str
@@ -37,6 +39,11 @@ class SaasSignupRequest(BaseSchema):
         if not normalized:
             raise ValueError("value is required")
         return normalized
+
+    @field_validator("business_slug")
+    @classmethod
+    def validate_business_slug(cls, value: str | None) -> str | None:
+        return normalize_business_slug(value) if value and value.strip() else None
 
     @field_validator("owner_email")
     @classmethod
@@ -70,6 +77,7 @@ class SaasSignupRequest(BaseSchema):
 
 class SaasSignupRead(BaseSchema):
     company_id: uuid.UUID
+    business_slug: str
     status: str
     verification_required: bool = True
     message: str
@@ -106,6 +114,13 @@ class SaasMembershipRead(BaseSchema):
     trial_started_at: datetime | None = None
     trial_ends_at: datetime | None = None
     trial_days_remaining: int | None = None
+
+
+class SaasBusinessRead(BaseSchema):
+    company_id: uuid.UUID
+    business_slug: str
+    name: str
+    logo_url: str | None = None
 
 
 class SaasActionRead(BaseSchema):

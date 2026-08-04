@@ -19,6 +19,7 @@ class SaasMembershipSchemaTests(unittest.TestCase):
     def test_signup_normalizes_identity_and_requires_consent(self) -> None:
         request = SaasSignupRequest(
             company_name=" ร้านตัวอย่าง ",
+            business_slug=" Sample-Cafe ",
             owner_display_name=" เจ้าของร้าน ",
             owner_email=" OWNER@Example.COM ",
             username=" Owner.One ",
@@ -27,17 +28,31 @@ class SaasMembershipSchemaTests(unittest.TestCase):
             privacy_accepted=True,
         )
         self.assertEqual(request.company_name, "ร้านตัวอย่าง")
+        self.assertEqual(request.business_slug, "sample-cafe")
         self.assertEqual(request.owner_email, "owner@example.com")
         self.assertEqual(request.username, "owner.one")
 
         with self.assertRaises(ValidationError):
             SaasSignupRequest(
                 company_name="ร้าน",
+                business_slug="sample-cafe",
                 owner_display_name="เจ้าของ",
                 owner_email="owner@example.com",
                 username="owner.one",
                 password="A-Strong-Password!",
                 terms_accepted=False,
+                privacy_accepted=True,
+            )
+
+        with self.assertRaises(ValidationError):
+            SaasSignupRequest(
+                company_name="ร้าน",
+                business_slug="admin",
+                owner_display_name="เจ้าของ",
+                owner_email="owner@example.com",
+                username="owner.one",
+                password="A-Strong-Password!",
+                terms_accepted=True,
                 privacy_accepted=True,
             )
 

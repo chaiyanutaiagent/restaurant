@@ -59,8 +59,8 @@ async def prepare_usage_fixture() -> tuple[uuid.UUID, uuid.UUID]:
         )
         db.add(operator)
         await db.flush()
-        company = Company(name="Private Usage Tenant", email=PRIVATE_MARKER, is_active=True)
-        other_company = Company(name="Other Isolated Tenant", is_active=True)
+        company = Company(name="Private Usage Tenant", business_slug="private-usage-tenant", email=PRIVATE_MARKER, is_active=True)
+        other_company = Company(name="Other Isolated Tenant", business_slug="other-isolated-tenant", is_active=True)
         db.add_all([company, other_company])
         await db.flush()
         db.add(

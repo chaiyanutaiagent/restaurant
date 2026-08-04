@@ -20,6 +20,7 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+    business_slug: str
     user: UserRead
 
 
@@ -39,6 +40,7 @@ class BranchSwitchRequest(BaseModel):
 class MeResponse(BaseModel):
     user: UserRead
     company_id: uuid.UUID
+    business_slug: str
     branch_id: uuid.UUID | None
     brand_id: uuid.UUID | None = None
     business_type: str | None = None

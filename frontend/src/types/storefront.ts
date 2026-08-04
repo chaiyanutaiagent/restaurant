@@ -1,6 +1,7 @@
 export interface StorefrontCompany {
   id: string;
   name: string;
+  business_slug: string;
   name_en: string | null;
   tax_id: string | null;
   vat_registered: boolean;

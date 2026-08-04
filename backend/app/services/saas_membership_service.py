@@ -24,6 +24,8 @@ from app.models.staff_assignment import StaffRoleAssignment
 from app.models.user import User
 from app.schemas.membership import SaasMembershipRead, SaasSignupRequest
 from app.utils.security import hash_password
+from app.services.business_directory_service import allocate_business_slug
+from app.services.platform_reference_projection import enqueue_reference_event
 from app.services.saas_billing_service import ensure_starter_subscription
 
 
@@ -73,8 +75,17 @@ class SaasMembershipService:
         user_agent: str | None,
     ) -> tuple[SaasTenantMembership, str]:
         now = datetime.now(timezone.utc)
+        company_id = uuid.uuid4()
+        business_slug = await allocate_business_slug(
+            self.db,
+            requested_slug=data.business_slug,
+            business_name=data.company_name,
+            company_id=company_id,
+        )
         company = Company(
+            id=company_id,
             name=data.company_name,
+            business_slug=business_slug,
             email=data.owner_email,
             phone=data.phone,
             is_active=True,
@@ -160,6 +171,7 @@ class SaasMembershipService:
                     resource_id=str(membership.id),
                     new_value={
                         "status": membership.status,
+                        "business_slug": company.business_slug,
                         "terms_version": TERMS_VERSION,
                         "privacy_version": PRIVACY_VERSION,
                     },
@@ -167,6 +179,21 @@ class SaasMembershipService:
                     user_agent=user_agent,
                 )
             )
+            if settings.identity_database == "platform_core":
+                await enqueue_reference_event(
+                    self.db,
+                    aggregate_type="company",
+                    aggregate_id=company.id,
+                    company_id=company.id,
+                    payload={"source": "saas.membership.signup"},
+                )
+                await enqueue_reference_event(
+                    self.db,
+                    aggregate_type="user",
+                    aggregate_id=owner.id,
+                    company_id=company.id,
+                    payload={"source": "saas.membership.signup"},
+                )
             await self.db.commit()
             return membership, raw_token
         except IntegrityError as exc:

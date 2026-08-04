@@ -141,7 +141,7 @@ async def seed_gate_context() -> GateContext:
             )
         )
 
-        company_b = Company(name=f"P1 Gate Tenant B {marker}", is_active=True)
+        company_b = Company(name=f"P1 Gate Tenant B {marker}", business_slug=f"p1-gate-{marker}", is_active=True)
         db.add(company_b)
         await db.flush()
         branch_b = Branch(

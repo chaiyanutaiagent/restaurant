@@ -14,7 +14,7 @@ function errorMessage(error: unknown): string {
 }
 
 export default function SignupPage(): JSX.Element {
-  const [form, setForm] = useState({ company_name: "", owner_display_name: "", owner_email: "", username: "", password: "", phone: "" });
+  const [form, setForm] = useState({ company_name: "", business_slug: "", owner_display_name: "", owner_email: "", username: "", password: "", phone: "" });
   const [accepted, setAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [companyId, setCompanyId] = useState<string | null>(null);
@@ -33,6 +33,8 @@ export default function SignupPage(): JSX.Element {
       });
       setCompanyId(response.data.data.company_id);
       window.localStorage.setItem("last_company_id", response.data.data.company_id);
+      window.localStorage.setItem("last_business_slug", response.data.data.business_slug);
+      setForm((current) => ({ ...current, business_slug: response.data.data.business_slug }));
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -46,10 +48,11 @@ export default function SignupPage(): JSX.Element {
         <CardHeader className="text-center"><Store className="mx-auto h-10 w-10 text-blue-600" /><CardTitle>เริ่มทดลอง Restaurant SaaS</CardTitle><CardDescription>สร้าง Company Owner สำหรับระบบร้านอาหารและคาเฟ่</CardDescription></CardHeader>
         <CardContent>
           {companyId ? (
-            <div className="space-y-4 text-center"><p className="text-lg font-semibold text-emerald-700">สร้างบัญชีแล้ว กรุณาตรวจอีเมลเพื่อยืนยัน</p><div className="rounded-lg bg-slate-100 p-4"><p className="text-xs text-slate-500">Company ID สำหรับเข้าสู่ระบบ</p><p className="mt-1 break-all font-mono text-sm">{companyId}</p></div><Button asChild><Link to={`/login?company_id=${encodeURIComponent(companyId)}`}>ไปหน้าเข้าสู่ระบบ</Link></Button></div>
+            <div className="space-y-4 text-center"><p className="text-lg font-semibold text-emerald-700">สร้างบัญชีแล้ว กรุณาตรวจอีเมลเพื่อยืนยัน</p><div className="rounded-lg bg-slate-100 p-4"><p className="text-xs text-slate-500">URL ธุรกิจ</p><p className="mt-1 break-all font-mono text-sm">/{form.business_slug}</p></div><Button asChild><Link to={`/${form.business_slug}/login`}>ไปหน้าเข้าสู่ระบบของธุรกิจ</Link></Button></div>
           ) : (
             <form className="space-y-4" onSubmit={submit}>
               <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="company_name">ชื่อร้าน/บริษัท</Label><Input id="company_name" required value={form.company_name} onChange={(e) => setForm({ ...form, company_name: e.target.value })} /></div><div className="space-y-2"><Label htmlFor="owner_display_name">ชื่อเจ้าของ</Label><Input id="owner_display_name" required value={form.owner_display_name} onChange={(e) => setForm({ ...form, owner_display_name: e.target.value })} /></div></div>
+              <div className="space-y-2"><Label htmlFor="business_slug">URL ธุรกิจ *</Label><div className="flex items-center gap-2"><span className="text-sm text-slate-500">/</span><Input id="business_slug" required minLength={3} maxLength={63} pattern="[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])" placeholder="coffee-house" value={form.business_slug} onChange={(e) => setForm({ ...form, business_slug: e.target.value.toLowerCase() })} /></div><p className="text-xs text-slate-500">ใช้ตัวอักษรอังกฤษพิมพ์เล็ก ตัวเลข และขีดกลาง เช่น coffee-house</p></div>
               <div className="space-y-2"><Label htmlFor="owner_email">อีเมลเจ้าของ</Label><Input id="owner_email" type="email" required value={form.owner_email} onChange={(e) => setForm({ ...form, owner_email: e.target.value })} /></div>
               <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="username">Username</Label><Input id="username" minLength={3} required value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></div><div className="space-y-2"><Label htmlFor="phone">เบอร์โทร (ถ้ามี)</Label><Input id="phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div></div>
               <div className="space-y-2"><Label htmlFor="password">รหัสผ่านอย่างน้อย 12 ตัว</Label><Input id="password" type="password" minLength={12} required value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>

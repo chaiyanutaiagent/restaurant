@@ -22,6 +22,7 @@ REFERENCE_COLUMNS: dict[str, tuple[str, ...]] = {
     "company": (
         "id",
         "name",
+        "business_slug",
         "name_en",
         "tax_id",
         "vat_registered",

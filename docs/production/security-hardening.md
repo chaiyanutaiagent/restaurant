@@ -103,7 +103,8 @@ HTTP local production mode includes:
 - `X-Content-Type-Options: nosniff`
 - `X-XSS-Protection: 1; mode=block`
 - `Referrer-Policy: strict-origin-when-cross-origin`
-- `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+- `Permissions-Policy: geolocation=(), microphone=(), camera=(self)` so the same-origin POS
+  scanner can request camera access while embedded and cross-origin pages remain blocked
 - `Content-Security-Policy` restricting scripts to same-origin, blocking framing and objects, and limiting
   API/WebSocket/image/font connections to the reviewed application requirements
 

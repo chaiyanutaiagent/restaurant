@@ -26,6 +26,8 @@ Do not record Wi-Fi passwords, application passwords, pairing PINs, tokens, QR s
 ## Preconditions
 
 - [ ] The release commit and UAT environment are identified and isolated from live customer transactions unless production UAT has been explicitly approved.
+- [ ] The replacement-server restore rehearsal passed, the UAT hostname resolves only to the approved target, and rollback ownership is recorded in [server-migration-plan.md](./server-migration-plan.md).
+- [ ] The HTTPS response permits same-origin camera use; `Permissions-Policy: camera=()` is not present on the Tablet UAT route.
 - [ ] Test users, branch, menu, stock, payment method, table, and clearly marked UAT orders are prepared.
 - [ ] Counter, kitchen, pickup display, Samsung Galaxy Tab A11 LTE or actual target tablet, camera, charger, stand, printer, and spare network path are available.
 - [ ] An operator can revoke device credentials and clean up test data according to policy.

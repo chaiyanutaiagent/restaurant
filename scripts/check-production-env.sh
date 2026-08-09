@@ -66,6 +66,13 @@ UPLOAD_DIR
 MAX_UPLOAD_SIZE_MB
 ALLOWED_UPLOAD_EXTENSIONS
 ALLOWED_UPLOAD_MIME_TYPES
+SAAS_PUBLIC_BASE_URL
+SAAS_EMAIL_DELIVERY_MODE
+SAAS_SMTP_HOST
+SAAS_SMTP_PORT
+SAAS_SMTP_FROM_EMAIL
+SAAS_SMTP_USE_TLS
+SAAS_SMTP_START_TLS
 "
 
 for key in $REQUIRED_VARS; do
@@ -123,6 +130,52 @@ case "$PUBLIC_BASE_URL_VALUE" in
     fi
     ;;
 esac
+
+SAAS_PUBLIC_BASE_URL_VALUE="$(value_of SAAS_PUBLIC_BASE_URL)"
+case "$SAAS_PUBLIC_BASE_URL_VALUE" in
+  https://*)
+    ;;
+  *)
+    fail "SAAS_PUBLIC_BASE_URL must use https:// in production"
+    ;;
+esac
+
+SAAS_EMAIL_DELIVERY_MODE_VALUE="$(value_of SAAS_EMAIL_DELIVERY_MODE | tr '[:upper:]' '[:lower:]')"
+if [ "$SAAS_EMAIL_DELIVERY_MODE_VALUE" != "smtp" ]; then
+  fail "SAAS_EMAIL_DELIVERY_MODE must be smtp in production"
+fi
+
+SAAS_SMTP_PORT_VALUE="$(value_of SAAS_SMTP_PORT)"
+if ! printf '%s' "$SAAS_SMTP_PORT_VALUE" | grep -Eq '^[0-9]+$'; then
+  fail "SAAS_SMTP_PORT must be an integer from 1 to 65535"
+elif [ "$SAAS_SMTP_PORT_VALUE" -lt 1 ] || [ "$SAAS_SMTP_PORT_VALUE" -gt 65535 ]; then
+  fail "SAAS_SMTP_PORT must be an integer from 1 to 65535"
+fi
+
+SAAS_SMTP_FROM_EMAIL_VALUE="$(value_of SAAS_SMTP_FROM_EMAIL)"
+case "$SAAS_SMTP_FROM_EMAIL_VALUE" in
+  *@*.*)
+    ;;
+  *)
+    fail "SAAS_SMTP_FROM_EMAIL must be an email address"
+    ;;
+esac
+
+SAAS_SMTP_USE_TLS_VALUE="$(value_of SAAS_SMTP_USE_TLS | tr '[:upper:]' '[:lower:]')"
+SAAS_SMTP_START_TLS_VALUE="$(value_of SAAS_SMTP_START_TLS | tr '[:upper:]' '[:lower:]')"
+for value in "$SAAS_SMTP_USE_TLS_VALUE" "$SAAS_SMTP_START_TLS_VALUE"; do
+  case "$value" in
+    true|false)
+      ;;
+    *)
+      fail "SAAS_SMTP_USE_TLS and SAAS_SMTP_START_TLS must be true or false"
+      break
+      ;;
+  esac
+done
+if [ "$SAAS_SMTP_USE_TLS_VALUE" = "true" ] && [ "$SAAS_SMTP_START_TLS_VALUE" = "true" ]; then
+  fail "SAAS_SMTP_USE_TLS and SAAS_SMTP_START_TLS must not both be true"
+fi
 
 SERVER_NAME_VALUE="$(value_of SERVER_NAME)"
 if printf '%s' "$SERVER_NAME_VALUE" | grep -Eq 'https?://|/'; then

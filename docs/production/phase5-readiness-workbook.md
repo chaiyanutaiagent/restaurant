@@ -4,6 +4,11 @@ This workbook separates evidence that can be prepared without production access 
 
 ```text
 physical_device_uat: pending
+server_migration_plan: in_progress
+source_server_inventory: read_only_complete
+target_server_inventory: read_only_complete
+isolated_target_restore: core restore/migration/smoke passed; auth and device flows pending
+server_cutover: owner approved; blocked on safe HTTPS route preflight
 security_owner_decision: pending
 operator_owner_signoff: pending
 platform_owner_completion_signoff: pending
@@ -83,15 +88,22 @@ Do not put passwords, tokens, private keys, database URLs, customer data, or bac
 
 Resume with scope `P5-PHYSICAL-UAT-SIGNOFF-06`. The scope remains part of Restaurant Phase 5; the `06` suffix is only the next work-record sequence and does not mean Takeaway Phase 6 has started.
 
+The owner requested server-migration planning before Tablet UAT on 9 August 2026.
+Follow [server-migration-plan.md](./server-migration-plan.md) first. Planning and
+an isolated target rehearsal are authorized; a live cutover, final hostname switch,
+or source-server shutdown still requires a separate explicit decision.
+
 | Order | Trigger | Work | Required evidence | Owner/status |
 | --- | --- | --- | --- | --- |
-| 1 | Before hardware arrives | Assign business UAT, security, operator, rollback, and Platform owners; fill non-secret production values | Named owners and completed value fields | Owner: pending |
-| 2 | Target hardware arrives | Run [device-uat-checklist.md](./device-uat-checklist.md) on counter, kitchen, pickup display, camera, printer, and actual network | Dine-in/takeaway, pairing/revocation, restart, offline/lost-ack, printer, and reconciliation evidence | `waiting_for_hardware` |
-| 3 | Any device item fails | Fix only the approved failure scope, re-run regression/readiness gates, and repeat affected physical cases | Linked defect, immutable fix commit, green CI, and physical retest | Conditional |
-| 4 | Device release candidate is stable | Re-run dependency audits against the exact commit and complete [security-risk-acceptance.md](./security-risk-acceptance.md) | Security-owner accept/mitigate/block decision | Pending |
-| 5 | UAT and security decision pass | Run [operator-training-drill.md](./operator-training-drill.md), finish production/go-live checklist, and confirm backup/restore, monitoring, TLS, and rollback ownership | Operator/business sign-off and completed production checklist | Pending |
-| 6 | All prior rows pass | Obtain Platform Owner Restaurant completion approval and update the Restaurant Completion Gate | Approved sign-off record tied to the release commit | Pending |
-| 7 | Completion approval exists | Ask for a separate explicit decision to mark the PR ready/merge, deploy production, or begin Takeaway Phase 6 | Recorded owner instruction and change scope | Blocked until approval |
+| 1 | Before target-host changes | Inventory the current Restaurant source host, target host, database runtime modes, backups, RPO/downtime, and accountable owners without recording secrets | Reviewed non-secret inventory and identified authoritative databases | `in_progress` |
+| 2 | Inventory reviewed | Rehearse backup transfer and restore only in an isolated target Compose project; verify checksums, migration heads, uploads, smoke, and reconciliation | Target restore evidence with unchanged source fingerprint | Pending |
+| 3 | Target rehearsal passes | Correct and verify the camera permission policy, create the UAT-only Tunnel, and expose only the approved UAT hostname | Healthy UAT route, expected response headers, external health/smoke, camera preflight | Pending |
+| 4 | Target hardware arrives | Run [device-uat-checklist.md](./device-uat-checklist.md) on counter, kitchen, pickup display, camera, printer, and actual network | Dine-in/takeaway, pairing/revocation, restart, offline/lost-ack, printer, and reconciliation evidence | `waiting_for_hardware` |
+| 5 | Any migration/UAT item fails | Fix only the approved failure scope, re-run regression/readiness gates, and repeat affected restore/device cases | Linked defect, immutable fix commit, green CI, and affected retest | Conditional |
+| 6 | Device release candidate is stable | Re-run dependency audits against the exact commit and complete [security-risk-acceptance.md](./security-risk-acceptance.md) | Security-owner accept/mitigate/block decision | Pending |
+| 7 | UAT and security decision pass | Run [operator-training-drill.md](./operator-training-drill.md), finish production/go-live checklist, and confirm backup/restore, monitoring, TLS, and rollback ownership | Operator/business sign-off and completed production checklist | Pending |
+| 8 | All prior rows pass | Obtain Platform Owner Restaurant completion approval and update the Restaurant Completion Gate | Approved sign-off record tied to the release commit | Pending |
+| 9 | Completion approval exists | Ask for separate explicit decisions for server cutover/final hostname, PR ready/merge, production activation, or Takeaway Phase 6 | Recorded owner instruction and change scope | Blocked until approval |
 
 When resuming, first confirm the hardware inventory, target browser/app versions, printer connection type, network profile, UAT environment, and accountable people. Do not store credentials or pairing secrets in Git.
 

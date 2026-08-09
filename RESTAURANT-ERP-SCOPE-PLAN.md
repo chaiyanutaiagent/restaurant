@@ -661,15 +661,29 @@ Owner สั่งเลื่อน physical/visual UAT จนกว่าอ�
 dependency risk acceptance, production checklist และ controlled owner sign-off ห้ามเริ่ม Phase 6,
 deploy production, migrate ฐาน live หรือสร้าง Platform Owner บนฐาน live จนกว่าจะครบและมีคำสั่งชัดเจน
 
+Owner อนุมัติให้เริ่มวางแผนย้าย Restaurant Server ก่อน Tablet UAT เมื่อ 9 สิงหาคม 2026 โดยให้
+`docs/production/server-migration-plan.md` เป็น runbook สนับสนุนภายใต้ Scope
+`P5-PHYSICAL-UAT-SIGNOFF-06` อนุญาตเฉพาะ read-only inventory, target preparation และ isolated
+restore/UAT rehearsal ก่อน ส่วน live cutover, source shutdown, final domain switch และ production
+activation ยังต้องมีคำสั่งอนุมัติแยกต่างหาก งานนี้ไม่ใช่ Takeaway Phase 6
+
+Owner สั่งให้สลับไปใช้เครื่องใหม่เมื่อ 9 สิงหาคม 2026 จึงอนุมัติ controlled server cutover
+ภายใต้ runbook ดังกล่าวแล้ว แต่ยังห้ามหยุด source จนกว่าจะมี target HTTPS route ที่ทดสอบผ่าน,
+final backup/checksum, restore/reconciliation และ rollback path ครบถ้วน การอนุมัตินี้ไม่รวม
+การเริ่ม Takeaway Phase 6 และไม่อนุญาตให้ลดความปลอดภัยของ Tablet เป็น public HTTP
+
 Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
 ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `waiting_for_hardware` ลำดับงานที่ล็อกไว้คือ
 
-1. ยืนยันอุปกรณ์จริง, OS/browser/app, printer, network/UAT environment และผู้รับผิดชอบแต่ละ sign-off
-2. ทำ physical dine-in/takeaway, pairing/revoke/restart/offline/lost-ack/printer และ ERP reconciliation UAT
-3. หากพบ defect ให้แก้เฉพาะ approved failure scope แล้วรัน automated readiness/CI และ physical retest ซ้ำ
-4. เมื่อ release candidate คงที่ ให้ refresh dependency audit และรับ Security Owner decision
-5. ทำ operator incident drill, production/go-live checklist, backup/restore/monitoring/TLS/rollback review และ owner sign-off
-6. รับ Platform Owner Restaurant completion approval แล้วจึงขอคำสั่งแยกสำหรับ mark PR ready/merge, deploy หรือเริ่ม Phase 6
+1. ทำ read-only inventory ของ Restaurant source/target server, runtime database modes, backup topology, RPO/downtime และ owner โดยไม่บันทึก secret ลง Git
+2. ซ้อม backup transfer/restore บน isolated target, ตรวจ checksum, migration heads, uploads, smoke และ reconciliation โดย source ต้องไม่เปลี่ยน
+3. แก้และยืนยัน camera permission policy, เปิดเฉพาะ UAT hostname/Tunnel บน target แล้วตรวจ HTTPS/Tablet preflight
+4. ยืนยันอุปกรณ์จริง, OS/browser/app, printer, network/UAT environment และผู้รับผิดชอบแต่ละ sign-off
+5. ทำ physical dine-in/takeaway, pairing/revoke/restart/offline/lost-ack/printer และ ERP reconciliation UAT
+6. หากพบ defect ให้แก้เฉพาะ approved failure scope แล้วรัน automated readiness/CI และ affected retest ซ้ำ
+7. เมื่อ release candidate คงที่ ให้ refresh dependency audit และรับ Security Owner decision
+8. ทำ operator incident drill, production/go-live checklist, backup/restore/monitoring/TLS/rollback review และ owner sign-off
+9. รับ Platform Owner Restaurant completion approval แล้วจึงขอคำสั่งแยกสำหรับ server cutover/final domain, mark PR ready/merge, deploy หรือเริ่ม Phase 6
 
 ### Restaurant Completion Gate — ต้องผ่านก่อนเริ่มระบบอื่น
 

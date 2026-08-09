@@ -94,6 +94,11 @@ See [uat-smoke-test.md](./uat-smoke-test.md) for automated smoke tests, optional
 See [phase5-readiness-workbook.md](./phase5-readiness-workbook.md) for the
 non-device evidence package and the remaining owner-controlled Phase 5 gates.
 
+See [server-migration-plan.md](./server-migration-plan.md) for the Phase 5
+source/target inventory, isolated restore rehearsal, UAT-host preparation,
+cutover gates, and rollback rules that must be completed before moving the
+Restaurant service to a replacement server.
+
 See [device-uat-checklist.md](./device-uat-checklist.md) for the real counter,
 kitchen, pickup, camera, network, and printer test matrix to run when hardware arrives.
 
@@ -140,7 +145,7 @@ Pass a path to check another file:
 ./scripts/check-production-env.sh .env.production
 ```
 
-The script fails when required variables are missing, placeholder values remain, `ENVIRONMENT` is not `production`, `DEBUG=true`, `SECRET_KEY` is too short, `POSTGRES_PASSWORD` or `DEFAULT_ADMIN_PASSWORD` is weak, wildcard CORS is enabled, `ENABLE_API_DOCS` is not `true` or `false`, `PUBLIC_BASE_URL` or `SERVER_NAME` is empty, or certificate/private-key files are found inside the repository.
+The script fails when required variables are missing, placeholder values remain, `ENVIRONMENT` is not `production`, `DEBUG=true`, `SECRET_KEY` is too short, `POSTGRES_PASSWORD` or `DEFAULT_ADMIN_PASSWORD` is weak, wildcard CORS is enabled, `ENABLE_API_DOCS` is not `true` or `false`, production SaaS email is not configured for SMTP and HTTPS links, `PUBLIC_BASE_URL` or `SERVER_NAME` is empty, or certificate/private-key files are found inside the repository.
 
 Before go-live, review [security-hardening.md](./security-hardening.md), run `./scripts/run-backend-regression.sh`, resolve or formally accept the listed dependency findings, and confirm `ENABLE_API_DOCS=false` for internet-facing production. With production docs disabled, `/api/docs`, `/api/redoc`, and `/api/openapi.json` should return 404 unless explicitly enabled for staging or operator-only environments.
 
@@ -154,6 +159,10 @@ Common failures usually mean the copied example file was not fully customized:
 - `DEFAULT_ADMIN_PASSWORD is weak`: use a strong unique bootstrap admin password from a secret source. The backend requires this value when seeding the default admin user during startup.
 - `CORS_ORIGINS must not allow wildcard origins`: list exact production origins only.
 - `ENABLE_API_DOCS must be true or false`: use `false` for internet-facing production.
+- `SAAS_EMAIL_DELIVERY_MODE must be smtp`: configure the approved SMTP provider/relay. For an
+  isolated UAT only, an internal mail catcher may be used so messages cannot reach real customers.
+- `SAAS_PUBLIC_BASE_URL must use https://`: use the public origin embedded in verification and
+  password-reset links; it normally matches `PUBLIC_BASE_URL`.
 - `certificate or private key files were found`: move `.pem`, `.key`, and `.crt` files outside the repository and mount them from the host.
 
 ## Health and readiness

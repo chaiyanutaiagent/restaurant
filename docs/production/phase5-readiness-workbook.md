@@ -8,7 +8,7 @@ server_migration_plan: in_progress
 source_server_inventory: read_only_complete
 target_server_inventory: read_only_complete
 isolated_target_restore: core restore/migration/smoke passed; auth and device flows pending
-server_cutover: owner approved; blocked on safe HTTPS route preflight
+server_cutover: complete on tailnet HTTPS; source retained for rollback
 security_owner_decision: pending
 operator_owner_signoff: pending
 platform_owner_completion_signoff: pending

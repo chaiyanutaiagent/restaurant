@@ -1,19 +1,20 @@
 # Phase 5 Restaurant Server Migration Plan
 
-This plan prepares a new Restaurant UAT host before physical-device testing. It is supporting
-work under `P5-PHYSICAL-UAT-SIGNOFF-06`; it does not start Takeaway Phase 6 and does not
-authorize a live migration or production cutover.
+This plan began as preparation for a new Restaurant UAT host before physical-device testing. It is
+supporting work under `P5-PHYSICAL-UAT-SIGNOFF-06` and does not start Takeaway Phase 6. Its initial
+scope did not authorize cutover; the later explicit owner authorization is recorded below.
 
 ```text
 planning_started_at: 2026-08-09
-planning_status: cutover_approved; safe_route_preflight_blocked
+planning_status: cutover_complete; post_cutover_observation
 source_server_inventory: read_only_complete
 target_server_inventory: read_only_complete
-isolated_restore_rehearsal: core_restore_migration_smoke_passed; auth_and_device_flows_pending
-uat_hostname_activation: pending
+isolated_restore_rehearsal: core_restore_migration_smoke_passed; device_business_flows_pending
+active_target_route: https://mainserver.tail96834f.ts.net (tailnet only)
+uat_hostname_activation: pending; Cloudflare route not created
 physical_device_uat: pending
 production_cutover_approved: true; owner instruction recorded 2026-08-09
-production_activated: false
+production_activated: true; tailnet route activated 2026-08-09
 phase6_started: false
 ```
 
@@ -195,6 +196,32 @@ Unknown values remain blockers; do not guess them during cutover.
   `1b2c3d4e5f60`, all five Restaurant services running with zero restarts, and backend readiness
   `200`. No source migration, shutdown, route change, or production activation occurred.
 
+### Controlled production cutover evidence — 2026-08-09
+
+- Release candidate `4c1c2ba` was committed and pushed to the permitted
+  `chaiyanutaiagent/restaurant` repository. A clean production checkout on the target built
+  immutable backend, frontend, and Nginx images tagged `4c1c2ba`.
+- Target-only `.env.production` secrets were generated without copying source secrets. The active
+  origin binds only to loopback and Tailscale Serve terminates HTTPS at
+  `https://mainserver.tail96834f.ts.net` inside the tailnet.
+- The source application edge was frozen at `2026-08-09T09:55:48Z`. Nginx, backend, and frontend
+  stopped cleanly while source PostgreSQL and Redis remained healthy for rollback.
+- Final backup `restaurant-pos-prod-20260809T095550Z` transferred with matching PostgreSQL,
+  uploads, and Redis SHA-256 checksums. Redis had zero keys and uploads remained empty.
+- The final backup restored into the new target `restaurant-pos-prod` Compose project and Alembic
+  upgraded it from `1b2c3d4e5f60` to `p12route0014`. Company `1`, User `1`, Branch `2`, and all
+  recorded zero-count operational tables reconciled with the frozen source.
+- All target services started on images tagged `4c1c2ba`, with health checks passing, zero
+  restarts, and no recent backend/Nginx error lines. External legacy health, liveness, readiness,
+  frontend, existing-user login, and `/api/v1/auth/me` smoke passed over HTTPS.
+- External headers include HSTS, CSP, `X-Content-Type-Options`, and
+  `Permissions-Policy: ... camera=(self)`. The new route returned `200`; the old source HTTP route
+  stopped accepting traffic.
+- The first post-cutover target backup completed as
+  `restaurant-pos-prod-20260809T100024Z` under the protected target backup directory.
+- Source application containers remain stopped but retained. Source PostgreSQL/Redis, final backup,
+  and the isolated UAT project remain available during the rollback observation period.
+
 ## Stage 1 — Read-only source inventory
 
 Run these only on the intended Restaurant host and keep their output outside Git:
@@ -354,20 +381,19 @@ this plan does not assume one.
 
 ## Current blockers and next inputs
 
-- Source and target access owners still need accountable names even though SSH access is confirmed.
-- The target secret source, backup staging path, and monitoring destination are not assigned.
-- Maximum downtime, RPO, maintenance window, and rollback owner are not assigned.
-- Core restore, migration, non-auth smoke, and count reconciliation passed on the isolated target.
-  Authenticated and business-flow smoke still need an approved UAT credential and test fixtures.
-- Final production SMTP provider/relay settings are not assigned; the current Mailpit transport is
-  UAT-only and must not be used as production email delivery.
+- Source/target access, rollback, business UAT, security, and platform owners still need accountable
+  names. Maximum downtime, RPO, and the formal retention/observation window were not recorded
+  before cutover and remain governance gaps to close.
+- Core restore, migration, count reconciliation, HTTPS smoke, and existing-user authentication
+  passed. Real order/payment/stock/accounting and device flows still need approved UAT fixtures.
+- Final production SMTP provider/relay settings are not assigned. SaaS verification/reset email
+  currently terminates in the internal Mailpit catcher, so real account email delivery is blocked.
 - The Nginx camera policy was build/header verified but still needs actual Tablet permission UAT.
-- UAT and production Cloudflare Tunnel tokens/routes have not been created on the target.
-- The target Tailscale HTTPS route cannot be enabled by the SSH account until an administrator runs
-  `sudo tailscale set --operator=behappyaiagent` (or performs the Serve command directly). The
-  browser-controlled Cloudflare alternative is also unavailable until a signed-in browser session
-  is connected. Because neither safe HTTPS route is active, the source has not been stopped.
+- The permanent `foodchainservice.com` Cloudflare Tunnel/route is not active. Users must use the
+  tailnet-only target URL until the signed-in Cloudflare workflow is available and verified.
+- Physical Tablet, printer, offline/retry, and real business-flow UAT remain pending. The source
+  must stay retained until these checks and the rollback observation period pass.
 
-The next safe action is to create a dedicated UAT-only Cloudflare Tunnel/hostname, verify the
-external HTTPS route, and run authenticated plus physical-device UAT. Do not switch the final
-`foodchainservice.com` route or change the source runtime without a separate cutover approval.
+The next safe action is to observe the target, run physical-device/business-flow UAT, configure a
+real SMTP provider, and create/verify the approved `foodchainservice.com` Cloudflare route. Do not
+restart the old application or retire its database/backups while the target accepts writes.

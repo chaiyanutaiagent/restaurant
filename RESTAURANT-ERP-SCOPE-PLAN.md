@@ -672,6 +672,12 @@ Owner สั่งให้สลับไปใช้เครื่องใ�
 final backup/checksum, restore/reconciliation และ rollback path ครบถ้วน การอนุมัตินี้ไม่รวม
 การเริ่ม Takeaway Phase 6 และไม่อนุญาตให้ลดความปลอดภัยของ Tablet เป็น public HTTP
 
+Controlled cutover เสร็จเมื่อ 9 สิงหาคม 2026 โดยใช้ release `4c1c2ba` บน `mainserver`, restore
+final backup และ migrate ถึง `p12route0014`; health, frontend, existing-user login และ auth/me
+ผ่านทาง Tailnet HTTPS เครื่องเดิมหยุดเฉพาะ application containers แต่ยังเก็บ PostgreSQL, Redis
+และ final backup สำหรับ rollback โดเมน `foodchainservice.com`, real SMTP, physical Tablet/printer
+UAT และ owner completion sign-off ยังเป็นงานค้างของ Phase 5
+
 Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
 ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `waiting_for_hardware` ลำดับงานที่ล็อกไว้คือ
 

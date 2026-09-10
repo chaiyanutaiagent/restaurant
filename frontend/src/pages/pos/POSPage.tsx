@@ -521,7 +521,7 @@ export default function POSPage(): JSX.Element {
     () => cart.items.filter((item) => item.vat_type === "exempt").reduce((sum, item) => sum + item.subtotal, 0),
     [cart.items],
   );
-  const scanSupported = typeof window !== "undefined" && "BarcodeDetector" in window && navigator.mediaDevices?.getUserMedia;
+  const cameraSupported = typeof window !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
 
   useEffect(() => {
     const settings = branchSettingsQuery.data;
@@ -555,31 +555,9 @@ export default function POSPage(): JSX.Element {
   }, [paymentMethod, promptPayAmount]);
 
   useEffect(() => {
-    if (!scannerOpen) {
-      if (scannerFrameRef.current !== null) {
-        window.cancelAnimationFrame(scannerFrameRef.current);
-        scannerFrameRef.current = null;
-      }
-      if (scannerStreamRef.current) {
-        scannerStreamRef.current.getTracks().forEach((track) => track.stop());
-        scannerStreamRef.current = null;
-      }
-      return;
-    }
-
-    if (!scanSupported) {
-      setScannerError("อุปกรณ์นี้ยังไม่รองรับการสแกนด้วยกล้อง");
-      return;
-    }
-
     let cancelled = false;
-    const BarcodeDetectorClass = (window as Window & { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
-    if (!BarcodeDetectorClass) {
-      setScannerError("ไม่พบตัวสแกนบาร์โค้ดในเบราว์เซอร์");
-      return;
-    }
-
-    const detector = new BarcodeDetectorClass({ formats: [...BARCODE_FORMATS] });
+    let fallbackControls: { stop: () => void } | null = null;
+    let codeHandled = false;
 
     const stopScanner = () => {
       if (scannerFrameRef.current !== null) {
@@ -590,55 +568,135 @@ export default function POSPage(): JSX.Element {
         scannerStreamRef.current.getTracks().forEach((track) => track.stop());
         scannerStreamRef.current = null;
       }
+      fallbackControls?.stop();
+      fallbackControls = null;
     };
 
-    const scanLoop = async () => {
-      if (cancelled) {
+    if (!scannerOpen) {
+      stopScanner();
+      return;
+    }
+
+    setScannerError("");
+
+    if (!cameraSupported) {
+      setScannerError("อุปกรณ์นี้ยังไม่รองรับการสแกนด้วยกล้อง");
+      return;
+    }
+
+    const handleDetectedCode = (rawCode: string, stop: () => void) => {
+      const code = rawCode.trim();
+      if (!code || cancelled || codeHandled) {
         return;
       }
-      const video = scannerVideoRef.current;
-      if (video && video.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
-        try {
-          const results = await detector.detect(video);
-          const code = results.find((item) => item.rawValue?.trim())?.rawValue?.trim();
-          if (code) {
-            stopScanner();
-            setScannerOpen(false);
-            await handleProductCodeLookup(code);
-            return;
-          }
-        } catch {
-          setScannerError("กล้องเปิดได้ แต่ยังอ่านบาร์โค้ดไม่ได้");
-        }
-      }
-      scannerFrameRef.current = window.requestAnimationFrame(() => {
-        void scanLoop();
-      });
+      codeHandled = true;
+      stop();
+      setScannerOpen(false);
+      void handleProductCodeLookup(code);
     };
 
-    void navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
-      .then(async (stream) => {
+    const startNativeScanner = (BarcodeDetectorClass: BarcodeDetectorCtor) => {
+      let detector: BarcodeDetectorInstance;
+      try {
+        detector = new BarcodeDetectorClass({ formats: [...BARCODE_FORMATS] });
+      } catch {
+        void startFallbackScanner();
+        return;
+      }
+
+      const scanLoop = async () => {
         if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
           return;
         }
-        scannerStreamRef.current = stream;
-        setScannerError("");
-        if (scannerVideoRef.current) {
-          scannerVideoRef.current.srcObject = stream;
-          await scannerVideoRef.current.play();
+        const video = scannerVideoRef.current;
+        if (video && video.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
+          try {
+            const results = await detector.detect(video);
+            const code = results.find((item) => item.rawValue?.trim())?.rawValue;
+            if (code) {
+              handleDetectedCode(code, stopScanner);
+              return;
+            }
+          } catch {
+            setScannerError("กล้องเปิดได้ แต่ยังอ่านบาร์โค้ดไม่ได้");
+          }
         }
-        await scanLoop();
-      })
-      .catch(() => {
-        setScannerError("ไม่สามารถเปิดกล้องเพื่อสแกนบาร์โค้ดได้");
-      });
+        scannerFrameRef.current = window.requestAnimationFrame(() => {
+          void scanLoop();
+        });
+      };
+
+      void navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
+        .then(async (stream) => {
+          if (cancelled) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          scannerStreamRef.current = stream;
+          setScannerError("");
+          if (scannerVideoRef.current) {
+            scannerVideoRef.current.srcObject = stream;
+            await scannerVideoRef.current.play();
+          }
+          await scanLoop();
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setScannerError("ไม่สามารถเปิดกล้องเพื่อสแกนบาร์โค้ดได้ กรุณาอนุญาตสิทธิ์กล้อง");
+          }
+        });
+    };
+
+    async function startFallbackScanner() {
+      try {
+        const { BarcodeFormat, BrowserMultiFormatReader } = await import("@zxing/browser");
+        if (cancelled) {
+          return;
+        }
+        const video = scannerVideoRef.current;
+        if (!video) {
+          return;
+        }
+
+        const reader = new BrowserMultiFormatReader();
+        reader.possibleFormats = [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+          BarcodeFormat.QR_CODE,
+        ];
+        fallbackControls = await reader.decodeFromConstraints(
+          { audio: false, video: { facingMode: { ideal: "environment" } } },
+          video,
+          (result, _error, controls) => {
+            const code = result?.getText();
+            if (code) {
+              handleDetectedCode(code, () => controls.stop());
+            }
+          },
+        );
+      } catch {
+        if (!cancelled) {
+          setScannerError("ไม่สามารถเปิดกล้องเพื่อสแกนบาร์โค้ดได้ กรุณาอนุญาตสิทธิ์กล้อง");
+        }
+      }
+    }
+
+    const BarcodeDetectorClass = (window as Window & { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
+    if (BarcodeDetectorClass) {
+      startNativeScanner(BarcodeDetectorClass);
+    } else {
+      void startFallbackScanner();
+    }
 
     return () => {
       cancelled = true;
       stopScanner();
     };
-  }, [scanSupported, scannerOpen]);
+  }, [cameraSupported, scannerOpen]);
 
   function updateCartItem(productId: string, updater: (item: CartItem) => CartItem | null): void {
     setCartItems((current) =>
@@ -2743,7 +2801,7 @@ export default function POSPage(): JSX.Element {
             </div>
             <p className="text-sm text-slate-500">วางบาร์โค้ดหรือ QR ของสินค้าไว้กลางกล้อง ระบบจะเพิ่มสินค้าเข้าตะกร้าอัตโนมัติ</p>
             {scannerError ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{scannerError}</p> : null}
-            {!scanSupported ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">เบราว์เซอร์นี้ยังไม่รองรับตัวสแกนในตัว ให้ใช้การยิงบาร์โค้ดผ่านช่องค้นหาด้านบนแทน</p> : null}
+            {!cameraSupported ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">เบราว์เซอร์นี้ไม่อนุญาตให้เว็บไซต์เปิดกล้อง ให้ใช้การยิงบาร์โค้ดผ่านช่องค้นหาด้านบนแทน</p> : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setScannerOpen(false)}>ปิด</Button>

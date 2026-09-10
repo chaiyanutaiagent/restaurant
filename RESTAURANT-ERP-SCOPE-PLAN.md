@@ -688,6 +688,11 @@ UAT Auto-login เฉพาะ `uat-pos.foodchainservice.com`; ระบบบ�
 Company และ tenant Superuser ที่ระบุชัดเจน ขณะที่ Production, Platform Owner และ device pairing
 ไม่ถูก bypass ต้องปิดสวิตช์นี้ก่อน formal login/permission/pairing/revoke/security UAT และ sign-off
 
+Physical iPad preflight รอบแรกเมื่อ 10 กันยายน 2026 พบว่า Chrome และ Safari ไม่มี native
+`BarcodeDetector` ที่ POS เดิมบังคับใช้ จึงเพิ่ม ZXing fallback สำหรับ QR/EAN/UPC/Code 39/Code 128
+และ deploy เฉพาะ UAT แล้ว Browser smoke เปิดหน้าต่างสแกนได้โดยไม่ขึ้น unsupported warning;
+การอนุญาตกล้องและอ่านโค้ดจาก iPad จริงยัง pending owner retest และยังไม่ถือว่า Camera UAT ผ่าน
+
 Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
 ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `waiting_for_hardware` ลำดับงานที่ล็อกไว้คือ
 

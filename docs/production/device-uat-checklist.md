@@ -4,6 +4,12 @@ Use this checklist only when the real hardware is available. Browser emulation i
 
 Current status: `physical_device_uat: pending`
 
+UAT observation on 10 September 2026: the first iPad camera attempt failed in both Chrome and
+Safari because the POS scanner required the native `BarcodeDetector` API. A cross-browser ZXing
+fallback was added and deployed only to `uat-pos.foodchainservice.com`; the scanner dialog now
+opens without the unsupported-browser warning in browser smoke. Actual iPad camera permission and
+barcode/QR recognition remain pending until the owner repeats the physical test.
+
 ## Test record
 
 ```text

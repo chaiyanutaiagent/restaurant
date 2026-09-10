@@ -681,7 +681,8 @@ UAT และ owner completion sign-off ยังเป็นงานค้า�
 UAT hostname เปิดเมื่อ 10 กันยายน 2026 โดยเชื่อม Tunnel `restaurant-uat` บน `mainserver` และ route
 `https://uat-pos.foodchainservice.com` ไปยัง isolated UAT stack; Tunnel healthy, หน้าเว็บและ
 `/health/live`/`/health/ready` ผ่าน HTTPS, browser ไม่มี console error และ response policy เป็น
-`camera=(self)` แล้ว ส่วนการกดอนุญาตกล้องและ flow อื่นบน iPad/Printer จริงยัง pending
+`camera=(self)` แล้ว ต่อมา physical iPad เปิดกล้องและอ่าน test QR ผ่านเมื่อ 10 กันยายน 2026
+ส่วน product/table business flow และ flow อื่นบน iPad/Printer จริงยัง pending
 
 Owner อนุญาตให้ปิดขั้นตอน tenant login ชั่วคราวระหว่างทดสอบคนเดียวเมื่อ 10 กันยายน 2026 จึงเปิด
 UAT Auto-login เฉพาะ `uat-pos.foodchainservice.com`; ระบบบังคับให้เป็น development HTTPS UAT,
@@ -691,10 +692,12 @@ Company และ tenant Superuser ที่ระบุชัดเจน ข�
 Physical iPad preflight รอบแรกเมื่อ 10 กันยายน 2026 พบว่า Chrome และ Safari ไม่มี native
 `BarcodeDetector` ที่ POS เดิมบังคับใช้ จึงเพิ่ม ZXing fallback สำหรับ QR/EAN/UPC/Code 39/Code 128
 และ deploy เฉพาะ UAT แล้ว Browser smoke เปิดหน้าต่างสแกนได้โดยไม่ขึ้น unsupported warning;
-การอนุญาตกล้องและอ่านโค้ดจาก iPad จริงยัง pending owner retest และยังไม่ถือว่า Camera UAT ผ่าน
+owner retest บน physical iPad เปิดกล้องและ decode `FCS-UAT-SCANNER-20260910` ได้สำเร็จ จึงผ่าน
+camera/scanner preflight ส่วน product barcode และ table QR ใน business flow ยังต้องทดสอบต่อ
 
 Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
-ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `waiting_for_hardware` ลำดับงานที่ล็อกไว้คือ
+ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `in_progress` หลัง iPad scanner preflight ผ่าน
+ลำดับงานที่ล็อกไว้คือ
 
 1. ทำ read-only inventory ของ Restaurant source/target server, runtime database modes, backup topology, RPO/downtime และ owner โดยไม่บันทึก secret ลง Git
 2. ซ้อม backup transfer/restore บน isolated target, ตรวจ checksum, migration heads, uploads, smoke และ reconciliation โดย source ต้องไม่เปลี่ยน

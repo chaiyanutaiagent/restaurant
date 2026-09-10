@@ -4,6 +4,7 @@ This workbook separates evidence that can be prepared without production access 
 
 ```text
 physical_device_uat: pending
+ipad_camera_scanner_preflight: passed 2026-09-10; product/table business-flow scan pending
 server_migration_plan: post_cutover_observation; UAT hostname active
 uat_tenant_auto_login: temporarily enabled 2026-09-10; disable before security UAT/sign-off
 source_server_inventory: read_only_complete
@@ -108,8 +109,8 @@ or source-server shutdown still requires a separate explicit decision.
 | --- | --- | --- | --- | --- |
 | 1 | Before target-host changes | Inventory the current Restaurant source host, target host, database runtime modes, backups, RPO/downtime, and accountable owners without recording secrets | Reviewed non-secret inventory and identified authoritative databases | `in_progress` |
 | 2 | Inventory reviewed | Rehearse backup transfer and restore only in an isolated target Compose project; verify checksums, migration heads, uploads, smoke, and reconciliation | Target restore evidence with unchanged source fingerprint | Pending |
-| 3 | Target rehearsal passes | Correct and verify the camera permission policy, create the UAT-only Tunnel, and expose only the approved UAT hostname | Healthy UAT route, expected response headers, external health/smoke, camera preflight | Route/external smoke passed 2026-09-10; native iPad scanner defect fixed with UAT cross-browser fallback; physical camera/scan retest pending |
-| 4 | Target hardware arrives | Run [device-uat-checklist.md](./device-uat-checklist.md) on counter, kitchen, pickup display, camera, printer, and actual network | Dine-in/takeaway, pairing/revocation, restart, offline/lost-ack, printer, and reconciliation evidence | `waiting_for_hardware` |
+| 3 | Target rehearsal passes | Correct and verify the camera permission policy, create the UAT-only Tunnel, and expose only the approved UAT hostname | Healthy UAT route, expected response headers, external health/smoke, camera preflight | Passed 2026-09-10, including physical iPad camera permission and test-QR decode after cross-browser fallback fix |
+| 4 | Target hardware arrives | Run [device-uat-checklist.md](./device-uat-checklist.md) on counter, kitchen, pickup display, camera, printer, and actual network | Dine-in/takeaway, pairing/revocation, restart, offline/lost-ack, printer, and reconciliation evidence | `in_progress`: iPad scanner preflight passed; full business/device matrix pending |
 | 5 | Any migration/UAT item fails | Fix only the approved failure scope, re-run regression/readiness gates, and repeat affected restore/device cases | Linked defect, immutable fix commit, green CI, and affected retest | Conditional |
 | 6 | Device release candidate is stable | Re-run dependency audits against the exact commit and complete [security-risk-acceptance.md](./security-risk-acceptance.md) | Security-owner accept/mitigate/block decision | Pending |
 | 7 | UAT and security decision pass | Run [operator-training-drill.md](./operator-training-drill.md), finish production/go-live checklist, and confirm backup/restore, monitoring, TLS, and rollback ownership | Operator/business sign-off and completed production checklist | Pending |

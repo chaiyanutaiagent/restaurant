@@ -7,8 +7,10 @@ Current status: `physical_device_uat: pending`
 UAT observation on 10 September 2026: the first iPad camera attempt failed in both Chrome and
 Safari because the POS scanner required the native `BarcodeDetector` API. A cross-browser ZXing
 fallback was added and deployed only to `uat-pos.foodchainservice.com`; the scanner dialog now
-opens without the unsupported-browser warning in browser smoke. Actual iPad camera permission and
-barcode/QR recognition remain pending until the owner repeats the physical test.
+opens without the unsupported-browser warning in browser smoke. The owner then repeated the test
+on the physical iPad: camera permission/open and decoding the QR payload
+`FCS-UAT-SCANNER-20260910` passed, with the expected product-not-found response because the UAT
+catalog has no matching product. Product barcode and table-QR business-flow tests remain pending.
 
 ## Test record
 

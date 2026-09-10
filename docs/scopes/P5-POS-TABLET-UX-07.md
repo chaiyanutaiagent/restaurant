@@ -2,7 +2,7 @@
 
 ## สถานะ
 
-`implementation_validated_uat_deploy_pending` — ปรับ Restaurant POS สำหรับ Tablet เสร็จใน source และผ่าน frontend type-check/build แล้ว การ deploy และ browser smoke บน `uat-pos.foodchainservice.com` รอ `mainserver` กลับมาออนไลน์ ส่วน physical workflow และเครื่องพิมพ์ยังต้องทดสอบกับอุปกรณ์จริง
+`uat_deployed_browser_smoke_passed_physical_pending` — ปรับ Restaurant POS สำหรับ Tablet เสร็จใน source, ผ่าน frontend type-check/build, deploy release `4100abb` ไปยัง `uat-pos.foodchainservice.com` และผ่าน browser smoke ที่ 1024×768 แล้ว ส่วน physical workflow และเครื่องพิมพ์ยังต้องทดสอบกับอุปกรณ์จริง
 
 ## ปัญหาที่แก้
 
@@ -38,7 +38,7 @@
 - [x] refresh frontend dependency audit แล้ว; ผลใหม่ถูกบันทึกและ Production sign-off ยังคง pending
 - [x] browser smoke แยก expected Cloudflare Analytics CSP block ออกจาก application error โดยไม่ผ่อน CSP
 - [x] `sw.js`, app shell และ manifest ส่ง no-cache headers เพื่อไม่ให้ Tablet ค้าง release เก่า
-- [ ] browser smoke บน UAT hostname ผ่าน
+- [x] browser smoke บน UAT hostname ผ่าน
 - [ ] physical iPad flow และ printer checks ที่เกี่ยวข้องผ่าน
 
 ## Rollback
@@ -55,7 +55,10 @@ target_database_change: none
 source_validation: frontend type-check/build passed
 frontend_production_audit: 4_rows_3_high_1_low_security_review_pending
 frontend_full_audit: 11_rows_7_high_3_moderate_1_low_security_review_pending
-uat_deployment: pending_mainserver_online
+uat_deployment: release_4100abb_deployed
+uat_browser_smoke_1024x768: passed
+cloudflare_sw_cache_purge: exact_url_passed_2026-09-11
+pwa_release_asset_after_reload: /assets/index-CPB_Jgd2.js
 physical_iPad_business_flow: pending
 printer_uat: pending
 production_activated: false

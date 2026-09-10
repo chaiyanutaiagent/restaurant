@@ -700,7 +700,10 @@ Progress record: `P5-POS-TABLET-UX-07` ปรับ Restaurant POS สำหร�
 route/permission เดิม เพิ่มสถานะเครื่อง/กล้อง/ซิงก์/การพิมพ์และ automated assertion ที่ 1024×768
 โดยไม่แก้ database/backend และไม่แตะ Production ปุ่มเดลิเวอรีแสดงเป็น `รอเปิดใช้` เพราะยังไม่มี
 Restaurant delivery order domain ใน Phase 5; source ผ่าน frontend type-check/build แล้ว ส่วน deploy และ
-browser smoke บน UAT รอ `mainserver` online และ physical iPad business flow/printer UAT ยัง pending
+release `4100abb` deploy เฉพาะ UAT และผ่าน browser smoke ที่ 1024×768 แล้ว เมื่อ 11 กันยายน 2026
+Cloudflare cache ถูกล้างเฉพาะ `https://uat-pos.foodchainservice.com/sw.js`; URL ตอบกลับแบบ `BYPASS`
+พร้อม `no-store/no-cache` และ browser reload เปลี่ยนมาใช้ `/assets/index-CPB_Jgd2.js` สำเร็จ
+โดยไม่ได้ใช้ Purge Everything ส่วน physical iPad business flow/printer UAT ยัง pending
 
 Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
 ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `in_progress` หลัง iPad scanner preflight ผ่าน

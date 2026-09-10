@@ -29,7 +29,12 @@ mkdirSync(artifactDir, { recursive: true });
 function watchPage(page: Page, failures: string[]): void {
   page.on("pageerror", (error) => failures.push(`pageerror ${page.url()}: ${error.message}`));
   page.on("console", (message) => {
-    if (message.type() === "error") failures.push(`console ${page.url()}: ${message.text()}`);
+    const text = message.text();
+    const expectedCloudflareCspBlock = text.includes("static.cloudflareinsights.com/beacon.min.js")
+      && text.includes("Content Security Policy");
+    if (message.type() === "error" && !expectedCloudflareCspBlock) {
+      failures.push(`console ${page.url()}: ${text}`);
+    }
   });
   page.on("response", (response) => {
     if (response.status() >= 500) failures.push(`HTTP ${response.status()} ${response.url()}`);

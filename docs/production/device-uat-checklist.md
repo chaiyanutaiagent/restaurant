@@ -19,6 +19,12 @@ actions, and a truthful device/camera/sync/print status panel. Frontend type-che
 UAT-host browser smoke is pending because `mainserver` is offline; this evidence does not replace
 the physical iPad, product/table QR, printer, offline or owner-signoff checks below.
 
+Deployment observation on 10 September 2026: a persistent browser session received an older PWA
+shell because Cloudflare cached `sw.js` with a four-hour browser TTL. The frontend now sends
+`no-store/no-cache` for the service worker and app shell and uses long-lived caching only for
+content-hashed assets. Purge or expiry of the previously cached object and a physical iPad reload
+must be confirmed before recording the release in the test record.
+
 ## Test record
 
 ```text

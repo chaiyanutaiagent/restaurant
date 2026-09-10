@@ -16,6 +16,7 @@
 - เพิ่มหน้าต่างสถานะอุปกรณ์ กล้อง เครือข่าย รอบซิงก์ และการพิมพ์ พร้อมตัวเลือกพิมพ์ใบเสร็จอัตโนมัติเฉพาะเครื่อง ซึ่งปิดเป็นค่าเริ่มต้น
 - เพิ่มสรุปสถานะในหน้าอุปกรณ์ โดยระบุชัดว่า activity ล่าสุดไม่ใช่การตรวจไฟหรือสายเครื่องพิมพ์
 - เพิ่ม Playwright assertion สำหรับ layout 1024×768, route สำคัญ และ horizontal overflow
+- บังคับ revalidate PWA service worker/app shell/manifest ทุก deploy และ cache ระยะยาวเฉพาะ hashed assets
 
 ## Out of scope
 
@@ -35,6 +36,8 @@
 - [x] auto-print เป็น per-device preference และปิดโดยค่าเริ่มต้น
 - [x] frontend type-check/build ผ่านและไม่มี schema/backend change
 - [x] refresh frontend dependency audit แล้ว; ผลใหม่ถูกบันทึกและ Production sign-off ยังคง pending
+- [x] browser smoke แยก expected Cloudflare Analytics CSP block ออกจาก application error โดยไม่ผ่อน CSP
+- [x] `sw.js`, app shell และ manifest ส่ง no-cache headers เพื่อไม่ให้ Tablet ค้าง release เก่า
 - [ ] browser smoke บน UAT hostname ผ่าน
 - [ ] physical iPad flow และ printer checks ที่เกี่ยวข้องผ่าน
 

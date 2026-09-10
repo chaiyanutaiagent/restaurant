@@ -678,6 +678,16 @@ final backup และ migrate ถึง `p12route0014`; health, frontend, exist
 และ final backup สำหรับ rollback โดเมน `foodchainservice.com`, real SMTP, physical Tablet/printer
 UAT และ owner completion sign-off ยังเป็นงานค้างของ Phase 5
 
+UAT hostname เปิดเมื่อ 10 กันยายน 2026 โดยเชื่อม Tunnel `restaurant-uat` บน `mainserver` และ route
+`https://uat-pos.foodchainservice.com` ไปยัง isolated UAT stack; Tunnel healthy, หน้าเว็บและ
+`/health/live`/`/health/ready` ผ่าน HTTPS, browser ไม่มี console error และ response policy เป็น
+`camera=(self)` แล้ว ส่วนการกดอนุญาตกล้องและ flow อื่นบน iPad/Printer จริงยัง pending
+
+Owner อนุญาตให้ปิดขั้นตอน tenant login ชั่วคราวระหว่างทดสอบคนเดียวเมื่อ 10 กันยายน 2026 จึงเปิด
+UAT Auto-login เฉพาะ `uat-pos.foodchainservice.com`; ระบบบังคับให้เป็น development HTTPS UAT,
+Company และ tenant Superuser ที่ระบุชัดเจน ขณะที่ Production, Platform Owner และ device pairing
+ไม่ถูก bypass ต้องปิดสวิตช์นี้ก่อน formal login/permission/pairing/revoke/security UAT และ sign-off
+
 Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
 ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `waiting_for_hardware` ลำดับงานที่ล็อกไว้คือ
 

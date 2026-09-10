@@ -4,7 +4,8 @@ This workbook separates evidence that can be prepared without production access 
 
 ```text
 physical_device_uat: pending
-server_migration_plan: in_progress
+server_migration_plan: post_cutover_observation; UAT hostname active
+uat_tenant_auto_login: temporarily enabled 2026-09-10; disable before security UAT/sign-off
 source_server_inventory: read_only_complete
 target_server_inventory: read_only_complete
 isolated_target_restore: core restore/migration/smoke passed; auth and device flows pending
@@ -47,6 +48,16 @@ P5_READINESS_ADMIN_PASSWORD='use-a-unique-test-secret' \
 ```
 
 The script is destructive only to Compose projects whose name begins with `restaurant-p5-uat-readiness`. It must never be pointed at production volumes.
+
+## Temporary single-tester UAT access
+
+The public UAT stack may temporarily set `UAT_AUTH_BYPASS_ENABLED=true` together with an explicit
+UAT Company ID and active tenant-superuser username. The backend rejects this mode unless
+`ENVIRONMENT=development` and `SAAS_PUBLIC_BASE_URL` is HTTPS on a hostname beginning with `uat-`.
+The browser then obtains a normal, audited tenant session automatically when it reaches a tenant
+login page. Production and Platform Owner authentication are not bypassed, and device pairing
+remains enabled. Set `UAT_AUTH_BYPASS_ENABLED=false` and recreate the UAT backend before formal
+login, permission, pairing/revocation, security UAT, or owner sign-off.
 
 ## Production values to be supplied by owners
 
@@ -97,7 +108,7 @@ or source-server shutdown still requires a separate explicit decision.
 | --- | --- | --- | --- | --- |
 | 1 | Before target-host changes | Inventory the current Restaurant source host, target host, database runtime modes, backups, RPO/downtime, and accountable owners without recording secrets | Reviewed non-secret inventory and identified authoritative databases | `in_progress` |
 | 2 | Inventory reviewed | Rehearse backup transfer and restore only in an isolated target Compose project; verify checksums, migration heads, uploads, smoke, and reconciliation | Target restore evidence with unchanged source fingerprint | Pending |
-| 3 | Target rehearsal passes | Correct and verify the camera permission policy, create the UAT-only Tunnel, and expose only the approved UAT hostname | Healthy UAT route, expected response headers, external health/smoke, camera preflight | Pending |
+| 3 | Target rehearsal passes | Correct and verify the camera permission policy, create the UAT-only Tunnel, and expose only the approved UAT hostname | Healthy UAT route, expected response headers, external health/smoke, camera preflight | Route and external smoke passed 2026-09-10; physical iPad camera permission pending |
 | 4 | Target hardware arrives | Run [device-uat-checklist.md](./device-uat-checklist.md) on counter, kitchen, pickup display, camera, printer, and actual network | Dine-in/takeaway, pairing/revocation, restart, offline/lost-ack, printer, and reconciliation evidence | `waiting_for_hardware` |
 | 5 | Any migration/UAT item fails | Fix only the approved failure scope, re-run regression/readiness gates, and repeat affected restore/device cases | Linked defect, immutable fix commit, green CI, and affected retest | Conditional |
 | 6 | Device release candidate is stable | Re-run dependency audits against the exact commit and complete [security-risk-acceptance.md](./security-risk-acceptance.md) | Security-owner accept/mitigate/block decision | Pending |

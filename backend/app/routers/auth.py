@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from typing import Any
-import uuid
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
@@ -86,6 +87,56 @@ async def login(
         user=user,
         branch_id=payload.branch_id,
         station_key=payload.station_key,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    return ok((await _token_response(access_token, refresh_token, user, db)).model_dump())
+
+
+@router.post("/uat/auto-login", include_in_schema=False)
+async def uat_auto_login(
+    request: Request,
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    configured_host = urlsplit(settings.saas_public_base_url).hostname
+    request_host = request.headers.get("host") or ""
+    request_host = request_host.split(",", 1)[0].strip().split(":", 1)[0].lower()
+    if (
+        not settings.uat_auth_bypass_enabled
+        or settings.environment != "development"
+        or configured_host is None
+        or request_host != configured_host.lower()
+        or settings.uat_auth_bypass_company_id is None
+        or settings.uat_auth_bypass_username is None
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    user = await db.scalar(
+        select(User)
+        .join(Company, Company.id == User.company_id)
+        .where(
+            User.company_id == settings.uat_auth_bypass_company_id,
+            User.username == settings.uat_auth_bypass_username,
+            User.is_superuser.is_(True),
+            User.is_active.is_(True),
+            User.deleted_at.is_(None),
+            Company.is_active.is_(True),
+        )
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Configured UAT test user is unavailable",
+        )
+
+    auth_service = AuthService(
+        db,
+        emit_reference_events=settings.identity_database == "platform_core",
+    )
+    access_token, refresh_token = await auth_service.create_session(
+        user=user,
+        branch_id=None,
+        station_key=None,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )

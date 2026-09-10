@@ -11,12 +11,20 @@ source_server_inventory: read_only_complete
 target_server_inventory: read_only_complete
 isolated_restore_rehearsal: core_restore_migration_smoke_passed; device_business_flows_pending
 active_target_route: https://mainserver.tail96834f.ts.net (tailnet only)
-uat_hostname_activation: pending; Cloudflare route not created
+uat_hostname_activation: complete; https://uat-pos.foodchainservice.com activated 2026-09-10
 physical_device_uat: pending
 production_cutover_approved: true; owner instruction recorded 2026-08-09
 production_activated: true; tailnet route activated 2026-08-09
 phase6_started: false
 ```
+
+Post-cutover UAT hostname record: on 10 September 2026 the existing `restaurant-uat`
+Tunnel was connected to the isolated `restaurant-pos-uat-drill` stack on `mainserver`.
+Cloudflare created the `uat-pos.foodchainservice.com` CNAME and published-application route to
+`http://nginx:80`. The Tunnel reported one healthy replica with four registered connections;
+external HTTPS `/`, `/health/live`, and `/health/ready` returned `200`, the browser reported no
+console errors, and the response policy contained `camera=(self)`. Actual iPad camera permission
+and the remaining physical-device flows are still pending and are not implied by this record.
 
 ## Objective
 

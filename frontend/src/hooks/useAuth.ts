@@ -58,6 +58,32 @@ export function useLogin(defaultDestination = "/admin"): {
   };
 }
 
+export function useUatAutoLogin(defaultDestination = "/admin"): {
+  startAutoLogin: () => void;
+  isLoading: boolean;
+} {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const setSession = useAuthStore((state) => state.setSession);
+  const next = new URLSearchParams(location.search).get("next");
+  const redirectTo = next?.startsWith("/") && !next.startsWith("//") ? next : defaultDestination;
+
+  const mutation = useMutation({
+    mutationFn: async () => (await authApi.uatAutoLogin()).data.data,
+    onSuccess: (tokenResponse) => {
+      const companyId = tokenResponse.user.company_id;
+      setSession(tokenResponse, companyId);
+      window.localStorage.setItem("last_company_id", companyId);
+      navigate(redirectTo, { replace: true });
+    }
+  });
+
+  return {
+    startAutoLogin: mutation.mutate,
+    isLoading: mutation.isPending
+  };
+}
+
 export function useLogout(destination = "/login"): () => void {
   const navigate = useNavigate();
   const clearSession = useAuthStore((state) => state.clearSession);

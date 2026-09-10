@@ -143,6 +143,8 @@ export const authApi = Object.assign(api, {
     api.post<ApiResponse<TokenResponse>>("/auth/login", data, {
       headers: { "X-Company-ID": companyId }
     }),
+  uatAutoLogin: () =>
+    api.post<ApiResponse<TokenResponse>>("/auth/uat/auto-login"),
   refresh: (refreshToken: string) =>
     api.post<ApiResponse<TokenResponse>>("/auth/refresh", { refresh_token: refreshToken }),
   logout: (refreshToken: string) =>

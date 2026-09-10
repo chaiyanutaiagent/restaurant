@@ -3,6 +3,7 @@ import { Capacitor } from "@capacitor/core";
 import { Eye, EyeOff, Loader2, LockKeyhole, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useEffect } from "react";
+import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
@@ -11,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useLogin } from "@/hooks/useAuth";
+import { useLogin, useUatAutoLogin } from "@/hooks/useAuth";
 import { membershipApi } from "@/lib/api";
 
 const loginSchema = z.object({
@@ -31,7 +32,10 @@ export default function LoginPage(): JSX.Element {
     enabled: Boolean(canonicalSlug),
     retry: false,
   });
-  const { login, isLoading, error } = useLogin(canonicalSlug ? `/${canonicalSlug}/admin` : "/admin");
+  const defaultDestination = canonicalSlug ? `/${canonicalSlug}/admin` : "/admin";
+  const { login, isLoading, error } = useLogin(defaultDestination);
+  const { startAutoLogin, isLoading: isAutoLoginLoading } = useUatAutoLogin(defaultDestination);
+  const autoLoginStarted = useRef(false);
   const [showPassword, setShowPassword] = useState(false);
   const isNativeApp = Capacitor.isNativePlatform();
   const form = useForm<LoginFormValues>({
@@ -49,6 +53,12 @@ export default function LoginPage(): JSX.Element {
     }
   }, [business.data, form]);
 
+  useEffect(() => {
+    if (autoLoginStarted.current) return;
+    autoLoginStarted.current = true;
+    startAutoLogin();
+  }, [startAutoLogin]);
+
   async function onSubmit(values: LoginFormValues): Promise<void> {
     await login(values);
   }
@@ -64,6 +74,12 @@ export default function LoginPage(): JSX.Element {
           <CardDescription>{isNativeApp ? "RESTAURANT POS · เข้าสู่ระบบพนักงาน" : canonicalSlug ? `พื้นที่ธุรกิจ /${canonicalSlug}` : "Restaurant POS System"}</CardDescription>
         </CardHeader>
         <CardContent>
+          {isAutoLoginLoading ? (
+            <div className="mb-5 flex items-center justify-center gap-2 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              กำลังเปิดโหมดทดสอบ UAT...
+            </div>
+          ) : null}
           <form className="space-y-5" onSubmit={form.handleSubmit(onSubmit)}>
             <div className={isNativeApp || canonicalSlug ? "hidden" : "space-y-2"}>
               <Label htmlFor="company_id">Company ID</Label>
@@ -116,7 +132,7 @@ export default function LoginPage(): JSX.Element {
               </div>
             ) : null}
 
-            <Button className="w-full" disabled={isLoading || Boolean(canonicalSlug && !business.data)} type="submit">
+            <Button className="w-full" disabled={isLoading || isAutoLoginLoading || Boolean(canonicalSlug && !business.data)} type="submit">
               {isLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />

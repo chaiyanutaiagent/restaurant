@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import uuid
 from functools import cached_property
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import computed_field
 from pydantic import Field, model_validator
@@ -44,6 +46,29 @@ def validate_saas_billing_config(*, provider: str, live_charging_enabled: bool) 
         raise ValueError(
             "Live SaaS charging is unavailable until a provider adapter Scope is approved"
         )
+
+
+def validate_uat_auth_bypass_config(
+    *,
+    environment: str,
+    enabled: bool,
+    public_base_url: str,
+    company_id: uuid.UUID | None,
+    username: str | None,
+) -> None:
+    if not enabled:
+        return
+    if environment != "development":
+        raise ValueError("UAT auth bypass is allowed only in the development environment")
+    parsed_url = urlsplit(public_base_url)
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.hostname is None
+        or not parsed_url.hostname.startswith("uat-")
+    ):
+        raise ValueError("UAT auth bypass requires an HTTPS hostname beginning with uat-")
+    if company_id is None or not username or not username.strip():
+        raise ValueError("UAT auth bypass requires an explicit Company ID and username")
 
 
 class Settings(BaseSettings):
@@ -106,6 +131,9 @@ class Settings(BaseSettings):
     saas_billing_live_charging_enabled: bool = False
     saas_privacy_internal_target_days: int = Field(default=30, ge=1, le=90)
     saas_support_access_max_minutes: int = Field(default=60, ge=5, le=60)
+    uat_auth_bypass_enabled: bool = False
+    uat_auth_bypass_company_id: uuid.UUID | None = None
+    uat_auth_bypass_username: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env", "../../.env"),
@@ -131,6 +159,15 @@ class Settings(BaseSettings):
         )
         self.saas_public_base_url = self.saas_public_base_url.rstrip("/")
         self.saas_billing_provider = self.saas_billing_provider.strip().lower()
+        validate_uat_auth_bypass_config(
+            environment=self.environment,
+            enabled=self.uat_auth_bypass_enabled,
+            public_base_url=self.saas_public_base_url,
+            company_id=self.uat_auth_bypass_company_id,
+            username=self.uat_auth_bypass_username,
+        )
+        if self.uat_auth_bypass_username is not None:
+            self.uat_auth_bypass_username = self.uat_auth_bypass_username.strip() or None
         return self
 
     @computed_field  # type: ignore[prop-decorator]

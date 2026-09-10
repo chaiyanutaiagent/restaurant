@@ -132,11 +132,19 @@ test("mobile QR to tablet kitchen, checkout, and ERP report", async ({ browser, 
     const categoryPanel = await staff.getByTestId("pos-category-panel").boundingBox();
     const productPanel = await staff.getByTestId("pos-product-panel").boundingBox();
     const cartPanel = await staff.getByTestId("pos-cart-panel").boundingBox();
+    const cartHeader = await staff.getByTestId("pos-cart-header").boundingBox();
+    const cartBody = await staff.getByTestId("pos-cart-body").boundingBox();
+    const checkoutPanel = await staff.getByTestId("pos-checkout-panel").boundingBox();
     expect(categoryPanel).not.toBeNull();
     expect(productPanel).not.toBeNull();
     expect(cartPanel).not.toBeNull();
+    expect(cartHeader).not.toBeNull();
+    expect(cartBody).not.toBeNull();
+    expect(checkoutPanel).not.toBeNull();
     expect((categoryPanel?.x ?? 0) < (productPanel?.x ?? 0)).toBeTruthy();
     expect((productPanel?.x ?? 0) < (cartPanel?.x ?? 0)).toBeTruthy();
+    expect((cartHeader?.y ?? 0) + (cartHeader?.height ?? 0)).toBeLessThanOrEqual((cartBody?.y ?? 0) + 1);
+    expect((cartBody?.y ?? 0) + (cartBody?.height ?? 0)).toBeLessThanOrEqual((checkoutPanel?.y ?? 0) + 1);
     await assertNoHorizontalOverflow(staff);
     await staff.screenshot({ path: `${artifactDir}/07-tablet-pos-workspace.png`, fullPage: true });
 

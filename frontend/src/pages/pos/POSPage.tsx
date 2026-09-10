@@ -1613,7 +1613,7 @@ export default function POSPage(): JSX.Element {
 
         <div data-testid="pos-workspace-bar" className="border-b border-slate-200 bg-slate-950 px-3 py-2 text-white">
           <div className="flex items-center gap-2 overflow-x-auto">
-            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">ช่องทางขาย</span>
+            <span className="hidden shrink-0 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 xl:block">ช่องทางขาย</span>
             <button type="button" aria-current="page" className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-white">
               <Store className="h-4 w-4" /> ขายหน้าร้าน
             </button>
@@ -1980,8 +1980,8 @@ export default function POSPage(): JSX.Element {
             </div>
           </div>
 
-          <aside data-testid="pos-cart-panel" className="flex w-full flex-col border-t border-slate-200/80 bg-white/92 backdrop-blur lg:h-full lg:w-[25rem] lg:max-h-none lg:border-l lg:border-t-0 xl:w-[28rem]">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <aside data-testid="pos-cart-panel" className="flex w-full flex-col overflow-y-auto border-t border-slate-200/80 bg-white/92 backdrop-blur lg:h-full lg:w-[25rem] lg:max-h-none lg:border-l lg:border-t-0 xl:w-[28rem]">
+            <div data-testid="pos-cart-header" className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold text-slate-900">ตะกร้า</h2>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">{cart.items.length}</span>
@@ -2016,7 +2016,7 @@ export default function POSPage(): JSX.Element {
               </div>
             </div>
 
-            <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+            <div data-testid="pos-cart-body" className="min-h-64 shrink-0 space-y-3 px-5 py-4">
               <div className="grid grid-cols-3 gap-2">
                 <div className={`rounded-2xl border px-3 py-3 text-xs ${cart.items.length > 0 ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
                   <div className="font-semibold uppercase tracking-[0.2em]">1</div>
@@ -2190,7 +2190,7 @@ export default function POSPage(): JSX.Element {
             </div>
 
             {/* P1: Sticky Checkout Footer */}
-            <div className="sticky bottom-0 space-y-4 border-t border-slate-200 bg-white/95 px-5 py-4 backdrop-blur shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+            <div data-testid="pos-checkout-panel" className="shrink-0 space-y-4 border-t border-slate-200 bg-white/95 px-5 py-4 backdrop-blur shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
               <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between"><span>ยอดรวม</span><span>{formatThaiCurrency(cart.subtotal)}</span></div>

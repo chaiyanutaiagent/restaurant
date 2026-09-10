@@ -1,6 +1,27 @@
 import { useQuery } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { ArrowLeft, Camera, LayoutGrid, LayoutList, Loader2, Search, ShoppingCart, UserRoundCheck, WifiOff } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  Camera,
+  ChefHat,
+  ClipboardList,
+  LayoutGrid,
+  LayoutList,
+  Loader2,
+  MonitorCog,
+  QrCode,
+  Search,
+  ShoppingBag,
+  ShoppingCart,
+  Store,
+  TabletSmartphone,
+  Truck,
+  UserRoundCheck,
+  UsersRound,
+  UtensilsCrossed,
+  WifiOff,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useReactToPrint } from "react-to-print";
@@ -25,6 +46,7 @@ import { posApi } from "@/lib/posApi";
 import { productApi } from "@/lib/productApi";
 import { syncPendingSales, syncProductCatalog, syncStockBalances, useOfflineProducts, useOnlineStatus } from "@/lib/syncService";
 import { useAuthStore } from "@/stores/auth.store";
+import { useDeviceStore } from "@/stores/device.store";
 import type { BranchReplacementRule, BranchSettings } from "@/types/admin";
 import type { ProductListItem } from "@/types/product";
 import type { Customer, CustomerSearchResult, LoyaltySettings } from "@/types/crm";
@@ -167,6 +189,9 @@ export default function POSPage(): JSX.Element {
   const branchId = useAuthStore((state) => state.branchId);
   const user = useAuthStore((state) => state.user);
   const hasPermission = useAuthStore((state) => state.hasPermission);
+  const pairedDevice = useDeviceStore((state) => state.device);
+  const deviceSessionHydrated = useDeviceStore((state) => state.hydrated);
+  const hydrateDeviceSession = useDeviceStore((state) => state.hydrate);
   const [search, setSearch] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -236,12 +261,16 @@ export default function POSPage(): JSX.Element {
   const [secondaryPaymentMethod, setSecondaryPaymentMethod] = useState<PaymentMethod>("promptpay");
   const [secondaryPaymentAmount, setSecondaryPaymentAmount] = useState(0);
   const [secondaryPaymentReference, setSecondaryPaymentReference] = useState("");
+  const [deviceStatusOpen, setDeviceStatusOpen] = useState(false);
+  const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
+  const [autoPrintReceipt, setAutoPrintReceipt] = useState(() => window.localStorage.getItem("pos-auto-print-receipt") === "true");
   const searchRef = useRef<HTMLInputElement | null>(null);
   const cashInputRef = useRef<HTMLInputElement | null>(null);
   const receiptRef = useRef<HTMLDivElement | null>(null);
   const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
   const scannerStreamRef = useRef<MediaStream | null>(null);
   const scannerFrameRef = useRef<number | null>(null);
+  const autoPrintedOrderRef = useRef<string | null>(null);
   const offlineProducts = useOfflineProducts(searchTerm);
   const handlePrint = useReactToPrint({ contentRef: receiptRef });
 
@@ -253,6 +282,10 @@ export default function POSPage(): JSX.Element {
     },
     enabled: Boolean(user),
   });
+
+  useEffect(() => {
+    if (!deviceSessionHydrated) void hydrateDeviceSession();
+  }, [deviceSessionHydrated, hydrateDeviceSession]);
 
   const locationsQuery = useQuery({
     queryKey: ["pos", "locations", branchId],
@@ -392,12 +425,28 @@ export default function POSPage(): JSX.Element {
   }, [currentShiftQuery.data]);
 
   useEffect(() => {
-    if (isOnline) {
-      void syncProductCatalog();
-      void syncStockBalances(branchId ?? undefined);
-      void syncPendingSales();
-    }
+    let active = true;
+    if (!isOnline) return () => { active = false; };
+    void Promise.all([
+      syncProductCatalog(),
+      syncStockBalances(branchId ?? undefined),
+      syncPendingSales(),
+    ]).then(() => {
+      if (active) setLastSyncAt(new Date());
+    }).catch(() => undefined);
+    return () => { active = false; };
   }, [branchId, isOnline]);
+
+  useEffect(() => {
+    if (!showReceipt || !lastOrder || !autoPrintReceipt || autoPrintedOrderRef.current === lastOrder.id) {
+      return;
+    }
+    autoPrintedOrderRef.current = lastOrder.id;
+    const timeout = window.setTimeout(() => {
+      void handlePrint();
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [autoPrintReceipt, handlePrint, lastOrder, showReceipt]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1340,6 +1389,14 @@ export default function POSPage(): JSX.Element {
   const canVoidSale = hasPermission("pos.sale.void") || hasPermission("pos.sale.void.request");
   const canRefundSale = hasPermission("pos.refund.create") || hasPermission("pos.refund.request");
   const canManageCentralReplacementRules = hasPermission("system.branch.edit");
+  const canManageRestaurantTables = hasPermission("fb.table.manage");
+  const canCreateRestaurantOrder = hasPermission("fb.order.create");
+  const canViewKitchen = hasPermission("fb.kitchen.ticket.manage") || hasPermission("fb.kitchen.manage");
+  const canViewCustomers = hasPermission("pos.sale.view");
+  const canViewDevices = hasPermission("system.device.view");
+  const canEditBranchSettings = hasPermission("system.branch.edit") || hasPermission("system.company.edit");
+  const currentCounterDevice = pairedDevice?.branch_id === branchId && pairedDevice.device_type === "counter" ? pairedDevice : null;
+  const cameraReady = typeof navigator.mediaDevices?.getUserMedia === "function";
   const discountAllowed = (branchSettings?.pos_allow_discount ?? true) && canApplyDiscount;
   const maxDiscountPct = branchSettings?.pos_max_discount_pct ?? 100;
   const maxDiscountAmount = (cart.subtotal * maxDiscountPct) / 100;
@@ -1498,14 +1555,21 @@ export default function POSPage(): JSX.Element {
     });
   }, [centralReplacementRuleMap, exchangeContext, products, replacementRuleMap, stockByProduct]);
 
+  function openWorkspace(path: string, label: string): void {
+    if (cart.items.length > 0 && !window.confirm(`มีสินค้าอยู่ในตะกร้า กรุณาพักบิลก่อนออกจากหน้าขาย\nต้องการไปที่ ${label} ต่อหรือไม่`)) {
+      return;
+    }
+    navigate(path);
+  }
+
   return (
-    <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] xl:h-screen">
-      <div className="flex flex-1 flex-col xl:overflow-hidden">
-        {/* P2: Compact Header — 1 แถว */}
+    <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] lg:h-screen">
+      <div className="flex min-w-0 flex-1 flex-col lg:overflow-hidden">
+        {/* Tablet v2: compact identity and health header */}
         <div className="border-b border-slate-200/80 bg-white/90 px-4 py-2.5 backdrop-blur">
-          <div className="flex items-center gap-3">
-            <span className="text-base font-bold text-slate-900">Restaurant POS</span>
-            <div className="flex flex-wrap gap-1.5 text-xs">
+          <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
+            <span className="whitespace-nowrap text-base font-bold text-slate-900">Restaurant POS</span>
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto text-xs">
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-700">{branchName}</span>
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-600">{currentLocationName}</span>
               {currentShift ? (
@@ -1514,7 +1578,7 @@ export default function POSPage(): JSX.Element {
                 </span>
               ) : null}
               {user ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700">
+                <span className="hidden items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700 xl:inline-flex">
                   <UserRoundCheck className="h-3.5 w-3.5" /> ID {staffIdentifier}
                 </span>
               ) : null}
@@ -1527,20 +1591,19 @@ export default function POSPage(): JSX.Element {
                 {isOnline ? "●" : "○"} {isOnline ? "ONLINE" : "OFFLINE"}
               </span>
             </div>
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
               <Button size="sm" variant="outline" onClick={() => setRecentSalesOpen(true)} disabled={!currentShift}>
                 ล่าสุด
               </Button>
               <Button size="sm" variant="outline" onClick={() => setCloseShiftOpen(true)} disabled={!currentShift}>ปิดกะ</Button>
+              <Button size="sm" variant="outline" aria-label="สถานะเครื่องและการพิมพ์" onClick={() => setDeviceStatusOpen(true)}>
+                <MonitorCog className="h-4 w-4" />
+              </Button>
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  if (cart.items.length > 0 && !window.confirm("มีสินค้าอยู่ในตะกร้า ต้องการย้อนกลับหรือไม่")) {
-                    return;
-                  }
-                  navigate("/admin");
-                }}
+                aria-label="กลับหน้าผู้ดูแล"
+                onClick={() => openWorkspace("/admin", "หน้าผู้ดูแล")}
               >
                 <ArrowLeft className="h-4 w-4" />
               </Button>
@@ -1548,8 +1611,54 @@ export default function POSPage(): JSX.Element {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col xl:overflow-hidden xl:flex-row">
-          <div className="flex flex-1 flex-col p-4 md:p-6 xl:overflow-hidden">
+        <div data-testid="pos-workspace-bar" className="border-b border-slate-200 bg-slate-950 px-3 py-2 text-white">
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">ช่องทางขาย</span>
+            <button type="button" aria-current="page" className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-white">
+              <Store className="h-4 w-4" /> ขายหน้าร้าน
+            </button>
+            {canManageRestaurantTables ? (
+              <button type="button" onClick={() => openWorkspace("/restaurant/tables", "เปิดโต๊ะและ QR")} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-sm font-medium hover:bg-slate-700">
+                <UtensilsCrossed className="h-4 w-4" /> เปิดโต๊ะ + QR
+              </button>
+            ) : null}
+            {canCreateRestaurantOrder ? (
+              <button type="button" onClick={() => openWorkspace("/restaurant/wap", "ออเดอร์รับกลับ")} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-sm font-medium hover:bg-slate-700">
+                <ShoppingBag className="h-4 w-4" /> รับกลับ
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled
+              title="Restaurant Phase 5 ยังไม่มีออเดอร์เดลิเวอรี ปุ่มนี้จึงยังไม่เปิดใช้"
+              className="flex min-h-11 shrink-0 cursor-not-allowed items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-sm font-medium text-slate-500"
+            >
+              <Truck className="h-4 w-4" /> เดลิเวอรี (รอเปิดใช้)
+            </button>
+            <span className="mx-1 h-7 w-px shrink-0 bg-slate-700" />
+            <button type="button" onClick={() => setHeldBillsOpen(true)} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800">
+              <ClipboardList className="h-4 w-4" /> พักบิล {heldBills.length}
+            </button>
+            {canCreateRestaurantOrder ? (
+              <button type="button" onClick={() => openWorkspace("/restaurant/orders", "ออเดอร์ร้านอาหาร")} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800">
+                <QrCode className="h-4 w-4" /> ออเดอร์ QR
+              </button>
+            ) : null}
+            {canViewKitchen ? (
+              <button type="button" onClick={() => openWorkspace("/restaurant/kitchen", "จอครัว KDS")} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800">
+                <ChefHat className="h-4 w-4" /> KDS
+              </button>
+            ) : null}
+            {canViewCustomers ? (
+              <button type="button" onClick={() => openWorkspace("/crm", "ข้อมูลลูกค้า")} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800">
+                <UsersRound className="h-4 w-4" /> ลูกค้า
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row lg:overflow-hidden">
+          <div className="flex min-w-0 flex-1 flex-col p-3 md:p-4 lg:overflow-hidden">
             <div className="rounded-[28px] border border-white/80 bg-white/85 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
                 <div className="relative flex-1">
@@ -1589,25 +1698,31 @@ export default function POSPage(): JSX.Element {
               </div>
             </div>
 
-            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-              <button
-                type="button"
-                className={`rounded-full px-4 py-2 text-sm ${selectedCategory === "" ? "bg-blue-600 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
-                onClick={() => setSelectedCategory("")}
-              >
-                ทั้งหมด
-              </button>
-              {categories.map((category) => (
-                <button
-                  key={category.id}
-                  type="button"
-                  className={`rounded-full px-4 py-2 text-sm ${selectedCategory === category.id ? "bg-blue-600 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
-                  onClick={() => setSelectedCategory(category.id)}
-                >
-                  {category.name}
-                </button>
-              ))}
-            </div>
+            <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+              <nav data-testid="pos-category-panel" aria-label="หมวดสินค้า" className="shrink-0 rounded-2xl border border-white/80 bg-white/80 p-2 shadow-sm lg:w-40 lg:overflow-y-auto">
+                <div className="hidden px-2 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 lg:block">หมวดสินค้า</div>
+                <div className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-x-visible">
+                  <button
+                    type="button"
+                    className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-left text-sm font-medium ${selectedCategory === "" ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
+                    onClick={() => setSelectedCategory("")}
+                  >
+                    ทั้งหมด
+                  </button>
+                  {categories.map((category) => (
+                    <button
+                      key={category.id}
+                      type="button"
+                      className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-left text-sm font-medium ${selectedCategory === category.id ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
+                      onClick={() => setSelectedCategory(category.id)}
+                    >
+                      {category.name}
+                    </button>
+                  ))}
+                </div>
+              </nav>
+
+              <section data-testid="pos-product-panel" aria-label="รายการสินค้า" className="flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-hidden">
 
             {exchangeContext && exchangeSuggestedProducts.length > 0 ? (
               <div className="mt-4 rounded-[28px] border border-amber-200 bg-amber-50/80 p-4 shadow-[0_16px_40px_rgba(180,83,9,0.08)]">
@@ -1761,7 +1876,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Normal Mode */}
             {cardDensity === "normal" && (
-              <div className="mt-3 grid flex-1 grid-cols-2 gap-3 md:grid-cols-3 xl:overflow-y-auto xl:grid-cols-4">
+              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-2 gap-3 overflow-y-auto md:grid-cols-3 xl:grid-cols-4">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const stockLabel = stock <= 0 ? "หมด" : stock <= 5 ? "ใกล้หมด" : `${stock}`;
@@ -1793,7 +1908,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Compact Mode (มากขึ้นต่อแถว) */}
             {cardDensity === "compact" && (
-              <div className="mt-3 grid flex-1 grid-cols-3 gap-2 md:grid-cols-4 xl:overflow-y-auto xl:grid-cols-5 2xl:grid-cols-6">
+              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-3 gap-2 overflow-y-auto md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const outOfStock = stock <= 0;
@@ -1828,7 +1943,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product List — List Mode */}
             {cardDensity === "list" && (
-              <div className="mt-3 flex-1 space-y-1.5 xl:overflow-y-auto">
+              <div className="mt-3 flex-1 space-y-1.5 lg:overflow-y-auto">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const outOfStock = stock <= 0;
@@ -1861,9 +1976,11 @@ export default function POSPage(): JSX.Element {
                 })}
               </div>
             )}
+              </section>
+            </div>
           </div>
 
-          <aside className="flex w-full flex-col border-t border-slate-200/80 bg-white/92 backdrop-blur xl:w-[28rem] xl:border-l xl:border-t-0 xl:max-h-none xl:h-full">
+          <aside data-testid="pos-cart-panel" className="flex w-full flex-col border-t border-slate-200/80 bg-white/92 backdrop-blur lg:h-full lg:w-[25rem] lg:max-h-none lg:border-l lg:border-t-0 xl:w-[28rem]">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold text-slate-900">ตะกร้า</h2>
@@ -1879,13 +1996,23 @@ export default function POSPage(): JSX.Element {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className="text-sm text-amber-700"
+                  className="min-h-11 rounded-xl bg-amber-50 px-3 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-40"
                   onClick={() => void handleHoldBill()}
                   disabled={cart.items.length === 0 || !currentShift}
                 >
                   พักบิล
                 </button>
-                <button type="button" className="text-sm text-slate-400 hover:text-red-500" onClick={() => { if (cart.items.length > 0 && !window.confirm("ล้างตะกร้าหรือไม่")) return; resetActiveSale(); }}>ล้าง</button>
+                <button
+                  type="button"
+                  className="min-h-11 rounded-xl border border-red-100 px-3 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-40"
+                  disabled={cart.items.length === 0}
+                  onClick={() => {
+                    if (cart.items.length > 0 && !window.confirm("ยืนยันล้างรายการสินค้าในตะกร้าทั้งหมด?\nบิลนี้จะไม่ถูกพักไว้")) return;
+                    resetActiveSale();
+                  }}
+                >
+                  ล้างรายการ
+                </button>
               </div>
             </div>
 
@@ -2017,7 +2144,11 @@ export default function POSPage(): JSX.Element {
               {cart.items.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-center text-slate-400">
                   <ShoppingCart className="mb-3 h-10 w-10" />
-                  <p>ยังไม่มีสินค้า</p>
+                  <p className="font-medium text-slate-600">ยังไม่มีสินค้าในบิล</p>
+                  <p className="mt-1 max-w-56 text-xs">แตะสินค้าจากตรงกลาง หรือใช้กล้องสแกนบาร์โค้ดเพื่อเริ่มขาย</p>
+                  <button type="button" className="mt-4 min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm text-blue-600" onClick={() => setScannerOpen(true)}>
+                    เปิดกล้องสแกน
+                  </button>
                 </div>
               ) : (
                 cart.items.map((item) => (
@@ -2039,14 +2170,14 @@ export default function POSPage(): JSX.Element {
                     </div>
                     <div className="mt-1.5 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1">
-                        <button type="button" className="h-7 w-7 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                        <button type="button" aria-label={`ลดจำนวน ${item.product_name}`} className="h-11 w-11 rounded-xl border border-slate-200 text-lg text-slate-700 hover:bg-slate-50"
                           onClick={() => updateCartItem(item.product_id, (c) => c.qty <= 1 ? null : { ...c, qty: c.qty - 1, subtotal: (c.qty - 1) * c.unit_price })}>
                           −
                         </button>
-                        <input type="number" className="h-7 w-12 rounded-md border border-slate-200 text-center text-sm"
+                        <input aria-label={`จำนวน ${item.product_name}`} type="number" className="h-11 w-14 rounded-xl border border-slate-200 text-center text-base font-semibold"
                           value={item.qty} min={1} max={getAvailableStock(item.product_id, item.variant_id)}
                           onChange={(e) => updateCartItem(item.product_id, (c) => ({ ...c, qty: Math.max(1, Math.min(Number(e.target.value), getAvailableStock(item.product_id, item.variant_id))) }))} />
-                        <button type="button" className="h-7 w-7 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                        <button type="button" aria-label={`เพิ่มจำนวน ${item.product_name}`} className="h-11 w-11 rounded-xl border border-slate-200 text-lg text-slate-700 hover:bg-slate-50"
                           onClick={() => updateCartItem(item.product_id, (c) => ({ ...c, qty: Math.min(c.qty + 1, getAvailableStock(item.product_id, item.variant_id)) }))}>
                           +
                         </button>
@@ -2254,6 +2385,77 @@ export default function POSPage(): JSX.Element {
           </aside>
         </div>
       </div>
+
+      <Dialog open={deviceStatusOpen} onOpenChange={setDeviceStatusOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><MonitorCog className="h-5 w-5" />สถานะเครื่องขายและการพิมพ์</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className={`rounded-2xl border p-4 ${isOnline ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
+              <div className="flex items-center gap-2 text-sm font-semibold"><Activity className="h-4 w-4" />เครือข่ายและการซิงก์</div>
+              <div className={`mt-3 text-lg font-bold ${isOnline ? "text-emerald-700" : "text-red-700"}`}>{isOnline ? "ออนไลน์" : "ออฟไลน์ — เก็บบิลรอซิงก์"}</div>
+              <div className="mt-1 text-xs text-slate-500">ซิงก์ล่าสุด {lastSyncAt ? lastSyncAt.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "ยังไม่มีข้อมูลรอบนี้"}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold"><TabletSmartphone className="h-4 w-4" />อุปกรณ์ Counter</div>
+              {currentCounterDevice ? (
+                <>
+                  <div className="mt-3 text-lg font-bold text-slate-900">{currentCounterDevice.name}</div>
+                  <div className="mt-1 font-mono text-xs text-slate-500">{currentCounterDevice.device_code} · จับคู่กับสาขานี้</div>
+                </>
+              ) : (
+                <>
+                  <div className="mt-3 text-lg font-bold text-amber-700">โหมดผู้ใช้ทั่วไป</div>
+                  <div className="mt-1 text-xs text-slate-500">ยังไม่ได้ล็อกเครื่องนี้ด้วย Counter Device ของสาขา</div>
+                </>
+              )}
+            </div>
+            <div className={`rounded-2xl border p-4 ${cameraReady ? "border-blue-200 bg-blue-50" : "border-amber-200 bg-amber-50"}`}>
+              <div className="flex items-center gap-2 text-sm font-semibold"><Camera className="h-4 w-4" />กล้องและสแกนเนอร์</div>
+              <div className={`mt-3 text-lg font-bold ${cameraReady ? "text-blue-700" : "text-amber-700"}`}>{cameraReady ? "พร้อมขอสิทธิ์กล้อง" : "อุปกรณ์นี้ไม่มีกล้องที่เว็บเข้าถึงได้"}</div>
+              <div className="mt-1 text-xs text-slate-500">รองรับ QR, EAN, UPC, Code 39 และ Code 128</div>
+            </div>
+            <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold"><ClipboardList className="h-4 w-4" />ใบเสร็จและเครื่องพิมพ์</div>
+              <div className="mt-3 text-lg font-bold text-violet-700">พิมพ์ผ่านระบบของอุปกรณ์</div>
+              <div className="mt-1 text-xs text-slate-500">ตั้งไว้ {branchSettings?.receipt_copies ?? 1} สำเนา · สถานะเครื่องพิมพ์จริงต้องยืนยันบนอุปกรณ์</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoPrintReceipt}
+            className="flex min-h-14 w-full items-center justify-between rounded-2xl border border-slate-200 px-4 text-left"
+            onClick={() => {
+              const next = !autoPrintReceipt;
+              setAutoPrintReceipt(next);
+              window.localStorage.setItem("pos-auto-print-receipt", String(next));
+            }}
+          >
+            <span><span className="block font-semibold text-slate-900">พิมพ์ใบเสร็จอัตโนมัติหลังชำระ</span><span className="block text-xs text-slate-500">ตั้งค่าเฉพาะเครื่องนี้และปิดไว้เป็นค่าเริ่มต้น</span></span>
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${autoPrintReceipt ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{autoPrintReceipt ? "เปิด" : "ปิด"}</span>
+          </button>
+          <div className="rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            เว็บตรวจได้เฉพาะความพร้อมของกล้อง การเชื่อมต่อ และการตั้งค่าใบเสร็จ การยืนยันสาย LAN/Bluetooth/USB และกระดาษต้องทำกับเครื่องพิมพ์จริงใน UAT
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {canViewDevices ? <Button variant="outline" onClick={() => { setDeviceStatusOpen(false); openWorkspace("/devices", "จัดการอุปกรณ์"); }}>จัดการอุปกรณ์</Button> : null}
+              {canEditBranchSettings && branchId ? <Button variant="outline" onClick={() => { setDeviceStatusOpen(false); openWorkspace(`/branches/${branchId}/settings`, "ตั้งค่าสาขาและใบเสร็จ"); }}>ตั้งค่าใบเสร็จ</Button> : null}
+            </div>
+            <Button
+              disabled={!lastOrder}
+              onClick={() => {
+                setDeviceStatusOpen(false);
+                setShowReceipt(true);
+              }}
+            >
+              {lastOrder ? "เปิดใบเสร็จล่าสุดเพื่อทดสอบพิมพ์" : "ยังไม่มีใบเสร็จให้ทดสอบ"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={shiftGateOpen} onOpenChange={setShiftGateOpen}>
         <DialogContent>

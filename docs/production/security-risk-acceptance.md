@@ -26,6 +26,13 @@ The 1 August 2026 `P5-UAT-SECURITY-03` evidence recorded:
 
 These counts are historical evidence, not a waiver. Re-run both the production-only and full frontend audits plus the backend audit against the exact release commit. If advisory data, dependency versions, architecture, or runtime reachability changes, update this record before deciding.
 
+Fresh frontend observation on 10 September 2026 while preparing `P5-POS-TABLET-UX-07`:
+
+- `npm audit --omit=dev --audit-level=high` reported four package rows: three high and one low (`nanoid`, `postcss-selector-parser`, `react-router`/`react-router-dom`).
+- The full `npm audit --audit-level=high` reported eleven package rows: seven high, three moderate, and one low. Additional findings are in the Capacitor/build/PWA toolchain (`@xmldom/xmldom`, `browserslist`, `esbuild`, `fast-uri`, and related dependency paths).
+- No critical npm finding was reported. No dependency was auto-upgraded in the Tablet UX scope because a combined update includes build-tool and potential breaking-version risk.
+- This refresh is not an acceptance. Production sign-off remains blocked on exact-release audit, reachability review, mitigation/acceptance, and the named security-owner decision.
+
 ## Other residual risks
 
 - Uploaded images are publicly reachable by URL.

@@ -695,6 +695,13 @@ Physical iPad preflight รอบแรกเมื่อ 10 กันยาย�
 owner retest บน physical iPad เปิดกล้องและ decode `FCS-UAT-SCANNER-20260910` ได้สำเร็จ จึงผ่าน
 camera/scanner preflight ส่วน product barcode และ table QR ใน business flow ยังต้องทดสอบต่อ
 
+Progress record: `P5-POS-TABLET-UX-07` ปรับ Restaurant POS สำหรับ iPad landscape เป็นสามส่วน
+หมวดสินค้า → สินค้า → ตะกร้า เพิ่มทางลัดเปิดโต๊ะ/QR, รับกลับ, พักบิล, ออเดอร์ QR และ KDS โดยใช้
+route/permission เดิม เพิ่มสถานะเครื่อง/กล้อง/ซิงก์/การพิมพ์และ automated assertion ที่ 1024×768
+โดยไม่แก้ database/backend และไม่แตะ Production ปุ่มเดลิเวอรีแสดงเป็น `รอเปิดใช้` เพราะยังไม่มี
+Restaurant delivery order domain ใน Phase 5; source ผ่าน frontend type-check/build แล้ว ส่วน deploy และ
+browser smoke บน UAT รอ `mainserver` online และ physical iPad business flow/printer UAT ยัง pending
+
 Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
 ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `in_progress` หลัง iPad scanner preflight ผ่าน
 ลำดับงานที่ล็อกไว้คือ

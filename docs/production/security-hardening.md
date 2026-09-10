@@ -30,6 +30,13 @@ Reviewed result on 1 August 2026 for `P5-UAT-SECURITY-03`:
   Node toolchain exist only in the build stage and are absent from the production nginx runtime.
 - There are no critical npm findings. Re-run both audits at release time because advisory data changes.
 
+Refresh on 10 September 2026 for `P5-POS-TABLET-UX-07`:
+
+- Production-only audit: four package rows (`3 high`, `1 low`).
+- Full frontend audit: eleven package rows (`7 high`, `3 moderate`, `1 low`).
+- Findings now include updated advisories in React Router, PostCSS/Nanoid and build/mobile tooling.
+- No critical finding was reported, but the earlier exception count is no longer current. UAT may continue in its isolated environment; Production release remains pending a scoped dependency update or accountable security-owner review recorded in `security-risk-acceptance.md`.
+
 ## Docker Base Image Policy
 
 Production Dockerfiles avoid `latest` tags. Current policy:

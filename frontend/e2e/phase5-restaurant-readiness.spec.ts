@@ -122,6 +122,24 @@ test("mobile QR to tablet kitchen, checkout, and ERP report", async ({ browser, 
     await expect(staff.getByText(/ผลต่างรายสาขา/)).toBeVisible();
     await staff.screenshot({ path: `${artifactDir}/06-erp-reconciliation.png`, fullPage: true });
 
+    await staff.setViewportSize({ width: 1024, height: 768 });
+    await staff.goto("/pos");
+    await expect(staff.getByTestId("pos-workspace-bar")).toBeVisible();
+    await expect(staff.getByRole("button", { name: "เปิดโต๊ะ + QR" })).toBeVisible();
+    await expect(staff.getByRole("button", { name: "ออเดอร์ QR" })).toBeVisible();
+    await expect(staff.getByRole("button", { name: "KDS" })).toBeVisible();
+    await expect(staff.getByRole("button", { name: "เดลิเวอรี (รอเปิดใช้)" })).toBeDisabled();
+    const categoryPanel = await staff.getByTestId("pos-category-panel").boundingBox();
+    const productPanel = await staff.getByTestId("pos-product-panel").boundingBox();
+    const cartPanel = await staff.getByTestId("pos-cart-panel").boundingBox();
+    expect(categoryPanel).not.toBeNull();
+    expect(productPanel).not.toBeNull();
+    expect(cartPanel).not.toBeNull();
+    expect((categoryPanel?.x ?? 0) < (productPanel?.x ?? 0)).toBeTruthy();
+    expect((productPanel?.x ?? 0) < (cartPanel?.x ?? 0)).toBeTruthy();
+    await assertNoHorizontalOverflow(staff);
+    await staff.screenshot({ path: `${artifactDir}/07-tablet-pos-workspace.png`, fullPage: true });
+
     expect(failures, failures.join("\n")).toEqual([]);
   } finally {
     await mobileContext.close();

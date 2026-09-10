@@ -12,6 +12,13 @@ on the physical iPad: camera permission/open and decoding the QR payload
 `FCS-UAT-SCANNER-20260910` passed, with the expected product-not-found response because the UAT
 catalog has no matching product. Product barcode and table-QR business-flow tests remain pending.
 
+Tablet POS UX preflight on 10 September 2026: scope `P5-POS-TABLET-UX-07` added a 1024×768
+three-part selling workspace (category, product, cart), direct access to the existing table/QR,
+takeaway, QR-order and KDS workspaces, 44px cart quantity controls, explicit hold-versus-clear
+actions, and a truthful device/camera/sync/print status panel. Frontend type-check/build passed.
+UAT-host browser smoke is pending because `mainserver` is offline; this evidence does not replace
+the physical iPad, product/table QR, printer, offline or owner-signoff checks below.
+
 ## Test record
 
 ```text
@@ -54,6 +61,8 @@ Do not record Wi-Fi passwords, application passwords, pairing PINs, tokens, QR s
 For every target device, test portrait and supported landscape orientation where applicable.
 
 - [ ] No horizontal clipping or hidden primary action at the supported zoom/font-size setting.
+- [ ] At 1024×768 landscape, category, product, and cart remain visible as three usable sections.
+- [ ] Table + QR, takeaway, held-bill, QR-order, and KDS shortcuts open the intended existing workspace; delivery remains disabled until a real Restaurant delivery domain is approved.
 - [ ] Touch targets, scrolling, dialogs, numeric input, on-screen keyboard, and back navigation work without trapping the operator.
 - [ ] Thai product names, notes, prices, totals, table labels, and status text are legible.
 - [ ] Camera opens and scans the table QR under normal restaurant lighting.

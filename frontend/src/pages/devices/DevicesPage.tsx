@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Cpu, Loader2, QrCode, RefreshCw, RotateCcwKey, TabletSmartphone, Unplug } from "lucide-react";
+import { Activity, CircleAlert, Cpu, Loader2, QrCode, RefreshCw, RotateCcwKey, TabletSmartphone, Unplug, Wifi } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -22,9 +22,16 @@ const STATUS_LABEL: Record<DeviceStatus, string> = {
   paired: "ใช้งานอยู่",
   revoked: "ยกเลิกแล้ว",
 };
+const RECENT_DEVICE_WINDOW_MS = 5 * 60 * 1000;
 
 function dateTime(value: string | null): string {
   return value ? new Date(value).toLocaleString("th-TH") : "-";
+}
+
+function wasSeenRecently(value: string | null): boolean {
+  if (!value) return false;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) && Date.now() - timestamp <= RECENT_DEVICE_WINDOW_MS;
 }
 
 function webPairingUrl(payload: string): string {
@@ -122,6 +129,13 @@ export default function DevicesPage(): JSX.Element {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["system-devices"] }),
   });
   const actionError = createMutation.error ?? rotateMutation.error ?? revokeMutation.error;
+  const devices = devicesQuery.data ?? [];
+  const deviceSummary = useMemo(() => ({
+    paired: devices.filter((device) => device.status === "paired").length,
+    recentlySeen: devices.filter((device) => device.status === "paired" && wasSeenRecently(device.last_seen_at)).length,
+    needsAttention: devices.filter((device) => device.status === "pending_pairing" || device.status === "pairing_expired").length,
+    revoked: devices.filter((device) => device.status === "revoked").length,
+  }), [devices]);
 
   return (
     <div className="space-y-6">
@@ -131,6 +145,13 @@ export default function DevicesPage(): JSX.Element {
       </div>
 
       {provisioning ? <ProvisioningPanel provisioning={provisioning} /> : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="สรุปสถานะอุปกรณ์">
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4"><div className="flex items-center gap-2 text-sm font-semibold text-blue-800"><TabletSmartphone className="h-4 w-4" />จับคู่แล้ว</div><div className="mt-2 text-3xl font-black text-blue-950">{deviceSummary.paired}</div></div>
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><div className="flex items-center gap-2 text-sm font-semibold text-emerald-800"><Wifi className="h-4 w-4" />พบภายใน 5 นาที</div><div className="mt-2 text-3xl font-black text-emerald-950">{deviceSummary.recentlySeen}</div></div>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><div className="flex items-center gap-2 text-sm font-semibold text-amber-800"><CircleAlert className="h-4 w-4" />ต้องดำเนินการ</div><div className="mt-2 text-3xl font-black text-amber-950">{deviceSummary.needsAttention}</div></div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><div className="flex items-center gap-2 text-sm font-semibold text-slate-600"><Unplug className="h-4 w-4" />ยกเลิกแล้ว</div><div className="mt-2 text-3xl font-black text-slate-900">{deviceSummary.revoked}</div></div>
+      </div>
 
       {canManage ? (
         <Card>
@@ -150,13 +171,13 @@ export default function DevicesPage(): JSX.Element {
       ) : null}
 
       <Card>
-        <CardHeader><CardTitle>อุปกรณ์ทั้งหมดใน Scope</CardTitle><CardDescription>{devicesQuery.data?.length ?? 0} เครื่อง</CardDescription></CardHeader>
+        <CardHeader><CardTitle>อุปกรณ์ทั้งหมดใน Scope</CardTitle><CardDescription>{devices.length} เครื่อง · “พบภายใน 5 นาที” คือสัญญาณกิจกรรมล่าสุด ไม่ใช่การตรวจสายไฟของอุปกรณ์</CardDescription></CardHeader>
         <CardContent className="space-y-3">
           {devicesQuery.isLoading ? <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin" /></div> : null}
-          {(devicesQuery.data ?? []).map((device) => (
+          {devices.map((device) => (
             <div key={device.id} className="flex flex-wrap items-center gap-4 rounded-xl border p-4">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100"><TabletSmartphone className="h-5 w-5" /></div>
-              <div className="min-w-48 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-bold">{device.name}</p><Badge variant={device.status === "revoked" ? "destructive" : "secondary"}>{STATUS_LABEL[device.status]}</Badge><Badge variant="outline">{TYPE_LABEL[device.device_type]}</Badge></div><p className="mt-1 font-mono text-xs text-gray-500">{device.device_code} · {branchName[device.branch_id] ?? device.branch_id}{device.station_key ? ` · ${device.station_key}` : ""}</p></div>
+              <div className="min-w-48 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-bold">{device.name}</p><Badge variant={device.status === "revoked" ? "destructive" : "secondary"}>{STATUS_LABEL[device.status]}</Badge><Badge variant="outline">{TYPE_LABEL[device.device_type]}</Badge>{device.status === "paired" ? <Badge className={wasSeenRecently(device.last_seen_at) ? "bg-emerald-600" : "bg-slate-500"}><Activity className="mr-1 h-3 w-3" />{wasSeenRecently(device.last_seen_at) ? "พบล่าสุด" : "ไม่พบล่าสุด"}</Badge> : null}</div><p className="mt-1 font-mono text-xs text-gray-500">{device.device_code} · {branchName[device.branch_id] ?? device.branch_id}{device.station_key ? ` · ${device.station_key}` : ""}</p></div>
               <div className="text-right text-xs text-gray-500"><p>จับคู่ {dateTime(device.paired_at)}</p><p>ล่าสุด {dateTime(device.last_seen_at)}</p></div>
               {canManage && device.status !== "revoked" ? <div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={rotateMutation.isPending} onClick={() => { const actionReason = window.prompt("เหตุผลที่ออก Pairing PIN ใหม่", "ติดตั้งหรือจับคู่เครื่องใหม่"); if (actionReason?.trim()) rotateMutation.mutate({ id: device.id, reason: actionReason.trim() }); }}><RotateCcwKey className="h-4 w-4" />PIN ใหม่</Button><Button type="button" size="sm" variant="destructive" disabled={revokeMutation.isPending} onClick={() => { const actionReason = window.prompt("เหตุผลที่ยกเลิกอุปกรณ์ (มีผลทันที)"); if (actionReason?.trim() && window.confirm(`ยืนยันยกเลิก ${device.name}?`)) revokeMutation.mutate({ id: device.id, reason: actionReason.trim() }); }}><Unplug className="h-4 w-4" />ยกเลิก</Button></div> : null}
             </div>

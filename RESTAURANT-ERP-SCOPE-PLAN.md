@@ -705,6 +705,16 @@ Cloudflare cache ถูกล้างเฉพาะ `https://uat-pos.foodchain
 พร้อม `no-store/no-cache` และ browser reload เปลี่ยนมาใช้ `/assets/index-CPB_Jgd2.js` สำเร็จ
 โดยไม่ได้ใช้ Purge Everything ส่วน physical iPad business flow/printer UAT ยัง pending
 
+Follow-up `P5-POS-WORKSPACE-THEME-08` เมื่อ 11 กันยายน 2026 รวม theme ของหน้าปฏิบัติการ POS
+ให้หน้าโต๊ะ/QR, รับกลับ, ออเดอร์ QR, session detail/checkout และลูกค้าใช้ identity header,
+navigation, background และ card language ชุดเดียวกับหน้าขาย; KDS ของพนักงานคง dark workspace
+แต่ใช้ navigation ชุดเดียวกัน ขณะที่ device-only KDS ไม่เปลี่ยน และ delivery ยัง disabled
+release `0a3642d` deploy เฉพาะ UAT frontend image `restaurant-pos-frontend:uat-pos-theme-0a3642d`
+โดยเก็บ image `restaurant-pos-frontend:uat-tablet-v2-4100abb` และ backup source/env สำหรับ rollback
+Browser smoke ที่ 1024×768 ผ่าน `/pos`, `/restaurant/tables`, `/restaurant/wap`,
+`/restaurant/orders`, `/restaurant/kitchen` และ `/crm`; active workspace ถูกต้องและ document
+horizontal overflow เป็น `0` ทุก route โดยไม่มี database/backend/Production change
+
 Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
 ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `in_progress` หลัง iPad scanner preflight ผ่าน
 ลำดับงานที่ล็อกไว้คือ

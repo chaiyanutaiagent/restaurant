@@ -2,7 +2,7 @@
 
 ## สถานะ
 
-`implementation_validated_uat_deploy_pending` — รวมภาษาภาพของหน้าปฏิบัติการ POS ใน source แล้ว และผ่าน frontend type-check/build; รอ deploy และ browser smoke บน UAT ก่อนส่งให้ทดสอบบน Safari/iPad
+`uat_deployed_browser_smoke_passed_physical_pending` — รวมภาษาภาพของหน้าปฏิบัติการ POS แล้ว ผ่าน frontend type-check/build และ CI, deploy release `0a3642d` เฉพาะ frontend UAT และผ่าน browser smoke ทุกพื้นที่งานที่ 1024×768; รอเจ้าของตรวจภาพและ touch behavior บน Safari/iPad จริง
 
 ## ปัญหาที่แก้
 
@@ -34,7 +34,7 @@
 - [x] active workspace และ permission visibility ทำงานจาก route/permission เดิม
 - [x] delivery ยัง disabled
 - [x] product grids ซ่อน horizontal overflow และยังเลื่อนแนวตั้งได้
-- [ ] browser smoke บน UAT ที่ 1024×768 ผ่านทุก operational route
+- [x] browser smoke บน UAT ที่ 1024×768 ผ่านทุก operational route
 - [ ] physical Safari/iPad visual and touch check ผ่าน
 
 ## Rollback
@@ -50,8 +50,14 @@ business_type: restaurant
 database_change: none
 backend_change: none
 source_validation: frontend_type_check_and_build_passed
-uat_deployment: pending
-uat_browser_smoke: pending
+source_commit: 0a3642d
+uat_frontend_image: restaurant-pos-frontend:uat-pos-theme-0a3642d
+uat_previous_frontend_image: restaurant-pos-frontend:uat-tablet-v2-4100abb
+uat_backup: /home/behappyaiagent/restaurant-uat-deploy-backups/0a3642d
+uat_asset: /assets/index-BFkC5VKM.js
+uat_health_live_ready: passed
+uat_browser_smoke_1024x768: pos_tables_wap_orders_kds_crm_passed
+uat_document_horizontal_overflow: 0_all_tested_routes
 physical_safari_ipad_check: pending
 production_activated: false
 phase6_started: false

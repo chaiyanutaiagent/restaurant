@@ -153,6 +153,30 @@ test("mobile QR to tablet kitchen, checkout, and ERP report", async ({ browser, 
     await assertNoHorizontalOverflow(staff);
     await staff.screenshot({ path: `${artifactDir}/07-tablet-pos-workspace.png`, fullPage: true });
 
+    const operationalWorkspaces = [
+      { path: uat.browser_paths.tables, active: "เปิดโต๊ะ + QR", heading: "แผนที่โต๊ะ", screenshot: "08-table-workspace-theme.png" },
+      { path: "/restaurant/wap", active: "รับกลับ", heading: "เมนูขายหน้าร้าน", screenshot: "09-takeaway-workspace-theme.png" },
+      { path: "/restaurant/orders", active: "ออเดอร์ QR", heading: "ออเดอร์ทั้งหมด", screenshot: "10-order-workspace-theme.png" },
+      { path: "/crm", active: "ลูกค้า", heading: "ลูกค้า", screenshot: "11-customer-workspace-theme.png" },
+    ];
+    for (const workspace of operationalWorkspaces) {
+      await staff.goto(workspace.path);
+      await expect(staff.getByTestId("pos-operation-shell")).toBeVisible();
+      await expect(staff.getByTestId("pos-workspace-bar")).toBeVisible();
+      await expect(staff.getByRole("button", { name: workspace.active }).first()).toHaveAttribute("aria-current", "page");
+      await expect(staff.getByRole("heading", { name: new RegExp(workspace.heading) }).first()).toBeVisible();
+      await expect(staff.getByRole("button", { name: "เดลิเวอรี (รอเปิดใช้)" })).toBeDisabled();
+      await assertNoHorizontalOverflow(staff);
+      await staff.screenshot({ path: `${artifactDir}/${workspace.screenshot}`, fullPage: true });
+    }
+
+    await staff.goto(uat.browser_paths.kitchen);
+    await expect(staff.getByTestId("pos-workspace-bar")).toBeVisible();
+    await expect(staff.getByRole("button", { name: "KDS" }).first()).toHaveAttribute("aria-current", "page");
+    await expect(staff.getByRole("heading", { name: "Kitchen Display" })).toBeVisible();
+    await assertNoHorizontalOverflow(staff);
+    await staff.screenshot({ path: `${artifactDir}/12-kitchen-workspace-theme.png`, fullPage: true });
+
     expect(failures, failures.join("\n")).toEqual([]);
   } finally {
     await mobileContext.close();

@@ -136,7 +136,7 @@ export default function FBOrdersPage(): JSX.Element {
         }
       />
 
-      <div className="space-y-6 p-6">
+      <div className="space-y-6 rounded-[28px] border border-white/80 bg-white/85 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur lg:p-6">
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard

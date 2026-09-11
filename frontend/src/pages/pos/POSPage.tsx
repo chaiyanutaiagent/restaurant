@@ -4,22 +4,15 @@ import {
   Activity,
   ArrowLeft,
   Camera,
-  ChefHat,
   ClipboardList,
   LayoutGrid,
   LayoutList,
   Loader2,
   MonitorCog,
-  QrCode,
   Search,
-  ShoppingBag,
   ShoppingCart,
-  Store,
   TabletSmartphone,
-  Truck,
   UserRoundCheck,
-  UsersRound,
-  UtensilsCrossed,
   WifiOff,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -57,6 +50,7 @@ import RedeemPointsDialog from "@/pages/crm/RedeemPointsDialog";
 import CloseShiftDialog from "@/pages/pos/CloseShiftDialog";
 import ReceiptView from "@/pages/pos/ReceiptView";
 import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
+import PosWorkspaceNav from "@/components/pos/PosWorkspaceNav";
 import type { ApprovalAction } from "@/types/approval";
 
 const SHIFT_CACHE_KEY = "restaurant-pos-current-shift";
@@ -1389,10 +1383,6 @@ export default function POSPage(): JSX.Element {
   const canVoidSale = hasPermission("pos.sale.void") || hasPermission("pos.sale.void.request");
   const canRefundSale = hasPermission("pos.refund.create") || hasPermission("pos.refund.request");
   const canManageCentralReplacementRules = hasPermission("system.branch.edit");
-  const canManageRestaurantTables = hasPermission("fb.table.manage");
-  const canCreateRestaurantOrder = hasPermission("fb.order.create");
-  const canViewKitchen = hasPermission("fb.kitchen.ticket.manage") || hasPermission("fb.kitchen.manage");
-  const canViewCustomers = hasPermission("pos.sale.view");
   const canViewDevices = hasPermission("system.device.view");
   const canEditBranchSettings = hasPermission("system.branch.edit") || hasPermission("system.company.edit");
   const currentCounterDevice = pairedDevice?.branch_id === branchId && pairedDevice.device_type === "counter" ? pairedDevice : null;
@@ -1611,51 +1601,11 @@ export default function POSPage(): JSX.Element {
           </div>
         </div>
 
-        <div data-testid="pos-workspace-bar" className="border-b border-slate-200 bg-slate-950 px-3 py-2 text-white">
-          <div className="flex items-center gap-2 overflow-x-auto">
-            <span className="hidden shrink-0 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 xl:block">ช่องทางขาย</span>
-            <button type="button" aria-current="page" className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-white">
-              <Store className="h-4 w-4" /> ขายหน้าร้าน
-            </button>
-            {canManageRestaurantTables ? (
-              <button type="button" onClick={() => openWorkspace("/restaurant/tables", "เปิดโต๊ะและ QR")} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-sm font-medium hover:bg-slate-700">
-                <UtensilsCrossed className="h-4 w-4" /> เปิดโต๊ะ + QR
-              </button>
-            ) : null}
-            {canCreateRestaurantOrder ? (
-              <button type="button" onClick={() => openWorkspace("/restaurant/wap", "ออเดอร์รับกลับ")} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-sm font-medium hover:bg-slate-700">
-                <ShoppingBag className="h-4 w-4" /> รับกลับ
-              </button>
-            ) : null}
-            <button
-              type="button"
-              disabled
-              title="Restaurant Phase 5 ยังไม่มีออเดอร์เดลิเวอรี ปุ่มนี้จึงยังไม่เปิดใช้"
-              className="flex min-h-11 shrink-0 cursor-not-allowed items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-sm font-medium text-slate-500"
-            >
-              <Truck className="h-4 w-4" /> เดลิเวอรี (รอเปิดใช้)
-            </button>
-            <span className="mx-1 h-7 w-px shrink-0 bg-slate-700" />
-            <button type="button" onClick={() => setHeldBillsOpen(true)} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800">
-              <ClipboardList className="h-4 w-4" /> พักบิล {heldBills.length}
-            </button>
-            {canCreateRestaurantOrder ? (
-              <button type="button" onClick={() => openWorkspace("/restaurant/orders", "ออเดอร์ร้านอาหาร")} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800">
-                <QrCode className="h-4 w-4" /> ออเดอร์ QR
-              </button>
-            ) : null}
-            {canViewKitchen ? (
-              <button type="button" onClick={() => openWorkspace("/restaurant/kitchen", "จอครัว KDS")} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800">
-                <ChefHat className="h-4 w-4" /> KDS
-              </button>
-            ) : null}
-            {canViewCustomers ? (
-              <button type="button" onClick={() => openWorkspace("/crm", "ข้อมูลลูกค้า")} className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800">
-                <UsersRound className="h-4 w-4" /> ลูกค้า
-              </button>
-            ) : null}
-          </div>
-        </div>
+        <PosWorkspaceNav
+          heldBillCount={heldBills.length}
+          onHeldBills={() => setHeldBillsOpen(true)}
+          onNavigate={openWorkspace}
+        />
 
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row lg:overflow-hidden">
           <div className="flex min-w-0 flex-1 flex-col p-3 md:p-4 lg:overflow-hidden">
@@ -1876,7 +1826,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Normal Mode */}
             {cardDensity === "normal" && (
-              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-2 gap-3 overflow-y-auto md:grid-cols-3 xl:grid-cols-4">
+              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-2 gap-3 overflow-x-hidden overflow-y-auto md:grid-cols-3 xl:grid-cols-4">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const stockLabel = stock <= 0 ? "หมด" : stock <= 5 ? "ใกล้หมด" : `${stock}`;
@@ -1908,7 +1858,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Compact Mode (มากขึ้นต่อแถว) */}
             {cardDensity === "compact" && (
-              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-3 gap-2 overflow-y-auto md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-3 gap-2 overflow-x-hidden overflow-y-auto md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const outOfStock = stock <= 0;
@@ -1943,7 +1893,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product List — List Mode */}
             {cardDensity === "list" && (
-              <div className="mt-3 flex-1 space-y-1.5 lg:overflow-y-auto">
+              <div className="mt-3 flex-1 space-y-1.5 overflow-x-hidden lg:overflow-y-auto">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const outOfStock = stock <= 0;

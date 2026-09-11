@@ -412,7 +412,7 @@ export default function WapOrderPage(): JSX.Element {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="grid min-h-0 flex-1 gap-4">
-        <section className={`${isSummaryVisible ? "hidden" : "flex"} min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white`}>
+        <section className={`${isSummaryVisible ? "hidden" : "flex"} min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/80 bg-white/90 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur`}>
           <div className="border-b border-slate-200 px-3 py-2 lg:px-4 lg:py-3">
             <div className="flex items-center gap-3">
               <DropdownMenu>
@@ -481,7 +481,7 @@ export default function WapOrderPage(): JSX.Element {
                 </DropdownMenuContent>
               </DropdownMenu>
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-700">เมนูขายหน้าร้าน · {menuQuery.data?.branch_name ?? "สาขา"}</p>
+                <h1 className="truncate text-sm font-semibold text-slate-700">เมนูขายหน้าร้าน · {menuQuery.data?.branch_name ?? "สาขา"}</h1>
                 <p className="flex items-center gap-1 truncate text-xs text-slate-500"><UserRoundCheck className="h-3.5 w-3.5" />พนักงาน: {employeeName} · ID {employeeIdentifier}</p>
               </div>
               <div className="ml-auto flex shrink-0 items-center gap-2 text-xs">
@@ -601,7 +601,7 @@ export default function WapOrderPage(): JSX.Element {
           </div>
         </section>
 
-        <aside className={`${isSummaryVisible ? "flex" : "hidden"} min-h-0 flex-col rounded-lg border border-slate-200 bg-white`}>
+        <aside className={`${isSummaryVisible ? "flex" : "hidden"} min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/80 bg-white/90 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur`}>
           <div className="border-b border-slate-200 p-3 lg:p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">

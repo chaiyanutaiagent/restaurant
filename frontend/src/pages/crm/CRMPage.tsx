@@ -162,7 +162,7 @@ export default function CRMPage(): JSX.Element {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 rounded-[28px] border border-white/80 bg-white/85 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur lg:p-6">
       <PageHeader title="ลูกค้า" subtitle="CRM + Loyalty" />
       <Tabs defaultValue="customers">
         <TabsList className="grid w-full grid-cols-3">

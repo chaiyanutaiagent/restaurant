@@ -38,6 +38,7 @@ export default function LoginPage(): JSX.Element {
   const autoLoginStarted = useRef(false);
   const [showPassword, setShowPassword] = useState(false);
   const isNativeApp = Capacitor.isNativePlatform();
+  const isUatPublicHost = !isNativeApp && window.location.hostname.startsWith("uat-");
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
@@ -54,10 +55,11 @@ export default function LoginPage(): JSX.Element {
   }, [business.data, form]);
 
   useEffect(() => {
+    if (!isUatPublicHost) return;
     if (autoLoginStarted.current) return;
     autoLoginStarted.current = true;
     startAutoLogin();
-  }, [startAutoLogin]);
+  }, [isUatPublicHost, startAutoLogin]);
 
   async function onSubmit(values: LoginFormValues): Promise<void> {
     await login(values);
@@ -74,7 +76,7 @@ export default function LoginPage(): JSX.Element {
           <CardDescription>{isNativeApp ? "RESTAURANT POS · เข้าสู่ระบบพนักงาน" : canonicalSlug ? `พื้นที่ธุรกิจ /${canonicalSlug}` : "Restaurant POS System"}</CardDescription>
         </CardHeader>
         <CardContent>
-          {isAutoLoginLoading ? (
+          {isUatPublicHost && isAutoLoginLoading ? (
             <div className="mb-5 flex items-center justify-center gap-2 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700">
               <Loader2 className="h-4 w-4 animate-spin" />
               กำลังเปิดโหมดทดสอบ UAT...

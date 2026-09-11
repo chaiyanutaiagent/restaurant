@@ -16,6 +16,7 @@ export default defineConfig({
   ],
   use: {
     baseURL: process.env.P5_UAT_BASE_URL ?? "http://127.0.0.1:18081",
+    serviceWorkers: "block",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     video: "retain-on-failure",

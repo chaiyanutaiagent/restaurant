@@ -774,6 +774,7 @@ test("business admin resolves Company ID, hides UUID entry, and keeps the canoni
   });
   await page.route("**/api/v1/reports/sales/hourly**", async (route) => { await fulfill(route, response([])); });
   await page.route("**/api/v1/stock/balances**", async (route) => { await fulfill(route, response([])); });
+  await page.route("**/api/v1/system/me/branches", async (route) => { await fulfill(route, response([])); });
   await page.route("**/api/v1/restaurant/me/brand-navigation", async (route) => { await fulfill(route, response([])); });
 
   await page.goto("/alpha-cafe/admin");

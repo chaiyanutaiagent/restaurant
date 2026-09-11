@@ -41,6 +41,13 @@ from app.schemas.takeaway import (
     TakeawayTransferStatusUpdate,
 )
 from app.services.takeaway_service import TakeawayService
+from app.services.takeaway_import_service import (
+    CONTRACT,
+    MAPPING_CONTRACT,
+    SCHEMA_VERSION,
+    TakeawayImportService,
+    canonical_record_hash,
+)
 
 
 def projection(
@@ -342,6 +349,113 @@ async def run() -> None:
                 or 0
             )
             assert outbox_count >= 10
+            export_id = uuid.uuid4()
+            import_category_id = uuid.uuid4()
+            import_item_id = uuid.uuid4()
+            category_data = {
+                "code": f"import-{str(import_category_id)[:8]}",
+                "name": "หมวดนำเข้าทดสอบ",
+                "parent_source_id": None,
+                "sort_order": 0,
+                "is_active": True,
+            }
+            item_data = {
+                "sku": f"IMP-{str(import_item_id)[:8]}",
+                "barcode": None,
+                "name": "สินค้านำเข้าทดสอบ",
+                "category_source_id": str(import_category_id),
+                "unit_code": "PCS",
+                "product_type": "stock",
+                "inventory_role": "store_local",
+                "brand_scope": "brand",
+                "cost_price": "10.00",
+                "selling_price": "20.00",
+                "vat_type": "exclusive",
+                "vat_rate": "7.00",
+                "image_media_source_id": None,
+                "is_active": True,
+                "is_for_sale": True,
+                "is_for_purchase": True,
+            }
+            import_records = [
+                {
+                    "record_type": "category",
+                    "source_id": str(import_category_id),
+                    "source_updated_at": "2026-09-11T00:00:00Z",
+                    "source_hash": canonical_record_hash("category", str(import_category_id), category_data),
+                    "data": category_data,
+                },
+                {
+                    "record_type": "item",
+                    "source_id": str(import_item_id),
+                    "source_updated_at": "2026-09-11T00:00:00Z",
+                    "source_hash": canonical_record_hash("item", str(import_item_id), item_data),
+                    "data": item_data,
+                },
+            ]
+            import_manifest = {
+                "contract": CONTRACT,
+                "schema_version": SCHEMA_VERSION,
+                "export_id": str(export_id),
+                "generated_at": "2026-09-11T00:00:00Z",
+                "cutoff_at": "2026-09-11T00:00:00Z",
+                "timezone": "Asia/Bangkok",
+                "source": {
+                    "system": "erp-pos-run",
+                    "repository": "chaiyanutaiagent/erp-pos-run",
+                    "repository_commit": "1" * 40,
+                    "migration_head": "synthetic",
+                    "environment": "synthetic",
+                    "snapshot_id": "synthetic-smoke",
+                    "read_only": True,
+                },
+                "scope": {},
+                "mapping": {"path": "mapping.json", "sha256": "0" * 64},
+                "files": [],
+                "omitted_sections": [],
+                "record_totals": {"categories": 1, "items": 1},
+                "security_attestation": {
+                    "forbidden_field_findings": 0,
+                    "unapproved_pii_findings": 0,
+                    "unsafe_media_findings": 0,
+                    "scanner_version": "synthetic-smoke",
+                },
+            }
+            import_mapping = {
+                "contract": MAPPING_CONTRACT,
+                "schema_version": SCHEMA_VERSION,
+                "mapping_id": str(uuid.uuid4()),
+                "export_id": str(export_id),
+                "company": {"source_id": str(uuid.uuid4()), "target_id": str(company_id)},
+                "brand": {
+                    "source_id": str(uuid.uuid4()),
+                    "target_id": str(brand_a),
+                    "business_type": "takeaway",
+                },
+                "branches": [],
+            }
+            importer = TakeawayImportService(db, current_a)
+            import_batch, import_replayed = await importer.apply_synthetic(
+                manifest=import_manifest,
+                mapping=import_mapping,
+                records=import_records,
+            )
+            replay_batch, import_replayed_second = await importer.apply_synthetic(
+                manifest=import_manifest,
+                mapping=import_mapping,
+                records=import_records,
+            )
+            assert not import_replayed and import_replayed_second
+            assert replay_batch.id == import_batch.id and import_batch.status == "completed"
+            outbox_after_import = int(
+                await db.scalar(
+                    select(func.count()).select_from(TakeawayOperationalOutbox).where(
+                        TakeawayOperationalOutbox.company_id == company_id
+                    )
+                )
+                or 0
+            )
+            assert outbox_after_import == outbox_count
             print(
                 json.dumps(
                     {
@@ -353,6 +467,8 @@ async def run() -> None:
                         "transfer_status": transfer.status,
                         "credit_balance": str(account.balance),
                         "outbox_events": outbox_count,
+                        "synthetic_import_replay": import_replayed_second,
+                        "import_created_side_effects": outbox_after_import - outbox_count,
                     },
                     ensure_ascii=False,
                     sort_keys=True,

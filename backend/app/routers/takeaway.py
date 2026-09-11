@@ -27,6 +27,7 @@ from app.schemas.takeaway import (
     TakeawayCentralRoundCreate,
     TakeawayCreditEntryCreate,
     TakeawayCreditLimitUpdate,
+    TakeawayImportDryRun,
     TakeawayProductionBatchCreate,
     TakeawayProductionComplete,
     TakeawayRefundCreate,
@@ -38,6 +39,10 @@ from app.schemas.takeaway import (
     TakeawayTransferStatusUpdate,
 )
 from app.services.takeaway_service import TakeawayService
+from app.services.takeaway_import_service import (
+    TakeawayImportService,
+    validate_takeaway_import_package,
+)
 
 
 router = APIRouter(
@@ -371,3 +376,32 @@ async def sales_summary(
             branch_id=branch_id,
         )
     )
+
+
+@router.post("/imports/dry-run")
+async def validate_import(
+    payload: TakeawayImportDryRun,
+    current: TokenData = Depends(require_permission("takeaway.import.dry_run")),
+) -> dict[str, Any]:
+    report = validate_takeaway_import_package(
+        manifest=payload.manifest,
+        mapping=payload.mapping,
+        records=payload.records,
+        expected_company_id=current.company_id,
+        expected_brand_id=current.brand_id,
+    )
+    return ok(report.as_dict())
+
+
+@router.post("/imports/synthetic-apply", status_code=status.HTTP_201_CREATED)
+async def apply_synthetic_import(
+    payload: TakeawayImportDryRun,
+    current: TokenData = Depends(require_permission("takeaway.import.apply")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    batch, replayed = await TakeawayImportService(db, current).apply_synthetic(
+        manifest=payload.manifest,
+        mapping=payload.mapping,
+        records=payload.records,
+    )
+    return ok(batch, {"idempotent_replay": replayed, "synthetic_only": True})

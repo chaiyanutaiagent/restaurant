@@ -2,7 +2,7 @@
 
 วันที่จัดทำ: 2026-09-11
 
-สถานะ: **discovery_only — รอ Restaurant Completion Gate**
+สถานะ: **implemented_dark_launch — รอ field UAT และ activation gate**
 
 Source baseline: `/Users/user/Projects/erp-pos-run` commit `15a1de1`
 
@@ -110,14 +110,15 @@ Target baseline: `/Users/user/Projects/restaurant` commit `27c9c10`
 | Historical sale/shift/order | immutable archive batch | ไม่กระทบ running document number |
 | Receipt image/brand artwork | import เฉพาะไฟล์ที่ได้รับอนุญาต | scan file type/size และไม่ย้าย secret |
 
-## ช่องว่างสำคัญก่อนเริ่ม Coding
+## ข้อตกลงรอบ Dark Launch และสิ่งที่ต้องตัดสินใจก่อน Activation
 
-1. ต้องอนุมัติว่า release แรกใช้ web/PWA เท่านั้นหรือรวม native Android ภายหลัง
-2. ต้องกำหนด policy ของ extra/correction order หลังส่งใบรายวัน
-3. ต้องกำหนดว่าร้านใดใช้ KDS/Pickup display และร้านใดเป็น paid-first แบบจบที่ counter
-4. ต้องกำหนด opening stock/credit date และผู้ลงนามกระทบยอด
-5. ต้องยืนยันว่ากองวัตถุดิบร่วมอยู่ภายใน Takeaway หลายแบรนด์เท่านั้น; หากแชร์ข้าม
-   Restaurant/Retail ต้องออกแบบ Inventory Service แยกและห้ามทำ SQL join ข้ามฐาน
+1. release แรกใช้ web/PWA และ paired device; native Android เลื่อนไปหลัง field UAT
+2. รองรับ `regular`, `extra`, `correction` โดยเก็บเหตุผลและไม่แก้ snapshot เดิม
+3. paid-first เป็นค่าเริ่มต้น; KDS/Pickup เปิดตาม workspace/permission ของสาขา
+4. opening stock/credit date, real Chambo snapshot และผู้ลงนามกระทบยอดต้องอนุมัติก่อน import จริง
+5. กองวัตถุดิบร่วมรองรับหลายแบรนด์ภายใน Company ของ Takeaway เท่านั้น หากแชร์ข้าม
+   Restaurant/Retail ต้องออกแบบ Inventory Service แยกและห้าม SQL join ข้ามฐาน
+6. physical tablet/printer/network/offline field UAT และ production owner sign-off ยัง pending
 
 ## Definition of Done ของ Capability Matrix
 
@@ -127,3 +128,5 @@ Target baseline: `/Users/user/Projects/restaurant` commit `27c9c10`
 - [x] ระบุ reuse/adapt/rebuild/exclude/defer ต่อ capability
 - [x] ระบุ test evidence ขั้นต่ำ
 - [x] ไม่แก้ source repository และไม่เปิด runtime
+
+Implementation evidence: `P6-TAKEAWAY-IMPLEMENTATION-06.md`

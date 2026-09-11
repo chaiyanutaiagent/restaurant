@@ -2,7 +2,11 @@
 
 วันที่จัดทำ: 2026-09-11
 
-สถานะ: **architecture_draft — ห้าม activate ก่อน Restaurant Completion Gate**
+สถานะ: **implemented_dark_launch — feature ปกติปิดและยังไม่ deploy**
+
+Owner อนุมัติเมื่อ 11 กันยายน 2026 ให้ implement ระหว่างพัก physical UAT ได้เฉพาะแบบ
+dark launch การเปิด feature, UAT/Production deployment, real Chambo import และ cutover
+ยังต้องผ่าน Restaurant Completion Gate และอนุมัติแยกต่างหาก
 
 เอกสารที่เกี่ยวข้อง:
 
@@ -10,6 +14,7 @@
 - `P6-TAKEAWAY-CAPABILITY-MATRIX-02.md`
 - `P6-CHAMBO-DATA-CONTRACT-04.md`
 - `P6-CHAMBO-DRY-RUN-05.md`
+- `P6-TAKEAWAY-IMPLEMENTATION-06.md`
 - `P1-DATABASE-BOUNDARY-03.md`
 - `P4-SALE-HANDOFF-03.md`
 
@@ -23,16 +28,16 @@
 6. Chambo เป็น migration source/reference ไม่ใช่ runtime dependency ของ Foodchainservice
 7. เปิด Takeaway session factory ได้ต่อเมื่อ URL, migration head, readiness และ feature flag พร้อม
 
-## Runtime Boundary Draft
+## Runtime Boundary
 
 ### Configuration
 
-เสนอเพิ่มค่าต่อไปนี้หลัง Gate:
+ค่าที่ implement แล้ว:
 
 ```text
 TAKEAWAY_DATABASE_URL=<required explicit URL>
 TAKEAWAY_SERVICE_DATABASE=disabled|takeaway
-TAKEAWAY_REFERENCE_PROJECTOR_ENABLED=false|true
+REFERENCE_PROJECTOR_ENABLED=false|true
 TAKEAWAY_FEATURE_ENABLED=false|true
 ```
 
@@ -168,51 +173,43 @@ adjustment entry พร้อมเหตุผลและ approval ห้า�
 | `takeaway_import_batches` | dry-run/execute/result ของ Chambo import | source hash+contract version+status |
 | `takeaway_import_issues` | mapping/validation/reconciliation issue | issue ต้อง resolve/accept ก่อน execute |
 
-## Permission Namespace Draft
+## Permission Namespace
 
-ห้ามใช้ `brand.store.*` หรือ `fb.*` เป็น authorization หลักของ Takeaway ใหม่ เสนอ permission:
+ห้ามใช้ `brand.store.*` หรือ `fb.*` เป็น authorization หลักของ Takeaway ใหม่ ชุด permission
+ที่ใช้งานจริงในรอบ dark launch คือ:
 
 ```text
-takeaway.brand.manage
-takeaway.menu.view
-takeaway.menu.manage
-takeaway.store.order.create
-takeaway.store.order.view
-takeaway.store.shift.open
-takeaway.store.shift.close
-takeaway.store.replenishment.submit
-takeaway.store.delivery.receive
-takeaway.store.stock.view
-takeaway.store.stock.adjust
-takeaway.kitchen.view
+takeaway.catalog.view
+takeaway.catalog.manage
+takeaway.sale.view
+takeaway.sale.create
+takeaway.sale.refund
+takeaway.shift.manage
 takeaway.kitchen.manage
-takeaway.pickup.view
-takeaway.pickup.handoff
-takeaway.central.order.view
-takeaway.central.order.manage
-takeaway.central.production.view
-takeaway.central.production.manage
-takeaway.central.stock.view
-takeaway.central.stock.manage
-takeaway.central.credit.view
-takeaway.central.credit.manage
+takeaway.pickup.manage
+takeaway.central_order.create
+takeaway.central_order.manage
+takeaway.production.manage
+takeaway.stock.view
+takeaway.stock.manage
+takeaway.transfer.manage
+takeaway.credit.manage
 takeaway.report.view
-takeaway.device.pair
-takeaway.settings.manage
+takeaway.import.dry_run
+takeaway.import.apply
+takeaway.erp.export
+takeaway.erp.acknowledge
 ```
 
-Role preset ขั้นต้น:
+Role preset ที่เชื่อมกับ Control Plane:
 
 | Role | Scope | Permission หลัก |
 | --- | --- | --- |
-| `takeaway_owner` | Company | ทุก Takeaway permission ยกเว้น platform-only operation |
-| `takeaway_brand_manager` | Brand | menu/central/report/settings และ store view |
-| `takeaway_central_manager` | Brand/Central location | order/production/stock/credit manage |
-| `takeaway_store_manager` | Branch | order/shift/replenishment/receive/stock/report |
-| `takeaway_store_cashier` | Branch/Counter | order create/view และ shift open/close |
-| `takeaway_store_receiver` | Branch | delivery receive และ stock view |
-| `takeaway_kitchen_staff` | Branch/Station | kitchen view/manage |
-| `takeaway_pickup_staff` | Branch/Station | pickup view/handoff |
+| `company-owner` | Company | ทุก Takeaway permission ตาม owner policy |
+| `brand-manager` | Brand | catalog/central/production/stock/credit/report/ERP |
+| `branch-manager` | Branch | sale/shift/pickup/central request/stock/transfer/report |
+| `cashier` | Branch/Station | catalog view, sale create/view, shift และ pickup |
+| `kitchen-staff` | Station | kitchen manage |
 
 Manager override ต้องเป็น approval session แบบหมดอายุเร็วและเก็บ actor/reason ไม่ส่ง PIN
 หรือ credential เข้า operational event
@@ -224,7 +221,7 @@ Manager override ต้องเป็น approval session แบบหมดอ
 ```json
 {
   "event_id": "uuid",
-  "event_type": "takeaway.sale.completed.v1",
+  "event_type": "takeaway.sale.paid.v1",
   "schema_version": 1,
   "occurred_at": "ISO-8601 UTC",
   "idempotency_key": "stable-source-key",
@@ -243,32 +240,42 @@ Payload ห้ามมี access token, password, PIN, full payment credential 
 
 | Event | สร้างเมื่อ | Consumer หลัก | Idempotency |
 | --- | --- | --- | --- |
-| `takeaway.sale.completed.v1` | payment และ stock issue สำเร็จ | Accounting/Consolidated Report | sale ID |
-| `takeaway.sale.voided.v1` | void/refund ที่อนุมัติ | Accounting/Report | void document ID |
+| `takeaway.sale.paid.v1` | payment และ stock issue สำเร็จ | Accounting/Consolidated Report | sale ID |
+| `takeaway.sale.refunded.v1` | refund ที่อนุมัติ | Accounting/Report | refund key |
 | `takeaway.shift.closed.v1` | ปิดรอบขาย | Operational Report | shift round ID |
 | `takeaway.central_order.submitted.v1` | ส่งใบ regular/extra/correction | Central/Report | central order ID+revision |
 | `takeaway.production.completed.v1` | complete batch และลง stock | Costing/Report | production batch ID |
-| `takeaway.transfer.shipped.v1` | ตัด central ไป transit | Inventory/Report | transfer ID+ship revision |
-| `takeaway.transfer.received.v1` | สาขารับและลง store stock | Inventory/Report | transfer ID+receive revision |
-| `takeaway.credit.captured.v1` | จัดส่งแฟรนไชส์และตัดเครดิต | Accounting/Report | credit ledger entry ID |
+| `takeaway.stock.moved.v1` | stock ledger เปลี่ยนจาก operation ที่อนุมัติ | Inventory/Report | movement ID |
+| `takeaway.order.ready.v1` | Kitchen ทำครบทุก ticket | Queue/Pickup | order ID |
+| `takeaway.order.picked_up.v1` | ส่งมอบสินค้า | Queue/Report | order ID |
+| `takeaway.credit.changed.v1` | เครดิตเปลี่ยนจาก entry ที่อนุมัติ | Accounting/Report | credit entry ID |
 
 ทุก event ถูกสร้างใน transaction เดียวกับ source document/movement/ledger และ consumer
 ต้องเก็บ processed event ID ก่อน side effect เพื่อ replay โดยไม่ทำรายการซ้ำ
 
 ## API และ Route Boundary
 
-Canonical UI:
+Canonical UI ที่ implement แล้ว:
 
 ```text
-/app/takeaway/brands
-/app/takeaway/:brandSlug
-/app/takeaway/:brandSlug/branches/:branchId/counter
-/app/takeaway/:brandSlug/branches/:branchId/kitchen
-/app/takeaway/:brandSlug/branches/:branchId/pickup
-/app/takeaway/:brandSlug/branches/:branchId/settings
+/takeaway
+/takeaway/counter
+/takeaway/kitchen
+/takeaway/pickup
+/takeaway/central-orders
+/takeaway/production
+/takeaway/stock
+/takeaway/transfers
+/takeaway/credits
+/takeaway/reports
+/takeaway/import
+/takeaway/erp
+/takeaway/order/:token
+/takeaway/pickup-status/:token
 ```
 
-Canonical API prefix เสนอเป็น `/api/v1/takeaway`. Public QR API ต้องแยก prefix/token audience
+Canonical API prefix คือ `/api/v1/takeaway` และ public QR API คือ `/api/public/takeaway`.
+Public QR API แยก token audience
 จาก Restaurant และ resolve Company/Brand/Branch จาก server-side token record เท่านั้น
 
 Legacy Chambo route อาจมีได้เฉพาะ redirect หลัง migration mapping ผ่านและต้องไม่กลายเป็น
@@ -296,10 +303,20 @@ default brand selector ของ SaaS
 6. เพิ่ม franchise credit และ consolidated reporting
 7. ทำ Chambo dry-run importer, reconciliation, isolated restore และ UAT
 
-## สิ่งที่ยังไม่ถูก Implement ในเอกสารนี้
+## Implementation Update — 11 กันยายน 2026
 
-- ไม่มี `TAKEAWAY_DATABASE_URL` ใน application config
-- ไม่มี Takeaway engine/session/router/model/migration
-- ไม่มี Takeaway feature flag หรือ entitlement ถูกเปิด
-- ไม่มี Chambo data ถูกอ่านจาก production/export/import
-- ไม่มี UAT/production deployment หรือ server mutation
+- มี config, engine/session, fail-closed readiness, router, model และ Alembic chain แยกถึง
+  `p6takeaway0004`
+- มี operational model 30 ชนิด ครอบคลุม reference, catalog/recipe, shift/order/payment/receipt,
+  ordering/pickup token, kitchen, central/production, stock/transfer, credit, outbox และ import archive
+- public ordering token เก็บเฉพาะ hash, จำกัดอายุ/rate และไม่ใช้เลขออเดอร์เป็น secret; pickup status
+  ใช้ token เฉพาะออเดอร์ที่สร้างจาก server secret
+- customer QR order อยู่สถานะรอชำระและยังไม่ส่งครัว/ตัด stock จนพนักงาน capture payment
+- device pairing/workspace รองรับ Takeaway context โดยไม่เปิด Restaurant operational session
+- Chambo importer ผ่าน synthetic fixture, hash/idempotency/reconciliation และยืนยันว่า historical
+  import ไม่สร้าง payment/ERP/notification side effect
+- backup แยก `platform-core.dump`, `restaurant.dump`, `takeaway.dump` พร้อม SHA-256 และ restore
+  ไปฐาน isolated ผ่านแล้ว
+- ไม่มีการอ่าน/import Chambo production, ไม่มี UAT/Production deployment และ feature ปกติยังปิด
+
+หลักฐานรวมอยู่ใน `P6-TAKEAWAY-IMPLEMENTATION-06.md`

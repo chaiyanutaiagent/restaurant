@@ -2,7 +2,7 @@
 
 วันที่จัดทำ: 2026-09-11
 
-สถานะ: **test_plan — ยังไม่รันกับ production data**
+สถานะ: **synthetic_validated — ยังไม่รันกับ production data**
 
 ## เป้าหมาย
 
@@ -202,6 +202,7 @@ storage ใน Git เก็บได้เฉพาะ template, schema แล�
 - [x] กำหนด equality/tolerance ของเงิน ปริมาณ Stock และเครดิต
 - [x] มี idempotency rehearsal และ side-effect isolation
 - [x] source/UAT/production ไม่เปลี่ยนจากการจัดทำแผนนี้
-- [ ] synthetic fixture ผ่าน validator/importer หลัง implement
+- [x] synthetic fixture ผ่าน validator/importer หลัง implement โดย import รอบสองไม่เพิ่มข้อมูล,
+  opening stock/credit ตรง และ historical side effect เท่ากับศูนย์
 - [ ] approved Chambo snapshot ผ่าน dry-run หลัง Restaurant Completion Gate
 - [ ] owner ลงนาม migration/cutover แยกต่างหาก

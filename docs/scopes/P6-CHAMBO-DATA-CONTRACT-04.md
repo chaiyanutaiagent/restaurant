@@ -2,7 +2,7 @@
 
 วันที่จัดทำ: 2026-09-11
 
-สถานะ: **contract_draft — ยังไม่ export production data**
+สถานะ: **synthetic_contract_implemented — ยังไม่ export production data**
 
 Source baseline: `/Users/user/Projects/erp-pos-run` commit `15a1de1`
 
@@ -218,4 +218,5 @@ scripts/import-takeaway-dry-run.sh \
 - [x] รองรับหลาย Company/Brand/Branch และ stock item ร่วมหลายแบรนด์
 - [x] มี machine-readable JSON Schema
 - [ ] schema ผ่าน owner/data/privacy review
-- [ ] exporter/validator/importer ถูก implement หลัง Restaurant Completion Gate
+- [x] validator และ synthetic importer ถูก implement พร้อม hash/idempotency/reconciliation
+- [ ] real exporter, approved Chambo snapshot และ production-derived dry-run รอ Restaurant Completion Gate

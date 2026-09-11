@@ -2,7 +2,10 @@
 
 วันที่จัดทำ: 2026-09-11
 
-สถานะ: **discovery_only — รอ Restaurant Completion Gate**
+สถานะ: **discovery_complete — implementation เดินหน้าตาม owner dark-launch exception**
+
+เอกสารนี้คงไว้เป็น baseline การสำรวจ ส่วนสถานะ implementation ปัจจุบันดูที่
+`P6-TAKEAWAY-IMPLEMENTATION-06.md`; activation ยังรอ Restaurant Completion Gate
 
 Source reference: `/Users/user/Projects/erp-pos-run` commit `15a1de1`
 
@@ -179,7 +182,7 @@ staff scope และ device binding ห้ามใช้ Restaurant router เ
 
 - accounting/reporting outbox contract และ replay/dead-letter handling
 - tenant/brand/branch isolation, role/device security และ lost-ack tests
-- QR → Order → Kitchen → Pickup → Payment → Stock/Credit → ERP reconciliation
+- QR → Order → Payment → Kitchen → Pickup → Receipt/Stock/Credit → ERP reconciliation
 - Takeaway backup/restore และ Restaurant/Retail regression
 
 ## Gate ก่อนเริ่ม implement

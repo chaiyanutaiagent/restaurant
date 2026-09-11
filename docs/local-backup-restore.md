@@ -60,15 +60,17 @@ COMPOSE_PROJECT_NAME=restaurant-pos-local-drill docker compose -f docker-compose
 ## Phase 1 Database Boundary Backup
 
 After running `./scripts/setup-local-database-boundary.sh`, create independent
-Platform and Restaurant dumps with:
+Platform, Restaurant and Takeaway dumps with:
 
 ```sh
 ./scripts/backup-local-database-boundary.sh
 ```
 
-This produces `platform-core.dump` and `restaurant.dump`; it intentionally does
-not replace the legacy full backup above while data cutover is pending. Verify a
-backup by restoring both dumps into isolated drill databases:
+This produces `platform-core.dump`, `restaurant.dump` and `takeaway.dump` plus
+SHA-256 values in `manifest.txt`; it intentionally does not replace the legacy
+full backup above while data cutover is pending. Dump and manifest permissions are
+set to owner-only. Verify a backup by checking checksums and restoring all three
+dumps into isolated drill databases:
 
 ```sh
 BOUNDARY_DRILL_SUFFIX=verify01 BOUNDARY_DRILL_CLEANUP=1 \

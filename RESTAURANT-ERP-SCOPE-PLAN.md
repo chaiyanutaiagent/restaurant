@@ -766,7 +766,10 @@ Restaurant ถือว่าเสร็จสำหรับเริ่ม Ph
 สถานะ physical/visual UAT: **deferred by owner until hardware arrives**; automated dine-in/takeaway chain
 ผ่านแล้ว แต่ยังไม่ใช้แทนการทดสอบ `ครัวป่า ปลาเขื่อน` บนอุปกรณ์จริงและไม่ใช้แทน owner sign-off
 
-หาก Gate ข้อใดไม่ผ่าน ห้ามเริ่ม Phase 6 แม้งาน Takeaway จะดูเหมือนใช้เวลาไม่นาน
+ข้อยกเว้นจาก Owner เมื่อ 11 กันยายน 2026: อนุญาตให้พัฒนา Phase 6 แบบ **dark launch**
+ระหว่างพัก physical UAT ได้ โดยต้องคง `TAKEAWAY_FEATURE_ENABLED=false` ใน runtime ปกติ,
+ไม่ deploy UAT/Production, ไม่อ่านหรือนำเข้าข้อมูล Chambo จริง และไม่ถือว่าแทน Restaurant
+Completion Gate หรือ owner sign-off งาน activation/cutover ยังถูกบล็อกด้วย Gate เดิม
 
 ### Phase 6 — Takeaway System (หลัง Restaurant เสร็จเท่านั้น)
 
@@ -786,13 +789,21 @@ Restaurant ถือว่าเสร็จสำหรับเริ่ม Ph
 
 Acceptance Criteria:
 
-- [ ] สร้าง Takeaway Company/Brand/Branch ได้โดยไม่แก้ source code หรือ SQL
-- [ ] Takeaway branch เปิด Restaurant/Retail operational API ไม่ได้
-- [ ] QR → Order → Kitchen → Pickup → Bill → Payment → ERP report ผ่าน
-- [ ] Takeaway order/stock/payment records อยู่ใน Takeaway Database เท่านั้น
-- [ ] Takeaway Database backup/restore และ migration ทำงานแยกจาก Restaurant/Retail
-- [ ] ข้อมูล Takeaway แยก Company/Brand/Branch และผ่าน cross-tenant test
-- [ ] Restaurant เดิมและ Retail POS regression ผ่านหลังเพิ่ม Takeaway system
+- [x] สร้าง Takeaway Company/Brand/Branch ได้โดยไม่แก้ source code หรือ SQL
+- [x] Takeaway branch เปิด Restaurant/Retail operational API ไม่ได้
+- [x] QR → Order → Payment → Kitchen → Pickup → Receipt → ERP event ผ่านแบบ automated
+- [x] Takeaway order/stock/payment records อยู่ใน Takeaway Database เท่านั้น
+- [x] Takeaway Database backup/restore และ migration ทำงานแยกจาก Restaurant/Retail
+- [x] ข้อมูล Takeaway แยก Company/Brand/Branch และผ่าน cross-tenant test
+- [x] Restaurant เดิมและ Retail POS regression ผ่านหลังเพิ่ม Takeaway system
+
+Progress record: `P6-TAKEAWAY-IMPLEMENTATION-06` ทำ Takeaway แบบ dark launch ครบตั้งแต่
+database/migration แยก, reference projection, `takeaway.*` permission, Counter/QR/Kitchen/Pickup,
+paid-first payment, shift, central order/production, shared stock/transfer, credit, report, ERP outbox,
+device workspace และ synthetic Chambo importer โดย backend `251` tests, frontend type-check/build,
+end-to-end smoke, import idempotency และ checksum backup/isolated restore drill ผ่านเมื่อ 11 กันยายน 2026
+ทั้งนี้ feature ปกติยังปิด ไม่มี UAT/Production deployment และ real Chambo migration, physical
+tablet/printer/offline field UAT, activation/cutover และ owner sign-off ยัง pending
 
 ไม่รวม: Delivery fleet, marketplace, aggregator integration และ native app
 

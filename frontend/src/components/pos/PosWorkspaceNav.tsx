@@ -21,7 +21,7 @@ type WorkspaceItem = {
   label: string;
   path: string;
   icon: typeof Store;
-  active: (pathname: string) => boolean;
+  active: (pathname: string, search: string) => boolean;
   visible: boolean;
 };
 
@@ -33,6 +33,7 @@ export default function PosWorkspaceNav({
   const location = useLocation();
   const navigate = useNavigate();
   const hasPermission = useAuthStore((state) => state.hasPermission);
+  const canCreatePosSale = hasPermission("pos.sale.create");
   const canCreateRestaurantOrder = hasPermission("fb.order.create");
   const canManageRestaurantTables = hasPermission("fb.table.manage");
   const canViewKitchen = hasPermission("fb.kitchen.ticket.manage") || hasPermission("fb.kitchen.manage");
@@ -43,8 +44,8 @@ export default function PosWorkspaceNav({
       label: "ขายหน้าร้าน",
       path: "/pos",
       icon: Store,
-      active: (pathname) => pathname === "/pos",
-      visible: hasPermission("pos.sale.create"),
+      active: (pathname, search) => pathname === "/pos" && new URLSearchParams(search).get("channel") !== "takeaway",
+      visible: canCreatePosSale,
     },
     {
       label: "เปิดโต๊ะ + QR",
@@ -55,9 +56,10 @@ export default function PosWorkspaceNav({
     },
     {
       label: "รับกลับ",
-      path: "/restaurant/wap",
+      path: canCreatePosSale ? "/pos?channel=takeaway" : "/restaurant/wap/legacy",
       icon: ShoppingBag,
-      active: (pathname) => pathname === "/restaurant/wap",
+      active: (pathname, search) => pathname === "/restaurant/wap/legacy"
+        || (pathname === "/pos" && new URLSearchParams(search).get("channel") === "takeaway"),
       visible: canCreateRestaurantOrder,
     },
     {
@@ -99,7 +101,7 @@ export default function PosWorkspaceNav({
         </span>
         {items.slice(0, 3).filter((item) => item.visible).map((item) => {
           const Icon = item.icon;
-          const isActive = item.active(location.pathname);
+          const isActive = item.active(location.pathname, location.search);
           return (
             <button
               key={item.path}
@@ -132,7 +134,7 @@ export default function PosWorkspaceNav({
         ) : null}
         {items.slice(3).filter((item) => item.visible).map((item) => {
           const Icon = item.icon;
-          const isActive = item.active(location.pathname);
+          const isActive = item.active(location.pathname, location.search);
           return (
             <button
               key={item.path}

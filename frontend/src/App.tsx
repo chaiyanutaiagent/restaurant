@@ -93,10 +93,18 @@ import TenantBillingPage from "@/pages/billing/TenantBillingPage";
 import TenantPrivacySupportPage from "@/pages/support/TenantPrivacySupportPage";
 import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
 import { useEffect } from "react";
+import { useAuthStore } from "@/stores/auth.store";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } }
 });
+
+function RestaurantTakeawayEntry(): JSX.Element {
+  const hasPermission = useAuthStore((state) => state.hasPermission);
+  return hasPermission("pos.sale.create")
+    ? <Navigate to="/pos?channel=takeaway" replace />
+    : <Navigate to="/restaurant/wap/legacy" replace />;
+}
 
 export default function App(): JSX.Element {
   useEffect(() => {
@@ -334,7 +342,8 @@ export default function App(): JSX.Element {
                 <Route path="/restaurant/tables" element={<TableMapPage />} />
               </Route>
               <Route element={<ProtectedRoute permission="fb.order.create" />}>
-                <Route path="/restaurant/wap" element={<WapOrderPage />} />
+                <Route path="/restaurant/wap" element={<RestaurantTakeawayEntry />} />
+                <Route path="/restaurant/wap/legacy" element={<WapOrderPage />} />
                 <Route path="/restaurant/close-shift" element={<WapShiftClosePage />} />
                 <Route path="/restaurant/orders" element={<FBOrdersPage />} />
                 <Route path="/restaurant/session/:sessionId/checkout" element={<SessionCheckoutPage />} />

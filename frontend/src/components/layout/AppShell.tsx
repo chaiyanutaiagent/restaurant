@@ -23,6 +23,7 @@ const titleMap: Record<string, string> = {
   "/restaurant/admin": "Restaurant Admin",
   "/restaurant/brands": "แบรนด์ร้านอาหาร",
   "/restaurant/wap": "ขายหน้าร้าน / กลับบ้าน",
+  "/restaurant/wap/legacy": "รับกลับ (โหมดสำรอง)",
   "/restaurant/close-shift": "ปิดกะร้านอาหาร",
   "/restaurant/tables": "แผนที่โต๊ะ",
   "/restaurant/orders": "ออเดอร์ร้านอาหาร",
@@ -40,6 +41,7 @@ export default function AppShell({ workspace = "admin" }: AppShellProps): JSX.El
   const isPosWorkspace = location.pathname === "/crm"
     || location.pathname === "/restaurant/tables"
     || location.pathname === "/restaurant/wap"
+    || location.pathname === "/restaurant/wap/legacy"
     || location.pathname === "/restaurant/orders"
     || location.pathname.startsWith("/restaurant/session/");
 

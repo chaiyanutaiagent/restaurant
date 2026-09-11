@@ -150,7 +150,8 @@ function buildLocalOrder(
       special_request: item.special_request ?? null,
     };
   });
-  const totalAmount = Number(payload.paid_amount || 0);
+  const totalAmount = items.reduce((sum, item) => sum + Number(item.unit_price) * item.qty, 0);
+  const paidAmount = Number(payload.paid_amount || 0);
   return {
     session_id: `local-session:${payload.client_order_id}`,
     order_id: `local-order:${payload.client_order_id}`,
@@ -165,8 +166,8 @@ function buildLocalOrder(
     customer_phone: payload.customer_phone ?? null,
     subtotal: totalAmount,
     total_amount: totalAmount,
-    paid_amount: totalAmount,
-    change_amount: 0,
+    paid_amount: paidAmount,
+    change_amount: Math.max(paidAmount - totalAmount, 0),
     payment_method: payload.payment_method,
     customer_slip_printed_at: null,
     kitchen_slip_printed_at: null,

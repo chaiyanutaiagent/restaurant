@@ -122,7 +122,7 @@ const fbItems: NavItem[] = [
 
 const fbSubItems: NavItem[] = [
   { label: "แบรนด์ร้านอาหาร", to: "/restaurant/brands", icon: Store, permission: "fb.settings.manage" },
-  { label: "ขายหน้าร้าน", to: "/restaurant/wap", icon: ShoppingCart, permission: "fb.order.create" },
+  { label: "ขาย / รับกลับ", to: "/restaurant/wap", icon: ShoppingCart, permission: "fb.order.create" },
   { label: "ออเดอร์", to: "/restaurant/orders", icon: ClipboardList, permission: "fb.order.create" },
   { label: "โต๊ะ", to: "/restaurant/tables", icon: Table2, permission: "fb.table.manage", feature: "tables" },
   { label: "ครัว", to: "/restaurant/kitchen", icon: ChefHat, permissions: ["fb.kitchen.ticket.manage", "fb.kitchen.manage"] },

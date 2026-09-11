@@ -54,8 +54,8 @@ export default function RestaurantIndexPage(): JSX.Element {
       to: "/restaurant/wap",
       permission: "fb.order.create",
       icon: <ShoppingBag className="h-7 w-7" />,
-      title: "ขายหน้าร้าน / กลับบ้าน",
-      desc: "รับออเดอร์ ชำระเงิน และออกเลขคิว",
+      title: "ขาย / รับกลับใน POS",
+      desc: "ใช้หน้าขายเดียวกัน รับเงิน ออกเลขคิว และส่งเข้า KDS",
       color: "bg-emerald-600",
     },
     ...(hasTables ? [

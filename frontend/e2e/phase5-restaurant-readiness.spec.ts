@@ -154,9 +154,21 @@ test("mobile QR to tablet kitchen, checkout, and ERP report", async ({ browser, 
     await assertNoHorizontalOverflow(staff);
     await staff.screenshot({ path: `${artifactDir}/07-tablet-pos-workspace.png`, fullPage: true });
 
+    await staff.getByRole("button", { name: "รับกลับ" }).click();
+    await expect(staff).toHaveURL(/\/pos\?channel=takeaway$/);
+    await expect(staff.getByRole("button", { name: "รับกลับ" })).toHaveAttribute("aria-current", "page");
+    await expect(staff.getByText("โหมดรับกลับ — รับเงิน ออกเลขคิว และส่งรายการเข้า KDS")).toBeVisible();
+    await expect(staff.getByRole("heading", { name: "ตะกร้ารับกลับ" })).toBeVisible();
+    await expect.poll(async () => staff.getByTestId("pos-category-panel").locator("button").count()).toBeGreaterThan(1);
+    await assertNoHorizontalOverflow(staff);
+    await staff.screenshot({ path: `${artifactDir}/09-takeaway-workspace-theme.png`, fullPage: true });
+
+    await staff.goto("/restaurant/wap");
+    await expect(staff).toHaveURL(/\/pos\?channel=takeaway$/);
+    await expect(staff.getByRole("button", { name: "รับกลับ" })).toHaveAttribute("aria-current", "page");
+
     const operationalWorkspaces = [
       { path: uat.browser_paths.tables, active: "เปิดโต๊ะ + QR", heading: "แผนที่โต๊ะ", screenshot: "08-table-workspace-theme.png" },
-      { path: "/restaurant/wap", active: "รับกลับ", heading: "เมนูขายหน้าร้าน", screenshot: "09-takeaway-workspace-theme.png" },
       { path: "/restaurant/orders", active: "ออเดอร์ QR", heading: "ออเดอร์ทั้งหมด", screenshot: "10-order-workspace-theme.png" },
       { path: "/crm", active: "ลูกค้า", heading: "ลูกค้า", screenshot: "11-customer-workspace-theme.png" },
     ];

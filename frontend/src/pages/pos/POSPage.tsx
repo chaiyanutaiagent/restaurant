@@ -2,21 +2,26 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import {
   Activity,
+  AlertTriangle,
   ArrowLeft,
   Camera,
+  ChefHat,
   ClipboardList,
+  CloudUpload,
   LayoutGrid,
   LayoutList,
   Loader2,
   MonitorCog,
+  Printer,
   Search,
+  ShoppingBag,
   ShoppingCart,
   TabletSmartphone,
   UserRoundCheck,
   WifiOff,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -37,7 +42,18 @@ import {
 import { db } from "@/lib/db";
 import { posApi } from "@/lib/posApi";
 import { productApi } from "@/lib/productApi";
+import {
+  getQueuedRestaurantOrder,
+  getRestaurantOutboxSummary,
+  loadRestaurantMenu,
+  markRestaurantLocalSlip,
+  queueRestaurantOrder,
+  retryRestaurantNeedsReview,
+  syncRestaurantPendingOrders,
+  type RestaurantOutboxSummary,
+} from "@/lib/restaurantOffline";
 import { syncPendingSales, syncProductCatalog, syncStockBalances, useOfflineProducts, useOnlineStatus } from "@/lib/syncService";
+import { wapApi, type WapOrder } from "@/lib/wapApi";
 import { useAuthStore } from "@/stores/auth.store";
 import { useDeviceStore } from "@/stores/device.store";
 import type { BranchReplacementRule, BranchSettings } from "@/types/admin";
@@ -51,6 +67,7 @@ import CloseShiftDialog from "@/pages/pos/CloseShiftDialog";
 import ReceiptView from "@/pages/pos/ReceiptView";
 import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
 import PosWorkspaceNav from "@/components/pos/PosWorkspaceNav";
+import TakeawayOrderSlip from "@/components/pos/TakeawayOrderSlip";
 import type { ApprovalAction } from "@/types/approval";
 
 const SHIFT_CACHE_KEY = "restaurant-pos-current-shift";
@@ -146,6 +163,14 @@ function tokenizeSearchTerms(value: string): string[] {
     .filter((item) => item.length >= 2);
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "response" in error) {
+    const response = (error as { response?: { data?: { detail?: string } } }).response;
+    if (response?.data?.detail) return response.data.detail;
+  }
+  return error instanceof Error ? error.message : "ทำรายการไม่สำเร็จ";
+}
+
 type ReplacementPlanEntry = {
   source: NonNullable<ExchangeContextDraft["source_items"]>[number];
   candidate: ProductListItem | null;
@@ -178,6 +203,8 @@ function getOrderStatusLabel(status: SaleOrder["status"]): string {
 
 export default function POSPage(): JSX.Element {
   const navigate = useNavigate();
+  const location = useLocation();
+  const isTakeawayMode = new URLSearchParams(location.search).get("channel") === "takeaway";
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const isOnline = useOnlineStatus();
@@ -228,6 +255,11 @@ export default function POSPage(): JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastOrder, setLastOrder] = useState<SaleOrder | null>(null);
+  const [takeawayOrder, setTakeawayOrder] = useState<WapOrder | null>(null);
+  const [takeawayResultOpen, setTakeawayResultOpen] = useState(false);
+  const [takeawayPrintBusy, setTakeawayPrintBusy] = useState<"customer" | "kitchen" | null>(null);
+  const [takeawayPendingPrint, setTakeawayPendingPrint] = useState<"customer" | "kitchen" | null>(null);
+  const [takeawayOutboxSummary, setTakeawayOutboxSummary] = useState<RestaurantOutboxSummary>({ pending: 0, syncing: 0, needsReview: 0 });
   const [closeShiftOpen, setCloseShiftOpen] = useState(false);
   const [confirm, ConfirmDialog] = useConfirm();
   const [heldBillsOpen, setHeldBillsOpen] = useState(false);
@@ -263,12 +295,16 @@ export default function POSPage(): JSX.Element {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const cashInputRef = useRef<HTMLInputElement | null>(null);
   const receiptRef = useRef<HTMLDivElement | null>(null);
+  const takeawayCustomerSlipRef = useRef<HTMLDivElement | null>(null);
+  const takeawayKitchenSlipRef = useRef<HTMLDivElement | null>(null);
   const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
   const scannerStreamRef = useRef<MediaStream | null>(null);
   const scannerFrameRef = useRef<number | null>(null);
   const autoPrintedOrderRef = useRef<string | null>(null);
   const offlineProducts = useOfflineProducts(searchTerm, catalogRevision);
   const handlePrint = useReactToPrint({ contentRef: receiptRef });
+  const printTakeawayCustomerSlip = useReactToPrint({ contentRef: takeawayCustomerSlipRef });
+  const printTakeawayKitchenSlip = useReactToPrint({ contentRef: takeawayKitchenSlipRef });
 
   const branchQuery = useQuery({
     queryKey: ["pos", "branches"],
@@ -309,6 +345,13 @@ export default function POSPage(): JSX.Element {
       return (await branchApi.getSettings(branchId)).data.data as BranchSettings;
     },
     enabled: Boolean(branchId) && isOnline,
+  });
+
+  const takeawayMenuQuery = useQuery({
+    queryKey: ["pos", "takeaway-menu", branchId],
+    queryFn: () => loadRestaurantMenu(),
+    enabled: isTakeawayMode && Boolean(branchId),
+    retry: false,
   });
 
   const onlineSearchQuery = useQuery({
@@ -440,6 +483,30 @@ export default function POSPage(): JSX.Element {
   }, [branchId, isOnline, queryClient]);
 
   useEffect(() => {
+    if (!isTakeawayMode) return;
+    let active = true;
+    void (async () => {
+      const summary = isOnline
+        ? await syncRestaurantPendingOrders().catch(() => getRestaurantOutboxSummary())
+        : await getRestaurantOutboxSummary();
+      if (!active) return;
+      setTakeawayOutboxSummary(summary);
+      if (isOnline) {
+        await takeawayMenuQuery.refetch();
+        if (takeawayOrder?.client_order_id) {
+          const resolved = await getQueuedRestaurantOrder(takeawayOrder.client_order_id);
+          if (active && resolved) setTakeawayOrder(resolved);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+    // Reconnect or entering Takeaway mode is the trigger; order/query updates must not loop the sync.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline, isTakeawayMode]);
+
+  useEffect(() => {
     if (!showReceipt || !lastOrder || !autoPrintReceipt || autoPrintedOrderRef.current === lastOrder.id) {
       return;
     }
@@ -449,6 +516,19 @@ export default function POSPage(): JSX.Element {
     }, 350);
     return () => window.clearTimeout(timeout);
   }, [autoPrintReceipt, handlePrint, lastOrder, showReceipt]);
+
+  useEffect(() => {
+    if (!takeawayPendingPrint || !takeawayOrder) return;
+    const timeout = window.setTimeout(() => {
+      if (takeawayPendingPrint === "customer") {
+        void printTakeawayCustomerSlip();
+      } else {
+        void printTakeawayKitchenSlip();
+      }
+      setTakeawayPendingPrint(null);
+    }, 150);
+    return () => window.clearTimeout(timeout);
+  }, [printTakeawayCustomerSlip, printTakeawayKitchenSlip, takeawayOrder, takeawayPendingPrint]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -473,7 +553,21 @@ export default function POSPage(): JSX.Element {
   const locations = locationsQuery.data ?? [];
   const categories = categoriesQuery.data ?? [];
   const stockBalances = stockBalancesQuery.data ?? [];
-  const products = (isOnline && searchTerm.trim().length > 0 ? onlineSearchQuery.data : offlineProducts) ?? [];
+  const baseProducts = (isOnline && searchTerm.trim().length > 0 ? onlineSearchQuery.data : offlineProducts) ?? [];
+  const takeawayMenuByProductId = useMemo(
+    () => new Map((takeawayMenuQuery.data?.products ?? []).map((product) => [product.id, product])),
+    [takeawayMenuQuery.data?.products],
+  );
+  const products = useMemo(() => {
+    if (!isTakeawayMode) return baseProducts;
+    if (!takeawayMenuQuery.data) return [];
+    return baseProducts
+      .filter((product) => takeawayMenuByProductId.get(product.id)?.is_available)
+      .map((product) => ({
+        ...product,
+        selling_price: Number(takeawayMenuByProductId.get(product.id)?.selling_price ?? product.selling_price),
+      }));
+  }, [baseProducts, isTakeawayMode, takeawayMenuByProductId, takeawayMenuQuery.data]);
   const stockByProduct = useMemo(
     () => new Map(stockBalances.map((item) => [`${item.product_id}:${item.variant_id ?? "base"}`, item])),
     [stockBalances],
@@ -489,6 +583,13 @@ export default function POSPage(): JSX.Element {
   }, [products, selectedCategory]);
 
   const cart = useMemo(() => calcCart(cartItems, orderDiscount, "amount"), [cartItems, orderDiscount]);
+  const takeawayExpectedTotal = useMemo(
+    () => roundMoney(cart.items.reduce((sum, item) => {
+      const menuProduct = takeawayMenuByProductId.get(item.product_id);
+      return sum + Number(menuProduct?.selling_price ?? item.unit_price) * Number(item.qty);
+    }, 0)),
+    [cart.items, takeawayMenuByProductId],
+  );
   const exchangeCreditAvailable = exchangeContext?.refund_amount ?? 0;
   const exchangeCreditApplied = useMemo(
     () => roundMoney(Math.min(exchangeCreditAvailable, Math.max(cart.total_amount - loyaltyDiscount, 0))),
@@ -499,7 +600,8 @@ export default function POSPage(): JSX.Element {
     [exchangeCreditApplied, exchangeCreditAvailable],
   );
   const totalDiscount = orderDiscount + loyaltyDiscount + exchangeCreditApplied;
-  const finalTotal = Math.max(cart.total_amount - loyaltyDiscount - exchangeCreditApplied, 0);
+  const standardFinalTotal = Math.max(cart.total_amount - loyaltyDiscount - exchangeCreditApplied, 0);
+  const finalTotal = isTakeawayMode ? takeawayExpectedTotal : standardFinalTotal;
   const secondaryAmount = Math.max(0, Math.min(secondaryPaymentAmount, finalTotal));
   const primaryDueAmount = Math.max(finalTotal - (splitPaymentEnabled ? secondaryAmount : 0), 0);
   const currentPaidAmount = useMemo(() => {
@@ -588,6 +690,13 @@ export default function POSPage(): JSX.Element {
       setOrderDiscount(maxDiscountAmount);
     }
   }, [branchSettingsQuery.data, cart.subtotal, orderDiscount]);
+
+  useEffect(() => {
+    if (!isTakeawayMode) return;
+    setOrderDiscount(0);
+    setLoyaltyDiscount(0);
+    setExchangeContext(null);
+  }, [isTakeawayMode]);
 
   useEffect(() => {
     if (paymentMethod === "promptpay" && promptPayAmount > 0) {
@@ -1163,6 +1272,7 @@ export default function POSPage(): JSX.Element {
       shift_id: currentShift.id,
       location_id: currentShift.location_id,
       branch_id: branchId ?? null,
+      sales_channel: isTakeawayMode ? "takeaway" : "walk_in",
       label: holdLabel.trim() || defaultLabel,
       items: cart.items,
       order_discount: orderDiscount,
@@ -1212,6 +1322,7 @@ export default function POSPage(): JSX.Element {
     setLoyaltyDiscount(draft.loyalty_discount);
     setNote(draft.note);
     setExchangeContext(draft.exchange_context ?? null);
+    navigate(draft.sales_channel === "takeaway" ? "/pos?channel=takeaway" : "/pos", { replace: true });
     await db.heldBills.delete(draft.id);
     await refreshHeldBills();
     setHeldBillsOpen(false);
@@ -1314,12 +1425,100 @@ export default function POSPage(): JSX.Element {
       toast({ title: "ชำระเงินสำเร็จ" });
   }
 
+  async function executeTakeawayCheckout(): Promise<void> {
+    if (!currentShift || !takeawayMenuQuery.data) {
+      throw new Error("ยังโหลดเมนูรับกลับและสิทธิ์ออฟไลน์ไม่สำเร็จ");
+    }
+    const result = await queueRestaurantOrder(undefined, {
+      items: cart.items.map((item) => ({
+        product_id: item.product_id,
+        qty: Number(item.qty),
+        special_request: null,
+      })),
+      payment_method: paymentMethod,
+      paid_amount: currentPaidAmount,
+      payments: checkoutPayments,
+      customer_name: customerName || selectedCustomer?.display_name || [selectedCustomer?.first_name, selectedCustomer?.last_name].filter(Boolean).join(" ") || null,
+      customer_phone: customerPhone || selectedCustomer?.phone || null,
+      customer_tax_id: customerTaxId || selectedCustomer?.tax_id || null,
+      note: note.trim() || null,
+      shift_id: currentShift.id,
+      location_id: currentShift.location_id,
+    }, takeawayMenuQuery.data);
+
+    setTakeawayOrder(result.order);
+    setTakeawayResultOpen(true);
+    resetActiveSale();
+    setTakeawayOutboxSummary(await getRestaurantOutboxSummary());
+    if (result.status === "synced") {
+      await syncStockBalances(branchId ?? undefined);
+      await queryClient.invalidateQueries({ queryKey: ["pos", "stock-balances"] });
+      toast({ title: "รับเงินและออกคิวสำเร็จ", description: `คิว ${result.order.queue_display ?? "-"} พร้อมพิมพ์สลิป` });
+    } else if (result.status === "needs_review") {
+      toast({ title: "เก็บรายการไว้แล้ว แต่ต้องตรวจสอบ", description: result.error ?? "ตรวจสอบกะ ราคา และสต๊อก", variant: "destructive" });
+    } else {
+      toast({ title: "บันทึกออเดอร์ในเครื่องแล้ว", description: `คิวออฟไลน์ ${result.order.queue_display ?? "-"} จะซิงก์อัตโนมัติ` });
+    }
+    if (result.order.recipe_stock_warnings?.length) {
+      toast({
+        title: "ออกคิวแล้ว แต่สต๊อกต้องตรวจสอบ",
+        description: result.order.recipe_stock_warnings.join(" · "),
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function handleTakeawaySlip(type: "customer" | "kitchen"): Promise<void> {
+    if (!takeawayOrder) return;
+    setTakeawayPrintBusy(type);
+    try {
+      const updated = takeawayOrder.client_order_id
+        ? await markRestaurantLocalSlip(takeawayOrder.client_order_id, type)
+        : type === "customer"
+          ? (await wapApi.markCustomerSlip(takeawayOrder.session_id)).data.data
+          : (await wapApi.markKitchenSlip(takeawayOrder.session_id)).data.data;
+      setTakeawayOrder(updated);
+      setTakeawayPendingPrint(type);
+      setTakeawayOutboxSummary(await getRestaurantOutboxSummary());
+      if (type === "kitchen") {
+        toast({ title: "ส่งเข้าครัวแล้ว", description: `คิว ${updated.queue_display ?? "-"} แสดงใน KDS แล้ว` });
+      }
+    } catch (error) {
+      toast({
+        title: type === "customer" ? "พิมพ์สลิปลูกค้าไม่ได้" : "ส่งออเดอร์เข้าครัวไม่ได้",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    } finally {
+      setTakeawayPrintBusy(null);
+    }
+  }
+
+  async function handleRetryTakeawayOutbox(): Promise<void> {
+    try {
+      await retryRestaurantNeedsReview();
+      const summary = await syncRestaurantPendingOrders();
+      setTakeawayOutboxSummary(summary);
+      toast({
+        title: summary.needsReview > 0 ? "ยังมีรายการต้องตรวจสอบ" : "ซิงก์รายการรับกลับแล้ว",
+        description: summary.latestError,
+        variant: summary.needsReview > 0 ? "destructive" : "default",
+      });
+    } catch (error) {
+      toast({ title: "ซิงก์รายการรับกลับไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    }
+  }
+
   async function handleCheckout(): Promise<void> {
     if (!currentShift || cart.items.length === 0) {
       return;
     }
     setIsSubmitting(true);
     try {
+      if (isTakeawayMode) {
+        await executeTakeawayCheckout();
+        return;
+      }
       if (!isOnline) {
         if (effectiveDiscountPct > cashierDiscountLimit && !canOverrideDiscount) {
           toast({
@@ -1558,6 +1757,9 @@ export default function POSPage(): JSX.Element {
     if (cart.items.length > 0 && !window.confirm(`มีสินค้าอยู่ในตะกร้า กรุณาพักบิลก่อนออกจากหน้าขาย\nต้องการไปที่ ${label} ต่อหรือไม่`)) {
       return;
     }
+    if (cart.items.length > 0 && path.startsWith("/pos")) {
+      resetActiveSale();
+    }
     navigate(path);
   }
 
@@ -1576,6 +1778,10 @@ export default function POSPage(): JSX.Element {
                   {currentShift.shift_number}
                 </span>
               ) : null}
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${isTakeawayMode ? "bg-orange-100 text-orange-700" : "bg-emerald-50 text-emerald-700"}`}>
+                {isTakeawayMode ? <ShoppingBag className="h-3.5 w-3.5" /> : null}
+                {isTakeawayMode ? "รับกลับ · ออกคิว/KDS" : "ขายหน้าร้าน"}
+              </span>
               {user ? (
                 <span className="hidden items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700 xl:inline-flex">
                   <UserRoundCheck className="h-3.5 w-3.5" /> ID {staffIdentifier}
@@ -1589,6 +1795,20 @@ export default function POSPage(): JSX.Element {
               <span className={`rounded-full px-2.5 py-0.5 font-medium ${isOnline ? "bg-blue-50 text-blue-700" : "bg-red-100 text-red-700"}`}>
                 {isOnline ? "●" : "○"} {isOnline ? "ONLINE" : "OFFLINE"}
               </span>
+              {isTakeawayMode && takeawayOutboxSummary.pending + takeawayOutboxSummary.syncing > 0 ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700">
+                  <CloudUpload className="h-3.5 w-3.5" /> รอส่ง {takeawayOutboxSummary.pending + takeawayOutboxSummary.syncing}
+                </span>
+              ) : null}
+              {isTakeawayMode && takeawayOutboxSummary.needsReview > 0 ? (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-0.5 font-medium text-red-700"
+                  onClick={() => void handleRetryTakeawayOutbox()}
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" /> ตรวจสอบ {takeawayOutboxSummary.needsReview}
+                </button>
+              ) : null}
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
               <Button size="sm" variant="outline" onClick={() => setRecentSalesOpen(true)} disabled={!currentShift}>
@@ -1656,6 +1876,26 @@ export default function POSPage(): JSX.Element {
                 </div>
               </div>
             </div>
+
+            {isTakeawayMode ? (
+              <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${takeawayMenuQuery.isError ? "border-red-200 bg-red-50 text-red-800" : "border-orange-200 bg-orange-50 text-orange-900"}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-semibold">โหมดรับกลับ — รับเงิน ออกเลขคิว และส่งรายการเข้า KDS</div>
+                    <div className="mt-1 text-xs opacity-80">
+                      {takeawayMenuQuery.isLoading
+                        ? "กำลังโหลดเมนูและสิทธิ์ออฟไลน์"
+                        : takeawayMenuQuery.isError
+                          ? "โหลดเมนูรับกลับไม่สำเร็จ กรุณากดโหลดใหม่ก่อนรับเงิน"
+                          : `พร้อมขาย ${takeawayMenuQuery.data?.products.filter((product) => product.is_available).length ?? 0} เมนู${isOnline ? "" : " · เก็บออเดอร์รอซิงก์ได้"}`}
+                    </div>
+                  </div>
+                  {takeawayMenuQuery.isError ? (
+                    <Button size="sm" variant="outline" onClick={() => void takeawayMenuQuery.refetch()}>โหลดใหม่</Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
               <nav data-testid="pos-category-panel" aria-label="หมวดสินค้า" className="shrink-0 rounded-2xl border border-white/80 bg-white/80 p-2 shadow-sm lg:w-40 lg:overflow-y-auto">
@@ -1942,7 +2182,7 @@ export default function POSPage(): JSX.Element {
           <aside data-testid="pos-cart-panel" className="flex w-full flex-col overflow-y-auto border-t border-slate-200/80 bg-white/92 backdrop-blur lg:h-full lg:w-[25rem] lg:max-h-none lg:border-l lg:border-t-0 xl:w-[28rem]">
             <div data-testid="pos-cart-header" className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-semibold text-slate-900">ตะกร้า</h2>
+                <h2 className="text-lg font-semibold text-slate-900">{isTakeawayMode ? "ตะกร้ารับกลับ" : "ตะกร้า"}</h2>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">{cart.items.length}</span>
                 <button
                   type="button"
@@ -2119,7 +2359,7 @@ export default function POSPage(): JSX.Element {
                         {item.variant_name ? <p className="text-xs text-slate-400">{item.variant_name}</p> : null}
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-1.5">
-                        {canOverrideDiscount ? (
+                        {canOverrideDiscount && !isTakeawayMode ? (
                           <button type="button" className="text-xs text-blue-500 hover:text-blue-700" onClick={() => openPriceEditor(item)}>
                             แก้
                           </button>
@@ -2159,12 +2399,14 @@ export default function POSPage(): JSX.Element {
                       type="number"
                       className="h-9 w-28 rounded-md border border-slate-300 bg-white px-2 text-right disabled:bg-slate-100 disabled:text-slate-400"
                       value={orderDiscount}
-                      disabled={!discountAllowed}
+                      disabled={isTakeawayMode || !discountAllowed}
                       onChange={(event) => handleOrderDiscountChange(Number(event.target.value))}
                     />
                   </div>
                   <div className="text-xs text-slate-500">
-                    {discountAllowed
+                    {isTakeawayMode
+                      ? "โหมดรับกลับใช้ราคาเมนูกลาง เพื่อให้ยอดขาย สต๊อก และ KDS ตรงกัน"
+                      : discountAllowed
                       ? canOverrideDiscount
                         ? "คุณมีสิทธิ์ override ส่วนลดได้"
                         : `ส่วนลดสูงสุด ${maxDiscountPct}% (${formatThaiCurrency(maxDiscountAmount)})`
@@ -2194,7 +2436,7 @@ export default function POSPage(): JSX.Element {
                   </div>
                 </div>
               </div>
-              {selectedCustomer && loyaltySettingsQuery.data?.enabled ? (
+              {!isTakeawayMode && selectedCustomer && loyaltySettingsQuery.data?.enabled ? (
                 <Button variant="outline" onClick={() => setRedeemOpen(true)}>แลกแต้มส่วนลด</Button>
               ) : null}
 
@@ -2332,13 +2574,14 @@ export default function POSPage(): JSX.Element {
                 disabled={
                   cart.items.length === 0 ||
                   !currentShift ||
+                  (isTakeawayMode && !takeawayMenuQuery.data) ||
                   (paymentMethod === "cash" && currentPaidAmount < finalTotal) ||
                   isSubmitting
                 }
                 onClick={() => void handleCheckout()}
               >
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                ชำระเงิน {formatThaiCurrency(finalTotal)}
+                {isTakeawayMode ? "รับเงินและออกคิว" : "ชำระเงิน"} {formatThaiCurrency(finalTotal)}
               </Button>
             </div>
           </aside>
@@ -2490,6 +2733,65 @@ export default function POSPage(): JSX.Element {
           <DialogFooter>
             <Button variant="outline" onClick={() => void handlePrint()}>พิมพ์</Button>
             <Button onClick={() => setShowReceipt(false)}>ขายต่อ</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={takeawayResultOpen} onOpenChange={setTakeawayResultOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>ออเดอร์รับกลับ</DialogTitle>
+          </DialogHeader>
+          {takeawayOrder ? (
+            <div className="space-y-4">
+              <div className="rounded-2xl bg-slate-950 p-5 text-center text-white">
+                <div className="text-xs uppercase tracking-[0.25em] text-slate-400">Queue</div>
+                <div className="mt-1 text-6xl font-black">{takeawayOrder.queue_display ?? "-"}</div>
+                <div className="mt-2 text-sm text-slate-300">รับเงินแล้ว {formatThaiCurrency(Number(takeawayOrder.total_amount))}</div>
+                {takeawayOrder.is_offline_pending ? (
+                  <div className="mt-3 inline-flex rounded-full bg-amber-400/20 px-3 py-1 text-xs font-semibold text-amber-200">คิวออฟไลน์ · รอซิงก์</div>
+                ) : (
+                  <div className="mt-3 inline-flex rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-semibold text-emerald-200">บันทึกบนเซิร์ฟเวอร์แล้ว</div>
+                )}
+              </div>
+              <div className="max-h-48 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 p-4">
+                {takeawayOrder.items.map((item) => (
+                  <div key={`${item.product_id}-${item.special_request ?? ""}`} className="flex items-start justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
+                    <div>
+                      <div className="font-medium text-slate-900">{item.product_name}</div>
+                      {item.special_request ? <div className="text-xs text-slate-500">{item.special_request}</div> : null}
+                    </div>
+                    <div className="font-semibold text-slate-900">x{item.qty}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button
+                  className="h-12"
+                  onClick={() => void handleTakeawaySlip("customer")}
+                  disabled={takeawayPrintBusy !== null}
+                >
+                  {takeawayPrintBusy === "customer" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                  {takeawayOrder.customer_slip_printed_at ? "พิมพ์สลิปลูกค้าซ้ำ" : "พิมพ์สลิปลูกค้า"}
+                </Button>
+                <Button
+                  className="h-12 bg-orange-600 hover:bg-orange-700"
+                  onClick={() => void handleTakeawaySlip("kitchen")}
+                  disabled={takeawayPrintBusy !== null || !takeawayOrder.customer_slip_printed_at}
+                >
+                  {takeawayPrintBusy === "kitchen" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChefHat className="h-4 w-4" />}
+                  {!takeawayOrder.customer_slip_printed_at
+                    ? "พิมพ์สลิปลูกค้าก่อน"
+                    : takeawayOrder.kitchen_slip_printed_at
+                      ? "พิมพ์ส่งครัวซ้ำ"
+                      : "พิมพ์และส่งเข้า KDS"}
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">ระบบจะสร้างงานใน KDS เมื่อกดพิมพ์และส่งเข้า KDS เพื่อป้องกันครัวทำรายการก่อนหน้าร้านยืนยันสลิปลูกค้า</p>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button onClick={() => setTakeawayResultOpen(false)}>เริ่มออเดอร์ถัดไป</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -3005,6 +3307,25 @@ export default function POSPage(): JSX.Element {
           onApproved={pendingManagerApproval.onApproved}
         />
       ) : null}
+      <div className="fixed -left-[9999px] top-0">
+        <div ref={takeawayCustomerSlipRef} className="wap-print-slip">
+          <TakeawayOrderSlip
+            order={takeawayOrder}
+            type="customer"
+            employeeName={staffDisplayName}
+            menu={takeawayMenuQuery.data ?? null}
+            promptpayQrDataUrl={takeawayOrder?.payment_method === "promptpay" ? qrDataUrl : null}
+          />
+        </div>
+        <div ref={takeawayKitchenSlipRef} className="wap-print-slip">
+          <TakeawayOrderSlip
+            order={takeawayOrder}
+            type="kitchen"
+            employeeName={staffDisplayName}
+            menu={takeawayMenuQuery.data ?? null}
+          />
+        </div>
+      </div>
     </div>
   );
 }

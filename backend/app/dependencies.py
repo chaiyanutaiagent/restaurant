@@ -28,6 +28,7 @@ from app.services.business_context_service import (
     resolve_user_branch_context,
 )
 from app.services.staff_scope_policy import normalized_station_key
+from app.services.tenant_control_policy import TenantControlPolicy
 from app.utils.security import decode_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -288,14 +289,22 @@ async def resolve_device_token(
     if (
         context is None
         or context.brand_id != brand_id
-        or context.business_type != "restaurant"
-        or context.target_database != "restaurant"
-        or payload.get("business_type") != "restaurant"
-        or payload.get("target_database") != "restaurant"
+        or context.business_type not in {"restaurant", "takeaway"}
+        or context.target_database != context.business_type
+        or payload.get("business_type") != context.business_type
+        or payload.get("target_database") != context.target_database
     ):
         raise _device_unauthorized()
 
-    if device.device_type == "kitchen":
+    if context.business_type == "takeaway" and not settings.takeaway_feature_enabled:
+        raise _device_unauthorized()
+    if context.business_type == "takeaway":
+        try:
+            await TenantControlPolicy(db).require_feature(company_id, "takeaway")
+        except HTTPException as exc:
+            raise _device_unauthorized() from exc
+
+    if device.device_type == "kitchen" and context.business_type == "restaurant":
         settings_row = await restaurant_db.scalar(
             select(BranchSettings).where(
                 BranchSettings.company_id == company_id,
@@ -340,6 +349,22 @@ async def get_current_device(
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> DeviceTokenData:
     return await resolve_device_token(token, db, restaurant_db)
+
+
+async def get_device_operational_db(
+    current: DeviceTokenData = Depends(get_current_device),
+) -> AsyncGenerator[AsyncSession, None]:
+    if current.target_database == "restaurant":
+        session_factory = active_restaurant_service_session_factory()
+    elif current.target_database == "takeaway":
+        try:
+            session_factory = active_takeaway_service_session_factory()
+        except ValueError as exc:
+            raise _device_unauthorized() from exc
+    else:
+        raise _device_unauthorized()
+    async with session_factory() as session:
+        yield session
 
 
 async def get_optional_counter_device(

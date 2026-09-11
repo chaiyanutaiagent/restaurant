@@ -11,6 +11,16 @@ fail() {
   exit 1
 }
 
+checksum_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    fail "sha256 checksum utility not found"
+  fi
+}
+
 if [ ! -f "$COMPOSE_FILE" ]; then
   fail "compose file not found: $COMPOSE_FILE"
 fi
@@ -40,8 +50,12 @@ docker compose -f "$COMPOSE_FILE" exec -T postgres \
 
 printf 'Backing up takeaway database...\n'
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
-  sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$TAKEAWAY_POSTGRES_DB"' \
+  sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "${TAKEAWAY_POSTGRES_DB:-takeaway_ops_db}"' \
   > "$BACKUP_DIR/takeaway.dump"
+
+platform_sha256="$(checksum_file "$BACKUP_DIR/platform-core.dump")"
+restaurant_sha256="$(checksum_file "$BACKUP_DIR/restaurant.dump")"
+takeaway_sha256="$(checksum_file "$BACKUP_DIR/takeaway.dump")"
 
 cat > "$BACKUP_DIR/manifest.txt" <<EOF
 backup_timestamp_utc=$TIMESTAMP
@@ -49,8 +63,13 @@ compose_file=$COMPOSE_FILE
 platform_dump=platform-core.dump
 restaurant_dump=restaurant.dump
 takeaway_dump=takeaway.dump
+platform_sha256=$platform_sha256
+restaurant_sha256=$restaurant_sha256
+takeaway_sha256=$takeaway_sha256
 legacy_database_included=false
-scope_id=P1-DATABASE-BOUNDARY-03
+scope_ids=P1-DATABASE-BOUNDARY-03,P6-TAKEAWAY-IMPLEMENTATION-06
 EOF
+
+chmod 600 "$BACKUP_DIR/platform-core.dump" "$BACKUP_DIR/restaurant.dump" "$BACKUP_DIR/takeaway.dump" "$BACKUP_DIR/manifest.txt"
 
 printf 'Boundary backup completed: %s\n' "$BACKUP_DIR"

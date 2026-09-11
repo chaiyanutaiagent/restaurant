@@ -4,15 +4,16 @@ from typing import Any
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_identity_db, get_restaurant_service_db
-from app.dependencies import DeviceTokenData, require_device_type
+from app.database import get_identity_db
+from app.dependencies import DeviceTokenData, TokenData, get_device_operational_db, require_device_type
 from app.models.audit import AuditLog
 from app.models.branch import Branch
 from app.models.restaurant import KitchenTicket
+from app.models.takeaway import TakeawayKitchenTicket, TakeawayOrder
 from app.models.settings import BranchSettings
 from app.schemas.device import (
     DeviceContextRead,
@@ -22,6 +23,7 @@ from app.schemas.device import (
 from app.schemas.restaurant import TicketStatusUpdate
 from app.services.dining_service import DiningService
 from app.services.staff_scope_policy import normalized_station_key
+from app.services.takeaway_service import TakeawayService
 
 
 router = APIRouter(prefix="/api/v1/device-workspaces", tags=["device-workspaces"])
@@ -34,6 +36,7 @@ def ok(data: Any) -> dict[str, Any]:
             "version": settings.app_version,
             "identity_database": settings.identity_database,
             "restaurant_service_database": settings.restaurant_service_database,
+            "takeaway_service_database": settings.takeaway_service_database,
         },
         "error": None,
     }
@@ -49,8 +52,8 @@ def _device_context(current: DeviceTokenData) -> DeviceContextRead:
         name=current.name,
         device_type=current.device_type,
         station_key=current.station_key,
-        business_type="restaurant",
-        target_database="restaurant",
+        business_type=current.business_type,
+        target_database=current.target_database,
         credential_version=current.credential_version,
         paired_at=current.paired_at,
         last_seen_at=current.last_seen_at,
@@ -60,7 +63,7 @@ def _device_context(current: DeviceTokenData) -> DeviceContextRead:
 async def _bootstrap(
     current: DeviceTokenData,
     identity_db: AsyncSession,
-    restaurant_db: AsyncSession,
+    operational_db: AsyncSession,
 ) -> DeviceWorkspaceBootstrapRead:
     branch = await identity_db.get(Branch, current.branch_id)
     if (
@@ -70,13 +73,17 @@ async def _bootstrap(
         or not branch.is_active
     ):
         raise HTTPException(status_code=401, detail="Device Branch is unavailable")
-    settings_row = await restaurant_db.scalar(
-        select(BranchSettings).where(
-            BranchSettings.company_id == current.company_id,
-            BranchSettings.branch_id == current.branch_id,
+    settings_row = None
+    if current.business_type == "restaurant":
+        settings_row = await operational_db.scalar(
+            select(BranchSettings).where(
+                BranchSettings.company_id == current.company_id,
+                BranchSettings.branch_id == current.branch_id,
+            )
         )
+    queue_prefix = settings_row.fb_queue_prefix if settings_row is not None else (
+        "TW" if current.business_type == "takeaway" else ""
     )
-    queue_prefix = settings_row.fb_queue_prefix if settings_row is not None else ""
     capabilities = {
         "counter": ["staff_login", "pos_handoff"],
         "kitchen": ["ticket_view", "ticket_progress"],
@@ -93,7 +100,26 @@ async def _bootstrap(
     )
 
 
-def _ticket_data(ticket: KitchenTicket) -> dict[str, Any]:
+def _ticket_data(ticket: KitchenTicket | TakeawayKitchenTicket) -> dict[str, Any]:
+    if isinstance(ticket, TakeawayKitchenTicket):
+        device_status = {"queued": "pending", "preparing": "cooking", "ready": "done"}.get(
+            ticket.status,
+            ticket.status,
+        )
+        return {
+            "id": str(ticket.id),
+            "order_id": str(ticket.order_id),
+            "product_name": ticket.item_name,
+            "qty": ticket.quantity,
+            "special_request": None,
+            "station": ticket.station,
+            "queue_number": ticket.queue_number,
+            "table_name": None,
+            "source_type": "quick_service",
+            "status": device_status,
+            "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
+            "done_at": ticket.ready_at.isoformat() if ticket.ready_at else None,
+        }
     return {
         "id": str(ticket.id),
         "session_id": str(ticket.session_id),
@@ -146,9 +172,9 @@ def _audit_device_action(
 async def counter_bootstrap(
     current: DeviceTokenData = Depends(require_device_type("counter")),
     identity_db: AsyncSession = Depends(get_identity_db),
-    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+    operational_db: AsyncSession = Depends(get_device_operational_db),
 ) -> dict[str, Any]:
-    result = await _bootstrap(current, identity_db, restaurant_db)
+    result = await _bootstrap(current, identity_db, operational_db)
     return ok(result.model_dump())
 
 
@@ -156,21 +182,31 @@ async def counter_bootstrap(
 async def kitchen_bootstrap(
     current: DeviceTokenData = Depends(require_device_type("kitchen")),
     identity_db: AsyncSession = Depends(get_identity_db),
-    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+    operational_db: AsyncSession = Depends(get_device_operational_db),
 ) -> dict[str, Any]:
-    result = await _bootstrap(current, identity_db, restaurant_db)
+    result = await _bootstrap(current, identity_db, operational_db)
     return ok(result.model_dump())
 
 
 @router.get("/kitchen/tickets")
 async def list_kitchen_tickets(
     current: DeviceTokenData = Depends(require_device_type("kitchen")),
-    db: AsyncSession = Depends(get_restaurant_service_db),
+    db: AsyncSession = Depends(get_device_operational_db),
 ) -> dict[str, Any]:
-    tickets = await DiningService(db).list_kitchen_tickets(
-        current.branch_id,
-        current.station_key,
-    )
+    if current.business_type == "takeaway":
+        statement = select(TakeawayKitchenTicket).where(
+            TakeawayKitchenTicket.company_id == current.company_id,
+            TakeawayKitchenTicket.branch_id == current.branch_id,
+            TakeawayKitchenTicket.status.in_(["queued", "preparing", "ready"]),
+        )
+        if current.station_key:
+            statement = statement.where(TakeawayKitchenTicket.station == current.station_key)
+        tickets = list(await db.scalars(statement.order_by(TakeawayKitchenTicket.queue_number)))
+    else:
+        tickets = await DiningService(db).list_kitchen_tickets(
+            current.branch_id,
+            current.station_key,
+        )
     return ok([_ticket_data(ticket) for ticket in tickets])
 
 
@@ -180,8 +216,15 @@ async def update_kitchen_ticket(
     payload: TicketStatusUpdate,
     request: Request,
     current: DeviceTokenData = Depends(require_device_type("kitchen")),
-    db: AsyncSession = Depends(get_restaurant_service_db),
+    db: AsyncSession = Depends(get_device_operational_db),
 ) -> dict[str, Any]:
+    if current.business_type == "takeaway":
+        translated = {"cooking": "preparing", "done": "ready"}.get(payload.status)
+        if translated is None:
+            raise HTTPException(status_code=400, detail="Takeaway kitchen device may only progress tickets")
+        service = TakeawayService(db, _takeaway_token_data(current))
+        updated = await service.update_kitchen_ticket(ticket_id, translated)
+        return ok({"id": str(updated.id), "status": updated.status})
     ticket = await db.get(KitchenTicket, ticket_id)
     if (
         ticket is None
@@ -215,17 +258,49 @@ async def update_kitchen_ticket(
 async def pickup_bootstrap(
     current: DeviceTokenData = Depends(require_device_type("pickup")),
     identity_db: AsyncSession = Depends(get_identity_db),
-    restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
+    operational_db: AsyncSession = Depends(get_device_operational_db),
 ) -> dict[str, Any]:
-    result = await _bootstrap(current, identity_db, restaurant_db)
+    result = await _bootstrap(current, identity_db, operational_db)
     return ok(result.model_dump())
 
 
 @router.get("/pickup/queue")
 async def get_pickup_queue(
     current: DeviceTokenData = Depends(require_device_type("pickup")),
-    db: AsyncSession = Depends(get_restaurant_service_db),
+    db: AsyncSession = Depends(get_device_operational_db),
 ) -> dict[str, Any]:
+    if current.business_type == "takeaway":
+        rows = (
+            await db.execute(
+                select(
+                    TakeawayOrder,
+                    func.count(TakeawayKitchenTicket.id),
+                    func.coalesce(func.sum(TakeawayKitchenTicket.quantity), 0),
+                    func.max(TakeawayKitchenTicket.ready_at),
+                )
+                .outerjoin(TakeawayKitchenTicket, TakeawayKitchenTicket.order_id == TakeawayOrder.id)
+                .where(
+                    TakeawayOrder.company_id == current.company_id,
+                    TakeawayOrder.branch_id == current.branch_id,
+                    TakeawayOrder.fulfillment_status == "ready",
+                )
+                .group_by(TakeawayOrder.id)
+                .order_by(TakeawayOrder.queue_number)
+            )
+        ).all()
+        return ok([
+            {
+                "session_id": str(order.id),
+                "queue_number": order.queue_number,
+                "order_number": order.order_number,
+                "customer_name": order.customer_name,
+                "ticket_count": ticket_count,
+                "item_count": float(item_count),
+                "ready_at": ready_at.isoformat() if ready_at else None,
+                "status": order.fulfillment_status,
+            }
+            for order, ticket_count, item_count, ready_at in rows
+        ])
     rows = await DiningService(db).get_ready_pickup_queues(current.branch_id)
     return ok(rows)
 
@@ -235,8 +310,11 @@ async def mark_pickup_queue_served(
     session_id: uuid.UUID,
     request: Request,
     current: DeviceTokenData = Depends(require_device_type("pickup")),
-    db: AsyncSession = Depends(get_restaurant_service_db),
+    db: AsyncSession = Depends(get_device_operational_db),
 ) -> dict[str, Any]:
+    if current.business_type == "takeaway":
+        order = await TakeawayService(db, _takeaway_token_data(current)).mark_picked_up(session_id)
+        return ok({"session_id": str(order.id), "status": order.fulfillment_status, "served_count": 1})
     try:
         result = await DiningService(db).mark_pickup_session_served(
             session_id,
@@ -257,3 +335,17 @@ async def mark_pickup_queue_served(
     )
     await db.commit()
     return ok(result)
+
+
+def _takeaway_token_data(current: DeviceTokenData) -> TokenData:
+    return TokenData(
+        user_id=current.device_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        business_type=current.business_type,
+        target_database=current.target_database,
+        permissions=["*"],
+        station_key=current.station_key,
+        scope_types=["station"],
+    )

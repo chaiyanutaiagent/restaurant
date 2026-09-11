@@ -125,6 +125,8 @@ def create_device_access_token(
     station_key: str | None,
     credential_version: int,
     company_credential_version: int = 1,
+    business_type: str = "restaurant",
+    target_database: str = "restaurant",
     expires_delta: timedelta | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
@@ -136,8 +138,8 @@ def create_device_access_token(
         "company_id": str(company_id),
         "brand_id": str(brand_id),
         "branch_id": str(branch_id),
-        "business_type": "restaurant",
-        "target_database": "restaurant",
+        "business_type": business_type,
+        "target_database": target_database,
         "device_type": device_type,
         "station_key": station_key,
         "credential_version": credential_version,

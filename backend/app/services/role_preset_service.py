@@ -10,7 +10,7 @@ from app.models.role import Permission
 from app.schemas.role import RolePresetRead, RoleScope
 
 
-ROLE_PRESET_POLICY_VERSION = "2026-09-11.1"
+ROLE_PRESET_POLICY_VERSION = "2026-09-11.2"
 
 TAKEAWAY_OWNER_PERMISSIONS = (
     "takeaway.catalog.view",
@@ -31,6 +31,8 @@ TAKEAWAY_OWNER_PERMISSIONS = (
     "takeaway.report.view",
     "takeaway.import.dry_run",
     "takeaway.import.apply",
+    "takeaway.erp.export",
+    "takeaway.erp.acknowledge",
 )
 
 
@@ -182,6 +184,8 @@ ROLE_PRESET_POLICIES = (
             "takeaway.credit.manage",
             "takeaway.report.view",
             "takeaway.import.dry_run",
+            "takeaway.erp.export",
+            "takeaway.erp.acknowledge",
         ),
     ),
     RolePresetPolicy(

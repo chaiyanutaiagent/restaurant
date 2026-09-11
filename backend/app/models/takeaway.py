@@ -337,6 +337,21 @@ class TakeawayPickupToken(UUIDMixin, TimestampMixin, Base):
     redeemed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class TakeawayOrderingToken(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_ordering_tokens"
+    __table_args__ = (
+        Index("ix_takeaway_ordering_token_scope", "company_id", "brand_id", "branch_id"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+
+
 class TakeawayCentralOrderRound(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "takeaway_central_order_rounds"
     __table_args__ = (

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
+import base64
 import hashlib
+import hmac
 import secrets
 from typing import Iterable
 import uuid
@@ -13,6 +15,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import TokenData
+from app.config import settings
 from app.models.takeaway import (
     TakeawayBranchCatalogItem,
     TakeawayCatalogItem,
@@ -24,6 +27,7 @@ from app.models.takeaway import (
     TakeawayCreditEntry,
     TakeawayKitchenTicket,
     TakeawayOperationalOutbox,
+    TakeawayOrderingToken,
     TakeawayOrder,
     TakeawayOrderItem,
     TakeawayPayment,
@@ -34,6 +38,7 @@ from app.models.takeaway import (
     TakeawayReferenceProjection,
     TakeawayShift,
     TakeawayStockBalance,
+    TakeawayStockLocation,
     TakeawayStockMovement,
     TakeawayTransfer,
     TakeawayTransferItem,
@@ -44,9 +49,13 @@ from app.schemas.takeaway import (
     TakeawayCentralOrderCreate,
     TakeawayCreditEntryCreate,
     TakeawayCreditLimitUpdate,
+    TakeawayErpEventAcknowledge,
+    TakeawayOrderPaymentCapture,
+    TakeawayOrderingLinkCreate,
     TakeawayProductionBatchCreate,
     TakeawayProductionComplete,
     TakeawaySaleCreate,
+    TakeawayPublicOrderCreate,
     TakeawayShiftClose,
     TakeawayShiftOpen,
     TakeawayStockMovementCreate,
@@ -87,6 +96,15 @@ class TakeawayService:
     def __init__(self, db: AsyncSession, current: TokenData):
         self.db = db
         self.current = current
+
+    @staticmethod
+    def _public_pickup_token(order_id: uuid.UUID) -> str:
+        digest = hmac.new(
+            settings.secret_key.encode(),
+            f"takeaway-public-pickup:{order_id}".encode(),
+            hashlib.sha256,
+        ).digest()
+        return base64.urlsafe_b64encode(digest).decode().rstrip("=")
 
     async def _reference(
         self,
@@ -484,6 +502,321 @@ class TakeawayService:
             statement = statement.where(TakeawayStockBalance.location_id == location_id)
         return list(await self.db.scalars(statement.order_by(TakeawayStockBalance.item_id)))
 
+    async def list_stock_locations(self) -> list[TakeawayStockLocation]:
+        statement = select(TakeawayStockLocation).where(
+            TakeawayStockLocation.company_id == self.current.company_id,
+            TakeawayStockLocation.is_active.is_(True),
+        )
+        if self.current.branch_id is not None:
+            statement = statement.where(TakeawayStockLocation.branch_id == self.current.branch_id)
+        return list(await self.db.scalars(statement.order_by(TakeawayStockLocation.name)))
+
+    async def create_ordering_link(
+        self,
+        data: TakeawayOrderingLinkCreate,
+    ) -> tuple[TakeawayOrderingToken, str]:
+        if self.current.brand_id is None or self.current.branch_id is None:
+            raise HTTPException(status_code=400, detail="Takeaway Branch context required")
+        await self._validate_context(
+            brand_id=self.current.brand_id,
+            branch_id=self.current.branch_id,
+        )
+        raw_token = secrets.token_urlsafe(32)
+        row = TakeawayOrderingToken(
+            company_id=self.current.company_id,
+            brand_id=self.current.brand_id,
+            branch_id=self.current.branch_id,
+            token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=data.expires_in_hours),
+            created_by=self.current.user_id,
+        )
+        self.db.add(row)
+        await self.db.commit()
+        await self.db.refresh(row)
+        return row, raw_token
+
+    async def create_public_order(
+        self,
+        data: TakeawayPublicOrderCreate,
+    ) -> tuple[TakeawayOrder, str | None, bool]:
+        if self.current.brand_id is None or self.current.branch_id is None:
+            raise HTTPException(status_code=404, detail="Takeaway ordering link not found")
+        brand_id = self.current.brand_id
+        branch_id = self.current.branch_id
+        await self._validate_context(brand_id=brand_id, branch_id=branch_id)
+        existing = await self.db.scalar(
+            select(TakeawayOrder).where(
+                TakeawayOrder.branch_id == branch_id,
+                TakeawayOrder.idempotency_key == data.idempotency_key,
+            )
+        )
+        if existing is not None:
+            pickup_token = (
+                self._public_pickup_token(existing.id)
+                if (existing.source_metadata or {}).get("public_order") is True
+                else None
+            )
+            return existing, pickup_token, True
+        shift = await self.db.scalar(
+            select(TakeawayShift).where(
+                TakeawayShift.company_id == self.current.company_id,
+                TakeawayShift.brand_id == brand_id,
+                TakeawayShift.branch_id == branch_id,
+                TakeawayShift.status == "open",
+            )
+        )
+        if shift is None:
+            raise HTTPException(status_code=409, detail="Store is not accepting Takeaway orders")
+        item_ids = [line.catalog_item_id for line in data.items]
+        catalog = {
+            item.id: item
+            for item in await self.db.scalars(
+                select(TakeawayCatalogItem).where(
+                    TakeawayCatalogItem.id.in_(item_ids),
+                    TakeawayCatalogItem.company_id == self.current.company_id,
+                    TakeawayCatalogItem.brand_id == brand_id,
+                    TakeawayCatalogItem.is_active.is_(True),
+                )
+            )
+        }
+        if len(catalog) != len(set(item_ids)):
+            raise HTTPException(status_code=404, detail="One or more Takeaway items were not found")
+        availability = {
+            row.catalog_item_id: row
+            for row in await self.db.scalars(
+                select(TakeawayBranchCatalogItem).where(
+                    TakeawayBranchCatalogItem.branch_id == branch_id,
+                    TakeawayBranchCatalogItem.catalog_item_id.in_(item_ids),
+                )
+            )
+        }
+        if any(not availability[item_id].is_available for item_id in availability):
+            raise HTTPException(status_code=409, detail="One or more Takeaway items are unavailable")
+        prepared: list[tuple[object, TakeawayCatalogItem, Decimal, Decimal, Decimal]] = []
+        subtotal = Decimal("0")
+        for line in data.items:
+            item = catalog[line.catalog_item_id]
+            override = availability.get(item.id)
+            unit_price = money(override.price_override if override and override.price_override is not None else item.price)
+            line_subtotal = money(unit_price * line.quantity)
+            line_tax = money(line_subtotal * Decimal(item.tax_rate) / Decimal("100"))
+            subtotal += line_subtotal
+            prepared.append((line, item, unit_price, line_subtotal, line_tax))
+        subtotal = money(subtotal)
+        tax = money(sum((entry[4] for entry in prepared), Decimal("0")))
+        total = money(subtotal + tax)
+
+        await self.db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"takeaway-queue:{branch_id}:{shift.business_date}"},
+        )
+        queue_number = int(
+            await self.db.scalar(
+                select(func.coalesce(func.max(TakeawayOrder.queue_number), 0)).where(
+                    TakeawayOrder.branch_id == branch_id,
+                    TakeawayOrder.business_date == shift.business_date,
+                )
+            )
+            or 0
+        ) + 1
+        branch_key = str(branch_id).replace("-", "")[:6].upper()
+        order = TakeawayOrder(
+            company_id=self.current.company_id,
+            brand_id=brand_id,
+            branch_id=branch_id,
+            shift_id=shift.id,
+            order_number=f"TW-{shift.business_date:%Y%m%d}-{branch_key}-{queue_number:04d}",
+            business_date=shift.business_date,
+            queue_number=queue_number,
+            channel="qr",
+            status="draft",
+            fulfillment_status="awaiting_payment",
+            subtotal=subtotal,
+            discount_amount=Decimal("0"),
+            tax_amount=tax,
+            total_amount=total,
+            customer_name=data.customer_name,
+            customer_phone=data.customer_phone,
+            note=data.note,
+            idempotency_key=data.idempotency_key,
+            source_metadata={
+                "public_order": True,
+                "stock_item_ids": [str(item.id) for _, item, _, _, _ in prepared if item.track_stock],
+            },
+        )
+        self.db.add(order)
+        await self.db.flush()
+        for line, item, unit_price, line_subtotal, line_tax in prepared:
+            self.db.add(
+                TakeawayOrderItem(
+                    order_id=order.id,
+                    catalog_item_id=item.id,
+                    sku=item.sku,
+                    name=item.name,
+                    quantity=line.quantity,
+                    unit_price=unit_price,
+                    discount_amount=Decimal("0"),
+                    tax_amount=line_tax,
+                    line_total=line_subtotal + line_tax,
+                    kitchen_station=item.kitchen_station,
+                    note=line.note,
+                )
+            )
+        pickup_token = self._public_pickup_token(order.id)
+        self.db.add(
+            TakeawayPickupToken(
+                order_id=order.id,
+                token_hash=hashlib.sha256(pickup_token.encode()).hexdigest(),
+                expires_at=datetime.combine(shift.business_date, time(23, 59, 59), tzinfo=timezone.utc),
+            )
+        )
+        await self.db.commit()
+        await self.db.refresh(order)
+        return order, pickup_token, False
+
+    async def capture_order_payment(
+        self,
+        order_id: uuid.UUID,
+        data: TakeawayOrderPaymentCapture,
+    ) -> tuple[TakeawayOrder, bool]:
+        order = await self.db.scalar(
+            select(TakeawayOrder)
+            .where(
+                TakeawayOrder.id == order_id,
+                TakeawayOrder.company_id == self.current.company_id,
+            )
+            .with_for_update()
+        )
+        if order is None:
+            raise HTTPException(status_code=404, detail="Takeaway order not found")
+        assert_takeaway_scope(self.current, brand_id=order.brand_id, branch_id=order.branch_id)
+        existing_payment = await self.db.scalar(
+            select(TakeawayPayment).where(
+                TakeawayPayment.order_id == order.id,
+                TakeawayPayment.idempotency_key == data.payment.idempotency_key,
+            )
+        )
+        if existing_payment is not None:
+            return order, True
+        if order.status != "draft" or order.fulfillment_status != "awaiting_payment":
+            raise HTTPException(status_code=409, detail="Takeaway order is not awaiting payment")
+        if money(data.payment.amount) != money(order.total_amount):
+            raise HTTPException(status_code=422, detail="Payment amount must equal Takeaway order total")
+
+        order_items = list(
+            await self.db.scalars(
+                select(TakeawayOrderItem).where(TakeawayOrderItem.order_id == order.id)
+            )
+        )
+        store_location_id = await self.db.scalar(
+            select(TakeawayStockLocation.id)
+            .where(
+                TakeawayStockLocation.company_id == self.current.company_id,
+                TakeawayStockLocation.branch_id == order.branch_id,
+                TakeawayStockLocation.location_type == "store",
+                TakeawayStockLocation.is_active.is_(True),
+            )
+            .order_by(TakeawayStockLocation.created_at, TakeawayStockLocation.id)
+            .limit(1)
+        )
+        sale_location_id = store_location_id or order.branch_id
+        raw_stock_item_ids = (order.source_metadata or {}).get("stock_item_ids", [])
+        stock_item_ids = (
+            {str(value) for value in raw_stock_item_ids}
+            if isinstance(raw_stock_item_ids, list)
+            else set()
+        )
+        receipt_lines: list[dict[str, object]] = []
+        for item in order_items:
+            self.db.add(
+                TakeawayKitchenTicket(
+                    company_id=order.company_id,
+                    brand_id=order.brand_id,
+                    branch_id=order.branch_id,
+                    order_id=order.id,
+                    order_item_id=item.id,
+                    queue_number=order.queue_number or 0,
+                    station=item.kitchen_station or "default",
+                    item_name=item.name,
+                    quantity=item.quantity,
+                )
+            )
+            if item.catalog_item_id is not None and str(item.catalog_item_id) in stock_item_ids:
+                await self._apply_stock(
+                    location_id=sale_location_id,
+                    item_id=item.catalog_item_id,
+                    lot_code="",
+                    quantity_delta=-item.quantity,
+                    unit_cost=Decimal("0"),
+                    movement_type="sale",
+                    idempotency_key=f"sale:{order.id}:{item.id}",
+                    brand_id=order.brand_id,
+                    branch_id=order.branch_id,
+                    order_id=order.id,
+                )
+            receipt_lines.append(
+                {"sku": item.sku, "name": item.name, "quantity": str(item.quantity), "line_total": str(item.line_total)}
+            )
+        self.db.add(
+            TakeawayPayment(
+                order_id=order.id,
+                method=data.payment.method,
+                amount=money(order.total_amount),
+                reference=data.payment.reference,
+                idempotency_key=data.payment.idempotency_key,
+            )
+        )
+        if data.payment.method == "credit":
+            await self._apply_credit(
+                brand_id=order.brand_id,
+                branch_id=order.branch_id,
+                entry_type="charge",
+                amount=money(order.total_amount),
+                reference_type="takeaway_order",
+                reference_id=order.id,
+                idempotency_key=f"credit:{data.payment.idempotency_key}",
+            )
+        receipt_number = order.order_number.replace("TW-", "TR-", 1)
+        self.db.add(
+            TakeawayReceipt(
+                order_id=order.id,
+                company_id=order.company_id,
+                branch_id=order.branch_id,
+                receipt_number=receipt_number,
+                payload={
+                    "order_number": order.order_number,
+                    "queue_number": order.queue_number,
+                    "items": receipt_lines,
+                    "subtotal": str(order.subtotal),
+                    "discount_amount": str(order.discount_amount),
+                    "tax_amount": str(order.tax_amount),
+                    "total_amount": str(order.total_amount),
+                    "payment_method": data.payment.method,
+                },
+            )
+        )
+        order.status = "paid"
+        order.fulfillment_status = "queued"
+        order.paid_at = datetime.now(timezone.utc)
+        self._outbox(
+            event_type="takeaway.sale.paid.v1",
+            aggregate_type="order",
+            aggregate_id=order.id,
+            idempotency_key=f"sale:{order.id}:captured",
+            payload={
+                "order_number": order.order_number,
+                "business_date": str(order.business_date),
+                "queue_number": order.queue_number,
+                "total_amount": str(order.total_amount),
+                "payment_method": data.payment.method,
+            },
+            brand_id=order.brand_id,
+            branch_id=order.branch_id,
+        )
+        await self.db.commit()
+        await self.db.refresh(order)
+        return order, False
+
     async def create_sale(self, data: TakeawaySaleCreate) -> tuple[TakeawayOrder, str | None, bool]:
         await self._validate_context(brand_id=data.brand_id, branch_id=data.branch_id)
         existing = await self.db.scalar(
@@ -589,6 +922,21 @@ class TakeawayService:
         )
         self.db.add(order)
         await self.db.flush()
+        store_location_id = await self.db.scalar(
+            select(TakeawayStockLocation.id)
+            .where(
+                TakeawayStockLocation.company_id == self.current.company_id,
+                TakeawayStockLocation.branch_id == data.branch_id,
+                TakeawayStockLocation.location_type == "store",
+                TakeawayStockLocation.is_active.is_(True),
+            )
+            .order_by(TakeawayStockLocation.created_at, TakeawayStockLocation.id)
+            .limit(1)
+        )
+        # Existing pre-Phase-6 fixtures use the branch id as a virtual store
+        # location. Keep that fallback while preferring the explicit location
+        # created by setup/import for all new tenants.
+        sale_location_id = store_location_id or data.branch_id
         receipt_lines: list[dict[str, object]] = []
         for line, item, unit_price, line_subtotal, line_tax in prepared:
             order_item = TakeawayOrderItem(
@@ -621,7 +969,7 @@ class TakeawayService:
             )
             if item.track_stock:
                 await self._apply_stock(
-                    location_id=data.branch_id,
+                    location_id=sale_location_id,
                     item_id=item.id,
                     lot_code="",
                     quantity_delta=-line.quantity,
@@ -802,29 +1150,28 @@ class TakeawayService:
             return order
         if order.status != "paid":
             raise HTTPException(status_code=409, detail="Only a paid Takeaway order can be refunded")
-        items = list(await self.db.scalars(select(TakeawayOrderItem).where(TakeawayOrderItem.order_id == order.id)))
-        tracked = {
-            row.id: row.track_stock
-            for row in await self.db.scalars(
-                select(TakeawayCatalogItem).where(
-                    TakeawayCatalogItem.id.in_([item.catalog_item_id for item in items if item.catalog_item_id])
+        sale_movements = list(
+            await self.db.scalars(
+                select(TakeawayStockMovement).where(
+                    TakeawayStockMovement.order_id == order.id,
+                    TakeawayStockMovement.company_id == self.current.company_id,
+                    TakeawayStockMovement.movement_type == "sale",
                 )
             )
-        }
-        for item in items:
-            if item.catalog_item_id is not None and tracked.get(item.catalog_item_id):
-                await self._apply_stock(
-                    location_id=order.branch_id,
-                    item_id=item.catalog_item_id,
-                    lot_code="",
-                    quantity_delta=item.quantity,
-                    unit_cost=Decimal("0"),
-                    movement_type="refund",
-                    idempotency_key=f"refund:{idempotency_key}:{item.id}",
-                    brand_id=order.brand_id,
-                    branch_id=order.branch_id,
-                    order_id=order.id,
-                )
+        )
+        for movement in sale_movements:
+            await self._apply_stock(
+                location_id=movement.location_id,
+                item_id=movement.item_id,
+                lot_code=movement.lot_code,
+                quantity_delta=-movement.quantity_delta,
+                unit_cost=movement.unit_cost,
+                movement_type="refund",
+                idempotency_key=f"refund:{idempotency_key}:{movement.id}",
+                brand_id=order.brand_id,
+                branch_id=order.branch_id,
+                order_id=order.id,
+            )
         payments = list(await self.db.scalars(select(TakeawayPayment).where(TakeawayPayment.order_id == order.id)))
         for payment in payments:
             payment.status = "refunded"
@@ -1261,4 +1608,167 @@ class TakeawayService:
             "gross_sales": str(money(row[1])),
             "tax_amount": str(money(row[2])),
             "discount_amount": str(money(row[3])),
+        }
+
+    async def list_shifts(self, *, limit: int = 100) -> list[TakeawayShift]:
+        statement = select(TakeawayShift).where(
+            TakeawayShift.company_id == self.current.company_id
+        )
+        if self.current.brand_id is not None:
+            statement = statement.where(TakeawayShift.brand_id == self.current.brand_id)
+        if self.current.branch_id is not None:
+            statement = statement.where(TakeawayShift.branch_id == self.current.branch_id)
+        return list(await self.db.scalars(statement.order_by(TakeawayShift.opened_at.desc()).limit(limit)))
+
+    async def list_kitchen_tickets(
+        self,
+        *,
+        branch_id: uuid.UUID | None = None,
+        ticket_status: str | None = None,
+        limit: int = 200,
+    ) -> list[TakeawayKitchenTicket]:
+        effective_branch = self.current.branch_id or branch_id
+        statement = select(TakeawayKitchenTicket).where(
+            TakeawayKitchenTicket.company_id == self.current.company_id
+        )
+        if self.current.brand_id is not None:
+            statement = statement.where(TakeawayKitchenTicket.brand_id == self.current.brand_id)
+        if effective_branch is not None:
+            statement = statement.where(TakeawayKitchenTicket.branch_id == effective_branch)
+        if ticket_status is not None:
+            statement = statement.where(TakeawayKitchenTicket.status == ticket_status)
+        return list(
+            await self.db.scalars(
+                statement.order_by(TakeawayKitchenTicket.queue_number, TakeawayKitchenTicket.created_at).limit(limit)
+            )
+        )
+
+    async def list_central_orders(
+        self,
+        *,
+        brand_id: uuid.UUID | None = None,
+        branch_id: uuid.UUID | None = None,
+        limit: int = 200,
+    ) -> list[TakeawayCentralOrder]:
+        statement = select(TakeawayCentralOrder).where(
+            TakeawayCentralOrder.company_id == self.current.company_id
+        )
+        effective_brand = self.current.brand_id or brand_id
+        effective_branch = self.current.branch_id or branch_id
+        if effective_brand is not None:
+            statement = statement.where(TakeawayCentralOrder.brand_id == effective_brand)
+        if effective_branch is not None:
+            statement = statement.where(TakeawayCentralOrder.branch_id == effective_branch)
+        return list(await self.db.scalars(statement.order_by(TakeawayCentralOrder.created_at.desc()).limit(limit)))
+
+    async def list_production_batches(
+        self, *, brand_id: uuid.UUID | None = None, limit: int = 200
+    ) -> list[TakeawayProductionBatch]:
+        statement = select(TakeawayProductionBatch).where(
+            TakeawayProductionBatch.company_id == self.current.company_id
+        )
+        effective_brand = self.current.brand_id or brand_id
+        if effective_brand is not None:
+            statement = statement.where(TakeawayProductionBatch.brand_id == effective_brand)
+        return list(await self.db.scalars(statement.order_by(TakeawayProductionBatch.created_at.desc()).limit(limit)))
+
+    async def list_transfers(
+        self, *, brand_id: uuid.UUID | None = None, limit: int = 200
+    ) -> list[TakeawayTransfer]:
+        statement = select(TakeawayTransfer).where(
+            TakeawayTransfer.company_id == self.current.company_id
+        )
+        effective_brand = self.current.brand_id or brand_id
+        if effective_brand is not None:
+            statement = statement.where(TakeawayTransfer.brand_id == effective_brand)
+        return list(await self.db.scalars(statement.order_by(TakeawayTransfer.created_at.desc()).limit(limit)))
+
+    async def list_credit_accounts(
+        self,
+        *,
+        brand_id: uuid.UUID | None = None,
+        branch_id: uuid.UUID | None = None,
+    ) -> list[TakeawayCreditAccount]:
+        statement = select(TakeawayCreditAccount).where(
+            TakeawayCreditAccount.company_id == self.current.company_id
+        )
+        effective_brand = self.current.brand_id or brand_id
+        effective_branch = self.current.branch_id or branch_id
+        if effective_brand is not None:
+            statement = statement.where(TakeawayCreditAccount.brand_id == effective_brand)
+        if effective_branch is not None:
+            statement = statement.where(TakeawayCreditAccount.branch_id == effective_branch)
+        return list(await self.db.scalars(statement.order_by(TakeawayCreditAccount.updated_at.desc())))
+
+    async def list_erp_events(
+        self, *, event_status: str = "pending", limit: int = 200
+    ) -> list[TakeawayOperationalOutbox]:
+        statement = select(TakeawayOperationalOutbox).where(
+            TakeawayOperationalOutbox.company_id == self.current.company_id,
+            TakeawayOperationalOutbox.status == event_status,
+        )
+        if self.current.brand_id is not None:
+            statement = statement.where(
+                (TakeawayOperationalOutbox.brand_id == self.current.brand_id)
+                | (TakeawayOperationalOutbox.brand_id.is_(None))
+            )
+        return list(
+            await self.db.scalars(
+                statement.order_by(TakeawayOperationalOutbox.created_at).limit(limit)
+            )
+        )
+
+    async def acknowledge_erp_event(
+        self,
+        event_id: uuid.UUID,
+        data: TakeawayErpEventAcknowledge,
+    ) -> tuple[TakeawayOperationalOutbox, bool]:
+        row = await self.db.scalar(
+            select(TakeawayOperationalOutbox)
+            .where(
+                TakeawayOperationalOutbox.id == event_id,
+                TakeawayOperationalOutbox.company_id == self.current.company_id,
+            )
+            .with_for_update()
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="Takeaway ERP event not found")
+        if self.current.brand_id is not None and row.brand_id not in {None, self.current.brand_id}:
+            raise HTTPException(status_code=404, detail="Takeaway ERP event not found")
+        if row.status == "processed":
+            return row, True
+        row.payload = {
+            **row.payload,
+            "erp_ack": {
+                "erp_reference": data.erp_reference,
+                "idempotency_key": data.idempotency_key,
+            },
+        }
+        row.status = "processed"
+        row.attempts += 1
+        row.processed_at = datetime.now(timezone.utc)
+        await self.db.commit()
+        await self.db.refresh(row)
+        return row, False
+
+    async def erp_reconciliation(self) -> dict[str, object]:
+        rows = list(
+            (
+                await self.db.execute(
+                    select(
+                        TakeawayOperationalOutbox.status,
+                        func.count(TakeawayOperationalOutbox.id),
+                    )
+                    .where(TakeawayOperationalOutbox.company_id == self.current.company_id)
+                    .group_by(TakeawayOperationalOutbox.status)
+                )
+            ).all()
+        )
+        counts = {str(status_value): int(count) for status_value, count in rows}
+        return {
+            "contract": "foodchainservice.takeaway-erp-event.v1",
+            "pending": counts.get("pending", 0),
+            "processed": counts.get("processed", 0),
+            "failed": counts.get("failed", 0),
+            "is_reconciled": counts.get("pending", 0) == 0 and counts.get("failed", 0) == 0,
         }

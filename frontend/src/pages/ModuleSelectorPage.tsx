@@ -4,6 +4,7 @@ import {
   Building2,
   LayoutDashboard,
   Loader2,
+  PackageCheck,
   ShoppingCart,
   Store,
   UtensilsCrossed,
@@ -44,6 +45,17 @@ const modules = [
     accent: "bg-emerald-600",
     surface: "border-emerald-200 bg-emerald-50",
     text: "text-emerald-700",
+  },
+  {
+    title: "Take away POS",
+    eyebrow: "รับสินค้าจากส่วนกลาง",
+    description: "ขายแบบชำระก่อนผลิต ออกเลขคิว ส่งครัว และใช้สต๊อกร่วมหลายแบรนด์",
+    to: "/takeaway",
+    icon: PackageCheck,
+    accent: "bg-slate-950",
+    surface: "border-emerald-200 bg-emerald-50",
+    text: "text-emerald-700",
+    permission: "takeaway.catalog.view",
   },
   {
     title: "ERP Admin",
@@ -220,7 +232,10 @@ export default function ModuleSelectorPage(): JSX.Element {
           </div>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {modules.map((module) => {
+            {modules.filter((module) => {
+              const permission = "permission" in module ? module.permission : undefined;
+              return typeof permission !== "string" || hasPermission(permission);
+            }).map((module) => {
               const content = (
                 <>
                   <div>

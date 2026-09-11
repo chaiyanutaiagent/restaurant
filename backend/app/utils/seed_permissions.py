@@ -559,6 +559,18 @@ PERMISSIONS: list[dict[str, str]] = [
         "module": "takeaway",
         "description": "Apply an approved Chambo import package without replaying side effects.",
     },
+    {
+        "code": "takeaway.erp.export",
+        "name": "Export Takeaway ERP Events",
+        "module": "takeaway",
+        "description": "Read canonical Takeaway events and reconciliation status for the shared ERP.",
+    },
+    {
+        "code": "takeaway.erp.acknowledge",
+        "name": "Acknowledge Takeaway ERP Events",
+        "module": "takeaway",
+        "description": "Acknowledge idempotently that the shared ERP processed a Takeaway event.",
+    },
 ]
 
 

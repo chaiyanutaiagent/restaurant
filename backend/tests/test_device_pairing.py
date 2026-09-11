@@ -142,6 +142,23 @@ class DeviceCredentialPolicyTests(unittest.TestCase):
         self.assertEqual(payload["target_database"], "restaurant")
         self.assertNotIn("permissions", payload)
 
+    def test_takeaway_device_token_is_bound_to_takeaway_database(self) -> None:
+        token = create_device_access_token(
+            device_id=self.device_id,
+            company_id=self.company_id,
+            brand_id=self.brand_id,
+            branch_id=self.branch_id,
+            device_type="pickup",
+            station_key=None,
+            credential_version=1,
+            business_type="takeaway",
+            target_database="takeaway",
+            expires_delta=timedelta(minutes=5),
+        )
+        payload = decode_token(token)
+        self.assertEqual(payload["business_type"], "takeaway")
+        self.assertEqual(payload["target_database"], "takeaway")
+
     def test_non_company_manager_is_limited_to_current_branch(self) -> None:
         current = TokenData(
             user_id=uuid.uuid4(),

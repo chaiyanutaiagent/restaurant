@@ -30,6 +30,7 @@ from app.schemas.device import (
 )
 from app.services.business_context_service import load_branch_business_context
 from app.services.staff_scope_policy import normalized_station_key
+from app.services.tenant_control_policy import TenantControlPolicy
 from app.utils.security import (
     create_device_access_token,
     decode_token,
@@ -109,12 +110,13 @@ class DeviceService:
         user_agent: str | None,
     ) -> DeviceProvisioningRead:
         await self._require_branch_access(current, data.branch_id)
-        context = await self._restaurant_context(current.company_id, data.branch_id)
+        context = await self._device_context(current.company_id, data.branch_id)
         station_key = await self._canonical_station(
             current.company_id,
             data.branch_id,
             data.device_type,
             data.station_key,
+            context.business_type,
         )
         pairing_pin, pairing_expires_at = self._new_pairing_credential()
         device = DeviceRegistration(
@@ -161,12 +163,13 @@ class DeviceService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Revoked devices cannot receive a new pairing code",
             )
-        await self._restaurant_context(current.company_id, device.branch_id)
+        context = await self._device_context(current.company_id, device.branch_id)
         await self._canonical_station(
             current.company_id,
             device.branch_id,
             device.device_type,
             device.station_key,
+            context.business_type,
         )
 
         old_value = self._snapshot(device, reason=data.reason)
@@ -280,12 +283,13 @@ class DeviceService:
             raise invalid_pairing_credentials()
 
         try:
-            context = await self._restaurant_context(device.company_id, device.branch_id)
+            context = await self._device_context(device.company_id, device.branch_id)
             await self._canonical_station(
                 device.company_id,
                 device.branch_id,
                 device.device_type,
                 device.station_key,
+                context.business_type,
             )
         except HTTPException as exc:
             raise invalid_pairing_credentials() from exc
@@ -313,7 +317,7 @@ class DeviceService:
         await self.db.commit()
         return self._session_read(
             device,
-            context.brand_id,
+            context,
             refresh_token,
             now,
             company.credential_version,
@@ -349,12 +353,13 @@ class DeviceService:
         if company is None or not company.is_active:
             raise invalid_refresh_credential()
         try:
-            context = await self._restaurant_context(device.company_id, device.branch_id)
+            context = await self._device_context(device.company_id, device.branch_id)
             await self._canonical_station(
                 device.company_id,
                 device.branch_id,
                 device.device_type,
                 device.station_key,
+                context.business_type,
             )
         except HTTPException as exc:
             raise invalid_refresh_credential() from exc
@@ -374,7 +379,7 @@ class DeviceService:
         await self.db.commit()
         return self._session_read(
             device,
-            context.brand_id,
+            context,
             data.refresh_token,
             now,
             company.credential_version,
@@ -405,7 +410,7 @@ class DeviceService:
     @staticmethod
     def _session_read(
         device: DeviceRegistration,
-        brand_id: uuid.UUID,
+        context,
         refresh_token: str,
         now: datetime,
         company_credential_version: int,
@@ -413,12 +418,14 @@ class DeviceService:
         access_token = create_device_access_token(
             device_id=device.id,
             company_id=device.company_id,
-            brand_id=brand_id,
+            brand_id=context.brand_id,
             branch_id=device.branch_id,
             device_type=device.device_type,
             station_key=device.station_key,
             credential_version=device.credential_version,
             company_credential_version=company_credential_version,
+            business_type=context.business_type,
+            target_database=context.target_database,
         )
         token_payload = decode_token(access_token)
         expires_in = max(int(token_payload["exp"] - now.timestamp()), 0)
@@ -429,14 +436,14 @@ class DeviceService:
             device=DeviceContextRead(
                 device_id=device.id,
                 company_id=device.company_id,
-                brand_id=brand_id,
+                brand_id=context.brand_id,
                 branch_id=device.branch_id,
                 device_code=device.device_code,
                 name=device.name,
                 device_type=device.device_type,
                 station_key=device.station_key,
-                business_type="restaurant",
-                target_database="restaurant",
+                business_type=context.business_type,
+                target_database=context.target_database,
                 credential_version=device.credential_version,
                 paired_at=now,
                 last_seen_at=now,
@@ -461,17 +468,24 @@ class DeviceService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
         return device
 
-    async def _restaurant_context(self, company_id: uuid.UUID, branch_id: uuid.UUID):
+    async def _device_context(self, company_id: uuid.UUID, branch_id: uuid.UUID):
         context = await load_branch_business_context(self.db, company_id, branch_id)
         if (
             context is None
-            or context.business_type != "restaurant"
-            or context.target_database != "restaurant"
+            or context.business_type not in {"restaurant", "takeaway"}
+            or context.target_database != context.business_type
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Devices in this scope require a Restaurant Branch",
+                detail="Devices in this scope require a Restaurant or Takeaway Branch",
             )
+        if context.business_type == "takeaway" and not settings.takeaway_feature_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Takeaway device service is not available",
+            )
+        if context.business_type == "takeaway":
+            await TenantControlPolicy(self.db).require_feature(company_id, "takeaway")
         return context
 
     async def _canonical_station(
@@ -480,9 +494,18 @@ class DeviceService:
         branch_id: uuid.UUID,
         device_type: str,
         station_key: str | None,
+        business_type: str,
     ) -> str | None:
         if device_type != "kitchen":
             return None
+        if business_type == "takeaway":
+            requested = normalized_station_key(station_key)
+            if not requested:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Kitchen station is required for this Takeaway Branch",
+                )
+            return requested
         settings_row = await self.restaurant_db.scalar(
             select(BranchSettings).where(
                 BranchSettings.company_id == company_id,

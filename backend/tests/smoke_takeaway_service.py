@@ -5,6 +5,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 import hashlib
 import json
+from types import SimpleNamespace
 import uuid
 
 from sqlalchemy import func, select
@@ -18,6 +19,7 @@ from app.models.takeaway import (
     TakeawayProductionLine,
     TakeawayReferenceProjection,
     TakeawayStockBalance,
+    TakeawayStockLocation,
 )
 from app.schemas.takeaway import (
     TakeawayCatalogItemCreate,
@@ -26,6 +28,9 @@ from app.schemas.takeaway import (
     TakeawayCentralOrderLineCreate,
     TakeawayCreditEntryCreate,
     TakeawayCreditLimitUpdate,
+    TakeawayErpEventAcknowledge,
+    TakeawayOrderPaymentCapture,
+    TakeawayOrderingLinkCreate,
     TakeawayPaymentCreate,
     TakeawayProductionBatchCreate,
     TakeawayProductionComplete,
@@ -33,6 +38,7 @@ from app.schemas.takeaway import (
     TakeawayProductionLineCreate,
     TakeawaySaleCreate,
     TakeawaySaleLine,
+    TakeawayPublicOrderCreate,
     TakeawayShiftClose,
     TakeawayShiftOpen,
     TakeawayStockMovementCreate,
@@ -40,6 +46,7 @@ from app.schemas.takeaway import (
     TakeawayTransferLineCreate,
     TakeawayTransferStatusUpdate,
 )
+from app.routers.takeaway import public_pickup_status
 from app.services.takeaway_service import TakeawayService
 from app.services.takeaway_import_service import (
     CONTRACT,
@@ -82,6 +89,7 @@ async def run() -> None:
     output_a = uuid.uuid4()
     output_b = uuid.uuid4()
     business_date = date(2026, 9, 11)
+    public_request = SimpleNamespace(client=SimpleNamespace(host="takeaway-smoke"))
 
     async with takeaway_engine.connect() as connection:
         outer = await connection.begin()
@@ -166,9 +174,18 @@ async def run() -> None:
                     track_stock=True,
                 )
             )
+            store_location = TakeawayStockLocation(
+                company_id=company_id,
+                branch_id=branch_id,
+                code=f"STORE-{str(branch_id)[:8]}",
+                name="Smoke Store",
+                location_type="store",
+            )
+            db.add(store_location)
+            await db.flush()
             await service_a.create_stock_movement(
                 TakeawayStockMovementCreate(
-                    location_id=branch_id,
+                    location_id=store_location.id,
                     item_id=item.id,
                     quantity_delta=Decimal("10"),
                     unit_cost=Decimal("40"),
@@ -197,6 +214,9 @@ async def run() -> None:
             replay_order, replay_token, was_replayed = await service_a.create_sale(sale_payload)
             assert not replayed and pickup_token and was_replayed and replay_token is None
             assert replay_order.id == order.id
+            public_status = await public_pickup_status(pickup_token, request=public_request, db=db)
+            assert public_status["data"]["queue_number"] == order.queue_number
+            assert public_status["data"]["fulfillment_status"] == "queued"
             tickets = list(
                 await db.scalars(
                     select(TakeawayKitchenTicket).where(TakeawayKitchenTicket.order_id == order.id)
@@ -206,6 +226,72 @@ async def run() -> None:
                 await service_a.update_kitchen_ticket(ticket.id, "preparing")
                 await service_a.update_kitchen_ticket(ticket.id, "ready")
             await service_a.mark_picked_up(order.id)
+            completed_public_status = await public_pickup_status(
+                pickup_token,
+                request=public_request,
+                db=db,
+            )
+            assert completed_public_status["data"]["fulfillment_status"] == "picked_up"
+
+            ordering_link, ordering_token = await service_a.create_ordering_link(
+                TakeawayOrderingLinkCreate(expires_in_hours=12)
+            )
+            assert ordering_link.token_hash and ordering_token
+            qr_order_payload = TakeawayPublicOrderCreate(
+                idempotency_key=f"smoke-public-order-{uuid.uuid4()}",
+                items=[TakeawaySaleLine(catalog_item_id=item.id, quantity=Decimal("1"))],
+                customer_name="QR Smoke",
+            )
+            qr_order, qr_pickup_token, qr_replayed = await service_a.create_public_order(
+                qr_order_payload
+            )
+            qr_replay_order, qr_replay_token, qr_replayed_second = await service_a.create_public_order(
+                qr_order_payload
+            )
+            assert not qr_replayed and qr_pickup_token and qr_replayed_second
+            assert qr_replay_token == qr_pickup_token
+            assert qr_replay_order.id == qr_order.id and qr_order.fulfillment_status == "awaiting_payment"
+            unpaid_ticket_count = int(
+                await db.scalar(
+                    select(func.count()).select_from(TakeawayKitchenTicket).where(
+                        TakeawayKitchenTicket.order_id == qr_order.id
+                    )
+                )
+                or 0
+            )
+            assert unpaid_ticket_count == 0
+            capture_payload = TakeawayOrderPaymentCapture(
+                payment=TakeawayPaymentCreate(
+                    method="cash",
+                    amount=Decimal("107"),
+                    idempotency_key=f"smoke-public-payment-{uuid.uuid4()}",
+                )
+            )
+            qr_order, capture_replayed = await service_a.capture_order_payment(
+                qr_order.id,
+                capture_payload,
+            )
+            qr_order, capture_replayed_second = await service_a.capture_order_payment(
+                qr_order.id,
+                capture_payload,
+            )
+            assert not capture_replayed and capture_replayed_second and qr_order.status == "paid"
+            qr_tickets = list(
+                await db.scalars(
+                    select(TakeawayKitchenTicket).where(TakeawayKitchenTicket.order_id == qr_order.id)
+                )
+            )
+            assert qr_tickets
+            for ticket in qr_tickets:
+                await service_a.update_kitchen_ticket(ticket.id, "preparing")
+                await service_a.update_kitchen_ticket(ticket.id, "ready")
+            await service_a.mark_picked_up(qr_order.id)
+            qr_status = await public_pickup_status(
+                qr_pickup_token,
+                request=public_request,
+                db=db,
+            )
+            assert qr_status["data"]["fulfillment_status"] == "picked_up"
 
             round_row = await service_a.create_central_round(brand_a, business_date, 1)
             central = await service_a.create_central_order(
@@ -334,12 +420,12 @@ async def run() -> None:
             )
             assert account.balance == Decimal("300.00")
             summary = await service_a.sales_summary(date_from=business_date, date_to=business_date)
-            assert summary["order_count"] == 1 and summary["gross_sales"] == "214.00"
+            assert summary["order_count"] == 2 and summary["gross_sales"] == "321.00"
             shift = await service_a.close_shift(
                 shift.id,
-                TakeawayShiftClose(counted_cash=Decimal("714")),
+                TakeawayShiftClose(counted_cash=Decimal("821")),
             )
-            assert shift.expected_cash == Decimal("714.00")
+            assert shift.expected_cash == Decimal("821.00")
             outbox_count = int(
                 await db.scalar(
                     select(func.count()).select_from(TakeawayOperationalOutbox).where(
@@ -349,6 +435,22 @@ async def run() -> None:
                 or 0
             )
             assert outbox_count >= 10
+            erp_events = await service_a.list_erp_events(event_status="pending")
+            assert erp_events
+            ack_payload = TakeawayErpEventAcknowledge(
+                idempotency_key=f"smoke-erp-ack-{uuid.uuid4()}",
+                erp_reference="ERP-SMOKE-001",
+            )
+            acked_event, ack_replayed = await service_a.acknowledge_erp_event(
+                erp_events[0].id, ack_payload
+            )
+            replayed_event, ack_replayed_second = await service_a.acknowledge_erp_event(
+                erp_events[0].id, ack_payload
+            )
+            assert not ack_replayed and ack_replayed_second
+            assert replayed_event.id == acked_event.id and acked_event.status == "processed"
+            reconciliation = await service_a.erp_reconciliation()
+            assert reconciliation["processed"] == 1
             export_id = uuid.uuid4()
             import_category_id = uuid.uuid4()
             import_item_id = uuid.uuid4()
@@ -456,6 +558,20 @@ async def run() -> None:
                 or 0
             )
             assert outbox_after_import == outbox_count
+            refunded = await service_a.refund_order(
+                order.id,
+                f"smoke-refund-{uuid.uuid4()}",
+                "verify exact sale-location reversal",
+            )
+            restored_stock = await db.scalar(
+                select(TakeawayStockBalance).where(
+                    TakeawayStockBalance.company_id == company_id,
+                    TakeawayStockBalance.location_id == store_location.id,
+                    TakeawayStockBalance.item_id == item.id,
+                )
+            )
+            assert refunded.status == "refunded"
+            assert restored_stock is not None and restored_stock.on_hand_qty == Decimal("9.0000")
             print(
                 json.dumps(
                     {
@@ -467,8 +583,14 @@ async def run() -> None:
                         "transfer_status": transfer.status,
                         "credit_balance": str(account.balance),
                         "outbox_events": outbox_count,
+                        "erp_ack_replay": ack_replayed_second,
+                        "erp_pending": reconciliation["pending"],
+                        "public_pickup_status": completed_public_status["data"]["fulfillment_status"],
+                        "public_qr_order_status": qr_status["data"]["fulfillment_status"],
+                        "public_qr_payment_replay": capture_replayed_second,
                         "synthetic_import_replay": import_replayed_second,
                         "import_created_side_effects": outbox_after_import - outbox_count,
+                        "refund_restored_original_location": str(restored_stock.on_hand_qty),
                     },
                     ensure_ascii=False,
                     sort_keys=True,

@@ -94,6 +94,22 @@ class TakeawaySaleCreate(BaseSchema):
         return self
 
 
+class TakeawayOrderingLinkCreate(BaseSchema):
+    expires_in_hours: int = Field(default=12, ge=1, le=168)
+
+
+class TakeawayPublicOrderCreate(BaseSchema):
+    idempotency_key: str = Field(min_length=8, max_length=160)
+    items: list[TakeawaySaleLine] = Field(min_length=1, max_length=100)
+    customer_name: str | None = Field(default=None, max_length=200)
+    customer_phone: str | None = Field(default=None, max_length=40)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class TakeawayOrderPaymentCapture(BaseSchema):
+    payment: TakeawayPaymentCreate
+
+
 class TakeawayOrderStatusUpdate(BaseSchema):
     status: Literal["preparing", "ready"]
 
@@ -229,3 +245,8 @@ class TakeawayImportDryRun(BaseSchema):
     manifest: dict[str, object]
     mapping: dict[str, object]
     records: list[dict[str, object]] = Field(max_length=10000)
+
+
+class TakeawayErpEventAcknowledge(BaseSchema):
+    idempotency_key: str = Field(min_length=8, max_length=180)
+    erp_reference: str = Field(min_length=1, max_length=180)

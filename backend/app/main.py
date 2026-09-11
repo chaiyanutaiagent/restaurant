@@ -187,6 +187,7 @@ app.include_router(restaurant_router.router)
 app.include_router(restaurant_router.public_router)
 app.include_router(restaurant_router.qs_router)
 app.include_router(takeaway_router.router)
+app.include_router(takeaway_router.public_router)
 
 
 @app.get("/health")

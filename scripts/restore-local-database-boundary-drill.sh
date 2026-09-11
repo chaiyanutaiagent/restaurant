@@ -17,6 +17,27 @@ validate_database_name() {
   esac
 }
 
+checksum_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    fail "sha256 checksum utility not found"
+  fi
+}
+
+manifest_value() {
+  awk -F= -v key="$1" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$BACKUP_DIR/manifest.txt"
+}
+
+verify_checksum() {
+  expected="$(manifest_value "$1")"
+  [ -n "$expected" ] || fail "checksum missing from manifest: $1"
+  actual="$(checksum_file "$BACKUP_DIR/$2")"
+  [ "$actual" = "$expected" ] || fail "checksum mismatch: $2"
+}
+
 if [ -z "$BACKUP_DIR" ]; then
   fail "backup directory argument is required"
 fi
@@ -25,6 +46,10 @@ for file in platform-core.dump restaurant.dump takeaway.dump manifest.txt; do
     fail "required backup file missing: $BACKUP_DIR/$file"
   fi
 done
+
+verify_checksum platform_sha256 platform-core.dump
+verify_checksum restaurant_sha256 restaurant.dump
+verify_checksum takeaway_sha256 takeaway.dump
 
 platform_drill="restaurant_platform_core_${DRILL_SUFFIX}"
 restaurant_drill="restaurant_ops_${DRILL_SUFFIX}"

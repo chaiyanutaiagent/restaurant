@@ -7,6 +7,7 @@ import PlatformProtectedRoute from "@/components/auth/PlatformProtectedRoute";
 import DeviceProtectedRoute from "@/components/auth/DeviceProtectedRoute";
 import AppShell from "@/components/layout/AppShell";
 import RestaurantShell from "@/components/layout/RestaurantShell";
+import TakeawayShell from "@/components/layout/TakeawayShell";
 import PlatformShell from "@/components/layout/PlatformShell";
 import { Toaster } from "@/components/ui/toaster";
 import { initAutoSync } from "@/lib/syncService";
@@ -92,6 +93,11 @@ import PlatformBillingPage from "@/pages/platform/PlatformBillingPage";
 import TenantBillingPage from "@/pages/billing/TenantBillingPage";
 import TenantPrivacySupportPage from "@/pages/support/TenantPrivacySupportPage";
 import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
+import TakeawayDashboardPage from "@/pages/takeaway/TakeawayDashboardPage";
+import TakeawayCounterPage from "@/pages/takeaway/TakeawayCounterPage";
+import TakeawayOperationsPage from "@/pages/takeaway/TakeawayOperationsPage";
+import TakeawayPickupStatusPage from "@/pages/takeaway/TakeawayPickupStatusPage";
+import TakeawayPublicOrderPage from "@/pages/takeaway/TakeawayPublicOrderPage";
 import { useEffect } from "react";
 import { useAuthStore } from "@/stores/auth.store";
 
@@ -158,7 +164,55 @@ export default function App(): JSX.Element {
           <Route path="/" element={Capacitor.isNativePlatform() ? <Navigate to="/restaurant" replace /> : <ModuleSelectorPage />} />
           <Route path="/store" element={<StorefrontPage />} />
           <Route path="/:businessSlug" element={<StorefrontPage />} />
+          <Route path="/takeaway/pickup-status/:token" element={<TakeawayPickupStatusPage />} />
+          <Route path="/takeaway/order/:token" element={<TakeawayPublicOrderPage />} />
           <Route path="/erp" element={<Navigate to="/admin" replace />} />
+          <Route element={<ProtectedRoute permissions={[
+            "takeaway.catalog.view", "takeaway.sale.create", "takeaway.kitchen.manage",
+            "takeaway.pickup.manage", "takeaway.central_order.create", "takeaway.central_order.manage",
+            "takeaway.production.manage", "takeaway.stock.view", "takeaway.transfer.manage",
+            "takeaway.credit.manage", "takeaway.report.view", "takeaway.import.dry_run",
+            "takeaway.erp.export"
+          ]} />}>
+            <Route element={<TakeawayShell />}>
+              <Route element={<ProtectedRoute permission="takeaway.catalog.view" />}>
+                <Route path="/takeaway" element={<TakeawayDashboardPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="takeaway.sale.create" />}>
+                <Route path="/takeaway/counter" element={<TakeawayCounterPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="takeaway.kitchen.manage" />}>
+                <Route path="/takeaway/kitchen" element={<TakeawayOperationsPage section="kitchen" />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="takeaway.pickup.manage" />}>
+                <Route path="/takeaway/pickup" element={<TakeawayOperationsPage section="pickup" />} />
+              </Route>
+              <Route element={<ProtectedRoute permissions={["takeaway.central_order.create", "takeaway.central_order.manage"]} />}>
+                <Route path="/takeaway/central-orders" element={<TakeawayOperationsPage section="central" />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="takeaway.production.manage" />}>
+                <Route path="/takeaway/production" element={<TakeawayOperationsPage section="production" />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="takeaway.stock.view" />}>
+                <Route path="/takeaway/stock" element={<TakeawayOperationsPage section="stock" />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="takeaway.transfer.manage" />}>
+                <Route path="/takeaway/transfers" element={<TakeawayOperationsPage section="transfers" />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="takeaway.credit.manage" />}>
+                <Route path="/takeaway/credits" element={<TakeawayOperationsPage section="credits" />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="takeaway.report.view" />}>
+                <Route path="/takeaway/reports" element={<TakeawayOperationsPage section="reports" />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="takeaway.import.dry_run" />}>
+                <Route path="/takeaway/import" element={<TakeawayOperationsPage section="import" />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="takeaway.erp.export" />}>
+                <Route path="/takeaway/erp" element={<TakeawayOperationsPage section="erp" />} />
+              </Route>
+            </Route>
+          </Route>
           <Route element={<ProtectedRoute permission="pos.sale.create" />}>
             <Route path="/pos" element={<POSPage />} />
           </Route>

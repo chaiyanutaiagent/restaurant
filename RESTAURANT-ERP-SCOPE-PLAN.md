@@ -715,6 +715,19 @@ Browser smoke ที่ 1024×768 ผ่าน `/pos`, `/restaurant/tables`, `/r
 `/restaurant/orders`, `/restaurant/kitchen` และ `/crm`; active workspace ถูกต้องและ document
 horizontal overflow เป็น `0` ทุก route โดยไม่มี database/backend/Production change
 
+Follow-up `P5-POS-TAKEAWAY-MERGE-09` เมื่อ 11 กันยายน 2026 รวมการขายรับกลับเข้า
+`/pos?channel=takeaway` โดยใช้เมนูกลาง, ตะกร้า, ลูกค้า และการรับชำระหน้าเดียวกับ POS แต่ยังคง
+order engine เดิมสำหรับเลขคิว, offline outbox, stock/accounting และลำดับสลิปลูกค้า → สลิปครัว →
+KDS; `/restaurant/wap` redirect เข้าหน้าใหม่ ขณะที่ `/restaurant/wap/legacy` เป็น fallback ซ่อนสำหรับ
+สิทธิ์เดิมและ rollback ส่วน Counter, Brand Store และ QR ลูกค้ายังคงเดิม release `c952f8d` deploy
+เฉพาะ UAT frontend image `restaurant-pos-frontend:uat-pos-takeaway-c952f8d` และเก็บ image เดิม
+`restaurant-pos-frontend:uat-pos-categories-47c583a` พร้อม backup source/env ที่
+`/home/behappyaiagent/restaurant-uat-deploy-backups/c952f8d`; type-check/build, CI, backend unit
+regression และ browser smoke บน UAT จริงผ่าน โดยหน้าใหม่แสดง 4 หมวด 16 เมนู, route redirect ถูกต้อง,
+ไม่มี console error และ horizontal overflow ที่ 1024×768 เป็น `0` ส่วน full isolated readiness rerun
+ติด Docker registry timeout ของ `nginx:1.25-alpine` สองครั้งก่อนเริ่ม test จึงยังต้อง rerun พร้อม
+physical Safari/iPad touch และ printer flow โดย Production ไม่ถูกเปลี่ยน
+
 Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
 ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `in_progress` หลัง iPad scanner preflight ผ่าน
 ลำดับงานที่ล็อกไว้คือ

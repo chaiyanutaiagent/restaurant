@@ -8,6 +8,11 @@ Source reference: `/Users/user/Projects/erp-pos-run` commit `15a1de1`
 
 Target reference: `/Users/user/Projects/restaurant` commit `27c9c10`
 
+เอกสารต่อเนื่อง:
+
+- `P6-TAKEAWAY-CAPABILITY-MATRIX-02.md`
+- `P6-TAKEAWAY-BOUNDARY-DRAFT-03.md`
+
 ## เป้าหมาย
 
 เตรียมแผนสร้าง Foodchainservice Takeaway POS จากความสามารถที่พิสูจน์แล้วใน Chambo

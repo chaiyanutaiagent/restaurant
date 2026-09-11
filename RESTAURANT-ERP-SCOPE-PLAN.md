@@ -724,9 +724,18 @@ KDS; `/restaurant/wap` redirect เข้าหน้าใหม่ ขณะ�
 `restaurant-pos-frontend:uat-pos-categories-47c583a` พร้อม backup source/env ที่
 `/home/behappyaiagent/restaurant-uat-deploy-backups/c952f8d`; type-check/build, CI, backend unit
 regression และ browser smoke บน UAT จริงผ่าน โดยหน้าใหม่แสดง 4 หมวด 16 เมนู, route redirect ถูกต้อง,
-ไม่มี console error และ horizontal overflow ที่ 1024×768 เป็น `0` ส่วน full isolated readiness rerun
-ติด Docker registry timeout ของ `nginx:1.25-alpine` สองครั้งก่อนเริ่ม test จึงยังต้อง rerun พร้อม
-physical Safari/iPad touch และ printer flow โดย Production ไม่ถูกเปลี่ยน
+ไม่มี console error และ horizontal overflow ที่ 1024×768 เป็น `0`
+
+Follow-up hardening `41d49d3` จำกัด UAT Auto-login ให้ทำงานเฉพาะ hostname `uat-*`, ปิด Service Worker
+เฉพาะ Playwright เพื่อให้ API mock deterministic, เติม branch mock ที่ขาด และอัปเดต WeasyPrint เป็น
+`70.0` พร้อม frontend dependency patches หลัง advisory ใหม่ โดย full isolated readiness gate ผ่าน
+backend `232/232`, browser `14/14`, QR → Kitchen → payment → stock/accounting → ERP report,
+offline reconnect/idempotency `100` orders, type-check/build, backend audit ศูนย์ known vulnerability,
+frontend production audit ศูนย์ finding และ repository safety; deploy UAT เป็น backend/frontend image
+`restaurant-pos-backend:uat-p5-hardening-41d49d3` และ
+`restaurant-pos-frontend:uat-p5-hardening-41d49d3`, asset `/assets/index-BWeGI9bh.js`, health/redirect/PDF
+runtime smoke ผ่าน พร้อม rollback backup `/home/behappyaiagent/restaurant-uat-deploy-backups/41d49d3`
+และ image ก่อนหน้า โดยเหลือ physical Safari/iPad touch และ printer flow; Production ไม่ถูกเปลี่ยน
 
 Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
 ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `in_progress` หลัง iPad scanner preflight ผ่าน

@@ -2,10 +2,9 @@
 
 ## สถานะ
 
-`uat_deployed_browser_smoke_passed_full_isolated_rerun_pending` — รวมการขายรับกลับเข้า
-หน้า `/pos` แล้ว, deploy เฉพาะ frontend UAT, CI และ browser smoke ที่ขนาด iPad ผ่าน;
-full isolated readiness rerun ยัง pending เพราะ Docker registry timeout ขณะอ่าน metadata ของ
-`nginx:1.25-alpine` สองครั้งก่อนเริ่มสร้างฐานทดสอบ
+`uat_deployed_full_isolated_readiness_passed_physical_printer_pending` — รวมการขายรับกลับเข้า
+หน้า `/pos` แล้ว, deploy UAT, CI, browser smoke ที่ขนาด iPad และ full isolated readiness gate ผ่าน;
+คงเหลือ physical Safari/iPad touch และ printer flow ก่อน owner sign-off
 
 ## ปัญหาที่แก้
 
@@ -41,18 +40,22 @@ full isolated readiness rerun ยัง pending เพราะ Docker registry 
 - [x] ตะกร้าและการรับเงินแสดงยอดถูกต้อง และปุ่มรับเงินพร้อมเมื่อยอดครบ
 - [x] browser smoke UAT ไม่มี console error และไม่มี horizontal overflow ที่ 1024×768
 - [x] backend unit regression สำหรับ WAP offline และ operational handoff ผ่านบน UAT container
-- [ ] full isolated QR-to-ERP/Playwright readiness gate rerun ผ่าน; blocked เฉพาะ Docker registry timeout ก่อนเริ่ม test
+- [x] full isolated QR-to-ERP/Playwright readiness gate ผ่าน
 - [ ] physical Safari/iPad touch และ printer flow ผ่านครบ
 
 ## Rollback
 
 1. เปลี่ยน `FRONTEND_IMAGE` ใน UAT กลับเป็น
-   `restaurant-pos-frontend:uat-pos-categories-47c583a`
-2. recreate เฉพาะ frontend service ของ Compose project `restaurant-pos-uat-drill`
-3. หากต้องคืน source UAT ให้ใช้ backup
+   `restaurant-pos-frontend:uat-pos-takeaway-c952f8d`
+2. เปลี่ยน `BACKEND_IMAGE` ใน UAT กลับเป็น
+   `restaurant-pos-backend:uat-auth-bypass-20260910`
+3. recreate เฉพาะ backend และ frontend service ของ Compose project `restaurant-pos-uat-drill`
+4. หากต้องคืน source/env UAT ล่าสุด ให้ใช้ backup
+   `/home/behappyaiagent/restaurant-uat-deploy-backups/41d49d3`
+5. backup ก่อนรวมหน้าเดิมยังอยู่ที่
    `/home/behappyaiagent/restaurant-uat-deploy-backups/c952f8d`
-4. ไม่มี database migration ใน scope นี้ และ `/restaurant/wap/legacy` ยังพร้อมใช้งานระหว่าง UAT
-5. Production ไม่ถูกเปลี่ยน
+6. ไม่มี database migration ใน scope นี้ และ `/restaurant/wap/legacy` ยังพร้อมใช้งานระหว่าง UAT
+7. Production ไม่ถูกเปลี่ยน
 
 ## Evidence
 
@@ -61,21 +64,32 @@ business_type: restaurant
 database_change: none
 backend_change: none
 source_commit: c952f8d
+hardening_commit: 41d49d3
 source_validation: frontend_type_check_and_build_passed
 ci_push_run: 34553526406 passed
 ci_pull_request_run: 34553529191 passed
-uat_frontend_image: restaurant-pos-frontend:uat-pos-takeaway-c952f8d
-uat_previous_frontend_image: restaurant-pos-frontend:uat-pos-categories-47c583a
-uat_backup: /home/behappyaiagent/restaurant-uat-deploy-backups/c952f8d
-uat_asset: /assets/index-DGy85Syo.js
+hardening_ci_push_run: 34556131431 passed
+hardening_ci_pull_request_run: 34556134248 passed
+uat_frontend_image: restaurant-pos-frontend:uat-p5-hardening-41d49d3
+uat_backend_image: restaurant-pos-backend:uat-p5-hardening-41d49d3
+uat_previous_frontend_image: restaurant-pos-frontend:uat-pos-takeaway-c952f8d
+uat_previous_backend_image: restaurant-pos-backend:uat-auth-bypass-20260910
+uat_backup: /home/behappyaiagent/restaurant-uat-deploy-backups/41d49d3
+uat_asset: /assets/index-BWeGI9bh.js
 uat_health: passed
 uat_route_redirect: /restaurant/wap -> /pos?channel=takeaway passed
 uat_menu: 4 categories / 16 products passed
 uat_cart_precheckout: 69.00 exact-payment button enabled passed
 uat_browser_console_errors: 0
 uat_document_horizontal_overflow_1024x768: 0
-backend_unit_regression: test_wap_offline + test_operational_handoff passed
-full_isolated_gate_attempts: 2 blocked before test by nginx:1.25-alpine registry metadata timeout
+backend_unit_regression: 232/232 passed
+browser_regression: 14/14 passed
+load_reconnect_idempotency: 100/100 orders passed
+backend_dependency_audit: zero known vulnerabilities
+frontend_production_dependency_audit: zero known vulnerabilities
+backend_pdf_runtime: weasyprint 70.0 generated PDF passed
+full_isolated_gate: passed
+full_isolated_artifact: /private/tmp/restaurant-p5-artifacts/p5-production-readiness-05-20260911T024453Z/manifest.txt
 physical_safari_ipad_printer_flow: pending
 production_activated: false
 phase6_started: false

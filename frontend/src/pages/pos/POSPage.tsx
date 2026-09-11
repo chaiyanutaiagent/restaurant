@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import {
   Activity,
@@ -178,6 +178,7 @@ function getOrderStatusLabel(status: SaleOrder["status"]): string {
 
 export default function POSPage(): JSX.Element {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const isOnline = useOnlineStatus();
   const branchId = useAuthStore((state) => state.branchId);
@@ -257,6 +258,7 @@ export default function POSPage(): JSX.Element {
   const [secondaryPaymentReference, setSecondaryPaymentReference] = useState("");
   const [deviceStatusOpen, setDeviceStatusOpen] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(() => window.localStorage.getItem("pos-auto-print-receipt") === "true");
   const searchRef = useRef<HTMLInputElement | null>(null);
   const cashInputRef = useRef<HTMLInputElement | null>(null);
@@ -265,7 +267,7 @@ export default function POSPage(): JSX.Element {
   const scannerStreamRef = useRef<MediaStream | null>(null);
   const scannerFrameRef = useRef<number | null>(null);
   const autoPrintedOrderRef = useRef<string | null>(null);
-  const offlineProducts = useOfflineProducts(searchTerm);
+  const offlineProducts = useOfflineProducts(searchTerm, catalogRevision);
   const handlePrint = useReactToPrint({ contentRef: receiptRef });
 
   const branchQuery = useQuery({
@@ -426,10 +428,16 @@ export default function POSPage(): JSX.Element {
       syncStockBalances(branchId ?? undefined),
       syncPendingSales(),
     ]).then(() => {
-      if (active) setLastSyncAt(new Date());
+      if (!active) return;
+      setCatalogRevision((current) => current + 1);
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["pos", "categories"] }),
+        queryClient.invalidateQueries({ queryKey: ["pos", "stock-balances"] }),
+      ]);
+      setLastSyncAt(new Date());
     }).catch(() => undefined);
     return () => { active = false; };
-  }, [branchId, isOnline]);
+  }, [branchId, isOnline, queryClient]);
 
   useEffect(() => {
     if (!showReceipt || !lastOrder || !autoPrintReceipt || autoPrintedOrderRef.current === lastOrder.id) {
@@ -1302,6 +1310,7 @@ export default function POSPage(): JSX.Element {
       resetActiveSale();
       await db.completedOrders.put({ ...order, synced_at: Date.now() });
       await syncStockBalances(branchId ?? undefined);
+      await queryClient.invalidateQueries({ queryKey: ["pos", "stock-balances"] });
       toast({ title: "ชำระเงินสำเร็จ" });
   }
 

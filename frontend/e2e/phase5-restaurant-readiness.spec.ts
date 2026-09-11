@@ -134,6 +134,7 @@ test("mobile QR to tablet kitchen, checkout, and ERP report", async ({ browser, 
     await expect(staff.getByRole("button", { name: "ออเดอร์ QR" })).toBeVisible();
     await expect(staff.getByRole("button", { name: "KDS" })).toBeVisible();
     await expect(staff.getByRole("button", { name: "เดลิเวอรี (รอเปิดใช้)" })).toBeDisabled();
+    await expect.poll(async () => staff.getByTestId("pos-category-panel").locator("button").count()).toBeGreaterThan(1);
     const categoryPanel = await staff.getByTestId("pos-category-panel").boundingBox();
     const productPanel = await staff.getByTestId("pos-product-panel").boundingBox();
     const cartPanel = await staff.getByTestId("pos-cart-panel").boundingBox();

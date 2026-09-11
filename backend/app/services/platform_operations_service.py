@@ -15,7 +15,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import AsyncSessionLocal, PlatformSessionLocal, RestaurantSessionLocal
+from app.database import (
+    AsyncSessionLocal,
+    PlatformSessionLocal,
+    RestaurantSessionLocal,
+    TakeawaySessionLocal,
+)
 from app.models.audit import AuditLog
 from app.models.platform import PlatformOperationsSnapshot
 from app.schemas.platform import (
@@ -78,6 +83,13 @@ async def collect_runtime_state() -> PlatformRuntimeRead:
         "legacy_database": legacy,
         "platform_database": platform,
         "restaurant_database": restaurant,
+        "takeaway_database": (
+            await _database_check(TakeawaySessionLocal)
+            if settings.takeaway_feature_enabled and TakeawaySessionLocal is not None
+            else "error"
+            if settings.takeaway_feature_enabled
+            else "disabled"
+        ),
         "redis": redis,
         "uploads": _uploads_check(),
         "reference_projector": (

@@ -21,3 +21,4 @@ create_database_if_missing() {
 
 create_database_if_missing "${PLATFORM_POSTGRES_DB:-restaurant_platform_core_db}"
 create_database_if_missing "${RESTAURANT_POSTGRES_DB:-restaurant_ops_db}"
+create_database_if_missing "${TAKEAWAY_POSTGRES_DB:-takeaway_ops_db}"

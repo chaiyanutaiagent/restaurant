@@ -14,6 +14,7 @@ from app.config import settings
 from app.database import (
     AsyncSessionLocal,
     active_restaurant_service_session_factory,
+    active_takeaway_service_session_factory,
     get_identity_db,
     get_restaurant_service_db,
 )
@@ -216,10 +217,13 @@ def operational_session_factory_for(current: TokenData):
     elif current.target_database in {None, "retail_pos"}:
         return AsyncSessionLocal
     elif current.target_database == "takeaway":
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Takeaway operational service is not available",
-        )
+        try:
+            return active_takeaway_service_session_factory()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Takeaway operational service is not available",
+            ) from exc
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

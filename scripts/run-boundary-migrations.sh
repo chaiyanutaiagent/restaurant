@@ -16,4 +16,8 @@ printf 'Migrating restaurant database...\n'
 docker compose -f "$COMPOSE_FILE" run --rm --no-deps backend \
   alembic -c alembic-boundaries.ini -n restaurant upgrade head
 
+printf 'Migrating takeaway database...\n'
+docker compose -f "$COMPOSE_FILE" run --rm --no-deps backend \
+  alembic -c alembic-boundaries.ini -n takeaway upgrade head
+
 printf 'Boundary migrations completed.\n'

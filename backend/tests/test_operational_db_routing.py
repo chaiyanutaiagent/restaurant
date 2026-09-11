@@ -31,9 +31,21 @@ class OperationalDatabaseRoutingTests(unittest.TestCase):
         self.assertIs(operational_session_factory_for(context("retail_pos")), AsyncSessionLocal)
         self.assertIs(operational_session_factory_for(context(None)), AsyncSessionLocal)
 
-    def test_takeaway_is_not_inferred_before_phase_six(self) -> None:
-        with self.assertRaises(HTTPException) as raised:
-            operational_session_factory_for(context("takeaway"))
+    def test_takeaway_context_uses_server_owned_factory_when_enabled(self) -> None:
+        sentinel = object()
+        with patch(
+            "app.dependencies.active_takeaway_service_session_factory",
+            return_value=sentinel,
+        ):
+            self.assertIs(operational_session_factory_for(context("takeaway")), sentinel)
+
+    def test_takeaway_context_fails_closed_when_disabled(self) -> None:
+        with patch(
+            "app.dependencies.active_takeaway_service_session_factory",
+            side_effect=ValueError("disabled"),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                operational_session_factory_for(context("takeaway"))
         self.assertEqual(raised.exception.status_code, 503)
 
     def test_unknown_operational_context_is_rejected(self) -> None:

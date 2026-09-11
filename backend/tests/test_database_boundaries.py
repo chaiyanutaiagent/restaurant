@@ -1,15 +1,22 @@
 import unittest
 
-from app.config import Settings, effective_database_url, settings
+from app.config import (
+    Settings,
+    effective_database_url,
+    settings,
+    validate_takeaway_runtime_config,
+)
 from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
     RestaurantSessionLocal,
+    TakeawaySessionLocal,
     active_identity_session_factory,
     active_restaurant_service_session_factory,
     session_factory_for,
 )
 from app.models.integration import OperationalOutboxEvent
+from app.models.takeaway import TakeawayOrder, TakeawayStockBalance
 
 
 class DatabaseBoundaryTests(unittest.TestCase):
@@ -43,6 +50,8 @@ class DatabaseBoundaryTests(unittest.TestCase):
         self.assertEqual(settings.identity_database, "legacy")
         self.assertEqual(settings.restaurant_service_database, "legacy")
         self.assertFalse(settings.reference_projector_enabled)
+        self.assertEqual(settings.takeaway_service_database, "disabled")
+        self.assertFalse(settings.takeaway_feature_enabled)
         self.assertIs(active_identity_session_factory(), AsyncSessionLocal)
         self.assertIs(
             active_restaurant_service_session_factory(),
@@ -56,3 +65,29 @@ class DatabaseBoundaryTests(unittest.TestCase):
             for foreign_key in OperationalOutboxEvent.__table__.foreign_keys
         }
         self.assertFalse({"retail", "takeaway"} & table_names)
+
+    def test_takeaway_models_have_no_cross_database_foreign_keys(self) -> None:
+        self.assertEqual(list(TakeawayOrder.__table__.foreign_keys), [])
+        self.assertEqual(list(TakeawayStockBalance.__table__.foreign_keys), [])
+
+    def test_takeaway_boundary_is_explicit_and_dark_by_default(self) -> None:
+        self.assertIsNone(settings.takeaway_database_url)
+        self.assertIsNone(TakeawaySessionLocal)
+        with self.assertRaisesRegex(ValueError, "TAKEAWAY_SERVICE_DATABASE"):
+            validate_takeaway_runtime_config(
+                environment="development",
+                enabled=True,
+                service_database="disabled",
+                database_url="postgresql+asyncpg://db/takeaway",
+                identity_database="platform_core",
+                reference_projector_enabled=True,
+            )
+        with self.assertRaisesRegex(ValueError, "TAKEAWAY_DATABASE_URL"):
+            validate_takeaway_runtime_config(
+                environment="development",
+                enabled=True,
+                service_database="takeaway",
+                database_url=None,
+                identity_database="platform_core",
+                reference_projector_enabled=True,
+            )

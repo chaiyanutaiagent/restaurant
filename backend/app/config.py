@@ -71,6 +71,32 @@ def validate_uat_auth_bypass_config(
         raise ValueError("UAT auth bypass requires an explicit Company ID and username")
 
 
+def validate_takeaway_runtime_config(
+    *,
+    environment: str,
+    enabled: bool,
+    service_database: str,
+    database_url: str | None,
+    identity_database: str,
+    reference_projector_enabled: bool,
+) -> None:
+    """Keep the Phase 6 boundary dark until every required dependency is explicit."""
+    if not enabled:
+        return
+    if service_database != "takeaway":
+        raise ValueError(
+            "TAKEAWAY_FEATURE_ENABLED requires TAKEAWAY_SERVICE_DATABASE=takeaway"
+        )
+    if not database_url:
+        raise ValueError("Takeaway service requires an explicit TAKEAWAY_DATABASE_URL")
+    if identity_database != "platform_core":
+        raise ValueError("Takeaway service requires IDENTITY_DATABASE=platform_core")
+    if not reference_projector_enabled:
+        raise ValueError("Takeaway service requires REFERENCE_PROJECTOR_ENABLED=true")
+    if environment in {"staging", "production"} and "localhost" in database_url:
+        raise ValueError("Staging and production Takeaway databases cannot use localhost")
+
+
 class Settings(BaseSettings):
     postgres_db: str
     postgres_user: str
@@ -80,8 +106,11 @@ class Settings(BaseSettings):
     database_url: str
     platform_database_url: str | None = None
     restaurant_database_url: str | None = None
+    takeaway_database_url: str | None = None
     identity_database: Literal["legacy", "platform_core"] = "legacy"
     restaurant_service_database: Literal["legacy", "restaurant"] = "legacy"
+    takeaway_service_database: Literal["disabled", "takeaway"] = "disabled"
+    takeaway_feature_enabled: bool = False
     reference_projector_enabled: bool = False
     reference_projector_poll_seconds: float = Field(default=1.0, ge=0.1, le=60.0)
     reference_projector_batch_size: int = Field(default=100, ge=1, le=1000)
@@ -166,6 +195,14 @@ class Settings(BaseSettings):
             company_id=self.uat_auth_bypass_company_id,
             username=self.uat_auth_bypass_username,
         )
+        validate_takeaway_runtime_config(
+            environment=self.environment,
+            enabled=self.takeaway_feature_enabled,
+            service_database=self.takeaway_service_database,
+            database_url=self.takeaway_database_url,
+            identity_database=self.identity_database,
+            reference_projector_enabled=self.reference_projector_enabled,
+        )
         if self.uat_auth_bypass_username is not None:
             self.uat_auth_bypass_username = self.uat_auth_bypass_username.strip() or None
         return self
@@ -197,6 +234,16 @@ class Settings(BaseSettings):
     @property
     def restaurant_database_url_sync(self) -> str:
         return self.restaurant_database_url_effective.replace(
+            "postgresql+asyncpg://",
+            "postgresql+psycopg2://",
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def takeaway_database_url_sync(self) -> str | None:
+        if self.takeaway_database_url is None:
+            return None
+        return self.takeaway_database_url.replace(
             "postgresql+asyncpg://",
             "postgresql+psycopg2://",
         )

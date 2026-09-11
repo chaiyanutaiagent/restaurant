@@ -1,0 +1,461 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+from decimal import Decimal
+import uuid
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.database import Base
+from app.models.base import TimestampMixin, UUIDMixin
+
+
+class TakeawayReferenceProjection(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_reference_projections"
+    __table_args__ = (
+        UniqueConstraint(
+            "aggregate_type",
+            "aggregate_id",
+            name="uq_takeaway_reference_projection_aggregate",
+        ),
+        CheckConstraint(
+            "aggregate_type IN ('company', 'brand', 'branch', 'brand_branch', 'user')",
+            name="ck_takeaway_reference_projection_type",
+        ),
+    )
+
+    aggregate_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    source_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    source_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class TakeawayCategory(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_categories"
+    __table_args__ = (
+        UniqueConstraint("company_id", "brand_id", "code", name="uq_takeaway_category_code"),
+        Index("ix_takeaway_categories_scope", "company_id", "brand_id", "is_active"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    code: Mapped[str] = mapped_column(String(60), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+
+
+class TakeawayCatalogItem(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_catalog_items"
+    __table_args__ = (
+        UniqueConstraint("company_id", "brand_id", "sku", name="uq_takeaway_catalog_item_sku"),
+        Index("ix_takeaway_catalog_items_scope", "company_id", "brand_id", "is_active"),
+        CheckConstraint("price >= 0", name="ck_takeaway_catalog_item_price"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    category_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    sku: Mapped[str] = mapped_column(String(100), nullable=False)
+    barcode: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    unit: Mapped[str] = mapped_column(String(40), nullable=False, server_default=text("'ชิ้น'"))
+    price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False, server_default=text("0"))
+    kitchen_station: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    track_stock: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    source_metadata: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+
+
+class TakeawayBranchCatalogItem(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_branch_catalog_items"
+    __table_args__ = (
+        UniqueConstraint("branch_id", "catalog_item_id", name="uq_takeaway_branch_catalog_item"),
+        Index("ix_takeaway_branch_catalog_scope", "company_id", "brand_id", "branch_id"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    catalog_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    price_override: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
+    is_available: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+
+
+class TakeawayShift(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_shifts"
+    __table_args__ = (
+        UniqueConstraint("branch_id", "business_date", "round_no", name="uq_takeaway_shift_round"),
+        Index("ix_takeaway_shifts_scope_status", "company_id", "brand_id", "branch_id", "status"),
+        CheckConstraint("status IN ('open', 'closed')", name="ck_takeaway_shift_status"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    business_date: Mapped[date] = mapped_column(Date, nullable=False)
+    round_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    opened_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    opening_cash: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, server_default=text("0"))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'open'"))
+    closed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expected_cash: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
+    counted_cash: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
+    close_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TakeawayOrder(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_orders"
+    __table_args__ = (
+        UniqueConstraint("branch_id", "order_number", name="uq_takeaway_order_number"),
+        UniqueConstraint("branch_id", "idempotency_key", name="uq_takeaway_order_idempotency"),
+        Index("ix_takeaway_orders_scope_status", "company_id", "brand_id", "branch_id", "status"),
+        Index("ix_takeaway_orders_queue", "branch_id", "business_date", "queue_number"),
+        CheckConstraint("channel IN ('counter', 'qr', 'online', 'import')", name="ck_takeaway_order_channel"),
+        CheckConstraint("status IN ('draft', 'paid', 'cancelled', 'refunded')", name="ck_takeaway_order_status"),
+        CheckConstraint(
+            "fulfillment_status IN ('awaiting_payment', 'queued', 'preparing', 'ready', 'picked_up', 'cancelled')",
+            name="ck_takeaway_order_fulfillment_status",
+        ),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    shift_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    order_number: Mapped[str] = mapped_column(String(60), nullable=False)
+    business_date: Mapped[date] = mapped_column(Date, nullable=False)
+    queue_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'counter'"))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'draft'"))
+    fulfillment_status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'awaiting_payment'"))
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, server_default=text("0"))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, server_default=text("0"))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, server_default=text("0"))
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, server_default=text("0"))
+    customer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    customer_phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    offline_device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    offline_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    picked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_metadata: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+
+
+class TakeawayOrderItem(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_order_items"
+    __table_args__ = (
+        Index("ix_takeaway_order_items_order", "order_id"),
+        CheckConstraint("quantity > 0", name="ck_takeaway_order_item_quantity"),
+    )
+
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    catalog_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    sku: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, server_default=text("0"))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, server_default=text("0"))
+    line_total: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    kitchen_station: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TakeawayPayment(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_payments"
+    __table_args__ = (
+        UniqueConstraint("order_id", "idempotency_key", name="uq_takeaway_payment_idempotency"),
+        CheckConstraint("amount > 0", name="ck_takeaway_payment_amount"),
+    )
+
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    method: Mapped[str] = mapped_column(String(30), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'captured'"))
+    reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+
+class TakeawayReceipt(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_receipts"
+    __table_args__ = (UniqueConstraint("receipt_number", name="uq_takeaway_receipt_number"),)
+
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    receipt_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+
+class TakeawayKitchenTicket(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_kitchen_tickets"
+    __table_args__ = (
+        UniqueConstraint("order_item_id", name="uq_takeaway_kitchen_order_item"),
+        Index("ix_takeaway_kitchen_queue", "branch_id", "station", "status"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    order_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    queue_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    station: Mapped[str] = mapped_column(String(80), nullable=False, server_default=text("'default'"))
+    item_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'queued'"))
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TakeawayPickupToken(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_pickup_tokens"
+
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    redeemed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TakeawayCentralOrderRound(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_central_order_rounds"
+    __table_args__ = (
+        UniqueConstraint("brand_id", "business_date", "round_no", name="uq_takeaway_central_round"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    business_date: Mapped[date] = mapped_column(Date, nullable=False)
+    round_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    cutoff_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'open'"))
+
+
+class TakeawayCentralOrder(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_central_orders"
+    __table_args__ = (
+        UniqueConstraint("branch_id", "order_number", name="uq_takeaway_central_order_number"),
+        Index("ix_takeaway_central_orders_status", "company_id", "brand_id", "status"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    round_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    order_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    order_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'regular'"))
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'submitted'"))
+    requested_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    submitted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TakeawayCentralOrderItem(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_central_order_items"
+    __table_args__ = (CheckConstraint("quantity > 0", name="ck_takeaway_central_item_quantity"),)
+
+    central_order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    catalog_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    sku: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    item_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    unit: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'catalog'"))
+    approval_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'pending'"))
+
+
+class TakeawayProductionBatch(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_production_batches"
+    __table_args__ = (UniqueConstraint("company_id", "batch_number", name="uq_takeaway_production_batch"),)
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    location_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    batch_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'planned'"))
+    planned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+
+
+class TakeawayProductionLine(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_production_lines"
+    __table_args__ = (CheckConstraint("planned_qty > 0", name="ck_takeaway_production_line_qty"),)
+
+    batch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    line_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    planned_qty: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    actual_qty: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
+    unit: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class TakeawayStockBalance(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_stock_balances"
+    __table_args__ = (
+        UniqueConstraint("company_id", "location_id", "item_id", "lot_code", name="uq_takeaway_stock_balance"),
+        CheckConstraint("on_hand_qty >= 0", name="ck_takeaway_stock_on_hand"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    location_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    lot_code: Mapped[str] = mapped_column(String(100), nullable=False, server_default=text("''"))
+    on_hand_qty: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("0"))
+    reserved_qty: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("0"))
+    average_cost: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("0"))
+
+
+class TakeawayStockMovement(UUIDMixin, Base):
+    __tablename__ = "takeaway_stock_movements"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_takeaway_stock_movement_idempotency"),
+        Index("ix_takeaway_stock_movements_item", "company_id", "location_id", "item_id", "occurred_at"),
+        CheckConstraint("quantity_delta <> 0", name="ck_takeaway_stock_movement_nonzero"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    location_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    lot_code: Mapped[str] = mapped_column(String(100), nullable=False, server_default=text("''"))
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    production_batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    order_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    transfer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    movement_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    quantity_delta: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("0"))
+    idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+
+class TakeawayTransfer(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_transfers"
+    __table_args__ = (UniqueConstraint("company_id", "transfer_number", name="uq_takeaway_transfer_number"),)
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    transfer_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    from_location_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    to_location_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'draft'"))
+    requested_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TakeawayTransferItem(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_transfer_items"
+    __table_args__ = (CheckConstraint("requested_qty > 0", name="ck_takeaway_transfer_item_qty"),)
+
+    transfer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    requested_qty: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    shipped_qty: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
+    received_qty: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
+    unit: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class TakeawayCreditAccount(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_credit_accounts"
+    __table_args__ = (
+        UniqueConstraint("company_id", "brand_id", "branch_id", name="uq_takeaway_credit_account"),
+        CheckConstraint("credit_limit >= 0", name="ck_takeaway_credit_limit"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    credit_limit: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, server_default=text("0"))
+    balance: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, server_default=text("0"))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'active'"))
+
+
+class TakeawayCreditEntry(UUIDMixin, Base):
+    __tablename__ = "takeaway_credit_entries"
+    __table_args__ = (UniqueConstraint("idempotency_key", name="uq_takeaway_credit_entry_idempotency"),)
+
+    account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    entry_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    reference_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    reference_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+
+class TakeawayOperationalOutbox(UUIDMixin, Base):
+    __tablename__ = "takeaway_operational_outbox"
+    __table_args__ = (UniqueConstraint("idempotency_key", name="uq_takeaway_outbox_idempotency"),)
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    aggregate_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    contract_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'pending'"))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+
+class TakeawayImportBatch(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_import_batches"
+    __table_args__ = (UniqueConstraint("manifest_digest", name="uq_takeaway_import_manifest_digest"),)
+
+    source_system: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_snapshot: Mapped[str] = mapped_column(String(100), nullable=False)
+    manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'dry_run'"))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'pending'"))
+    total_records: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    accepted_records: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rejected_records: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    report: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+
+
+class TakeawayImportRecord(UUIDMixin, Base):
+    __tablename__ = "takeaway_import_records"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "source_type", "source_id", name="uq_takeaway_import_record_source"),
+    )
+
+    batch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    target_type: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    source_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))

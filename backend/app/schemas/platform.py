@@ -20,6 +20,7 @@ OPERATIONS_COMPONENT_KEYS = {
     "legacy_database",
     "platform_database",
     "restaurant_database",
+    "takeaway_database",
     "redis",
     "uploads",
     "reference_projector",

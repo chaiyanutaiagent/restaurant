@@ -18,6 +18,7 @@ from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
     RestaurantSessionLocal,
+    TakeawaySessionLocal,
     current_database_name,
     init_db,
     validate_runtime_database_names,
@@ -52,6 +53,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         current_database_name(PlatformSessionLocal),
         current_database_name(RestaurantSessionLocal),
     )
+    takeaway_database_name = (
+        await current_database_name(TakeawaySessionLocal)
+        if settings.takeaway_feature_enabled and TakeawaySessionLocal is not None
+        else None
+    )
     validate_runtime_database_names(
         identity_database=settings.identity_database,
         restaurant_service_database=settings.restaurant_service_database,
@@ -59,6 +65,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         legacy_database_name=legacy_database_name,
         platform_database_name=platform_database_name,
         restaurant_database_name=restaurant_database_name,
+        takeaway_service_database=settings.takeaway_service_database,
+        takeaway_feature_enabled=settings.takeaway_feature_enabled,
+        takeaway_database_name=takeaway_database_name,
     )
     permission_catalog_factories = [AsyncSessionLocal]
     if platform_database_name != legacy_database_name:

@@ -27,6 +27,7 @@ COPY alembic-boundaries.ini ./alembic-boundaries.ini
 COPY alembic ./alembic
 COPY alembic_platform ./alembic_platform
 COPY alembic_restaurant ./alembic_restaurant
+COPY alembic_takeaway ./alembic_takeaway
 COPY app ./app
 
 RUN mkdir -p /app/uploads /app/logs \

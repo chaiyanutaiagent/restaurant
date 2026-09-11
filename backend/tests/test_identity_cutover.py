@@ -92,6 +92,31 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
             restaurant_database_name="shared",
         )
 
+    def test_takeaway_cutover_requires_four_distinct_databases(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "distinct legacy"):
+            validate_runtime_database_names(
+                identity_database="platform_core",
+                restaurant_service_database="restaurant",
+                takeaway_service_database="takeaway",
+                takeaway_feature_enabled=True,
+                reference_projector_enabled=True,
+                legacy_database_name="legacy",
+                platform_database_name="platform",
+                restaurant_database_name="restaurant",
+                takeaway_database_name="restaurant",
+            )
+        validate_runtime_database_names(
+            identity_database="platform_core",
+            restaurant_service_database="restaurant",
+            takeaway_service_database="takeaway",
+            takeaway_feature_enabled=True,
+            reference_projector_enabled=True,
+            legacy_database_name="legacy",
+            platform_database_name="platform",
+            restaurant_database_name="restaurant",
+            takeaway_database_name="takeaway",
+        )
+
     def test_auth_metadata_exposes_server_owned_identity_source(self) -> None:
         response = ok({"message": "test"})
         self.assertEqual(response["meta"]["identity_database"], "legacy")

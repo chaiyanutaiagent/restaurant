@@ -70,6 +70,11 @@ restaurant_engine = (
     if settings.restaurant_database_url_effective == settings.database_url
     else _create_engine(settings.restaurant_database_url_effective)
 )
+takeaway_engine = (
+    _create_engine(settings.takeaway_database_url)
+    if settings.takeaway_database_url
+    else None
+)
 
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 PlatformSessionLocal = async_sessionmaker(
@@ -82,12 +87,16 @@ RestaurantSessionLocal = async_sessionmaker(
     expire_on_commit=False,
     class_=AsyncSession,
 )
+TakeawaySessionLocal = (
+    async_sessionmaker(takeaway_engine, expire_on_commit=False, class_=AsyncSession)
+    if takeaway_engine is not None
+    else None
+)
 
 TARGET_DATABASE_SESSION_FACTORIES = {
     "platform_core": PlatformSessionLocal,
     "restaurant": RestaurantSessionLocal,
 }
-
 IDENTITY_DATABASE_SESSION_FACTORIES = {
     "legacy": AsyncSessionLocal,
     "platform_core": PlatformSessionLocal,
@@ -136,6 +145,20 @@ def active_restaurant_service_session_factory() -> async_sessionmaker[AsyncSessi
     return restaurant_service_session_factory_for(settings.restaurant_service_database)
 
 
+def takeaway_service_session_factory_for(
+    takeaway_service_database: str,
+) -> async_sessionmaker[AsyncSession]:
+    if takeaway_service_database != "takeaway" or TakeawaySessionLocal is None:
+        raise ValueError("Takeaway operational service is not available")
+    return TakeawaySessionLocal
+
+
+def active_takeaway_service_session_factory() -> async_sessionmaker[AsyncSession]:
+    if not settings.takeaway_feature_enabled:
+        raise ValueError("Takeaway operational service is not enabled")
+    return takeaway_service_session_factory_for(settings.takeaway_service_database)
+
+
 def validate_runtime_database_names(
     *,
     identity_database: str,
@@ -144,6 +167,9 @@ def validate_runtime_database_names(
     legacy_database_name: str,
     platform_database_name: str,
     restaurant_database_name: str,
+    takeaway_service_database: str = "disabled",
+    takeaway_feature_enabled: bool = False,
+    takeaway_database_name: str | None = None,
 ) -> None:
     if (
         restaurant_service_database == "restaurant"
@@ -156,21 +182,39 @@ def validate_runtime_database_names(
         raise RuntimeError(
             "Platform identity cutover requires REFERENCE_PROJECTOR_ENABLED=true"
         )
+    if takeaway_feature_enabled:
+        if takeaway_service_database != "takeaway":
+            raise RuntimeError(
+                "Takeaway feature requires TAKEAWAY_SERVICE_DATABASE=takeaway"
+            )
+        if identity_database != "platform_core":
+            raise RuntimeError(
+                "Takeaway service cutover requires IDENTITY_DATABASE=platform_core"
+            )
+        if not reference_projector_enabled:
+            raise RuntimeError(
+                "Takeaway service cutover requires REFERENCE_PROJECTOR_ENABLED=true"
+            )
+        if takeaway_database_name is None:
+            raise RuntimeError("Takeaway feature requires a physical Takeaway database")
     if (
         identity_database != "platform_core"
         and restaurant_service_database != "restaurant"
         and not reference_projector_enabled
     ):
         return
-    if len(
-        {
-            legacy_database_name,
-            platform_database_name,
-            restaurant_database_name,
-        }
-    ) != 3:
+    required_names = {
+        legacy_database_name,
+        platform_database_name,
+        restaurant_database_name,
+    }
+    expected_count = 3
+    if takeaway_feature_enabled and takeaway_database_name is not None:
+        required_names.add(takeaway_database_name)
+        expected_count = 4
+    if len(required_names) != expected_count:
         raise RuntimeError(
-            "Runtime cutover requires distinct legacy, Platform and Restaurant databases"
+            "Runtime cutover requires distinct legacy, Platform, Restaurant and enabled service databases"
         )
 
 
@@ -199,6 +243,13 @@ async def get_restaurant_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def get_takeaway_db() -> AsyncGenerator[AsyncSession, None]:
+    if TakeawaySessionLocal is None:
+        raise RuntimeError("Takeaway database is not configured")
+    async with TakeawaySessionLocal() as session:
+        yield session
+
+
 async def get_identity_db() -> AsyncGenerator[AsyncSession, None]:
     session_factory = active_identity_session_factory()
     async with session_factory() as session:
@@ -211,9 +262,18 @@ async def get_restaurant_service_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def get_takeaway_service_db() -> AsyncGenerator[AsyncSession, None]:
+    session_factory = active_takeaway_service_session_factory()
+    async with session_factory() as session:
+        yield session
+
+
 async def init_db() -> None:
     checked_engine_ids: set[int] = set()
-    for candidate in (engine, platform_engine, restaurant_engine):
+    candidates = [engine, platform_engine, restaurant_engine]
+    if takeaway_engine is not None:
+        candidates.append(takeaway_engine)
+    for candidate in candidates:
         if id(candidate) in checked_engine_ids:
             continue
         async with candidate.begin() as connection:

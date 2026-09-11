@@ -38,11 +38,17 @@ docker compose -f "$COMPOSE_FILE" exec -T postgres \
   sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$RESTAURANT_POSTGRES_DB"' \
   > "$BACKUP_DIR/restaurant.dump"
 
+printf 'Backing up takeaway database...\n'
+docker compose -f "$COMPOSE_FILE" exec -T postgres \
+  sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$TAKEAWAY_POSTGRES_DB"' \
+  > "$BACKUP_DIR/takeaway.dump"
+
 cat > "$BACKUP_DIR/manifest.txt" <<EOF
 backup_timestamp_utc=$TIMESTAMP
 compose_file=$COMPOSE_FILE
 platform_dump=platform-core.dump
 restaurant_dump=restaurant.dump
+takeaway_dump=takeaway.dump
 legacy_database_included=false
 scope_id=P1-DATABASE-BOUNDARY-03
 EOF

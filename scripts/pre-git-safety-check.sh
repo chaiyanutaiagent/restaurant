@@ -100,9 +100,7 @@ check_required_doc "docs/production/incident-quick-guide.md"
 check_required_doc "docs/production/sign-off.md"
 
 printf '%s\n' 'Checking shell syntax for scripts/*.sh.'
-for script in scripts/*.sh; do
-  sh -n "$script"
-done
+./scripts/validate-shell-syntax.sh
 pass_check "shell syntax passed"
 
 if [ "$ERRORS" -ne 0 ]; then

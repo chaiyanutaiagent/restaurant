@@ -1,4 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
+import axios from "axios";
 import { LockKeyhole, ShieldCheck } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -11,17 +12,22 @@ import { usePlatformAuthStore } from "@/stores/platform-auth.store";
 export default function PlatformLoginPage(): JSX.Element {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaRequired, setMfaRequired] = useState(false);
   const setSession = usePlatformAuthStore((state) => state.setSession);
   const navigate = useNavigate();
   const location = useLocation();
   const requested = new URLSearchParams(location.search).get("next");
-  const next = requested?.startsWith("/platform/") ? requested : "/platform/companies";
+  const next = requested?.startsWith("/platform/") ? requested : "/platform/dashboard";
   const login = useMutation({
-    mutationFn: () => platformApi.login(username, password),
+    mutationFn: () => platformApi.login(username, password, mfaCode),
     onSuccess: (response) => {
       setSession(response.data.data);
       navigate(next, { replace: true });
-    }
+    },
+    onError: (error) => {
+      if (axios.isAxiosError(error) && error.response?.status === 428) setMfaRequired(true);
+    },
   });
 
   const submit = (event: FormEvent) => {
@@ -55,6 +61,19 @@ export default function PlatformLoginPage(): JSX.Element {
               required
             />
           </div>
+          {mfaRequired ? (
+            <div className="space-y-2">
+              <Label htmlFor="platform-mfa-code" className="text-slate-200">MFA หรือ recovery code</Label>
+              <Input
+                id="platform-mfa-code"
+                autoComplete="one-time-code"
+                value={mfaCode}
+                onChange={(event) => setMfaCode(event.target.value)}
+                required
+                autoFocus
+              />
+            </div>
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor="platform-password" className="text-slate-200">รหัสผ่าน</Label>
             <Input

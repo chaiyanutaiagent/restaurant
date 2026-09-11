@@ -442,7 +442,7 @@ export default function TableMapPage(): JSX.Element {
         }
       />
 
-      <div className="p-6">
+      <div className="rounded-[28px] border border-white/80 bg-white/85 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur lg:p-6">
         {!branchId && (
           <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             กรุณาเลือกสาขาที่มุมขวาบนก่อนเพิ่มโต๊ะ

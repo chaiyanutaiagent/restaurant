@@ -619,8 +619,8 @@ Acceptance Criteria:
 
 - [x] สร้างร้านลูกค้าใหม่โดยไม่แก้ source code หรือ SQL ด้วยมือ
 - [x] ปิด Company แล้วทุก user/device ของ tenant เข้าไม่ได้
-- [ ] Backup/restore tenant test ผ่าน
-- [ ] UAT ตั้งแต่ QR order จนถึง ERP report ผ่าน
+- [x] Backup/restore tenant test ผ่าน
+- [x] UAT ตั้งแต่ QR order จนถึง ERP report ผ่าน
 - [ ] Production checklist และ owner sign-off ครบ
 
 ไม่รวม: ระบบเก็บเงิน subscription อัตโนมัติ
@@ -631,17 +631,140 @@ audited suspend/reactivate และ Company credential generation ที่ rev
 isolated Legacy/Platform/Restaurant migration rehearsal, backend `183` tests, lifecycle API smoke และ
 frontend type-check/build ผ่าน โดยไม่ migrate/deploy production หรือเปลี่ยนฐาน live
 
+Gate record: `P5-TENANT-RESILIENCE-02` เพิ่ม credential-redacted tenant export,
+three-boundary backup/checksum, isolated restore drill, monitoring/webhook alert และ incident/recovery
+evidence โดยผ่าน backend `185` tests, tenant API smoke, frontend type-check/build และ restore checksum
+เมื่อ 1 สิงหาคม 2026 โดยไม่เพิ่ม migration ไม่แตะฐาน live และไม่มี production activation
+
+Gate record: `P5-UAT-SECURITY-03` ผ่าน automated clean-room QR → Kitchen → payment →
+recipe stock/accounting → ERP report UAT, exactly-once handoff, dine-in/takeaway และ role permission smoke,
+backend `188` tests, frontend type-check/build, backend dependency audit, production API-doc disable,
+nginx CSP/config และ repository safety เมื่อ 1 สิงหาคม 2026 โดยไม่มี production activation/deploy/push;
+visual browser/device UAT, dependency risk acceptance และ owner sign-off ยัง pending
+
+Gate record: `P5-COMPLETION-NONDEVICE-04` เพิ่ม Company Owner ใน Restaurant security matrix และ
+explicit Retail POS compatibility ตั้งแต่ context → sale/payment → stock → accounting/outbox → report →
+shift close พร้อมแก้ mixed central/store stock scope ของ Company Owner; isolated backend `189` tests,
+role/approval smokes, Retail idempotency/reconciliation, frontend type-check/build และ repository safety ผ่าน
+เมื่อ 1 สิงหาคม 2026 โดยไม่มี production activation/deploy/push
+
+Gate record: `P5-PRODUCTION-READINESS-05` ผ่าน clean-room backend `189` tests และ QR → Kitchen →
+served → bill/payment → stock/accounting/outbox → central report, standalone Chromium mobile/tablet
+โดยไม่มี page/console/HTTP 5xx error, offline sync `100` orders แบบสอง batch และ lost-ack replay
+โดยได้ canonical sale/payment/session/outbox/journal/stock เดิม, frontend type-check/build, backend audit
+ไม่มี known vulnerability, frontend findings ไม่เกิน reviewed exceptions เดิม, readiness documents และ
+repository safety เมื่อ 1 สิงหาคม 2026; physical-device UAT, security/operator/Platform Owner sign-off
+ยัง pending ส่วน Draft PR CI ผ่านทั้ง push และ pull_request events แล้ว โดยไม่มี production activation,
+live migration หรือ Phase 6 work
+
+Owner สั่งเลื่อน physical/visual UAT จนกว่าอุปกรณ์จริงจะมาถึง งานที่เหลือคือ UAT ส่วนนั้น,
+dependency risk acceptance, production checklist และ controlled owner sign-off ห้ามเริ่ม Phase 6,
+deploy production, migrate ฐาน live หรือสร้าง Platform Owner บนฐาน live จนกว่าจะครบและมีคำสั่งชัดเจน
+
+Owner อนุมัติให้เริ่มวางแผนย้าย Restaurant Server ก่อน Tablet UAT เมื่อ 9 สิงหาคม 2026 โดยให้
+`docs/production/server-migration-plan.md` เป็น runbook สนับสนุนภายใต้ Scope
+`P5-PHYSICAL-UAT-SIGNOFF-06` อนุญาตเฉพาะ read-only inventory, target preparation และ isolated
+restore/UAT rehearsal ก่อน ส่วน live cutover, source shutdown, final domain switch และ production
+activation ยังต้องมีคำสั่งอนุมัติแยกต่างหาก งานนี้ไม่ใช่ Takeaway Phase 6
+
+Owner สั่งให้สลับไปใช้เครื่องใหม่เมื่อ 9 สิงหาคม 2026 จึงอนุมัติ controlled server cutover
+ภายใต้ runbook ดังกล่าวแล้ว แต่ยังห้ามหยุด source จนกว่าจะมี target HTTPS route ที่ทดสอบผ่าน,
+final backup/checksum, restore/reconciliation และ rollback path ครบถ้วน การอนุมัตินี้ไม่รวม
+การเริ่ม Takeaway Phase 6 และไม่อนุญาตให้ลดความปลอดภัยของ Tablet เป็น public HTTP
+
+Controlled cutover เสร็จเมื่อ 9 สิงหาคม 2026 โดยใช้ release `4c1c2ba` บน `mainserver`, restore
+final backup และ migrate ถึง `p12route0014`; health, frontend, existing-user login และ auth/me
+ผ่านทาง Tailnet HTTPS เครื่องเดิมหยุดเฉพาะ application containers แต่ยังเก็บ PostgreSQL, Redis
+และ final backup สำหรับ rollback โดเมน `foodchainservice.com`, real SMTP, physical Tablet/printer
+UAT และ owner completion sign-off ยังเป็นงานค้างของ Phase 5
+
+UAT hostname เปิดเมื่อ 10 กันยายน 2026 โดยเชื่อม Tunnel `restaurant-uat` บน `mainserver` และ route
+`https://uat-pos.foodchainservice.com` ไปยัง isolated UAT stack; Tunnel healthy, หน้าเว็บและ
+`/health/live`/`/health/ready` ผ่าน HTTPS, browser ไม่มี console error และ response policy เป็น
+`camera=(self)` แล้ว ต่อมา physical iPad เปิดกล้องและอ่าน test QR ผ่านเมื่อ 10 กันยายน 2026
+ส่วน product/table business flow และ flow อื่นบน iPad/Printer จริงยัง pending
+
+Owner อนุญาตให้ปิดขั้นตอน tenant login ชั่วคราวระหว่างทดสอบคนเดียวเมื่อ 10 กันยายน 2026 จึงเปิด
+UAT Auto-login เฉพาะ `uat-pos.foodchainservice.com`; ระบบบังคับให้เป็น development HTTPS UAT,
+Company และ tenant Superuser ที่ระบุชัดเจน ขณะที่ Production, Platform Owner และ device pairing
+ไม่ถูก bypass ต้องปิดสวิตช์นี้ก่อน formal login/permission/pairing/revoke/security UAT และ sign-off
+
+Physical iPad preflight รอบแรกเมื่อ 10 กันยายน 2026 พบว่า Chrome และ Safari ไม่มี native
+`BarcodeDetector` ที่ POS เดิมบังคับใช้ จึงเพิ่ม ZXing fallback สำหรับ QR/EAN/UPC/Code 39/Code 128
+และ deploy เฉพาะ UAT แล้ว Browser smoke เปิดหน้าต่างสแกนได้โดยไม่ขึ้น unsupported warning;
+owner retest บน physical iPad เปิดกล้องและ decode `FCS-UAT-SCANNER-20260910` ได้สำเร็จ จึงผ่าน
+camera/scanner preflight ส่วน product barcode และ table QR ใน business flow ยังต้องทดสอบต่อ
+
+Progress record: `P5-POS-TABLET-UX-07` ปรับ Restaurant POS สำหรับ iPad landscape เป็นสามส่วน
+หมวดสินค้า → สินค้า → ตะกร้า เพิ่มทางลัดเปิดโต๊ะ/QR, รับกลับ, พักบิล, ออเดอร์ QR และ KDS โดยใช้
+route/permission เดิม เพิ่มสถานะเครื่อง/กล้อง/ซิงก์/การพิมพ์และ automated assertion ที่ 1024×768
+โดยไม่แก้ database/backend และไม่แตะ Production ปุ่มเดลิเวอรีแสดงเป็น `รอเปิดใช้` เพราะยังไม่มี
+Restaurant delivery order domain ใน Phase 5; source ผ่าน frontend type-check/build แล้ว ส่วน deploy และ
+release `4100abb` deploy เฉพาะ UAT และผ่าน browser smoke ที่ 1024×768 แล้ว เมื่อ 11 กันยายน 2026
+Cloudflare cache ถูกล้างเฉพาะ `https://uat-pos.foodchainservice.com/sw.js`; URL ตอบกลับแบบ `BYPASS`
+พร้อม `no-store/no-cache` และ browser reload เปลี่ยนมาใช้ `/assets/index-CPB_Jgd2.js` สำเร็จ
+โดยไม่ได้ใช้ Purge Everything ส่วน physical iPad business flow/printer UAT ยัง pending
+
+Follow-up `P5-POS-WORKSPACE-THEME-08` เมื่อ 11 กันยายน 2026 รวม theme ของหน้าปฏิบัติการ POS
+ให้หน้าโต๊ะ/QR, รับกลับ, ออเดอร์ QR, session detail/checkout และลูกค้าใช้ identity header,
+navigation, background และ card language ชุดเดียวกับหน้าขาย; KDS ของพนักงานคง dark workspace
+แต่ใช้ navigation ชุดเดียวกัน ขณะที่ device-only KDS ไม่เปลี่ยน และ delivery ยัง disabled
+release `0a3642d` deploy เฉพาะ UAT frontend image `restaurant-pos-frontend:uat-pos-theme-0a3642d`
+โดยเก็บ image `restaurant-pos-frontend:uat-tablet-v2-4100abb` และ backup source/env สำหรับ rollback
+Browser smoke ที่ 1024×768 ผ่าน `/pos`, `/restaurant/tables`, `/restaurant/wap`,
+`/restaurant/orders`, `/restaurant/kitchen` และ `/crm`; active workspace ถูกต้องและ document
+horizontal overflow เป็น `0` ทุก route โดยไม่มี database/backend/Production change
+
+Follow-up `P5-POS-TAKEAWAY-MERGE-09` เมื่อ 11 กันยายน 2026 รวมการขายรับกลับเข้า
+`/pos?channel=takeaway` โดยใช้เมนูกลาง, ตะกร้า, ลูกค้า และการรับชำระหน้าเดียวกับ POS แต่ยังคง
+order engine เดิมสำหรับเลขคิว, offline outbox, stock/accounting และลำดับสลิปลูกค้า → สลิปครัว →
+KDS; `/restaurant/wap` redirect เข้าหน้าใหม่ ขณะที่ `/restaurant/wap/legacy` เป็น fallback ซ่อนสำหรับ
+สิทธิ์เดิมและ rollback ส่วน Counter, Brand Store และ QR ลูกค้ายังคงเดิม release `c952f8d` deploy
+เฉพาะ UAT frontend image `restaurant-pos-frontend:uat-pos-takeaway-c952f8d` และเก็บ image เดิม
+`restaurant-pos-frontend:uat-pos-categories-47c583a` พร้อม backup source/env ที่
+`/home/behappyaiagent/restaurant-uat-deploy-backups/c952f8d`; type-check/build, CI, backend unit
+regression และ browser smoke บน UAT จริงผ่าน โดยหน้าใหม่แสดง 4 หมวด 16 เมนู, route redirect ถูกต้อง,
+ไม่มี console error และ horizontal overflow ที่ 1024×768 เป็น `0`
+
+Follow-up hardening `41d49d3` จำกัด UAT Auto-login ให้ทำงานเฉพาะ hostname `uat-*`, ปิด Service Worker
+เฉพาะ Playwright เพื่อให้ API mock deterministic, เติม branch mock ที่ขาด และอัปเดต WeasyPrint เป็น
+`70.0` พร้อม frontend dependency patches หลัง advisory ใหม่ โดย full isolated readiness gate ผ่าน
+backend `232/232`, browser `14/14`, QR → Kitchen → payment → stock/accounting → ERP report,
+offline reconnect/idempotency `100` orders, type-check/build, backend audit ศูนย์ known vulnerability,
+frontend production audit ศูนย์ finding และ repository safety; deploy UAT เป็น backend/frontend image
+`restaurant-pos-backend:uat-p5-hardening-41d49d3` และ
+`restaurant-pos-frontend:uat-p5-hardening-41d49d3`, asset `/assets/index-BWeGI9bh.js`, health/redirect/PDF
+runtime smoke ผ่าน พร้อม rollback backup `/home/behappyaiagent/restaurant-uat-deploy-backups/41d49d3`
+และ image ก่อนหน้า โดยเหลือ physical Safari/iPad touch และ printer flow; Production ไม่ถูกเปลี่ยน
+
+Next action record: งานที่จะกลับมาทำต่อใช้ Scope ID `P5-PHYSICAL-UAT-SIGNOFF-06`
+ซึ่งยังเป็น Restaurant Phase 5 และมีสถานะ `in_progress` หลัง iPad scanner preflight ผ่าน
+ลำดับงานที่ล็อกไว้คือ
+
+1. ทำ read-only inventory ของ Restaurant source/target server, runtime database modes, backup topology, RPO/downtime และ owner โดยไม่บันทึก secret ลง Git
+2. ซ้อม backup transfer/restore บน isolated target, ตรวจ checksum, migration heads, uploads, smoke และ reconciliation โดย source ต้องไม่เปลี่ยน
+3. แก้และยืนยัน camera permission policy, เปิดเฉพาะ UAT hostname/Tunnel บน target แล้วตรวจ HTTPS/Tablet preflight
+4. ยืนยันอุปกรณ์จริง, OS/browser/app, printer, network/UAT environment และผู้รับผิดชอบแต่ละ sign-off
+5. ทำ physical dine-in/takeaway, pairing/revoke/restart/offline/lost-ack/printer และ ERP reconciliation UAT
+6. หากพบ defect ให้แก้เฉพาะ approved failure scope แล้วรัน automated readiness/CI และ affected retest ซ้ำ
+7. เมื่อ release candidate คงที่ ให้ refresh dependency audit และรับ Security Owner decision
+8. ทำ operator incident drill, production/go-live checklist, backup/restore/monitoring/TLS/rollback review และ owner sign-off
+9. รับ Platform Owner Restaurant completion approval แล้วจึงขอคำสั่งแยกสำหรับ server cutover/final domain, mark PR ready/merge, deploy หรือเริ่ม Phase 6
+
 ### Restaurant Completion Gate — ต้องผ่านก่อนเริ่มระบบอื่น
 
 Restaurant ถือว่าเสร็จสำหรับเริ่ม Phase 6 เมื่อครบทั้งหมด:
 
 - [ ] Phase 0–5 ผ่าน Acceptance Criteria
 - [ ] ครัวป่า ปลาเขื่อนผ่าน UAT แบบ dine-in และรับกลับ
-- [ ] Role/Scope อย่างน้อย Owner, Manager, Cashier และ Kitchen ผ่าน security test
-- [ ] Restaurant ERP report กระทบยอดกับ order/payment/stock ได้
-- [ ] Backup/restore และ rollback ผ่าน
-- [ ] Retail POS regression suite ผ่าน
+- [x] Role/Scope อย่างน้อย Owner, Manager, Cashier และ Kitchen ผ่าน security test
+- [x] Restaurant ERP report กระทบยอดกับ order/payment/stock ได้
+- [x] Backup/restore และ rollback ผ่าน
+- [x] Retail POS regression suite ผ่าน
 - [ ] Platform Owner ลงนามอนุมัติ Restaurant completion
+
+สถานะ physical/visual UAT: **deferred by owner until hardware arrives**; automated dine-in/takeaway chain
+ผ่านแล้ว แต่ยังไม่ใช้แทนการทดสอบ `ครัวป่า ปลาเขื่อน` บนอุปกรณ์จริงและไม่ใช้แทน owner sign-off
 
 หาก Gate ข้อใดไม่ผ่าน ห้ามเริ่ม Phase 6 แม้งาน Takeaway จะดูเหมือนใช้เวลาไม่นาน
 

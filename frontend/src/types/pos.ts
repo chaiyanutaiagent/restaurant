@@ -161,6 +161,7 @@ export interface HeldSaleDraft {
   shift_id: string;
   location_id: string;
   branch_id: string | null;
+  sales_channel?: "walk_in" | "takeaway";
   label: string;
   items: CartItem[];
   order_discount: number;

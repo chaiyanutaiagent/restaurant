@@ -1,8 +1,27 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { ArrowLeft, Camera, LayoutGrid, LayoutList, Loader2, Search, ShoppingCart, UserRoundCheck, WifiOff } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowLeft,
+  Camera,
+  ChefHat,
+  ClipboardList,
+  CloudUpload,
+  LayoutGrid,
+  LayoutList,
+  Loader2,
+  MonitorCog,
+  Printer,
+  Search,
+  ShoppingBag,
+  ShoppingCart,
+  TabletSmartphone,
+  UserRoundCheck,
+  WifiOff,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,8 +42,20 @@ import {
 import { db } from "@/lib/db";
 import { posApi } from "@/lib/posApi";
 import { productApi } from "@/lib/productApi";
+import {
+  getQueuedRestaurantOrder,
+  getRestaurantOutboxSummary,
+  loadRestaurantMenu,
+  markRestaurantLocalSlip,
+  queueRestaurantOrder,
+  retryRestaurantNeedsReview,
+  syncRestaurantPendingOrders,
+  type RestaurantOutboxSummary,
+} from "@/lib/restaurantOffline";
 import { syncPendingSales, syncProductCatalog, syncStockBalances, useOfflineProducts, useOnlineStatus } from "@/lib/syncService";
+import { wapApi, type WapOrder } from "@/lib/wapApi";
 import { useAuthStore } from "@/stores/auth.store";
+import { useDeviceStore } from "@/stores/device.store";
 import type { BranchReplacementRule, BranchSettings } from "@/types/admin";
 import type { ProductListItem } from "@/types/product";
 import type { Customer, CustomerSearchResult, LoyaltySettings } from "@/types/crm";
@@ -35,6 +66,8 @@ import RedeemPointsDialog from "@/pages/crm/RedeemPointsDialog";
 import CloseShiftDialog from "@/pages/pos/CloseShiftDialog";
 import ReceiptView from "@/pages/pos/ReceiptView";
 import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
+import PosWorkspaceNav from "@/components/pos/PosWorkspaceNav";
+import TakeawayOrderSlip from "@/components/pos/TakeawayOrderSlip";
 import type { ApprovalAction } from "@/types/approval";
 
 const SHIFT_CACHE_KEY = "restaurant-pos-current-shift";
@@ -130,6 +163,14 @@ function tokenizeSearchTerms(value: string): string[] {
     .filter((item) => item.length >= 2);
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "response" in error) {
+    const response = (error as { response?: { data?: { detail?: string } } }).response;
+    if (response?.data?.detail) return response.data.detail;
+  }
+  return error instanceof Error ? error.message : "ทำรายการไม่สำเร็จ";
+}
+
 type ReplacementPlanEntry = {
   source: NonNullable<ExchangeContextDraft["source_items"]>[number];
   candidate: ProductListItem | null;
@@ -162,11 +203,17 @@ function getOrderStatusLabel(status: SaleOrder["status"]): string {
 
 export default function POSPage(): JSX.Element {
   const navigate = useNavigate();
+  const location = useLocation();
+  const isTakeawayMode = new URLSearchParams(location.search).get("channel") === "takeaway";
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const isOnline = useOnlineStatus();
   const branchId = useAuthStore((state) => state.branchId);
   const user = useAuthStore((state) => state.user);
   const hasPermission = useAuthStore((state) => state.hasPermission);
+  const pairedDevice = useDeviceStore((state) => state.device);
+  const deviceSessionHydrated = useDeviceStore((state) => state.hydrated);
+  const hydrateDeviceSession = useDeviceStore((state) => state.hydrate);
   const [search, setSearch] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -208,6 +255,11 @@ export default function POSPage(): JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastOrder, setLastOrder] = useState<SaleOrder | null>(null);
+  const [takeawayOrder, setTakeawayOrder] = useState<WapOrder | null>(null);
+  const [takeawayResultOpen, setTakeawayResultOpen] = useState(false);
+  const [takeawayPrintBusy, setTakeawayPrintBusy] = useState<"customer" | "kitchen" | null>(null);
+  const [takeawayPendingPrint, setTakeawayPendingPrint] = useState<"customer" | "kitchen" | null>(null);
+  const [takeawayOutboxSummary, setTakeawayOutboxSummary] = useState<RestaurantOutboxSummary>({ pending: 0, syncing: 0, needsReview: 0 });
   const [closeShiftOpen, setCloseShiftOpen] = useState(false);
   const [confirm, ConfirmDialog] = useConfirm();
   const [heldBillsOpen, setHeldBillsOpen] = useState(false);
@@ -236,14 +288,23 @@ export default function POSPage(): JSX.Element {
   const [secondaryPaymentMethod, setSecondaryPaymentMethod] = useState<PaymentMethod>("promptpay");
   const [secondaryPaymentAmount, setSecondaryPaymentAmount] = useState(0);
   const [secondaryPaymentReference, setSecondaryPaymentReference] = useState("");
+  const [deviceStatusOpen, setDeviceStatusOpen] = useState(false);
+  const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  const [autoPrintReceipt, setAutoPrintReceipt] = useState(() => window.localStorage.getItem("pos-auto-print-receipt") === "true");
   const searchRef = useRef<HTMLInputElement | null>(null);
   const cashInputRef = useRef<HTMLInputElement | null>(null);
   const receiptRef = useRef<HTMLDivElement | null>(null);
+  const takeawayCustomerSlipRef = useRef<HTMLDivElement | null>(null);
+  const takeawayKitchenSlipRef = useRef<HTMLDivElement | null>(null);
   const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
   const scannerStreamRef = useRef<MediaStream | null>(null);
   const scannerFrameRef = useRef<number | null>(null);
-  const offlineProducts = useOfflineProducts(searchTerm);
+  const autoPrintedOrderRef = useRef<string | null>(null);
+  const offlineProducts = useOfflineProducts(searchTerm, catalogRevision);
   const handlePrint = useReactToPrint({ contentRef: receiptRef });
+  const printTakeawayCustomerSlip = useReactToPrint({ contentRef: takeawayCustomerSlipRef });
+  const printTakeawayKitchenSlip = useReactToPrint({ contentRef: takeawayKitchenSlipRef });
 
   const branchQuery = useQuery({
     queryKey: ["pos", "branches"],
@@ -253,6 +314,10 @@ export default function POSPage(): JSX.Element {
     },
     enabled: Boolean(user),
   });
+
+  useEffect(() => {
+    if (!deviceSessionHydrated) void hydrateDeviceSession();
+  }, [deviceSessionHydrated, hydrateDeviceSession]);
 
   const locationsQuery = useQuery({
     queryKey: ["pos", "locations", branchId],
@@ -280,6 +345,13 @@ export default function POSPage(): JSX.Element {
       return (await branchApi.getSettings(branchId)).data.data as BranchSettings;
     },
     enabled: Boolean(branchId) && isOnline,
+  });
+
+  const takeawayMenuQuery = useQuery({
+    queryKey: ["pos", "takeaway-menu", branchId],
+    queryFn: () => loadRestaurantMenu(),
+    enabled: isTakeawayMode && Boolean(branchId),
+    retry: false,
   });
 
   const onlineSearchQuery = useQuery({
@@ -392,12 +464,71 @@ export default function POSPage(): JSX.Element {
   }, [currentShiftQuery.data]);
 
   useEffect(() => {
-    if (isOnline) {
-      void syncProductCatalog();
-      void syncStockBalances(branchId ?? undefined);
-      void syncPendingSales();
+    let active = true;
+    if (!isOnline) return () => { active = false; };
+    void Promise.all([
+      syncProductCatalog(),
+      syncStockBalances(branchId ?? undefined),
+      syncPendingSales(),
+    ]).then(() => {
+      if (!active) return;
+      setCatalogRevision((current) => current + 1);
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["pos", "categories"] }),
+        queryClient.invalidateQueries({ queryKey: ["pos", "stock-balances"] }),
+      ]);
+      setLastSyncAt(new Date());
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [branchId, isOnline, queryClient]);
+
+  useEffect(() => {
+    if (!isTakeawayMode) return;
+    let active = true;
+    void (async () => {
+      const summary = isOnline
+        ? await syncRestaurantPendingOrders().catch(() => getRestaurantOutboxSummary())
+        : await getRestaurantOutboxSummary();
+      if (!active) return;
+      setTakeawayOutboxSummary(summary);
+      if (isOnline) {
+        await takeawayMenuQuery.refetch();
+        if (takeawayOrder?.client_order_id) {
+          const resolved = await getQueuedRestaurantOrder(takeawayOrder.client_order_id);
+          if (active && resolved) setTakeawayOrder(resolved);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+    // Reconnect or entering Takeaway mode is the trigger; order/query updates must not loop the sync.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline, isTakeawayMode]);
+
+  useEffect(() => {
+    if (!showReceipt || !lastOrder || !autoPrintReceipt || autoPrintedOrderRef.current === lastOrder.id) {
+      return;
     }
-  }, [branchId, isOnline]);
+    autoPrintedOrderRef.current = lastOrder.id;
+    const timeout = window.setTimeout(() => {
+      void handlePrint();
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [autoPrintReceipt, handlePrint, lastOrder, showReceipt]);
+
+  useEffect(() => {
+    if (!takeawayPendingPrint || !takeawayOrder) return;
+    const timeout = window.setTimeout(() => {
+      if (takeawayPendingPrint === "customer") {
+        void printTakeawayCustomerSlip();
+      } else {
+        void printTakeawayKitchenSlip();
+      }
+      setTakeawayPendingPrint(null);
+    }, 150);
+    return () => window.clearTimeout(timeout);
+  }, [printTakeawayCustomerSlip, printTakeawayKitchenSlip, takeawayOrder, takeawayPendingPrint]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -422,7 +553,21 @@ export default function POSPage(): JSX.Element {
   const locations = locationsQuery.data ?? [];
   const categories = categoriesQuery.data ?? [];
   const stockBalances = stockBalancesQuery.data ?? [];
-  const products = (isOnline && searchTerm.trim().length > 0 ? onlineSearchQuery.data : offlineProducts) ?? [];
+  const baseProducts = (isOnline && searchTerm.trim().length > 0 ? onlineSearchQuery.data : offlineProducts) ?? [];
+  const takeawayMenuByProductId = useMemo(
+    () => new Map((takeawayMenuQuery.data?.products ?? []).map((product) => [product.id, product])),
+    [takeawayMenuQuery.data?.products],
+  );
+  const products = useMemo(() => {
+    if (!isTakeawayMode) return baseProducts;
+    if (!takeawayMenuQuery.data) return [];
+    return baseProducts
+      .filter((product) => takeawayMenuByProductId.get(product.id)?.is_available)
+      .map((product) => ({
+        ...product,
+        selling_price: Number(takeawayMenuByProductId.get(product.id)?.selling_price ?? product.selling_price),
+      }));
+  }, [baseProducts, isTakeawayMode, takeawayMenuByProductId, takeawayMenuQuery.data]);
   const stockByProduct = useMemo(
     () => new Map(stockBalances.map((item) => [`${item.product_id}:${item.variant_id ?? "base"}`, item])),
     [stockBalances],
@@ -438,6 +583,13 @@ export default function POSPage(): JSX.Element {
   }, [products, selectedCategory]);
 
   const cart = useMemo(() => calcCart(cartItems, orderDiscount, "amount"), [cartItems, orderDiscount]);
+  const takeawayExpectedTotal = useMemo(
+    () => roundMoney(cart.items.reduce((sum, item) => {
+      const menuProduct = takeawayMenuByProductId.get(item.product_id);
+      return sum + Number(menuProduct?.selling_price ?? item.unit_price) * Number(item.qty);
+    }, 0)),
+    [cart.items, takeawayMenuByProductId],
+  );
   const exchangeCreditAvailable = exchangeContext?.refund_amount ?? 0;
   const exchangeCreditApplied = useMemo(
     () => roundMoney(Math.min(exchangeCreditAvailable, Math.max(cart.total_amount - loyaltyDiscount, 0))),
@@ -448,7 +600,8 @@ export default function POSPage(): JSX.Element {
     [exchangeCreditApplied, exchangeCreditAvailable],
   );
   const totalDiscount = orderDiscount + loyaltyDiscount + exchangeCreditApplied;
-  const finalTotal = Math.max(cart.total_amount - loyaltyDiscount - exchangeCreditApplied, 0);
+  const standardFinalTotal = Math.max(cart.total_amount - loyaltyDiscount - exchangeCreditApplied, 0);
+  const finalTotal = isTakeawayMode ? takeawayExpectedTotal : standardFinalTotal;
   const secondaryAmount = Math.max(0, Math.min(secondaryPaymentAmount, finalTotal));
   const primaryDueAmount = Math.max(finalTotal - (splitPaymentEnabled ? secondaryAmount : 0), 0);
   const currentPaidAmount = useMemo(() => {
@@ -521,7 +674,7 @@ export default function POSPage(): JSX.Element {
     () => cart.items.filter((item) => item.vat_type === "exempt").reduce((sum, item) => sum + item.subtotal, 0),
     [cart.items],
   );
-  const scanSupported = typeof window !== "undefined" && "BarcodeDetector" in window && navigator.mediaDevices?.getUserMedia;
+  const cameraSupported = typeof window !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
 
   useEffect(() => {
     const settings = branchSettingsQuery.data;
@@ -537,6 +690,13 @@ export default function POSPage(): JSX.Element {
       setOrderDiscount(maxDiscountAmount);
     }
   }, [branchSettingsQuery.data, cart.subtotal, orderDiscount]);
+
+  useEffect(() => {
+    if (!isTakeawayMode) return;
+    setOrderDiscount(0);
+    setLoyaltyDiscount(0);
+    setExchangeContext(null);
+  }, [isTakeawayMode]);
 
   useEffect(() => {
     if (paymentMethod === "promptpay" && promptPayAmount > 0) {
@@ -555,31 +715,9 @@ export default function POSPage(): JSX.Element {
   }, [paymentMethod, promptPayAmount]);
 
   useEffect(() => {
-    if (!scannerOpen) {
-      if (scannerFrameRef.current !== null) {
-        window.cancelAnimationFrame(scannerFrameRef.current);
-        scannerFrameRef.current = null;
-      }
-      if (scannerStreamRef.current) {
-        scannerStreamRef.current.getTracks().forEach((track) => track.stop());
-        scannerStreamRef.current = null;
-      }
-      return;
-    }
-
-    if (!scanSupported) {
-      setScannerError("อุปกรณ์นี้ยังไม่รองรับการสแกนด้วยกล้อง");
-      return;
-    }
-
     let cancelled = false;
-    const BarcodeDetectorClass = (window as Window & { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
-    if (!BarcodeDetectorClass) {
-      setScannerError("ไม่พบตัวสแกนบาร์โค้ดในเบราว์เซอร์");
-      return;
-    }
-
-    const detector = new BarcodeDetectorClass({ formats: [...BARCODE_FORMATS] });
+    let fallbackControls: { stop: () => void } | null = null;
+    let codeHandled = false;
 
     const stopScanner = () => {
       if (scannerFrameRef.current !== null) {
@@ -590,55 +728,135 @@ export default function POSPage(): JSX.Element {
         scannerStreamRef.current.getTracks().forEach((track) => track.stop());
         scannerStreamRef.current = null;
       }
+      fallbackControls?.stop();
+      fallbackControls = null;
     };
 
-    const scanLoop = async () => {
-      if (cancelled) {
+    if (!scannerOpen) {
+      stopScanner();
+      return;
+    }
+
+    setScannerError("");
+
+    if (!cameraSupported) {
+      setScannerError("อุปกรณ์นี้ยังไม่รองรับการสแกนด้วยกล้อง");
+      return;
+    }
+
+    const handleDetectedCode = (rawCode: string, stop: () => void) => {
+      const code = rawCode.trim();
+      if (!code || cancelled || codeHandled) {
         return;
       }
-      const video = scannerVideoRef.current;
-      if (video && video.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
-        try {
-          const results = await detector.detect(video);
-          const code = results.find((item) => item.rawValue?.trim())?.rawValue?.trim();
-          if (code) {
-            stopScanner();
-            setScannerOpen(false);
-            await handleProductCodeLookup(code);
-            return;
-          }
-        } catch {
-          setScannerError("กล้องเปิดได้ แต่ยังอ่านบาร์โค้ดไม่ได้");
-        }
-      }
-      scannerFrameRef.current = window.requestAnimationFrame(() => {
-        void scanLoop();
-      });
+      codeHandled = true;
+      stop();
+      setScannerOpen(false);
+      void handleProductCodeLookup(code);
     };
 
-    void navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
-      .then(async (stream) => {
+    const startNativeScanner = (BarcodeDetectorClass: BarcodeDetectorCtor) => {
+      let detector: BarcodeDetectorInstance;
+      try {
+        detector = new BarcodeDetectorClass({ formats: [...BARCODE_FORMATS] });
+      } catch {
+        void startFallbackScanner();
+        return;
+      }
+
+      const scanLoop = async () => {
         if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
           return;
         }
-        scannerStreamRef.current = stream;
-        setScannerError("");
-        if (scannerVideoRef.current) {
-          scannerVideoRef.current.srcObject = stream;
-          await scannerVideoRef.current.play();
+        const video = scannerVideoRef.current;
+        if (video && video.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
+          try {
+            const results = await detector.detect(video);
+            const code = results.find((item) => item.rawValue?.trim())?.rawValue;
+            if (code) {
+              handleDetectedCode(code, stopScanner);
+              return;
+            }
+          } catch {
+            setScannerError("กล้องเปิดได้ แต่ยังอ่านบาร์โค้ดไม่ได้");
+          }
         }
-        await scanLoop();
-      })
-      .catch(() => {
-        setScannerError("ไม่สามารถเปิดกล้องเพื่อสแกนบาร์โค้ดได้");
-      });
+        scannerFrameRef.current = window.requestAnimationFrame(() => {
+          void scanLoop();
+        });
+      };
+
+      void navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
+        .then(async (stream) => {
+          if (cancelled) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          scannerStreamRef.current = stream;
+          setScannerError("");
+          if (scannerVideoRef.current) {
+            scannerVideoRef.current.srcObject = stream;
+            await scannerVideoRef.current.play();
+          }
+          await scanLoop();
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setScannerError("ไม่สามารถเปิดกล้องเพื่อสแกนบาร์โค้ดได้ กรุณาอนุญาตสิทธิ์กล้อง");
+          }
+        });
+    };
+
+    async function startFallbackScanner() {
+      try {
+        const { BarcodeFormat, BrowserMultiFormatReader } = await import("@zxing/browser");
+        if (cancelled) {
+          return;
+        }
+        const video = scannerVideoRef.current;
+        if (!video) {
+          return;
+        }
+
+        const reader = new BrowserMultiFormatReader();
+        reader.possibleFormats = [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+          BarcodeFormat.QR_CODE,
+        ];
+        fallbackControls = await reader.decodeFromConstraints(
+          { audio: false, video: { facingMode: { ideal: "environment" } } },
+          video,
+          (result, _error, controls) => {
+            const code = result?.getText();
+            if (code) {
+              handleDetectedCode(code, () => controls.stop());
+            }
+          },
+        );
+      } catch {
+        if (!cancelled) {
+          setScannerError("ไม่สามารถเปิดกล้องเพื่อสแกนบาร์โค้ดได้ กรุณาอนุญาตสิทธิ์กล้อง");
+        }
+      }
+    }
+
+    const BarcodeDetectorClass = (window as Window & { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
+    if (BarcodeDetectorClass) {
+      startNativeScanner(BarcodeDetectorClass);
+    } else {
+      void startFallbackScanner();
+    }
 
     return () => {
       cancelled = true;
       stopScanner();
     };
-  }, [scanSupported, scannerOpen]);
+  }, [cameraSupported, scannerOpen]);
 
   function updateCartItem(productId: string, updater: (item: CartItem) => CartItem | null): void {
     setCartItems((current) =>
@@ -1054,6 +1272,7 @@ export default function POSPage(): JSX.Element {
       shift_id: currentShift.id,
       location_id: currentShift.location_id,
       branch_id: branchId ?? null,
+      sales_channel: isTakeawayMode ? "takeaway" : "walk_in",
       label: holdLabel.trim() || defaultLabel,
       items: cart.items,
       order_discount: orderDiscount,
@@ -1103,6 +1322,7 @@ export default function POSPage(): JSX.Element {
     setLoyaltyDiscount(draft.loyalty_discount);
     setNote(draft.note);
     setExchangeContext(draft.exchange_context ?? null);
+    navigate(draft.sales_channel === "takeaway" ? "/pos?channel=takeaway" : "/pos", { replace: true });
     await db.heldBills.delete(draft.id);
     await refreshHeldBills();
     setHeldBillsOpen(false);
@@ -1201,7 +1421,92 @@ export default function POSPage(): JSX.Element {
       resetActiveSale();
       await db.completedOrders.put({ ...order, synced_at: Date.now() });
       await syncStockBalances(branchId ?? undefined);
+      await queryClient.invalidateQueries({ queryKey: ["pos", "stock-balances"] });
       toast({ title: "ชำระเงินสำเร็จ" });
+  }
+
+  async function executeTakeawayCheckout(): Promise<void> {
+    if (!currentShift || !takeawayMenuQuery.data) {
+      throw new Error("ยังโหลดเมนูรับกลับและสิทธิ์ออฟไลน์ไม่สำเร็จ");
+    }
+    const result = await queueRestaurantOrder(undefined, {
+      items: cart.items.map((item) => ({
+        product_id: item.product_id,
+        qty: Number(item.qty),
+        special_request: null,
+      })),
+      payment_method: paymentMethod,
+      paid_amount: currentPaidAmount,
+      payments: checkoutPayments,
+      customer_name: customerName || selectedCustomer?.display_name || [selectedCustomer?.first_name, selectedCustomer?.last_name].filter(Boolean).join(" ") || null,
+      customer_phone: customerPhone || selectedCustomer?.phone || null,
+      customer_tax_id: customerTaxId || selectedCustomer?.tax_id || null,
+      note: note.trim() || null,
+      shift_id: currentShift.id,
+      location_id: currentShift.location_id,
+    }, takeawayMenuQuery.data);
+
+    setTakeawayOrder(result.order);
+    setTakeawayResultOpen(true);
+    resetActiveSale();
+    setTakeawayOutboxSummary(await getRestaurantOutboxSummary());
+    if (result.status === "synced") {
+      await syncStockBalances(branchId ?? undefined);
+      await queryClient.invalidateQueries({ queryKey: ["pos", "stock-balances"] });
+      toast({ title: "รับเงินและออกคิวสำเร็จ", description: `คิว ${result.order.queue_display ?? "-"} พร้อมพิมพ์สลิป` });
+    } else if (result.status === "needs_review") {
+      toast({ title: "เก็บรายการไว้แล้ว แต่ต้องตรวจสอบ", description: result.error ?? "ตรวจสอบกะ ราคา และสต๊อก", variant: "destructive" });
+    } else {
+      toast({ title: "บันทึกออเดอร์ในเครื่องแล้ว", description: `คิวออฟไลน์ ${result.order.queue_display ?? "-"} จะซิงก์อัตโนมัติ` });
+    }
+    if (result.order.recipe_stock_warnings?.length) {
+      toast({
+        title: "ออกคิวแล้ว แต่สต๊อกต้องตรวจสอบ",
+        description: result.order.recipe_stock_warnings.join(" · "),
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function handleTakeawaySlip(type: "customer" | "kitchen"): Promise<void> {
+    if (!takeawayOrder) return;
+    setTakeawayPrintBusy(type);
+    try {
+      const updated = takeawayOrder.client_order_id
+        ? await markRestaurantLocalSlip(takeawayOrder.client_order_id, type)
+        : type === "customer"
+          ? (await wapApi.markCustomerSlip(takeawayOrder.session_id)).data.data
+          : (await wapApi.markKitchenSlip(takeawayOrder.session_id)).data.data;
+      setTakeawayOrder(updated);
+      setTakeawayPendingPrint(type);
+      setTakeawayOutboxSummary(await getRestaurantOutboxSummary());
+      if (type === "kitchen") {
+        toast({ title: "ส่งเข้าครัวแล้ว", description: `คิว ${updated.queue_display ?? "-"} แสดงใน KDS แล้ว` });
+      }
+    } catch (error) {
+      toast({
+        title: type === "customer" ? "พิมพ์สลิปลูกค้าไม่ได้" : "ส่งออเดอร์เข้าครัวไม่ได้",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    } finally {
+      setTakeawayPrintBusy(null);
+    }
+  }
+
+  async function handleRetryTakeawayOutbox(): Promise<void> {
+    try {
+      await retryRestaurantNeedsReview();
+      const summary = await syncRestaurantPendingOrders();
+      setTakeawayOutboxSummary(summary);
+      toast({
+        title: summary.needsReview > 0 ? "ยังมีรายการต้องตรวจสอบ" : "ซิงก์รายการรับกลับแล้ว",
+        description: summary.latestError,
+        variant: summary.needsReview > 0 ? "destructive" : "default",
+      });
+    } catch (error) {
+      toast({ title: "ซิงก์รายการรับกลับไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    }
   }
 
   async function handleCheckout(): Promise<void> {
@@ -1210,6 +1515,10 @@ export default function POSPage(): JSX.Element {
     }
     setIsSubmitting(true);
     try {
+      if (isTakeawayMode) {
+        await executeTakeawayCheckout();
+        return;
+      }
       if (!isOnline) {
         if (effectiveDiscountPct > cashierDiscountLimit && !canOverrideDiscount) {
           toast({
@@ -1282,6 +1591,10 @@ export default function POSPage(): JSX.Element {
   const canVoidSale = hasPermission("pos.sale.void") || hasPermission("pos.sale.void.request");
   const canRefundSale = hasPermission("pos.refund.create") || hasPermission("pos.refund.request");
   const canManageCentralReplacementRules = hasPermission("system.branch.edit");
+  const canViewDevices = hasPermission("system.device.view");
+  const canEditBranchSettings = hasPermission("system.branch.edit") || hasPermission("system.company.edit");
+  const currentCounterDevice = pairedDevice?.branch_id === branchId && pairedDevice.device_type === "counter" ? pairedDevice : null;
+  const cameraReady = typeof navigator.mediaDevices?.getUserMedia === "function";
   const discountAllowed = (branchSettings?.pos_allow_discount ?? true) && canApplyDiscount;
   const maxDiscountPct = branchSettings?.pos_max_discount_pct ?? 100;
   const maxDiscountAmount = (cart.subtotal * maxDiscountPct) / 100;
@@ -1440,14 +1753,24 @@ export default function POSPage(): JSX.Element {
     });
   }, [centralReplacementRuleMap, exchangeContext, products, replacementRuleMap, stockByProduct]);
 
+  function openWorkspace(path: string, label: string): void {
+    if (cart.items.length > 0 && !window.confirm(`มีสินค้าอยู่ในตะกร้า กรุณาพักบิลก่อนออกจากหน้าขาย\nต้องการไปที่ ${label} ต่อหรือไม่`)) {
+      return;
+    }
+    if (cart.items.length > 0 && path.startsWith("/pos")) {
+      resetActiveSale();
+    }
+    navigate(path);
+  }
+
   return (
-    <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] xl:h-screen">
-      <div className="flex flex-1 flex-col xl:overflow-hidden">
-        {/* P2: Compact Header — 1 แถว */}
+    <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] lg:h-screen">
+      <div className="flex min-w-0 flex-1 flex-col lg:overflow-hidden">
+        {/* Tablet v2: compact identity and health header */}
         <div className="border-b border-slate-200/80 bg-white/90 px-4 py-2.5 backdrop-blur">
-          <div className="flex items-center gap-3">
-            <span className="text-base font-bold text-slate-900">Restaurant POS</span>
-            <div className="flex flex-wrap gap-1.5 text-xs">
+          <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
+            <span className="whitespace-nowrap text-base font-bold text-slate-900">Restaurant POS</span>
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto text-xs">
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-700">{branchName}</span>
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-600">{currentLocationName}</span>
               {currentShift ? (
@@ -1455,8 +1778,12 @@ export default function POSPage(): JSX.Element {
                   {currentShift.shift_number}
                 </span>
               ) : null}
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${isTakeawayMode ? "bg-orange-100 text-orange-700" : "bg-emerald-50 text-emerald-700"}`}>
+                {isTakeawayMode ? <ShoppingBag className="h-3.5 w-3.5" /> : null}
+                {isTakeawayMode ? "รับกลับ · ออกคิว/KDS" : "ขายหน้าร้าน"}
+              </span>
               {user ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700">
+                <span className="hidden items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700 xl:inline-flex">
                   <UserRoundCheck className="h-3.5 w-3.5" /> ID {staffIdentifier}
                 </span>
               ) : null}
@@ -1468,21 +1795,34 @@ export default function POSPage(): JSX.Element {
               <span className={`rounded-full px-2.5 py-0.5 font-medium ${isOnline ? "bg-blue-50 text-blue-700" : "bg-red-100 text-red-700"}`}>
                 {isOnline ? "●" : "○"} {isOnline ? "ONLINE" : "OFFLINE"}
               </span>
+              {isTakeawayMode && takeawayOutboxSummary.pending + takeawayOutboxSummary.syncing > 0 ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700">
+                  <CloudUpload className="h-3.5 w-3.5" /> รอส่ง {takeawayOutboxSummary.pending + takeawayOutboxSummary.syncing}
+                </span>
+              ) : null}
+              {isTakeawayMode && takeawayOutboxSummary.needsReview > 0 ? (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-0.5 font-medium text-red-700"
+                  onClick={() => void handleRetryTakeawayOutbox()}
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" /> ตรวจสอบ {takeawayOutboxSummary.needsReview}
+                </button>
+              ) : null}
             </div>
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
               <Button size="sm" variant="outline" onClick={() => setRecentSalesOpen(true)} disabled={!currentShift}>
                 ล่าสุด
               </Button>
               <Button size="sm" variant="outline" onClick={() => setCloseShiftOpen(true)} disabled={!currentShift}>ปิดกะ</Button>
+              <Button size="sm" variant="outline" aria-label="สถานะเครื่องและการพิมพ์" onClick={() => setDeviceStatusOpen(true)}>
+                <MonitorCog className="h-4 w-4" />
+              </Button>
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  if (cart.items.length > 0 && !window.confirm("มีสินค้าอยู่ในตะกร้า ต้องการย้อนกลับหรือไม่")) {
-                    return;
-                  }
-                  navigate("/admin");
-                }}
+                aria-label="กลับหน้าผู้ดูแล"
+                onClick={() => openWorkspace("/admin", "หน้าผู้ดูแล")}
               >
                 <ArrowLeft className="h-4 w-4" />
               </Button>
@@ -1490,8 +1830,14 @@ export default function POSPage(): JSX.Element {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col xl:overflow-hidden xl:flex-row">
-          <div className="flex flex-1 flex-col p-4 md:p-6 xl:overflow-hidden">
+        <PosWorkspaceNav
+          heldBillCount={heldBills.length}
+          onHeldBills={() => setHeldBillsOpen(true)}
+          onNavigate={openWorkspace}
+        />
+
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row lg:overflow-hidden">
+          <div className="flex min-w-0 flex-1 flex-col p-3 md:p-4 lg:overflow-hidden">
             <div className="rounded-[28px] border border-white/80 bg-white/85 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
                 <div className="relative flex-1">
@@ -1531,25 +1877,51 @@ export default function POSPage(): JSX.Element {
               </div>
             </div>
 
-            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-              <button
-                type="button"
-                className={`rounded-full px-4 py-2 text-sm ${selectedCategory === "" ? "bg-blue-600 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
-                onClick={() => setSelectedCategory("")}
-              >
-                ทั้งหมด
-              </button>
-              {categories.map((category) => (
-                <button
-                  key={category.id}
-                  type="button"
-                  className={`rounded-full px-4 py-2 text-sm ${selectedCategory === category.id ? "bg-blue-600 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
-                  onClick={() => setSelectedCategory(category.id)}
-                >
-                  {category.name}
-                </button>
-              ))}
-            </div>
+            {isTakeawayMode ? (
+              <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${takeawayMenuQuery.isError ? "border-red-200 bg-red-50 text-red-800" : "border-orange-200 bg-orange-50 text-orange-900"}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-semibold">โหมดรับกลับ — รับเงิน ออกเลขคิว และส่งรายการเข้า KDS</div>
+                    <div className="mt-1 text-xs opacity-80">
+                      {takeawayMenuQuery.isLoading
+                        ? "กำลังโหลดเมนูและสิทธิ์ออฟไลน์"
+                        : takeawayMenuQuery.isError
+                          ? "โหลดเมนูรับกลับไม่สำเร็จ กรุณากดโหลดใหม่ก่อนรับเงิน"
+                          : `พร้อมขาย ${takeawayMenuQuery.data?.products.filter((product) => product.is_available).length ?? 0} เมนู${isOnline ? "" : " · เก็บออเดอร์รอซิงก์ได้"}`}
+                    </div>
+                  </div>
+                  {takeawayMenuQuery.isError ? (
+                    <Button size="sm" variant="outline" onClick={() => void takeawayMenuQuery.refetch()}>โหลดใหม่</Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+              <nav data-testid="pos-category-panel" aria-label="หมวดสินค้า" className="shrink-0 rounded-2xl border border-white/80 bg-white/80 p-2 shadow-sm lg:w-40 lg:overflow-y-auto">
+                <div className="hidden px-2 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 lg:block">หมวดสินค้า</div>
+                <div className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-x-visible">
+                  <button
+                    type="button"
+                    className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-left text-sm font-medium ${selectedCategory === "" ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
+                    onClick={() => setSelectedCategory("")}
+                  >
+                    ทั้งหมด
+                  </button>
+                  {categories.map((category) => (
+                    <button
+                      key={category.id}
+                      type="button"
+                      className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-left text-sm font-medium ${selectedCategory === category.id ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
+                      onClick={() => setSelectedCategory(category.id)}
+                    >
+                      {category.name}
+                    </button>
+                  ))}
+                </div>
+              </nav>
+
+              <section data-testid="pos-product-panel" aria-label="รายการสินค้า" className="flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-hidden">
 
             {exchangeContext && exchangeSuggestedProducts.length > 0 ? (
               <div className="mt-4 rounded-[28px] border border-amber-200 bg-amber-50/80 p-4 shadow-[0_16px_40px_rgba(180,83,9,0.08)]">
@@ -1703,7 +2075,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Normal Mode */}
             {cardDensity === "normal" && (
-              <div className="mt-3 grid flex-1 grid-cols-2 gap-3 md:grid-cols-3 xl:overflow-y-auto xl:grid-cols-4">
+              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-2 gap-3 overflow-x-hidden overflow-y-auto md:grid-cols-3 xl:grid-cols-4">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const stockLabel = stock <= 0 ? "หมด" : stock <= 5 ? "ใกล้หมด" : `${stock}`;
@@ -1735,7 +2107,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Compact Mode (มากขึ้นต่อแถว) */}
             {cardDensity === "compact" && (
-              <div className="mt-3 grid flex-1 grid-cols-3 gap-2 md:grid-cols-4 xl:overflow-y-auto xl:grid-cols-5 2xl:grid-cols-6">
+              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-3 gap-2 overflow-x-hidden overflow-y-auto md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const outOfStock = stock <= 0;
@@ -1770,7 +2142,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product List — List Mode */}
             {cardDensity === "list" && (
-              <div className="mt-3 flex-1 space-y-1.5 xl:overflow-y-auto">
+              <div className="mt-3 flex-1 space-y-1.5 overflow-x-hidden lg:overflow-y-auto">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const outOfStock = stock <= 0;
@@ -1803,12 +2175,14 @@ export default function POSPage(): JSX.Element {
                 })}
               </div>
             )}
+              </section>
+            </div>
           </div>
 
-          <aside className="flex w-full flex-col border-t border-slate-200/80 bg-white/92 backdrop-blur xl:w-[28rem] xl:border-l xl:border-t-0 xl:max-h-none xl:h-full">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <aside data-testid="pos-cart-panel" className="flex w-full flex-col overflow-y-auto border-t border-slate-200/80 bg-white/92 backdrop-blur lg:h-full lg:w-[25rem] lg:max-h-none lg:border-l lg:border-t-0 xl:w-[28rem]">
+            <div data-testid="pos-cart-header" className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-semibold text-slate-900">ตะกร้า</h2>
+                <h2 className="text-lg font-semibold text-slate-900">{isTakeawayMode ? "ตะกร้ารับกลับ" : "ตะกร้า"}</h2>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">{cart.items.length}</span>
                 <button
                   type="button"
@@ -1821,17 +2195,27 @@ export default function POSPage(): JSX.Element {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className="text-sm text-amber-700"
+                  className="min-h-11 rounded-xl bg-amber-50 px-3 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-40"
                   onClick={() => void handleHoldBill()}
                   disabled={cart.items.length === 0 || !currentShift}
                 >
                   พักบิล
                 </button>
-                <button type="button" className="text-sm text-slate-400 hover:text-red-500" onClick={() => { if (cart.items.length > 0 && !window.confirm("ล้างตะกร้าหรือไม่")) return; resetActiveSale(); }}>ล้าง</button>
+                <button
+                  type="button"
+                  className="min-h-11 rounded-xl border border-red-100 px-3 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-40"
+                  disabled={cart.items.length === 0}
+                  onClick={() => {
+                    if (cart.items.length > 0 && !window.confirm("ยืนยันล้างรายการสินค้าในตะกร้าทั้งหมด?\nบิลนี้จะไม่ถูกพักไว้")) return;
+                    resetActiveSale();
+                  }}
+                >
+                  ล้างรายการ
+                </button>
               </div>
             </div>
 
-            <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+            <div data-testid="pos-cart-body" className="min-h-64 shrink-0 space-y-3 px-5 py-4">
               <div className="grid grid-cols-3 gap-2">
                 <div className={`rounded-2xl border px-3 py-3 text-xs ${cart.items.length > 0 ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
                   <div className="font-semibold uppercase tracking-[0.2em]">1</div>
@@ -1959,7 +2343,11 @@ export default function POSPage(): JSX.Element {
               {cart.items.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-center text-slate-400">
                   <ShoppingCart className="mb-3 h-10 w-10" />
-                  <p>ยังไม่มีสินค้า</p>
+                  <p className="font-medium text-slate-600">ยังไม่มีสินค้าในบิล</p>
+                  <p className="mt-1 max-w-56 text-xs">แตะสินค้าจากตรงกลาง หรือใช้กล้องสแกนบาร์โค้ดเพื่อเริ่มขาย</p>
+                  <button type="button" className="mt-4 min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm text-blue-600" onClick={() => setScannerOpen(true)}>
+                    เปิดกล้องสแกน
+                  </button>
                 </div>
               ) : (
                 cart.items.map((item) => (
@@ -1971,7 +2359,7 @@ export default function POSPage(): JSX.Element {
                         {item.variant_name ? <p className="text-xs text-slate-400">{item.variant_name}</p> : null}
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-1.5">
-                        {canOverrideDiscount ? (
+                        {canOverrideDiscount && !isTakeawayMode ? (
                           <button type="button" className="text-xs text-blue-500 hover:text-blue-700" onClick={() => openPriceEditor(item)}>
                             แก้
                           </button>
@@ -1981,14 +2369,14 @@ export default function POSPage(): JSX.Element {
                     </div>
                     <div className="mt-1.5 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1">
-                        <button type="button" className="h-7 w-7 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                        <button type="button" aria-label={`ลดจำนวน ${item.product_name}`} className="h-11 w-11 rounded-xl border border-slate-200 text-lg text-slate-700 hover:bg-slate-50"
                           onClick={() => updateCartItem(item.product_id, (c) => c.qty <= 1 ? null : { ...c, qty: c.qty - 1, subtotal: (c.qty - 1) * c.unit_price })}>
                           −
                         </button>
-                        <input type="number" className="h-7 w-12 rounded-md border border-slate-200 text-center text-sm"
+                        <input aria-label={`จำนวน ${item.product_name}`} type="number" className="h-11 w-14 rounded-xl border border-slate-200 text-center text-base font-semibold"
                           value={item.qty} min={1} max={getAvailableStock(item.product_id, item.variant_id)}
                           onChange={(e) => updateCartItem(item.product_id, (c) => ({ ...c, qty: Math.max(1, Math.min(Number(e.target.value), getAvailableStock(item.product_id, item.variant_id))) }))} />
-                        <button type="button" className="h-7 w-7 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                        <button type="button" aria-label={`เพิ่มจำนวน ${item.product_name}`} className="h-11 w-11 rounded-xl border border-slate-200 text-lg text-slate-700 hover:bg-slate-50"
                           onClick={() => updateCartItem(item.product_id, (c) => ({ ...c, qty: Math.min(c.qty + 1, getAvailableStock(item.product_id, item.variant_id)) }))}>
                           +
                         </button>
@@ -2001,7 +2389,7 @@ export default function POSPage(): JSX.Element {
             </div>
 
             {/* P1: Sticky Checkout Footer */}
-            <div className="sticky bottom-0 space-y-4 border-t border-slate-200 bg-white/95 px-5 py-4 backdrop-blur shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+            <div data-testid="pos-checkout-panel" className="shrink-0 space-y-4 border-t border-slate-200 bg-white/95 px-5 py-4 backdrop-blur shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
               <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between"><span>ยอดรวม</span><span>{formatThaiCurrency(cart.subtotal)}</span></div>
@@ -2011,12 +2399,14 @@ export default function POSPage(): JSX.Element {
                       type="number"
                       className="h-9 w-28 rounded-md border border-slate-300 bg-white px-2 text-right disabled:bg-slate-100 disabled:text-slate-400"
                       value={orderDiscount}
-                      disabled={!discountAllowed}
+                      disabled={isTakeawayMode || !discountAllowed}
                       onChange={(event) => handleOrderDiscountChange(Number(event.target.value))}
                     />
                   </div>
                   <div className="text-xs text-slate-500">
-                    {discountAllowed
+                    {isTakeawayMode
+                      ? "โหมดรับกลับใช้ราคาเมนูกลาง เพื่อให้ยอดขาย สต๊อก และ KDS ตรงกัน"
+                      : discountAllowed
                       ? canOverrideDiscount
                         ? "คุณมีสิทธิ์ override ส่วนลดได้"
                         : `ส่วนลดสูงสุด ${maxDiscountPct}% (${formatThaiCurrency(maxDiscountAmount)})`
@@ -2046,7 +2436,7 @@ export default function POSPage(): JSX.Element {
                   </div>
                 </div>
               </div>
-              {selectedCustomer && loyaltySettingsQuery.data?.enabled ? (
+              {!isTakeawayMode && selectedCustomer && loyaltySettingsQuery.data?.enabled ? (
                 <Button variant="outline" onClick={() => setRedeemOpen(true)}>แลกแต้มส่วนลด</Button>
               ) : null}
 
@@ -2184,18 +2574,90 @@ export default function POSPage(): JSX.Element {
                 disabled={
                   cart.items.length === 0 ||
                   !currentShift ||
+                  (isTakeawayMode && !takeawayMenuQuery.data) ||
                   (paymentMethod === "cash" && currentPaidAmount < finalTotal) ||
                   isSubmitting
                 }
                 onClick={() => void handleCheckout()}
               >
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                ชำระเงิน {formatThaiCurrency(finalTotal)}
+                {isTakeawayMode ? "รับเงินและออกคิว" : "ชำระเงิน"} {formatThaiCurrency(finalTotal)}
               </Button>
             </div>
           </aside>
         </div>
       </div>
+
+      <Dialog open={deviceStatusOpen} onOpenChange={setDeviceStatusOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><MonitorCog className="h-5 w-5" />สถานะเครื่องขายและการพิมพ์</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className={`rounded-2xl border p-4 ${isOnline ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
+              <div className="flex items-center gap-2 text-sm font-semibold"><Activity className="h-4 w-4" />เครือข่ายและการซิงก์</div>
+              <div className={`mt-3 text-lg font-bold ${isOnline ? "text-emerald-700" : "text-red-700"}`}>{isOnline ? "ออนไลน์" : "ออฟไลน์ — เก็บบิลรอซิงก์"}</div>
+              <div className="mt-1 text-xs text-slate-500">ซิงก์ล่าสุด {lastSyncAt ? lastSyncAt.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "ยังไม่มีข้อมูลรอบนี้"}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold"><TabletSmartphone className="h-4 w-4" />อุปกรณ์ Counter</div>
+              {currentCounterDevice ? (
+                <>
+                  <div className="mt-3 text-lg font-bold text-slate-900">{currentCounterDevice.name}</div>
+                  <div className="mt-1 font-mono text-xs text-slate-500">{currentCounterDevice.device_code} · จับคู่กับสาขานี้</div>
+                </>
+              ) : (
+                <>
+                  <div className="mt-3 text-lg font-bold text-amber-700">โหมดผู้ใช้ทั่วไป</div>
+                  <div className="mt-1 text-xs text-slate-500">ยังไม่ได้ล็อกเครื่องนี้ด้วย Counter Device ของสาขา</div>
+                </>
+              )}
+            </div>
+            <div className={`rounded-2xl border p-4 ${cameraReady ? "border-blue-200 bg-blue-50" : "border-amber-200 bg-amber-50"}`}>
+              <div className="flex items-center gap-2 text-sm font-semibold"><Camera className="h-4 w-4" />กล้องและสแกนเนอร์</div>
+              <div className={`mt-3 text-lg font-bold ${cameraReady ? "text-blue-700" : "text-amber-700"}`}>{cameraReady ? "พร้อมขอสิทธิ์กล้อง" : "อุปกรณ์นี้ไม่มีกล้องที่เว็บเข้าถึงได้"}</div>
+              <div className="mt-1 text-xs text-slate-500">รองรับ QR, EAN, UPC, Code 39 และ Code 128</div>
+            </div>
+            <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold"><ClipboardList className="h-4 w-4" />ใบเสร็จและเครื่องพิมพ์</div>
+              <div className="mt-3 text-lg font-bold text-violet-700">พิมพ์ผ่านระบบของอุปกรณ์</div>
+              <div className="mt-1 text-xs text-slate-500">ตั้งไว้ {branchSettings?.receipt_copies ?? 1} สำเนา · สถานะเครื่องพิมพ์จริงต้องยืนยันบนอุปกรณ์</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoPrintReceipt}
+            className="flex min-h-14 w-full items-center justify-between rounded-2xl border border-slate-200 px-4 text-left"
+            onClick={() => {
+              const next = !autoPrintReceipt;
+              setAutoPrintReceipt(next);
+              window.localStorage.setItem("pos-auto-print-receipt", String(next));
+            }}
+          >
+            <span><span className="block font-semibold text-slate-900">พิมพ์ใบเสร็จอัตโนมัติหลังชำระ</span><span className="block text-xs text-slate-500">ตั้งค่าเฉพาะเครื่องนี้และปิดไว้เป็นค่าเริ่มต้น</span></span>
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${autoPrintReceipt ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{autoPrintReceipt ? "เปิด" : "ปิด"}</span>
+          </button>
+          <div className="rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            เว็บตรวจได้เฉพาะความพร้อมของกล้อง การเชื่อมต่อ และการตั้งค่าใบเสร็จ การยืนยันสาย LAN/Bluetooth/USB และกระดาษต้องทำกับเครื่องพิมพ์จริงใน UAT
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {canViewDevices ? <Button variant="outline" onClick={() => { setDeviceStatusOpen(false); openWorkspace("/devices", "จัดการอุปกรณ์"); }}>จัดการอุปกรณ์</Button> : null}
+              {canEditBranchSettings && branchId ? <Button variant="outline" onClick={() => { setDeviceStatusOpen(false); openWorkspace(`/branches/${branchId}/settings`, "ตั้งค่าสาขาและใบเสร็จ"); }}>ตั้งค่าใบเสร็จ</Button> : null}
+            </div>
+            <Button
+              disabled={!lastOrder}
+              onClick={() => {
+                setDeviceStatusOpen(false);
+                setShowReceipt(true);
+              }}
+            >
+              {lastOrder ? "เปิดใบเสร็จล่าสุดเพื่อทดสอบพิมพ์" : "ยังไม่มีใบเสร็จให้ทดสอบ"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={shiftGateOpen} onOpenChange={setShiftGateOpen}>
         <DialogContent>
@@ -2271,6 +2733,65 @@ export default function POSPage(): JSX.Element {
           <DialogFooter>
             <Button variant="outline" onClick={() => void handlePrint()}>พิมพ์</Button>
             <Button onClick={() => setShowReceipt(false)}>ขายต่อ</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={takeawayResultOpen} onOpenChange={setTakeawayResultOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>ออเดอร์รับกลับ</DialogTitle>
+          </DialogHeader>
+          {takeawayOrder ? (
+            <div className="space-y-4">
+              <div className="rounded-2xl bg-slate-950 p-5 text-center text-white">
+                <div className="text-xs uppercase tracking-[0.25em] text-slate-400">Queue</div>
+                <div className="mt-1 text-6xl font-black">{takeawayOrder.queue_display ?? "-"}</div>
+                <div className="mt-2 text-sm text-slate-300">รับเงินแล้ว {formatThaiCurrency(Number(takeawayOrder.total_amount))}</div>
+                {takeawayOrder.is_offline_pending ? (
+                  <div className="mt-3 inline-flex rounded-full bg-amber-400/20 px-3 py-1 text-xs font-semibold text-amber-200">คิวออฟไลน์ · รอซิงก์</div>
+                ) : (
+                  <div className="mt-3 inline-flex rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-semibold text-emerald-200">บันทึกบนเซิร์ฟเวอร์แล้ว</div>
+                )}
+              </div>
+              <div className="max-h-48 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 p-4">
+                {takeawayOrder.items.map((item) => (
+                  <div key={`${item.product_id}-${item.special_request ?? ""}`} className="flex items-start justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
+                    <div>
+                      <div className="font-medium text-slate-900">{item.product_name}</div>
+                      {item.special_request ? <div className="text-xs text-slate-500">{item.special_request}</div> : null}
+                    </div>
+                    <div className="font-semibold text-slate-900">x{item.qty}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button
+                  className="h-12"
+                  onClick={() => void handleTakeawaySlip("customer")}
+                  disabled={takeawayPrintBusy !== null}
+                >
+                  {takeawayPrintBusy === "customer" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                  {takeawayOrder.customer_slip_printed_at ? "พิมพ์สลิปลูกค้าซ้ำ" : "พิมพ์สลิปลูกค้า"}
+                </Button>
+                <Button
+                  className="h-12 bg-orange-600 hover:bg-orange-700"
+                  onClick={() => void handleTakeawaySlip("kitchen")}
+                  disabled={takeawayPrintBusy !== null || !takeawayOrder.customer_slip_printed_at}
+                >
+                  {takeawayPrintBusy === "kitchen" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChefHat className="h-4 w-4" />}
+                  {!takeawayOrder.customer_slip_printed_at
+                    ? "พิมพ์สลิปลูกค้าก่อน"
+                    : takeawayOrder.kitchen_slip_printed_at
+                      ? "พิมพ์ส่งครัวซ้ำ"
+                      : "พิมพ์และส่งเข้า KDS"}
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">ระบบจะสร้างงานใน KDS เมื่อกดพิมพ์และส่งเข้า KDS เพื่อป้องกันครัวทำรายการก่อนหน้าร้านยืนยันสลิปลูกค้า</p>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button onClick={() => setTakeawayResultOpen(false)}>เริ่มออเดอร์ถัดไป</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2743,7 +3264,7 @@ export default function POSPage(): JSX.Element {
             </div>
             <p className="text-sm text-slate-500">วางบาร์โค้ดหรือ QR ของสินค้าไว้กลางกล้อง ระบบจะเพิ่มสินค้าเข้าตะกร้าอัตโนมัติ</p>
             {scannerError ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{scannerError}</p> : null}
-            {!scanSupported ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">เบราว์เซอร์นี้ยังไม่รองรับตัวสแกนในตัว ให้ใช้การยิงบาร์โค้ดผ่านช่องค้นหาด้านบนแทน</p> : null}
+            {!cameraSupported ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">เบราว์เซอร์นี้ไม่อนุญาตให้เว็บไซต์เปิดกล้อง ให้ใช้การยิงบาร์โค้ดผ่านช่องค้นหาด้านบนแทน</p> : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setScannerOpen(false)}>ปิด</Button>
@@ -2786,6 +3307,25 @@ export default function POSPage(): JSX.Element {
           onApproved={pendingManagerApproval.onApproved}
         />
       ) : null}
+      <div className="fixed -left-[9999px] top-0">
+        <div ref={takeawayCustomerSlipRef} className="wap-print-slip">
+          <TakeawayOrderSlip
+            order={takeawayOrder}
+            type="customer"
+            employeeName={staffDisplayName}
+            menu={takeawayMenuQuery.data ?? null}
+            promptpayQrDataUrl={takeawayOrder?.payment_method === "promptpay" ? qrDataUrl : null}
+          />
+        </div>
+        <div ref={takeawayKitchenSlipRef} className="wap-print-slip">
+          <TakeawayOrderSlip
+            order={takeawayOrder}
+            type="kitchen"
+            employeeName={staffDisplayName}
+            menu={takeawayMenuQuery.data ?? null}
+          />
+        </div>
+      </div>
     </div>
   );
 }

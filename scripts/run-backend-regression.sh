@@ -33,6 +33,7 @@ run_with_docker() {
 
   printf 'Local python3 is older than 3.10; running backend regression checks in python:3.11-slim.\n'
   docker run --rm \
+    -e UPLOAD_DIR=/tmp/restaurant-pos-uploads \
     -v "$DOCKER_SRC/backend:/backend:ro" \
     -w /backend \
     python:3.11-slim \

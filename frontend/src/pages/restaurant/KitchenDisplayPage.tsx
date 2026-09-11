@@ -8,6 +8,7 @@ import { useAuthStore } from "@/stores/auth.store";
 import { useDeviceStore } from "@/stores/device.store";
 import type { ApiResponse } from "@/types/api";
 import type { DeviceWorkspaceBootstrap } from "@/types/device";
+import PosWorkspaceNav from "@/components/pos/PosWorkspaceNav";
 
 type Ticket = {
   id: string; session_id: string; product_name: string; qty: number;
@@ -119,6 +120,7 @@ export default function KitchenDisplayPage(): JSX.Element {
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-slate-900 text-white">
+      {isRestaurantKitchen ? <PosWorkspaceNav /> : null}
       <div className="shrink-0 border-b border-slate-700 px-3 py-2 sm:px-4 xl:px-6 xl:py-4">
         <div className="flex flex-wrap items-center justify-between gap-2 xl:gap-4">
           <div className="flex items-center gap-3">

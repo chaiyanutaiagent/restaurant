@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Capacitor } from "@capacitor/core";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
+import BusinessAdminGuard from "@/components/auth/BusinessAdminGuard";
 import PlatformProtectedRoute from "@/components/auth/PlatformProtectedRoute";
 import DeviceProtectedRoute from "@/components/auth/DeviceProtectedRoute";
 import AppShell from "@/components/layout/AppShell";
@@ -12,6 +13,11 @@ import { initAutoSync } from "@/lib/syncService";
 import AccountingPage from "@/pages/accounting/AccountingPage";
 import LoginPage from "@/pages/auth/LoginPage";
 import AcceptInvitationPage from "@/pages/auth/AcceptInvitationPage";
+import SignupPage from "@/pages/auth/SignupPage";
+import SignupProductSelectorPage from "@/pages/auth/SignupProductSelectorPage";
+import VerifyEmailPage from "@/pages/auth/VerifyEmailPage";
+import ForgotPasswordPage from "@/pages/auth/ForgotPasswordPage";
+import ResetPasswordPage from "@/pages/auth/ResetPasswordPage";
 import DashboardPage from "@/pages/dashboard/DashboardPage";
 import ModuleSelectorPage from "@/pages/ModuleSelectorPage";
 import StorefrontPage from "@/pages/storefront/StorefrontPage";
@@ -76,14 +82,29 @@ import CounterDevicePage from "@/pages/devices/CounterDevicePage";
 import DevicePairingPage from "@/pages/devices/DevicePairingPage";
 import DevicesPage from "@/pages/devices/DevicesPage";
 import PlatformLoginPage from "@/pages/platform/PlatformLoginPage";
+import PlatformDashboardPage from "@/pages/platform/PlatformDashboardPage";
 import PlatformCompaniesPage from "@/pages/platform/PlatformCompaniesPage";
 import PlatformCompanyDetailPage from "@/pages/platform/PlatformCompanyDetailPage";
 import PlatformAuditPage from "@/pages/platform/PlatformAuditPage";
+import PlatformSecurityPage from "@/pages/platform/PlatformSecurityPage";
+import PlatformOperationsPage from "@/pages/platform/PlatformOperationsPage";
+import PlatformBillingPage from "@/pages/platform/PlatformBillingPage";
+import TenantBillingPage from "@/pages/billing/TenantBillingPage";
+import TenantPrivacySupportPage from "@/pages/support/TenantPrivacySupportPage";
+import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
 import { useEffect } from "react";
+import { useAuthStore } from "@/stores/auth.store";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } }
 });
+
+function RestaurantTakeawayEntry(): JSX.Element {
+  const hasPermission = useAuthStore((state) => state.hasPermission);
+  return hasPermission("pos.sale.create")
+    ? <Navigate to="/pos?channel=takeaway" replace />
+    : <Navigate to="/restaurant/wap/legacy" replace />;
+}
 
 export default function App(): JSX.Element {
   useEffect(() => {
@@ -95,13 +116,29 @@ export default function App(): JSX.Element {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/:businessSlug/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupProductSelectorPage />} />
+          <Route path="/signup/restaurant" element={<SignupPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/platform/login" element={<PlatformLoginPage />} />
           <Route element={<PlatformProtectedRoute />}>
             <Route element={<PlatformShell />}>
-              <Route path="/platform" element={<Navigate to="/platform/companies" replace />} />
+              <Route path="/platform" element={<Navigate to="/platform/dashboard" replace />} />
+              <Route path="/platform/dashboard" element={<PlatformDashboardPage />} />
               <Route path="/platform/companies" element={<PlatformCompaniesPage />} />
               <Route path="/platform/companies/:companyId" element={<PlatformCompanyDetailPage />} />
               <Route path="/platform/audit" element={<PlatformAuditPage />} />
+              <Route path="/platform/security" element={<PlatformSecurityPage />} />
+              <Route path="/platform/operations" element={<PlatformOperationsPage />} />
+              <Route path="/platform/billing" element={<PlatformBillingPage />} />
+              <Route path="/platform/support" element={<PlatformSupportPage />} />
+            </Route>
+          </Route>
+          <Route element={<BusinessAdminGuard />}>
+            <Route element={<AppShell />}>
+              <Route path="/:businessSlug/admin" element={<DashboardPage />} />
             </Route>
           </Route>
           <Route path="/device/pair" element={<DevicePairingPage />} />
@@ -120,6 +157,7 @@ export default function App(): JSX.Element {
           <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
           <Route path="/" element={Capacitor.isNativePlatform() ? <Navigate to="/restaurant" replace /> : <ModuleSelectorPage />} />
           <Route path="/store" element={<StorefrontPage />} />
+          <Route path="/:businessSlug" element={<StorefrontPage />} />
           <Route path="/erp" element={<Navigate to="/admin" replace />} />
           <Route element={<ProtectedRoute permission="pos.sale.create" />}>
             <Route path="/pos" element={<POSPage />} />
@@ -206,6 +244,8 @@ export default function App(): JSX.Element {
             <Route element={<AppShell />}>
               <Route path="/admin" element={<DashboardPage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/billing" element={<TenantBillingPage />} />
+              <Route path="/privacy-support" element={<TenantPrivacySupportPage />} />
               <Route element={<ProtectedRoute permission="system.user.view" />}>
                 <Route path="/users" element={<UsersPage />} />
               </Route>
@@ -302,7 +342,8 @@ export default function App(): JSX.Element {
                 <Route path="/restaurant/tables" element={<TableMapPage />} />
               </Route>
               <Route element={<ProtectedRoute permission="fb.order.create" />}>
-                <Route path="/restaurant/wap" element={<WapOrderPage />} />
+                <Route path="/restaurant/wap" element={<RestaurantTakeawayEntry />} />
+                <Route path="/restaurant/wap/legacy" element={<WapOrderPage />} />
                 <Route path="/restaurant/close-shift" element={<WapShiftClosePage />} />
                 <Route path="/restaurant/orders" element={<FBOrdersPage />} />
                 <Route path="/restaurant/session/:sessionId/checkout" element={<SessionCheckoutPage />} />

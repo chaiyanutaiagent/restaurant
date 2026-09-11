@@ -1,6 +1,14 @@
 from app.models.base import TimestampMixin, UUIDMixin, SoftDeleteMixin
 from app.models.company import Company
-from app.models.platform import PlatformOperator, PlatformTenantProfile
+from app.models.platform import (
+    PlatformOperator,
+    PlatformOperationsSnapshot,
+    PlatformSession,
+    PlatformTenantProfile,
+    PlatformTenantUsageSnapshot,
+    SaasAccountCredential,
+    SaasTenantMembership,
+)
 from app.models.branch import Branch
 from app.models.role import Role, Permission, role_permissions_table
 from app.models.user import User, UserBranch
@@ -34,6 +42,14 @@ from app.models.user_access import UserAccessRequest
 from app.models.accounting import Account, JournalEntry, JournalLine, AccountBalance
 from app.models.integration import OperationalOutboxEvent
 from app.models.entitlement import BrandModuleEntitlement
+from app.models.saas_billing import SaasBillingEvent, SaasInvoice, SaasPlan, SaasSubscription
+from app.models.saas_privacy_support import (
+    SaasPrivacyRequest,
+    SaasRetentionDecision,
+    SaasSupportAccessGrant,
+    SaasSupportMessage,
+    SaasSupportTicket,
+)
 from app.models.etax import TaxDocument, TaxDocumentItem
 from app.models.payable import SupplierInvoice, APPayment, APPaymentAllocation, WHTCertificate
 from app.models.hr import (
@@ -80,7 +96,20 @@ __all__ = [
     "SoftDeleteMixin",
     "Company",
     "PlatformOperator",
+    "PlatformOperationsSnapshot",
     "PlatformTenantProfile",
+    "PlatformTenantUsageSnapshot",
+    "SaasAccountCredential",
+    "SaasTenantMembership",
+    "SaasBillingEvent",
+    "SaasInvoice",
+    "SaasPlan",
+    "SaasSubscription",
+    "SaasPrivacyRequest",
+    "SaasRetentionDecision",
+    "SaasSupportTicket",
+    "SaasSupportMessage",
+    "SaasSupportAccessGrant",
     "Branch",
     "Role",
     "Permission",

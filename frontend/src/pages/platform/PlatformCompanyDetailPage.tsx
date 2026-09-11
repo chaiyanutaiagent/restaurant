@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Circle, KeyRound, Save, ShieldOff, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Circle, CreditCard, Download, KeyRound, Save, ShieldOff, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -15,10 +15,27 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
     queryFn: async () => (await platformApi.company(companyId)).data.data,
     enabled: Boolean(companyId)
   });
+  const usage = useQuery({
+    queryKey: ["platform", "company", companyId, "usage"],
+    queryFn: async () => (await platformApi.companyUsage(companyId)).data.data,
+    enabled: Boolean(companyId),
+  });
+  const usageHistory = useQuery({
+    queryKey: ["platform", "company", companyId, "usage", "history"],
+    queryFn: async () => (await platformApi.companyUsageHistory(companyId)).data.data,
+    enabled: Boolean(companyId),
+  });
+  const billing = useQuery({
+    queryKey: ["platform", "company", companyId, "billing"],
+    queryFn: async () => (await platformApi.companyBilling(companyId)).data.data,
+    enabled: Boolean(companyId),
+  });
   const [reason, setReason] = useState("");
   const [planCode, setPlanCode] = useState("starter");
   const [features, setFeatures] = useState<Record<string, boolean>>({});
   const [limits, setLimits] = useState<Record<string, number>>({});
+  const [billingStatus, setBillingStatus] = useState<"incomplete" | "trialing" | "active" | "past_due" | "paused" | "cancelled">("incomplete");
+  const [invoiceBaht, setInvoiceBaht] = useState("");
 
   useEffect(() => {
     if (!company.data) return;
@@ -27,10 +44,16 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
     setLimits(company.data.controls.plan_limits);
   }, [company.data]);
 
+  useEffect(() => {
+    if (billing.data?.subscription) setBillingStatus(billing.data.subscription.status);
+  }, [billing.data]);
+
   const refresh = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["platform", "company", companyId] }),
-      queryClient.invalidateQueries({ queryKey: ["platform", "companies"] })
+      queryClient.invalidateQueries({ queryKey: ["platform", "companies"] }),
+      queryClient.invalidateQueries({ queryKey: ["platform", "company", companyId, "usage"] }),
+      queryClient.invalidateQueries({ queryKey: ["platform", "company", companyId, "billing"] }),
     ]);
   };
   const lifecycle = useMutation({
@@ -60,11 +83,57 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
       void refresh();
     }
   });
+  const exportCompany = useMutation({
+    mutationFn: async () => {
+      if (!reason.trim()) throw new Error("กรุณาระบุเหตุผลเพื่อบันทึก Audit Log");
+      return (await platformApi.exportCompany(companyId, reason)).data.data;
+    },
+    onSuccess: (artifact) => {
+      const blob = new Blob([JSON.stringify(artifact, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `tenant-export-${artifact.company_id}-${artifact.generated_at.slice(0, 10)}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setReason("");
+    }
+  });
+  const updateBilling = useMutation({
+    mutationFn: async () => {
+      if (!reason.trim()) throw new Error("กรุณาระบุเหตุผลเพื่อบันทึก Audit Log");
+      return platformApi.updateSubscription(companyId, {
+        plan_code: billing.data?.plan?.code ?? "starter",
+        status: billingStatus,
+        current_period_start: billing.data?.subscription?.current_period_start ?? null,
+        current_period_end: billing.data?.subscription?.current_period_end ?? null,
+        cancel_at_period_end: billing.data?.subscription?.cancel_at_period_end ?? false,
+        reason,
+      });
+    },
+    onSuccess: () => { setReason(""); void refresh(); },
+  });
+  const createInvoice = useMutation({
+    mutationFn: async () => {
+      if (!reason.trim()) throw new Error("กรุณาระบุเหตุผลเพื่อบันทึก Audit Log");
+      const baht = Number(invoiceBaht);
+      if (!Number.isFinite(baht) || baht < 0) throw new Error("กรุณาระบุยอดใบแจ้งหนี้ที่ถูกต้อง");
+      return platformApi.createInvoice(companyId, {
+        status: "draft",
+        currency: billing.data?.plan?.currency ?? "THB",
+        subtotal_satang: Math.round(baht * 100),
+        tax_satang: 0,
+        memo: "Manual SaaS invoice",
+        reason,
+      });
+    },
+    onSuccess: () => { setReason(""); setInvoiceBaht(""); void refresh(); },
+  });
 
   if (company.isLoading) return <p className="text-slate-400">กำลังโหลด Company...</p>;
   if (company.error || !company.data) return <p className="text-red-300">{platformErrorMessage(company.error)}</p>;
   const data = company.data;
-  const mutationError = lifecycle.error ?? saveControls.error;
+  const mutationError = lifecycle.error ?? saveControls.error ?? exportCompany.error ?? updateBilling.error ?? createInvoice.error;
 
   return (
     <div className="space-y-6">
@@ -84,6 +153,48 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
             <p className="mt-1">เหตุผล: {data.suspension_reason || "ไม่ระบุ"} เมื่อเปิดใหม่ user ต้อง login ใหม่ และ tablet ต้องจับคู่ใหม่</p>
           </div>
         ) : null}
+      </section>
+
+      {data.membership ? <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6"><p className="text-sm text-violet-300">SaaS membership</p><div className="mt-3 flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-xl font-semibold">{data.membership.status}</h3><p className="mt-1 text-sm text-slate-400">{data.membership.owner_email} · onboarding {data.membership.onboarding_state}</p></div><div className="text-right text-sm text-slate-400">{data.membership.trial_ends_at ? <>Trial สิ้นสุด {new Date(data.membership.trial_ends_at).toLocaleString("th-TH")}<br />คงเหลือ {data.membership.trial_days_remaining ?? 0} วัน</> : "ยังไม่เริ่ม Trial"}</div></div></section> : null}
+
+      <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6">
+        <div className="flex items-center gap-3"><CreditCard className="h-6 w-6 text-violet-300" /><div><p className="text-sm text-violet-300">SaaS billing</p><h3 className="text-xl font-semibold">Subscription และ Invoice</h3></div></div>
+        {billing.isLoading ? <p className="mt-4 text-sm text-slate-400">กำลังโหลด Billing...</p> : null}
+        {billing.error ? <p className="mt-4 text-sm text-red-300">{platformErrorMessage(billing.error)}</p> : null}
+        {billing.data ? <>
+          <div className="mt-5 grid gap-4 md:grid-cols-3"><div className="rounded-xl bg-slate-950/50 p-4"><p className="text-xs text-slate-500">Plan</p><p className="mt-1 font-semibold">{billing.data.plan?.name ?? "ไม่มี"}</p></div><div className="rounded-xl bg-slate-950/50 p-4"><p className="text-xs text-slate-500">Subscription</p><p className="mt-1 font-semibold">{billing.data.subscription?.status ?? "ไม่มี"}</p></div><div className="rounded-xl bg-slate-950/50 p-4"><p className="text-xs text-slate-500">Collection</p><p className="mt-1 font-semibold">{billing.data.collection_available ? "พร้อม" : "ปิดไว้"}</p></div></div>
+          <div className="mt-5 grid gap-4 md:grid-cols-3"><div className="space-y-2"><Label className="text-slate-300">สถานะ Subscription</Label><select className="h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm" value={billingStatus} onChange={(event) => setBillingStatus(event.target.value as typeof billingStatus)}>{["incomplete", "trialing", "active", "past_due", "paused", "cancelled"].map((value) => <option key={value}>{value}</option>)}</select></div><div className="space-y-2"><Label className="text-slate-300">ยอด Invoice ใหม่ (บาท)</Label><Input type="number" min="0" step="0.01" value={invoiceBaht} onChange={(event) => setInvoiceBaht(event.target.value)} /></div><div className="flex items-end gap-2"><Button variant="outline" onClick={() => updateBilling.mutate()} disabled={updateBilling.isPending}>อัปเดตสถานะ</Button><Button variant="outline" onClick={() => createInvoice.mutate()} disabled={createInvoice.isPending}>สร้าง Draft</Button></div></div>
+          <p className="mt-3 text-xs text-amber-300">ใช้ช่องเหตุผลในส่วน Plan controls ด้านล่างร่วมกัน ทุกการเปลี่ยนแปลงถูกบันทึก Audit Log และยังไม่มีการเก็บเงินจริง</p>
+          {billing.data.invoices.length ? <div className="mt-4 space-y-2">{billing.data.invoices.slice(0, 5).map((invoice) => <div key={invoice.id} className="flex justify-between rounded-lg border border-slate-800 px-3 py-2 text-sm"><span>{invoice.invoice_number} · {invoice.status}</span><span>{(invoice.total_satang / 100).toLocaleString("th-TH")} {invoice.currency}</span></div>)}</div> : null}
+        </> : null}
+      </section>
+
+      <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><p className="text-sm text-sky-300">Aggregate usage</p><h3 className="mt-1 text-xl font-semibold">การใช้ทรัพยากรตาม Plan</h3><p className="mt-1 text-xs text-slate-400">ไม่รวมรายละเอียดออเดอร์ ลูกค้า หรือข้อมูลพนักงาน</p></div>
+          {usage.data?.last_activity_at ? <p className="text-xs text-slate-500">กิจกรรมล่าสุด {new Date(usage.data.last_activity_at).toLocaleString("th-TH")}</p> : null}
+        </div>
+        {usage.isLoading ? <p className="mt-5 text-sm text-slate-400">กำลังคำนวณ usage...</p> : null}
+        {usage.error ? <p className="mt-5 text-sm text-red-300">{platformErrorMessage(usage.error)}</p> : null}
+        {usage.data ? (
+          <>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {Object.entries(usage.data.limit_state).map(([key, state]) => (
+                <article key={key} className={`rounded-xl border p-4 ${state.exceeded ? "border-red-800 bg-red-950/25" : "border-slate-700 bg-slate-950/40"}`}>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">{key}</p>
+                  <p className="mt-2 text-2xl font-bold">{state.current} <span className="text-sm font-normal text-slate-500">/ {state.unlimited ? "ไม่จำกัด" : state.limit}</span></p>
+                  <p className={`mt-2 text-xs ${state.exceeded ? "text-red-300" : "text-slate-400"}`}>{state.exceeded ? "เกิน Plan limit" : state.unlimited ? "Unlimited" : `คงเหลือ ${state.remaining}`}</p>
+                </article>
+              ))}
+            </div>
+            {usage.data.attention_codes.length ? <div className="mt-4 flex flex-wrap gap-2">{usage.data.attention_codes.map((code) => <span key={code} className="rounded-full bg-amber-400/10 px-3 py-1 text-xs text-amber-300">{code}</span>)}</div> : null}
+          </>
+        ) : null}
+        <div className="mt-6 border-t border-slate-800 pt-4">
+          <p className="text-sm font-semibold">Snapshot history</p>
+          {usageHistory.isLoading ? <p className="mt-2 text-xs text-slate-500">กำลังโหลด...</p> : null}
+          {usageHistory.data?.length ? <div className="mt-3 flex flex-wrap gap-2">{usageHistory.data.map((snapshot) => <span key={snapshot.id} className="rounded-lg bg-slate-800 px-3 py-2 text-xs text-slate-300">{new Date(snapshot.captured_on).toLocaleDateString("th-TH")} · {snapshot.attention_codes.length} จุดติดตาม</span>)}</div> : !usageHistory.isLoading ? <p className="mt-2 text-xs text-slate-500">ยังไม่มี snapshot — บันทึกได้จากหน้า Dashboard</p> : null}
+        </div>
       </section>
 
       <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6">
@@ -129,6 +240,7 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
         {mutationError ? <p className="mt-4 text-sm text-red-300">{platformErrorMessage(mutationError)}</p> : null}
         <div className="mt-6 flex flex-wrap gap-3 border-t border-slate-700 pt-5">
           <Button className="bg-emerald-400 text-slate-950 hover:bg-emerald-300" onClick={() => saveControls.mutate()} disabled={saveControls.isPending}><Save className="h-4 w-4" />บันทึก controls</Button>
+          <Button variant="outline" onClick={() => exportCompany.mutate()} disabled={exportCompany.isPending}><Download className="h-4 w-4" />{exportCompany.isPending ? "กำลังจัด export..." : "ดาวน์โหลด tenant export"}</Button>
           {data.is_active ? (
             <Button variant="destructive" onClick={() => lifecycle.mutate(true)} disabled={lifecycle.isPending}><ShieldOff className="h-4 w-4" />ระงับ Company</Button>
           ) : (
@@ -136,6 +248,7 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
           )}
         </div>
         <div className="mt-4 flex gap-2 text-xs text-amber-300"><AlertTriangle className="h-4 w-4 shrink-0" /><p>การระงับจะเพิ่ม credential generation, revoke refresh sessions และยกเลิก credential ของ tablet ทุกเครื่องทันที</p></div>
+        <p className="mt-2 text-xs text-slate-500">Tenant export มีข้อมูลธุรกิจ/ข้อมูลส่วนบุคคล แต่แทนค่า password, hash, token และ secret ทั้งหมดก่อนดาวน์โหลด พร้อมบันทึก checksum ใน Audit Log</p>
       </section>
     </div>
   );

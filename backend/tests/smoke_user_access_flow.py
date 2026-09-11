@@ -20,7 +20,7 @@ from app.utils.security import hash_password
 async def run() -> None:
     marker = uuid.uuid4().hex[:8]
     async with AsyncSessionLocal() as db:
-        company = Company(name=f"User Access Smoke {marker}")
+        company = Company(name=f"User Access Smoke {marker}", business_slug=f"user-access-{marker}")
         db.add(company)
         await db.flush()
 

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.database import get_db
+from app.database import get_restaurant_service_db
 from app.models.branch import Branch
 from app.models.company import Company
 from app.models.product import Product
@@ -23,6 +23,7 @@ from app.schemas.api_integration import (
     PublicStorefrontSummaryRead,
 )
 from app.services.crm_service import resolve_public_company_id
+from app.services.business_directory_service import resolve_active_business
 
 router = APIRouter(prefix="/api/public/storefront", tags=["storefront"])
 
@@ -100,11 +101,19 @@ def _product_statement(company_id: uuid.UUID) -> Select[tuple[Product, Decimal]]
     )
 
 
+async def _resolve_company_id(db: AsyncSession, business_slug: str | None) -> uuid.UUID:
+    if business_slug is not None:
+        return (await resolve_active_business(db, business_slug)).id
+    return await resolve_public_company_id(db)
+
+
 @router.get("")
+@router.get("/businesses/{business_slug}")
 async def get_storefront_summary(
-    db: AsyncSession = Depends(get_db),
+    business_slug: str | None = None,
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
-    company_id = await resolve_public_company_id(db)
+    company_id = await _resolve_company_id(db, business_slug)
     company = await db.scalar(select(Company).where(Company.id == company_id, Company.is_active.is_(True)))
     assert company is not None
 
@@ -151,15 +160,17 @@ async def get_storefront_summary(
 
 
 @router.get("/products")
+@router.get("/businesses/{business_slug}/products")
 async def list_storefront_products(
+    business_slug: str | None = None,
     search: str | None = Query(default=None),
     category_id: uuid.UUID | None = Query(default=None),
     in_stock_only: bool = Query(default=False),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=24, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
-    company_id = await resolve_public_company_id(db)
+    company_id = await _resolve_company_id(db, business_slug)
     statement = _product_statement(company_id)
 
     if search:
@@ -191,11 +202,13 @@ async def list_storefront_products(
 
 
 @router.get("/branches")
+@router.get("/businesses/{business_slug}/branches")
 async def list_storefront_branches(
+    business_slug: str | None = None,
     active_only: bool = Query(default=True),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
-    company_id = await resolve_public_company_id(db)
+    company_id = await _resolve_company_id(db, business_slug)
     filters = [Branch.company_id == company_id, Branch.deleted_at.is_(None)]
     if active_only:
         filters.append(Branch.is_active.is_(True))

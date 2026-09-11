@@ -21,7 +21,7 @@ function getLoginErrorMessage(error: unknown): string | null {
   return error instanceof Error ? error.message : "เข้าสู่ระบบไม่สำเร็จ";
 }
 
-export function useLogin(): {
+export function useLogin(defaultDestination = "/admin"): {
   login: (payload: LoginRequest) => Promise<void>;
   isLoading: boolean;
   error: string | null;
@@ -30,7 +30,7 @@ export function useLogin(): {
   const location = useLocation();
   const setSession = useAuthStore((state) => state.setSession);
   const next = new URLSearchParams(location.search).get("next");
-  const redirectTo = next?.startsWith("/") && !next.startsWith("//") ? next : "/admin";
+  const redirectTo = next?.startsWith("/") && !next.startsWith("//") ? next : defaultDestination;
 
   const mutation = useMutation({
     mutationFn: async (payload: LoginRequest) => {
@@ -55,6 +55,32 @@ export function useLogin(): {
     },
     isLoading: mutation.isPending,
     error: getLoginErrorMessage(mutation.error)
+  };
+}
+
+export function useUatAutoLogin(defaultDestination = "/admin"): {
+  startAutoLogin: () => void;
+  isLoading: boolean;
+} {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const setSession = useAuthStore((state) => state.setSession);
+  const next = new URLSearchParams(location.search).get("next");
+  const redirectTo = next?.startsWith("/") && !next.startsWith("//") ? next : defaultDestination;
+
+  const mutation = useMutation({
+    mutationFn: async () => (await authApi.uatAutoLogin()).data.data,
+    onSuccess: (tokenResponse) => {
+      const companyId = tokenResponse.user.company_id;
+      setSession(tokenResponse, companyId);
+      window.localStorage.setItem("last_company_id", companyId);
+      navigate(redirectTo, { replace: true });
+    }
+  });
+
+  return {
+    startAutoLogin: mutation.mutate,
+    isLoading: mutation.isPending
   };
 }
 

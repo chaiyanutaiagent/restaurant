@@ -2,6 +2,8 @@ import { Outlet, useLocation } from "react-router-dom";
 import { useState } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
+import PosWorkspaceHeader from "@/components/pos/PosWorkspaceHeader";
+import PosWorkspaceNav from "@/components/pos/PosWorkspaceNav";
 
 type AppShellProps = {
   workspace?: "admin" | "restaurant";
@@ -13,12 +15,15 @@ const titleMap: Record<string, string> = {
   "/users": "ผู้ใช้งาน",
   "/roles": "บทบาทและสิทธิ์",
   "/branches": "สาขา",
+  "/billing": "แพ็กเกจและการเรียกเก็บเงิน",
+  "/privacy-support": "ความเป็นส่วนตัวและการช่วยเหลือ",
   "/403": "ไม่มีสิทธิ์เข้าถึง",
   "/pos/admin": "POS Admin",
   "/restaurant": "ภาพรวมร้านอาหาร",
   "/restaurant/admin": "Restaurant Admin",
   "/restaurant/brands": "แบรนด์ร้านอาหาร",
   "/restaurant/wap": "ขายหน้าร้าน / กลับบ้าน",
+  "/restaurant/wap/legacy": "รับกลับ (โหมดสำรอง)",
   "/restaurant/close-shift": "ปิดกะร้านอาหาร",
   "/restaurant/tables": "แผนที่โต๊ะ",
   "/restaurant/orders": "ออเดอร์ร้านอาหาร",
@@ -33,6 +38,27 @@ export default function AppShell({ workspace = "admin" }: AppShellProps): JSX.El
   const location = useLocation();
 
   const title = titleMap[location.pathname] ?? (workspace === "restaurant" ? "ร้านอาหาร" : "Restaurant POS");
+  const isPosWorkspace = location.pathname === "/crm"
+    || location.pathname === "/restaurant/tables"
+    || location.pathname === "/restaurant/wap"
+    || location.pathname === "/restaurant/wap/legacy"
+    || location.pathname === "/restaurant/orders"
+    || location.pathname.startsWith("/restaurant/session/");
+
+  if (isPosWorkspace) {
+    return (
+      <div
+        data-testid="pos-operation-shell"
+        className="flex h-screen flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)]"
+      >
+        <PosWorkspaceHeader title={title} />
+        <PosWorkspaceNav />
+        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 md:p-4">
+          <Outlet />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-gray-50">

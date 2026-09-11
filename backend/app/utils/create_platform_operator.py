@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime, timezone
 from getpass import getpass
 import os
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.database import active_identity_session_factory
-from app.models.platform import PlatformOperator
+from app.models.audit import AuditLog
+from app.models.platform import PlatformOperator, PlatformSession
 from app.utils.security import hash_password
 
 
@@ -19,6 +21,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--username", required=True)
     parser.add_argument("--display-name", required=True)
     parser.add_argument("--email")
+    parser.add_argument(
+        "--reason",
+        default="Platform operator bootstrap or reactivation",
+    )
     parser.add_argument(
         "--password-env",
         default="PLATFORM_OPERATOR_PASSWORD",
@@ -33,6 +39,7 @@ async def create_operator(
     display_name: str,
     email: str | None,
     password: str,
+    reason: str = "Platform operator bootstrap or reactivation",
 ) -> PlatformOperator:
     normalized_username = username.strip().lower()
     normalized_name = display_name.strip()
@@ -66,6 +73,30 @@ async def create_operator(
             operator.credential_version += 1
             operator.failed_login_attempts = 0
             operator.locked_until = None
+            operator.password_changed_at = datetime.now(timezone.utc)
+            await db.execute(
+                update(PlatformSession)
+                .where(
+                    PlatformSession.operator_id == operator.id,
+                    PlatformSession.revoked_at.is_(None),
+                )
+                .values(
+                    revoked_at=datetime.now(timezone.utc),
+                    revocation_reason="operator-bootstrap-reset",
+                )
+            )
+        await db.flush()
+        db.add(
+            AuditLog(
+                company_id=None,
+                branch_id=None,
+                user_id=operator.id,
+                action="platform.operator.bootstrap",
+                resource="PlatformOperator",
+                resource_id=str(operator.id),
+                new_value={"reason": reason.strip(), "sessions_revoked": True},
+            )
+        )
         await db.commit()
         await db.refresh(operator)
         return operator
@@ -84,6 +115,7 @@ async def main() -> None:
         display_name=args.display_name,
         email=args.email,
         password=password,
+        reason=args.reason,
     )
     print(f"Platform Owner ready: {operator.username} ({operator.id})")
 

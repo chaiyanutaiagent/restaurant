@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { MapPin, Navigation, Phone, Search, ShoppingBag, Store } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { storefrontApi } from "@/lib/storefrontApi";
 import { formatThaiCurrency } from "@/lib/cartUtils";
 import type { StorefrontBranch, StorefrontProduct, StorefrontSummary } from "@/types/storefront";
@@ -18,6 +18,7 @@ function todayWorkingHours(branch: StorefrontBranch): string {
 }
 
 export default function StorefrontPage(): JSX.Element {
+  const { businessSlug } = useParams();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("");
@@ -29,12 +30,12 @@ export default function StorefrontPage(): JSX.Element {
   }, [search]);
 
   const summaryQuery = useQuery({
-    queryKey: ["storefront", "summary"],
-    queryFn: async () => (await storefrontApi.summary()).data.data as StorefrontSummary,
+    queryKey: ["storefront", businessSlug ?? "legacy", "summary"],
+    queryFn: async () => (await storefrontApi.summary(businessSlug)).data.data as StorefrontSummary,
   });
 
   const productsQuery = useQuery({
-    queryKey: ["storefront", "products", debouncedSearch, selectedCategory],
+    queryKey: ["storefront", businessSlug ?? "legacy", "products", debouncedSearch, selectedCategory],
     queryFn: async () =>
       (await storefrontApi.products({
         search: debouncedSearch || undefined,
@@ -42,7 +43,7 @@ export default function StorefrontPage(): JSX.Element {
         in_stock_only: false,
         page: 1,
         limit: 24,
-      })).data,
+      }, businessSlug)).data,
   });
 
   const company = summaryQuery.data?.company ?? null;
@@ -87,7 +88,7 @@ export default function StorefrontPage(): JSX.Element {
               <div className="mt-5 flex flex-wrap gap-3 text-sm text-slate-600">
                 {company?.phone ? <span className="rounded-full bg-slate-100 px-4 py-2">{company.phone}</span> : null}
                 {company?.address ? <span className="rounded-full bg-slate-100 px-4 py-2">{company.address}</span> : null}
-                <Link className="rounded-full bg-slate-900 px-4 py-2 text-white" to="/login">เข้าสู่ระบบแอดมิน</Link>
+                <Link className="rounded-full bg-slate-900 px-4 py-2 text-white" to={businessSlug ? `/${businessSlug}/admin` : "/login"}>เข้าสู่ระบบแอดมิน</Link>
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
@@ -236,7 +237,7 @@ export default function StorefrontPage(): JSX.Element {
                     เปิดใน Google Maps
                   </a>
                 ) : null}
-                <Link to="/login" className="rounded-full border border-white/25 px-4 py-2 text-sm font-medium text-white">
+                <Link to={businessSlug ? `/${businessSlug}/admin` : "/login"} className="rounded-full border border-white/25 px-4 py-2 text-sm font-medium text-white">
                   เข้าสู่หลังบ้าน
                 </Link>
               </div>

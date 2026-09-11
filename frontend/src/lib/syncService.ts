@@ -167,7 +167,7 @@ export function initAutoSync(): void {
   });
 }
 
-export function useOfflineProducts(search?: string): ProductListItem[] {
+export function useOfflineProducts(search?: string, catalogRevision = 0): ProductListItem[] {
   const [items, setItems] = useState<ProductListItem[]>([]);
 
   useEffect(() => {
@@ -193,7 +193,7 @@ export function useOfflineProducts(search?: string): ProductListItem[] {
     return () => {
       cancelled = true;
     };
-  }, [search]);
+  }, [catalogRevision, search]);
 
   return items;
 }

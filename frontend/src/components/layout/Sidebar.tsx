@@ -61,6 +61,8 @@ type NavItem = {
 
 const mainItems: NavItem[] = [
   { label: "ERP Admin", to: "/admin", icon: LayoutDashboard },
+  { label: "แพ็กเกจ SaaS", to: "/billing", icon: CreditCard },
+  { label: "Privacy & Support", to: "/privacy-support", icon: Shield },
   { label: "ผู้ใช้งาน", to: "/users", icon: Users, permission: "system.user.view" },
   { label: "บทบาท", to: "/roles", icon: Shield, permission: "system.role.view" },
   { label: "สาขา", to: "/branches", icon: Building2, permission: "system.branch.view" },
@@ -120,7 +122,7 @@ const fbItems: NavItem[] = [
 
 const fbSubItems: NavItem[] = [
   { label: "แบรนด์ร้านอาหาร", to: "/restaurant/brands", icon: Store, permission: "fb.settings.manage" },
-  { label: "ขายหน้าร้าน", to: "/restaurant/wap", icon: ShoppingCart, permission: "fb.order.create" },
+  { label: "ขาย / รับกลับ", to: "/restaurant/wap", icon: ShoppingCart, permission: "fb.order.create" },
   { label: "ออเดอร์", to: "/restaurant/orders", icon: ClipboardList, permission: "fb.order.create" },
   { label: "โต๊ะ", to: "/restaurant/tables", icon: Table2, permission: "fb.table.manage", feature: "tables" },
   { label: "ครัว", to: "/restaurant/kitchen", icon: ChefHat, permissions: ["fb.kitchen.ticket.manage", "fb.kitchen.manage"] },
@@ -142,7 +144,8 @@ export default function Sidebar({
   isSidebarOpen,
   onClose
 }: SidebarProps): JSX.Element {
-  const logout = useLogout();
+  const businessSlug = useAuthStore((state) => state.businessSlug);
+  const logout = useLogout(businessSlug ? `/${businessSlug}` : "/login");
   const user = useAuthStore((state) => state.user);
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasFbAccess = fbPermissionCodes.some((code) => hasPermission(code));
@@ -254,7 +257,7 @@ export default function Sidebar({
                 .map((item) => (
                   <NavLink
                     key={item.to}
-                    to={item.to}
+                    to={item.to === "/admin" && businessSlug ? `/${businessSlug}/admin` : item.to}
                     onClick={onClose}
                     className={({ isActive }) =>
                       cn(
@@ -281,7 +284,7 @@ export default function Sidebar({
                 .map((item) => (
                   <NavLink
                     key={item.to}
-                    to={item.to}
+                    to={item.to === "/admin" && businessSlug ? `/${businessSlug}/admin` : item.to}
                     onClick={onClose}
                     className={({ isActive }) =>
                       cn(
@@ -304,7 +307,7 @@ export default function Sidebar({
             .map((item) => (
               <NavLink
                 key={item.to}
-                to={item.to}
+                to={item.to === "/admin" && businessSlug ? `/${businessSlug}/admin` : item.to}
                 onClick={onClose}
                 className={({ isActive }) =>
                   cn(

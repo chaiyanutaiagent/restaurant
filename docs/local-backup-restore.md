@@ -98,3 +98,28 @@ databases to their pre-rehearsal state with:
 Both scripts refuse to recreate databases unless the legacy, Platform and
 Restaurant database names are distinct. Runtime routing must not be switched to
 the rehearsal targets until an outbox-backed reference projection is available.
+
+## Phase 5 Tenant Resilience
+
+Create a credential-redacted portability export for one Company:
+
+```sh
+./scripts/export-tenant.sh \
+  --company-id COMPANY_UUID \
+  --reason "Customer data portability request"
+```
+
+Create independent Legacy, Platform and Restaurant dumps with a tenant content checksum,
+then restore them only into isolated drill databases and compare the tenant again:
+
+```sh
+./scripts/backup-tenant-boundaries.sh \
+  --company-id COMPANY_UUID \
+  --reason "Scheduled tenant resilience backup"
+
+./scripts/restore-tenant-boundaries-drill.sh --yes \
+  backups/p5-tenant-boundaries-YYYYMMDDTHHMMSSZ
+```
+
+The Phase 5 boundary backup covers durable PostgreSQL data. Continue using the full local or
+production backup for upload binaries and Redis operational state.

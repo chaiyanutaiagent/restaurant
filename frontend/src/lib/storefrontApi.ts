@@ -5,9 +5,17 @@ import type { StorefrontBranch, StorefrontProduct, StorefrontSummary } from "@/t
 const storefrontApiClient = axios.create({ baseURL: "/api/public/storefront" });
 
 export const storefrontApi = {
-  summary: () => storefrontApiClient.get<ApiResponse<StorefrontSummary>>(""),
-  products: (params?: { search?: string; category_id?: string; in_stock_only?: boolean; page?: number; limit?: number }) =>
-    storefrontApiClient.get<ApiResponse<StorefrontProduct[]>>("/products", { params }),
-  branches: (params?: { active_only?: boolean }) =>
-    storefrontApiClient.get<ApiResponse<StorefrontBranch[]>>("/branches", { params }),
+  summary: (businessSlug?: string) => storefrontApiClient.get<ApiResponse<StorefrontSummary>>(
+    businessSlug ? `/businesses/${encodeURIComponent(businessSlug)}` : ""
+  ),
+  products: (params?: { search?: string; category_id?: string; in_stock_only?: boolean; page?: number; limit?: number }, businessSlug?: string) =>
+    storefrontApiClient.get<ApiResponse<StorefrontProduct[]>>(
+      businessSlug ? `/businesses/${encodeURIComponent(businessSlug)}/products` : "/products",
+      { params }
+    ),
+  branches: (params?: { active_only?: boolean }, businessSlug?: string) =>
+    storefrontApiClient.get<ApiResponse<StorefrontBranch[]>>(
+      businessSlug ? `/businesses/${encodeURIComponent(businessSlug)}/branches` : "/branches",
+      { params }
+    ),
 };

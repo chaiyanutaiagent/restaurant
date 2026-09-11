@@ -1,15 +1,74 @@
 from __future__ import annotations
 
+import uuid
 from functools import cached_property
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import computed_field
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def effective_database_url(explicit_url: str | None, legacy_url: str) -> str:
     return explicit_url or legacy_url
+
+
+def resolve_api_docs_enabled(environment: str, configured: bool | None) -> bool:
+    """Keep local docs convenient while defaulting internet production to closed."""
+    if configured is not None:
+        return configured
+    return environment != "production"
+
+
+def validate_saas_email_delivery_config(
+    *,
+    environment: str,
+    mode: str,
+    public_base_url: str,
+    smtp_host: str | None,
+    smtp_from_email: str | None,
+) -> None:
+    if mode == "smtp" and (not smtp_host or not smtp_from_email):
+        raise ValueError("SaaS SMTP mode requires host and from email")
+    if environment == "production":
+        if mode != "smtp":
+            raise ValueError("Production SaaS account email delivery must use SMTP")
+        if not public_base_url.startswith("https://"):
+            raise ValueError("Production SaaS public base URL must use HTTPS")
+
+
+def validate_saas_billing_config(*, provider: str, live_charging_enabled: bool) -> None:
+    normalized = provider.strip().lower()
+    if not normalized:
+        raise ValueError("SaaS billing provider decision must not be empty")
+    if live_charging_enabled:
+        raise ValueError(
+            "Live SaaS charging is unavailable until a provider adapter Scope is approved"
+        )
+
+
+def validate_uat_auth_bypass_config(
+    *,
+    environment: str,
+    enabled: bool,
+    public_base_url: str,
+    company_id: uuid.UUID | None,
+    username: str | None,
+) -> None:
+    if not enabled:
+        return
+    if environment != "development":
+        raise ValueError("UAT auth bypass is allowed only in the development environment")
+    parsed_url = urlsplit(public_base_url)
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.hostname is None
+        or not parsed_url.hostname.startswith("uat-")
+    ):
+        raise ValueError("UAT auth bypass requires an HTTPS hostname beginning with uat-")
+    if company_id is None or not username or not username.strip():
+        raise ValueError("UAT auth bypass requires an explicit Company ID and username")
 
 
 class Settings(BaseSettings):
@@ -47,6 +106,7 @@ class Settings(BaseSettings):
     cors_origins: list[str]
     app_name: str
     app_version: str
+    enable_api_docs: bool | None = None
     celery_broker_url: str
     celery_result_backend: str
     upload_dir: str = "./uploads"
@@ -54,6 +114,26 @@ class Settings(BaseSettings):
     allowed_image_types: list[str] = Field(
         default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
     )
+    saas_public_base_url: str = "http://localhost:4173"
+    saas_email_delivery_mode: Literal["console", "smtp"] = "console"
+    saas_smtp_host: str | None = None
+    saas_smtp_port: int = Field(default=587, ge=1, le=65535)
+    saas_smtp_username: str | None = None
+    saas_smtp_password: str | None = None
+    saas_smtp_from_email: str | None = None
+    saas_smtp_from_name: str = "Restaurant SaaS"
+    saas_smtp_use_tls: bool = False
+    saas_smtp_start_tls: bool = True
+    saas_verification_expire_hours: int = Field(default=24, ge=1, le=72)
+    saas_password_reset_expire_minutes: int = Field(default=30, ge=10, le=120)
+    saas_trial_days: int = Field(default=14, ge=1, le=90)
+    saas_billing_provider: str = "unconfigured"
+    saas_billing_live_charging_enabled: bool = False
+    saas_privacy_internal_target_days: int = Field(default=30, ge=1, le=90)
+    saas_support_access_max_minutes: int = Field(default=60, ge=5, le=60)
+    uat_auth_bypass_enabled: bool = False
+    uat_auth_bypass_company_id: uuid.UUID | None = None
+    uat_auth_bypass_username: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env", "../../.env"),
@@ -63,6 +143,32 @@ class Settings(BaseSettings):
         # Compose. Service-specific bootstrap variables are not app settings.
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def validate_saas_delivery(self) -> "Settings":
+        validate_saas_email_delivery_config(
+            environment=self.environment,
+            mode=self.saas_email_delivery_mode,
+            public_base_url=self.saas_public_base_url,
+            smtp_host=self.saas_smtp_host,
+            smtp_from_email=self.saas_smtp_from_email,
+        )
+        validate_saas_billing_config(
+            provider=self.saas_billing_provider,
+            live_charging_enabled=self.saas_billing_live_charging_enabled,
+        )
+        self.saas_public_base_url = self.saas_public_base_url.rstrip("/")
+        self.saas_billing_provider = self.saas_billing_provider.strip().lower()
+        validate_uat_auth_bypass_config(
+            environment=self.environment,
+            enabled=self.uat_auth_bypass_enabled,
+            public_base_url=self.saas_public_base_url,
+            company_id=self.uat_auth_bypass_company_id,
+            username=self.uat_auth_bypass_username,
+        )
+        if self.uat_auth_bypass_username is not None:
+            self.uat_auth_bypass_username = self.uat_auth_bypass_username.strip() or None
+        return self
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -98,6 +204,10 @@ class Settings(BaseSettings):
     @cached_property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @cached_property
+    def api_docs_enabled(self) -> bool:
+        return resolve_api_docs_enabled(self.environment, self.enable_api_docs)
 
 
 settings = Settings()

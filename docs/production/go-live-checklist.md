@@ -84,8 +84,9 @@ Use this checklist for the final production go/no-go review. It is documentation
 ## Security Accepted-Risk Checklist
 
 - [ ] Reviewed [security-hardening.md](./security-hardening.md).
-- [ ] Remaining frontend Vite/esbuild dev-server advisory is fixed or formally accepted because production serves static assets from nginx.
-- [ ] Content Security Policy is implemented or formally deferred.
+- [ ] React Router RSC-mode advisory is fixed or formally accepted as non-reachable for the static CSR application.
+- [ ] Remaining frontend Vite/esbuild dev-server findings are fixed or formally accepted because production serves static assets from nginx.
+- [ ] Content Security Policy behavior is verified during visual UAT.
 - [ ] WeasyPrint/fontconfig cache warnings are fixed or formally accepted as non-blocking after PDF verification.
 - [ ] Upload malware scanning, object storage, quotas, and lifecycle cleanup gaps are accepted or assigned.
 - [ ] Centralized logs, metrics, and alert delivery gaps are accepted or assigned.

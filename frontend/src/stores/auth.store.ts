@@ -16,6 +16,7 @@ type AuthState = {
   refreshToken: string | null;
   user: User | null;
   companyId: string | null;
+  businessSlug: string | null;
   branchId: string | null;
   stationKey: string | null;
   permissions: string[];
@@ -48,6 +49,7 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
   refreshToken: null,
   user: null,
   companyId: null,
+  businessSlug: null,
   branchId: null,
   stationKey: null,
   permissions: [],
@@ -58,6 +60,7 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
       state.refreshToken = tokens.refresh_token;
       state.user = tokens.user;
       state.companyId = companyId;
+      state.businessSlug = tokens.business_slug ?? null;
       state.branchId = payload?.branch_id ?? null;
       state.stationKey = payload?.station_key ?? null;
       state.permissions = payload?.permissions ?? [];
@@ -74,6 +77,7 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
       state.refreshToken = null;
       state.user = null;
       state.companyId = null;
+      state.businessSlug = null;
       state.branchId = null;
       state.stationKey = null;
       state.permissions = [];

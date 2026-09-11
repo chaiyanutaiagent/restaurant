@@ -96,6 +96,8 @@ class PlatformReferenceProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("hashed_password", rendered)
 
     def test_operational_location_columns_are_not_projected(self) -> None:
+        self.assertIn("business_slug", REFERENCE_COLUMNS["company"])
+        self.assertIn("business_slug = EXCLUDED.business_slug", _upsert_sql("company"))
         self.assertNotIn("central_location_id", REFERENCE_COLUMNS["brand"])
         self.assertNotIn("central_ready_location_id", REFERENCE_COLUMNS["brand"])
         self.assertNotIn("store_location_id", REFERENCE_COLUMNS["brand_branch"])

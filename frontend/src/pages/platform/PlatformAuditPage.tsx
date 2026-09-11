@@ -10,7 +10,7 @@ export default function PlatformAuditPage(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <div><p className="text-sm font-medium text-emerald-300">Traceability</p><h2 className="mt-1 text-3xl font-bold">Platform Audit Log</h2><p className="mt-2 text-sm text-slate-400">การสร้าง ระงับ เปิดใหม่ และแก้ plan พร้อมเหตุผลและ operator</p></div>
+      <div><p className="text-sm font-medium text-emerald-300">Traceability</p><h2 className="mt-1 text-3xl font-bold">Platform Audit Log</h2><p className="mt-2 text-sm text-slate-400">การสร้าง ระงับ เปิดใหม่ แก้ plan และ tenant export พร้อมเหตุผลและ operator</p></div>
       {audit.isLoading ? <p className="text-slate-400">กำลังโหลด...</p> : null}
       {audit.error ? <p className="text-red-300">{platformErrorMessage(audit.error)}</p> : null}
       <div className="space-y-3">

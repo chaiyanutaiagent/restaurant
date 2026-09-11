@@ -111,6 +111,7 @@ class PublicProductRead(BaseSchema):
 class PublicStorefrontCompanyRead(BaseSchema):
     id: uuid.UUID
     name: str
+    business_slug: str
     name_en: str | None = None
     tax_id: str | None = None
     vat_registered: bool

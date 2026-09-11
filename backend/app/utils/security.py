@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 import uuid
 
 from fastapi import HTTPException, status
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError
 from passlib.context import CryptContext
 
 from app.config import settings
@@ -152,6 +153,7 @@ def create_device_access_token(
 def create_platform_access_token(
     *,
     operator_id: uuid.UUID,
+    session_id: uuid.UUID,
     credential_version: int,
     is_superuser: bool,
     expires_delta: timedelta | None = None,
@@ -162,6 +164,7 @@ def create_platform_access_token(
     )
     payload = {
         "sub": str(operator_id),
+        "sid": str(session_id),
         "credential_version": credential_version,
         "is_superuser": is_superuser,
         "type": "platform_access",
@@ -214,7 +217,7 @@ def decode_offline_sale_authorization(token: str) -> dict:
             algorithms=[settings.algorithm],
             options={"verify_exp": False},
         )
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid offline sale authorization",
@@ -224,7 +227,7 @@ def decode_offline_sale_authorization(token: str) -> dict:
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",

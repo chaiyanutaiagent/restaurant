@@ -211,6 +211,18 @@ async def get_scoped_operational_db(
         yield session
 
 
+async def get_takeaway_operational_db() -> AsyncGenerator[AsyncSession, None]:
+    try:
+        session_factory = active_takeaway_service_session_factory()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Takeaway operational service is not available",
+        ) from exc
+    async with session_factory() as session:
+        yield session
+
+
 def operational_session_factory_for(current: TokenData):
     if current.target_database == "restaurant":
         return active_restaurant_service_session_factory()

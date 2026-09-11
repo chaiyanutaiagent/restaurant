@@ -31,6 +31,7 @@ from app.schemas.platform import (
     PlatformRuntimeRead,
 )
 from app.services.reference_projector_worker import reference_projector_state
+from app.services.takeaway_reference_projector import takeaway_projector_state
 
 
 async def _database_check(session_factory) -> str:
@@ -97,6 +98,13 @@ async def collect_runtime_state() -> PlatformRuntimeRead:
             if settings.reference_projector_enabled and reference_projector_state.running
             else "error"
             if settings.reference_projector_enabled
+            else "disabled"
+        ),
+        "takeaway_reference_projector": (
+            "ok"
+            if settings.takeaway_feature_enabled and takeaway_projector_state.running
+            else "error"
+            if settings.takeaway_feature_enabled
             else "disabled"
         ),
     }

@@ -24,6 +24,7 @@ OPERATIONS_COMPONENT_KEYS = {
     "redis",
     "uploads",
     "reference_projector",
+    "takeaway_reference_projector",
     "public_api",
 }
 OPERATIONS_ALERT_CODES = {

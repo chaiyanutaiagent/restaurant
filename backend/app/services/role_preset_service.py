@@ -10,7 +10,28 @@ from app.models.role import Permission
 from app.schemas.role import RolePresetRead, RoleScope
 
 
-ROLE_PRESET_POLICY_VERSION = "2026-08-01.4"
+ROLE_PRESET_POLICY_VERSION = "2026-09-11.1"
+
+TAKEAWAY_OWNER_PERMISSIONS = (
+    "takeaway.catalog.view",
+    "takeaway.catalog.manage",
+    "takeaway.sale.view",
+    "takeaway.sale.create",
+    "takeaway.sale.refund",
+    "takeaway.shift.manage",
+    "takeaway.kitchen.manage",
+    "takeaway.pickup.manage",
+    "takeaway.central_order.create",
+    "takeaway.central_order.manage",
+    "takeaway.production.manage",
+    "takeaway.stock.view",
+    "takeaway.stock.manage",
+    "takeaway.transfer.manage",
+    "takeaway.credit.manage",
+    "takeaway.report.view",
+    "takeaway.import.dry_run",
+    "takeaway.import.apply",
+)
 
 
 @dataclass(frozen=True)
@@ -99,7 +120,7 @@ COMPANY_OWNER_PERMISSION_CODES = (
     "brand.central.ready_stock.manage",
     "brand.central.production.view",
     "brand.central.production.manage",
-)
+) + TAKEAWAY_OWNER_PERMISSIONS
 
 
 ROLE_PRESET_POLICIES = (
@@ -150,6 +171,17 @@ ROLE_PRESET_POLICIES = (
             "brand.central.ready_stock.manage",
             "brand.central.production.view",
             "brand.central.production.manage",
+            "takeaway.catalog.view",
+            "takeaway.catalog.manage",
+            "takeaway.sale.view",
+            "takeaway.central_order.manage",
+            "takeaway.production.manage",
+            "takeaway.stock.view",
+            "takeaway.stock.manage",
+            "takeaway.transfer.manage",
+            "takeaway.credit.manage",
+            "takeaway.report.view",
+            "takeaway.import.dry_run",
         ),
     ),
     RolePresetPolicy(
@@ -195,6 +227,16 @@ ROLE_PRESET_POLICIES = (
             "brand.store.delivery.receive",
             "brand.store.stock.view",
             "brand.store.stock.adjust",
+            "takeaway.catalog.view",
+            "takeaway.sale.view",
+            "takeaway.sale.create",
+            "takeaway.sale.refund",
+            "takeaway.shift.manage",
+            "takeaway.pickup.manage",
+            "takeaway.central_order.create",
+            "takeaway.stock.view",
+            "takeaway.transfer.manage",
+            "takeaway.report.view",
         ),
     ),
     RolePresetPolicy(
@@ -214,6 +256,11 @@ ROLE_PRESET_POLICIES = (
             "pos.cashier.close_shift",
             "inventory.product.view",
             "inventory.stock.view",
+            "takeaway.catalog.view",
+            "takeaway.sale.view",
+            "takeaway.sale.create",
+            "takeaway.shift.manage",
+            "takeaway.pickup.manage",
         ),
     ),
     RolePresetPolicy(
@@ -226,6 +273,7 @@ ROLE_PRESET_POLICIES = (
         permission_codes=(
             "fb.menu.view",
             "fb.kitchen.ticket.manage",
+            "takeaway.kitchen.manage",
         ),
     ),
 )

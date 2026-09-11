@@ -31,7 +31,7 @@ class RolePresetPolicyTests(unittest.TestCase):
                 "kitchen-staff",
             ],
         )
-        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-08-01.4")
+        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-09-11.1")
 
     def test_every_preset_uses_registered_permissions_without_duplicates(self) -> None:
         for policy in ROLE_PRESET_POLICIES:
@@ -71,7 +71,11 @@ class RolePresetPolicyTests(unittest.TestCase):
         self.assertEqual(policy.allowed_scopes, ("station",))
         self.assertEqual(
             set(policy.permission_codes),
-            {"fb.menu.view", "fb.kitchen.ticket.manage"},
+            {
+                "fb.menu.view",
+                "fb.kitchen.ticket.manage",
+                "takeaway.kitchen.manage",
+            },
         )
 
     def test_device_management_is_limited_to_manager_presets(self) -> None:

@@ -43,6 +43,7 @@ from app.services.reference_projector_worker import (
     run_reference_projector,
 )
 from app.services.platform_operations_service import collect_runtime_state
+from app.services.takeaway_reference_projector import run_takeaway_reference_projector
 
 
 @asynccontextmanager
@@ -97,6 +98,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             name="platform-reference-projector",
         )
 
+    takeaway_projector_stop: asyncio.Event | None = None
+    takeaway_projector_task: asyncio.Task[None] | None = None
+    if settings.takeaway_feature_enabled:
+        takeaway_projector_stop = asyncio.Event()
+        takeaway_projector_task = asyncio.create_task(
+            run_takeaway_reference_projector(
+                takeaway_projector_stop,
+                poll_seconds=settings.reference_projector_poll_seconds,
+            ),
+            name="takeaway-reference-projector",
+        )
+
     try:
         yield
     finally:
@@ -108,6 +121,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             except TimeoutError:  # pragma: no cover - shutdown timeout path
                 projector_task.cancel()
                 await asyncio.gather(projector_task, return_exceptions=True)
+        if takeaway_projector_stop is not None:
+            takeaway_projector_stop.set()
+        if takeaway_projector_task is not None:
+            try:
+                await asyncio.wait_for(takeaway_projector_task, timeout=5)
+            except TimeoutError:  # pragma: no cover - shutdown timeout path
+                takeaway_projector_task.cancel()
+                await asyncio.gather(takeaway_projector_task, return_exceptions=True)
 
 
 app = FastAPI(

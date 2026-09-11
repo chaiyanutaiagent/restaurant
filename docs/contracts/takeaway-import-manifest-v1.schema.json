@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://foodchainservice.com/schemas/takeaway-import-manifest-v1.schema.json",
+  "title": "Foodchainservice Takeaway Import Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "schema_version",
+    "export_id",
+    "generated_at",
+    "cutoff_at",
+    "timezone",
+    "source",
+    "scope",
+    "mapping",
+    "files",
+    "omitted_sections",
+    "record_totals",
+    "security_attestation"
+  ],
+  "properties": {
+    "contract": {
+      "const": "foodchainservice.takeaway-import"
+    },
+    "schema_version": {
+      "const": "1.0.0-draft"
+    },
+    "export_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "generated_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "cutoff_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "timezone": {
+      "const": "Asia/Bangkok"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "system",
+        "repository",
+        "repository_commit",
+        "migration_head",
+        "environment",
+        "snapshot_id",
+        "read_only"
+      ],
+      "properties": {
+        "system": {
+          "const": "erp-pos-run"
+        },
+        "repository": {
+          "const": "chaiyanutaiagent/erp-pos-run"
+        },
+        "repository_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "migration_head": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "environment": {
+          "enum": ["synthetic", "local", "staging", "production_snapshot"]
+        },
+        "snapshot_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "read_only": {
+          "const": true
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_company_id",
+        "source_brand_id",
+        "source_brand_slug",
+        "source_branch_ids",
+        "history_from",
+        "history_to"
+      ],
+      "properties": {
+        "source_company_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "source_brand_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "source_brand_slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "maxLength": 80
+        },
+        "source_branch_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "history_from": {
+          "anyOf": [
+            {"$ref": "#/$defs/timestamp"},
+            {"type": "null"}
+          ]
+        },
+        "history_to": {
+          "anyOf": [
+            {"$ref": "#/$defs/timestamp"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "const": "mapping.json"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "logical_name",
+          "path",
+          "media_type",
+          "record_count",
+          "byte_size",
+          "sha256"
+        ],
+        "properties": {
+          "logical_name": {
+            "$ref": "#/$defs/section"
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^(data|media)/[A-Za-z0-9._/-]+$",
+            "maxLength": 500
+          },
+          "media_type": {
+            "enum": ["application/x-ndjson", "image/jpeg", "image/png", "image/webp"]
+          },
+          "record_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "byte_size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "$ref": "#/$defs/sha256"
+          }
+        }
+      }
+    },
+    "omitted_sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logical_name", "reason"],
+        "properties": {
+          "logical_name": {
+            "$ref": "#/$defs/section"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      }
+    },
+    "record_totals": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "source_summary_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "security_attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "forbidden_field_findings",
+        "unapproved_pii_findings",
+        "unsafe_media_findings",
+        "scanner_version"
+      ],
+      "properties": {
+        "forbidden_field_findings": {
+          "const": 0
+        },
+        "unapproved_pii_findings": {
+          "const": 0
+        },
+        "unsafe_media_findings": {
+          "const": 0
+        },
+        "scanner_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "section": {
+      "enum": [
+        "units",
+        "categories",
+        "items",
+        "recipes",
+        "replenishment_policies",
+        "stock_locations",
+        "opening_stock",
+        "opening_credit",
+        "historical_sales",
+        "historical_shifts",
+        "historical_central_orders",
+        "historical_production",
+        "historical_transfers",
+        "historical_credit_ledger",
+        "media_metadata",
+        "media"
+      ]
+    }
+  }
+}

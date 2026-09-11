@@ -1,0 +1,718 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://foodchainservice.com/schemas/takeaway-import-record-v1.schema.json",
+  "title": "Foodchainservice Takeaway Import NDJSON Record v1",
+  "oneOf": [
+    {"$ref": "#/$defs/unitRecord"},
+    {"$ref": "#/$defs/categoryRecord"},
+    {"$ref": "#/$defs/itemRecord"},
+    {"$ref": "#/$defs/recipeRecord"},
+    {"$ref": "#/$defs/replenishmentPolicyRecord"},
+    {"$ref": "#/$defs/stockLocationRecord"},
+    {"$ref": "#/$defs/openingStockRecord"},
+    {"$ref": "#/$defs/openingCreditRecord"},
+    {"$ref": "#/$defs/historicalSaleRecord"},
+    {"$ref": "#/$defs/historicalShiftRecord"},
+    {"$ref": "#/$defs/historicalCentralOrderRecord"},
+    {"$ref": "#/$defs/historicalProductionRecord"},
+    {"$ref": "#/$defs/historicalTransferRecord"},
+    {"$ref": "#/$defs/historicalCreditLedgerRecord"},
+    {"$ref": "#/$defs/mediaMetadataRecord"}
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "nullableUuid": {
+      "anyOf": [
+        {"$ref": "#/$defs/uuid"},
+        {"type": "null"}
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "nullableTimestamp": {
+      "anyOf": [
+        {"$ref": "#/$defs/timestamp"},
+        {"type": "null"}
+      ]
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "nullableDate": {
+      "anyOf": [
+        {"$ref": "#/$defs/date"},
+        {"type": "null"}
+      ]
+    },
+    "decimal": {
+      "type": "string",
+      "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"
+    },
+    "nonNegativeDecimal": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"
+    },
+    "positiveDecimal": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]*(?:\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "nullableString": {
+      "type": ["string", "null"]
+    },
+    "baseRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_type", "source_id", "source_updated_at", "source_hash", "data"],
+      "properties": {
+        "record_type": {
+          "type": "string"
+        },
+        "source_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "source_updated_at": {
+          "$ref": "#/$defs/nullableTimestamp"
+        },
+        "source_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    },
+    "unitRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "unit"},
+            "data": {"$ref": "#/$defs/unit"}
+          }
+        }
+      ]
+    },
+    "unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "name", "decimal_places", "is_active"],
+      "properties": {
+        "code": {"$ref": "#/$defs/code"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 100},
+        "name_en": {"type": ["string", "null"], "maxLength": 100},
+        "decimal_places": {"type": "integer", "minimum": 0, "maximum": 6},
+        "is_active": {"type": "boolean"}
+      }
+    },
+    "categoryRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "category"},
+            "data": {"$ref": "#/$defs/category"}
+          }
+        }
+      ]
+    },
+    "category": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "name", "parent_source_id", "sort_order", "is_active"],
+      "properties": {
+        "code": {"type": ["string", "null"], "maxLength": 50},
+        "name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "name_en": {"type": ["string", "null"], "maxLength": 255},
+        "parent_source_id": {"$ref": "#/$defs/nullableUuid"},
+        "sort_order": {"type": "integer"},
+        "is_active": {"type": "boolean"}
+      }
+    },
+    "itemRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "item"},
+            "data": {"$ref": "#/$defs/item"}
+          }
+        }
+      ]
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sku",
+        "name",
+        "category_source_id",
+        "unit_code",
+        "product_type",
+        "inventory_role",
+        "brand_scope",
+        "cost_price",
+        "selling_price",
+        "vat_type",
+        "vat_rate",
+        "is_active",
+        "is_for_sale",
+        "is_for_purchase"
+      ],
+      "properties": {
+        "sku": {"$ref": "#/$defs/code"},
+        "barcode": {"type": ["string", "null"], "maxLength": 100},
+        "name": {"type": "string", "minLength": 1, "maxLength": 500},
+        "name_en": {"type": ["string", "null"], "maxLength": 500},
+        "category_source_id": {"$ref": "#/$defs/nullableUuid"},
+        "unit_code": {"$ref": "#/$defs/code"},
+        "product_type": {"type": "string", "minLength": 1, "maxLength": 30},
+        "inventory_role": {
+          "enum": ["central_raw", "central_ready", "store_local", "not_stocked", null]
+        },
+        "brand_scope": {"enum": ["brand", "shared"]},
+        "cost_price": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "selling_price": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "vat_type": {"type": "string", "minLength": 1, "maxLength": 20},
+        "vat_rate": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "image_media_source_id": {"$ref": "#/$defs/nullableUuid"},
+        "is_active": {"type": "boolean"},
+        "is_for_sale": {"type": "boolean"},
+        "is_for_purchase": {"type": "boolean"}
+      }
+    },
+    "recipeRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "recipe"},
+            "data": {"$ref": "#/$defs/recipe"}
+          }
+        }
+      ]
+    },
+    "recipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "output_item_source_id",
+        "output_sku",
+        "branch_source_id",
+        "recipe_type",
+        "version_no",
+        "effective_from",
+        "effective_to",
+        "name",
+        "yield_qty",
+        "yield_unit_code",
+        "loss_percent",
+        "is_active",
+        "ingredients"
+      ],
+      "properties": {
+        "output_item_source_id": {"$ref": "#/$defs/uuid"},
+        "output_sku": {"$ref": "#/$defs/code"},
+        "branch_source_id": {"$ref": "#/$defs/nullableUuid"},
+        "recipe_type": {"enum": ["menu_recipe", "production_recipe"]},
+        "version_no": {"type": "integer", "minimum": 1},
+        "effective_from": {"$ref": "#/$defs/nullableDate"},
+        "effective_to": {"$ref": "#/$defs/nullableDate"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "yield_qty": {"$ref": "#/$defs/positiveDecimal"},
+        "yield_unit_code": {"$ref": "#/$defs/code"},
+        "loss_percent": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "is_active": {"type": "boolean"},
+        "ingredients": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/recipeIngredient"}
+        }
+      }
+    },
+    "recipeIngredient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "item_source_id", "sku", "quantity", "unit_code", "sort_order"],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/uuid"},
+        "item_source_id": {"$ref": "#/$defs/uuid"},
+        "sku": {"$ref": "#/$defs/code"},
+        "quantity": {"$ref": "#/$defs/positiveDecimal"},
+        "unit_code": {"$ref": "#/$defs/code"},
+        "sort_order": {"type": "integer", "minimum": 0}
+      }
+    },
+    "replenishmentPolicyRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "replenishment_policy"},
+            "data": {"$ref": "#/$defs/replenishmentPolicy"}
+          }
+        }
+      ]
+    },
+    "replenishmentPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch_source_id",
+        "item_source_id",
+        "sku",
+        "is_enabled",
+        "safety_stock_percent",
+        "safety_stock_qty",
+        "pack_size",
+        "lead_time_days",
+        "forecast_method",
+        "minimum_order_qty"
+      ],
+      "properties": {
+        "branch_source_id": {"$ref": "#/$defs/uuid"},
+        "item_source_id": {"$ref": "#/$defs/uuid"},
+        "sku": {"$ref": "#/$defs/code"},
+        "is_enabled": {"type": "boolean"},
+        "safety_stock_percent": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "safety_stock_qty": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "pack_size": {"$ref": "#/$defs/positiveDecimal"},
+        "lead_time_days": {"type": "integer", "minimum": 1, "maximum": 365},
+        "forecast_method": {"enum": ["auto", "latest_day", "average_7_open_days"]},
+        "minimum_order_qty": {"$ref": "#/$defs/nonNegativeDecimal"}
+      }
+    },
+    "stockLocationRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "stock_location"},
+            "data": {"$ref": "#/$defs/stockLocation"}
+          }
+        }
+      ]
+    },
+    "stockLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["branch_source_id", "code", "name", "location_type", "is_active"],
+      "properties": {
+        "branch_source_id": {"$ref": "#/$defs/uuid"},
+        "code": {"$ref": "#/$defs/code"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "location_type": {"enum": ["central_raw", "central_ready", "store", "transit", "waste"]},
+        "is_active": {"type": "boolean"}
+      }
+    },
+    "openingStockRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "opening_stock"},
+            "data": {"$ref": "#/$defs/openingStock"}
+          }
+        }
+      ]
+    },
+    "openingStock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch_source_id",
+        "location_source_id",
+        "item_source_id",
+        "sku",
+        "unit_code",
+        "lot_code",
+        "expiry_date",
+        "qty_on_hand",
+        "qty_reserved",
+        "cost_per_unit",
+        "as_of",
+        "proof_reference"
+      ],
+      "properties": {
+        "branch_source_id": {"$ref": "#/$defs/uuid"},
+        "location_source_id": {"$ref": "#/$defs/uuid"},
+        "item_source_id": {"$ref": "#/$defs/uuid"},
+        "sku": {"$ref": "#/$defs/code"},
+        "unit_code": {"$ref": "#/$defs/code"},
+        "lot_code": {"type": ["string", "null"], "maxLength": 100},
+        "expiry_date": {"$ref": "#/$defs/nullableDate"},
+        "qty_on_hand": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "qty_reserved": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "cost_per_unit": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "as_of": {"$ref": "#/$defs/timestamp"},
+        "proof_reference": {"type": "string", "minLength": 1, "maxLength": 255}
+      }
+    },
+    "openingCreditRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "opening_credit"},
+            "data": {"$ref": "#/$defs/openingCredit"}
+          }
+        }
+      ]
+    },
+    "openingCredit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch_source_id",
+        "currency",
+        "credit_limit",
+        "balance",
+        "reserved_amount",
+        "as_of",
+        "proof_reference"
+      ],
+      "properties": {
+        "branch_source_id": {"$ref": "#/$defs/uuid"},
+        "currency": {"const": "THB"},
+        "credit_limit": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "balance": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "reserved_amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "as_of": {"$ref": "#/$defs/timestamp"},
+        "proof_reference": {"type": "string", "minLength": 1, "maxLength": 255}
+      }
+    },
+    "historicalSaleRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "historical_sale"},
+            "data": {"$ref": "#/$defs/historicalSale"}
+          }
+        }
+      ]
+    },
+    "historicalSale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch_source_id",
+        "legacy_document_number",
+        "business_at",
+        "status",
+        "subtotal",
+        "discount_amount",
+        "vat_amount",
+        "total_amount",
+        "paid_amount",
+        "change_amount",
+        "is_offline",
+        "actor_source_id",
+        "items",
+        "payments"
+      ],
+      "properties": {
+        "branch_source_id": {"$ref": "#/$defs/uuid"},
+        "legacy_document_number": {"$ref": "#/$defs/code"},
+        "business_at": {"$ref": "#/$defs/timestamp"},
+        "status": {"type": "string", "minLength": 1, "maxLength": 30},
+        "subtotal": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "discount_amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "vat_amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "total_amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "paid_amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "change_amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "is_offline": {"type": "boolean"},
+        "actor_source_id": {"$ref": "#/$defs/nullableUuid"},
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/historicalSaleItem"}
+        },
+        "payments": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/historicalPayment"}
+        }
+      }
+    },
+    "historicalSaleItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "item_source_id", "sku", "name", "unit_code", "qty", "unit_price", "discount_amount", "vat_amount", "subtotal"],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/uuid"},
+        "item_source_id": {"$ref": "#/$defs/uuid"},
+        "sku": {"$ref": "#/$defs/code"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 500},
+        "unit_code": {"type": ["string", "null"], "maxLength": 30},
+        "qty": {"$ref": "#/$defs/positiveDecimal"},
+        "unit_price": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "discount_amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "vat_amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "subtotal": {"$ref": "#/$defs/nonNegativeDecimal"}
+      }
+    },
+    "historicalPayment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "payment_method", "amount", "paid_at", "reference_no"],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/uuid"},
+        "payment_method": {"type": "string", "minLength": 1, "maxLength": 30},
+        "amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "paid_at": {"$ref": "#/$defs/timestamp"},
+        "reference_no": {"type": ["string", "null"], "maxLength": 100}
+      }
+    },
+    "historicalShiftRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "historical_shift"},
+            "data": {"$ref": "#/$defs/historicalShift"}
+          }
+        }
+      ]
+    },
+    "historicalShift": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["branch_source_id", "business_date", "round_no", "closed_at", "closed_by_source_id", "total_orders", "total_amount"],
+      "properties": {
+        "branch_source_id": {"$ref": "#/$defs/uuid"},
+        "business_date": {"$ref": "#/$defs/date"},
+        "round_no": {"type": "integer", "minimum": 1},
+        "closed_at": {"$ref": "#/$defs/timestamp"},
+        "closed_by_source_id": {"$ref": "#/$defs/uuid"},
+        "total_orders": {"type": "integer", "minimum": 0},
+        "total_amount": {"$ref": "#/$defs/nonNegativeDecimal"}
+      }
+    },
+    "historicalCentralOrderRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "historical_central_order"},
+            "data": {"$ref": "#/$defs/historicalCentralOrder"}
+          }
+        }
+      ]
+    },
+    "historicalCentralOrder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["branch_source_id", "legacy_document_number", "order_kind", "business_date", "status", "submitted_at", "submitted_by_source_id", "items"],
+      "properties": {
+        "branch_source_id": {"$ref": "#/$defs/uuid"},
+        "legacy_document_number": {"$ref": "#/$defs/code"},
+        "order_kind": {"enum": ["regular", "extra", "correction"]},
+        "business_date": {"$ref": "#/$defs/date"},
+        "status": {"type": "string", "minLength": 1, "maxLength": 30},
+        "submitted_at": {"$ref": "#/$defs/timestamp"},
+        "submitted_by_source_id": {"$ref": "#/$defs/uuid"},
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/centralOrderItem"}
+        }
+      }
+    },
+    "centralOrderItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "item_source_id", "sku", "name", "unit_code", "system_qty", "requested_qty", "approved_qty", "shipped_qty", "received_qty", "unit_cost", "source"],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/uuid"},
+        "item_source_id": {"$ref": "#/$defs/nullableUuid"},
+        "sku": {"$ref": "#/$defs/code"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 500},
+        "unit_code": {"$ref": "#/$defs/code"},
+        "system_qty": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "requested_qty": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "approved_qty": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "shipped_qty": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "received_qty": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "unit_cost": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "source": {"type": ["string", "null"], "maxLength": 50}
+      }
+    },
+    "historicalProductionRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "historical_production"},
+            "data": {"$ref": "#/$defs/historicalProduction"}
+          }
+        }
+      ]
+    },
+    "historicalProduction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["legacy_document_number", "planned_date", "status", "lines"],
+      "properties": {
+        "legacy_document_number": {"$ref": "#/$defs/code"},
+        "planned_date": {"$ref": "#/$defs/date"},
+        "status": {"enum": ["draft", "planned", "in_progress", "completed", "cancelled"]},
+        "lines": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/productionLine"}
+        }
+      }
+    },
+    "productionLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "line_type", "item_source_id", "sku", "unit_code", "planned_qty", "actual_qty", "cost_per_unit"],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/uuid"},
+        "line_type": {"enum": ["input", "output", "waste"]},
+        "item_source_id": {"$ref": "#/$defs/uuid"},
+        "sku": {"$ref": "#/$defs/code"},
+        "unit_code": {"$ref": "#/$defs/code"},
+        "planned_qty": {"$ref": "#/$defs/positiveDecimal"},
+        "actual_qty": {
+          "anyOf": [
+            {"$ref": "#/$defs/nonNegativeDecimal"},
+            {"type": "null"}
+          ]
+        },
+        "cost_per_unit": {"$ref": "#/$defs/nonNegativeDecimal"}
+      }
+    },
+    "historicalTransferRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "historical_transfer"},
+            "data": {"$ref": "#/$defs/historicalTransfer"}
+          }
+        }
+      ]
+    },
+    "historicalTransfer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["legacy_document_number", "from_branch_source_id", "to_branch_source_id", "from_location_source_id", "to_location_source_id", "status", "request_date", "items"],
+      "properties": {
+        "legacy_document_number": {"$ref": "#/$defs/code"},
+        "from_branch_source_id": {"$ref": "#/$defs/uuid"},
+        "to_branch_source_id": {"$ref": "#/$defs/uuid"},
+        "from_location_source_id": {"$ref": "#/$defs/uuid"},
+        "to_location_source_id": {"$ref": "#/$defs/uuid"},
+        "status": {"type": "string", "minLength": 1, "maxLength": 30},
+        "request_date": {"$ref": "#/$defs/date"},
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/transferItem"}
+        }
+      }
+    },
+    "transferItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "item_source_id", "sku", "unit_code", "qty_requested", "qty_approved", "qty_sent", "qty_received", "qty_discrepancy", "unit_cost"],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/uuid"},
+        "item_source_id": {"$ref": "#/$defs/uuid"},
+        "sku": {"$ref": "#/$defs/code"},
+        "unit_code": {"type": ["string", "null"], "maxLength": 30},
+        "qty_requested": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "qty_approved": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "qty_sent": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "qty_received": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "qty_discrepancy": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "unit_cost": {"$ref": "#/$defs/nonNegativeDecimal"}
+      }
+    },
+    "historicalCreditLedgerRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "historical_credit_ledger"},
+            "data": {"$ref": "#/$defs/historicalCreditLedger"}
+          }
+        }
+      ]
+    },
+    "historicalCreditLedger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["branch_source_id", "currency", "entry_type", "amount", "balance_after", "reserved_after", "reference_type", "reference_id", "created_by_source_id", "created_at"],
+      "properties": {
+        "branch_source_id": {"$ref": "#/$defs/uuid"},
+        "currency": {"const": "THB"},
+        "entry_type": {"enum": ["topup", "reserve", "capture", "release", "refund", "adjustment"]},
+        "amount": {"$ref": "#/$defs/decimal"},
+        "balance_after": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "reserved_after": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "reference_type": {"type": ["string", "null"], "maxLength": 50},
+        "reference_id": {"type": ["string", "null"], "maxLength": 100},
+        "created_by_source_id": {"$ref": "#/$defs/uuid"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "mediaMetadataRecord": {
+      "allOf": [
+        {"$ref": "#/$defs/baseRecord"},
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {"const": "media_metadata"},
+            "data": {"$ref": "#/$defs/mediaMetadata"}
+          }
+        }
+      ]
+    },
+    "mediaMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_owner_type", "logical_owner_source_id", "relative_path", "media_type", "byte_size", "sha256", "approved_for_migration"],
+      "properties": {
+        "logical_owner_type": {"enum": ["brand", "item", "credit_topup"]},
+        "logical_owner_source_id": {"$ref": "#/$defs/uuid"},
+        "relative_path": {"type": "string", "pattern": "^media/[0-9a-f]{64}\\.[a-z0-9]+$"},
+        "media_type": {"enum": ["image/jpeg", "image/png", "image/webp"]},
+        "byte_size": {"type": "integer", "minimum": 1, "maximum": 5242880},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "approved_for_migration": {"const": true}
+      }
+    }
+  }
+}

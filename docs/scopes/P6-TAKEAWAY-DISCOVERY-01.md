@@ -12,6 +12,8 @@ Target reference: `/Users/user/Projects/restaurant` commit `27c9c10`
 
 - `P6-TAKEAWAY-CAPABILITY-MATRIX-02.md`
 - `P6-TAKEAWAY-BOUNDARY-DRAFT-03.md`
+- `P6-CHAMBO-DATA-CONTRACT-04.md`
+- `P6-CHAMBO-DRY-RUN-05.md`
 
 ## เป้าหมาย
 

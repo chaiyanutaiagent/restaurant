@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://foodchainservice.com/schemas/takeaway-import-mapping-v1.schema.json",
+  "title": "Foodchainservice Takeaway Import Mapping v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "schema_version",
+    "mapping_id",
+    "export_id",
+    "approved_at",
+    "approved_by",
+    "company",
+    "brand",
+    "branches",
+    "actors",
+    "locations",
+    "unit_overrides",
+    "item_overrides"
+  ],
+  "properties": {
+    "contract": {
+      "const": "foodchainservice.takeaway-import-mapping"
+    },
+    "schema_version": {
+      "const": "1.0.0-draft"
+    },
+    "mapping_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "export_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "approved_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "approved_by": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "company": {
+      "$ref": "#/$defs/idMapping"
+    },
+    "brand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "target_id", "source_slug", "target_slug", "business_type"],
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "target_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "source_slug": {
+          "$ref": "#/$defs/slug"
+        },
+        "target_slug": {
+          "$ref": "#/$defs/slug"
+        },
+        "business_type": {
+          "const": "takeaway"
+        }
+      }
+    },
+    "branches": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "target_id", "source_code", "target_code", "branch_type"],
+        "properties": {
+          "source_id": {
+            "$ref": "#/$defs/uuid"
+          },
+          "target_id": {
+            "$ref": "#/$defs/uuid"
+          },
+          "source_code": {
+            "$ref": "#/$defs/code"
+          },
+          "target_code": {
+            "$ref": "#/$defs/code"
+          },
+          "branch_type": {
+            "enum": ["company_owned", "franchise"]
+          }
+        }
+      }
+    },
+    "actors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "resolution"],
+        "properties": {
+          "source_id": {
+            "$ref": "#/$defs/uuid"
+          },
+          "resolution": {
+            "enum": ["control_plane_user", "legacy_actor"]
+          },
+          "target_id": {
+            "$ref": "#/$defs/nullableUuid"
+          },
+          "legacy_label": {
+            "type": ["string", "null"],
+            "maxLength": 255
+          }
+        }
+      }
+    },
+    "locations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "target_id", "source_code", "target_code", "location_type"],
+        "properties": {
+          "source_id": {
+            "$ref": "#/$defs/uuid"
+          },
+          "target_id": {
+            "$ref": "#/$defs/uuid"
+          },
+          "source_code": {
+            "$ref": "#/$defs/code"
+          },
+          "target_code": {
+            "$ref": "#/$defs/code"
+          },
+          "location_type": {
+            "enum": ["central_raw", "central_ready", "store", "transit", "waste"]
+          }
+        }
+      }
+    },
+    "unit_overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_code", "target_code", "factor"],
+        "properties": {
+          "source_code": {
+            "$ref": "#/$defs/code"
+          },
+          "target_code": {
+            "$ref": "#/$defs/code"
+          },
+          "factor": {
+            "$ref": "#/$defs/positiveDecimal"
+          }
+        }
+      }
+    },
+    "item_overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "source_sku", "target_sku", "resolution"],
+        "properties": {
+          "source_id": {
+            "$ref": "#/$defs/uuid"
+          },
+          "source_sku": {
+            "$ref": "#/$defs/code"
+          },
+          "target_sku": {
+            "$ref": "#/$defs/code"
+          },
+          "resolution": {
+            "enum": ["create", "map_existing", "exclude"]
+          },
+          "reason": {
+            "type": ["string", "null"],
+            "maxLength": 500
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "nullableUuid": {
+      "anyOf": [
+        {"$ref": "#/$defs/uuid"},
+        {"type": "null"}
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "maxLength": 80
+    },
+    "code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "positiveDecimal": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]*(?:\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)$"
+    },
+    "idMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "target_id"],
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "target_id": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    }
+  }
+}

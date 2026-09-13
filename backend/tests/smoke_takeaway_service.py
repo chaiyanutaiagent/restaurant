@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 import hashlib
 import json
 from types import SimpleNamespace
 import uuid
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,7 +89,7 @@ async def run() -> None:
     raw_item = uuid.uuid4()
     output_a = uuid.uuid4()
     output_b = uuid.uuid4()
-    business_date = date(2026, 9, 11)
+    business_date = datetime.now(ZoneInfo("Asia/Bangkok")).date()
     public_request = SimpleNamespace(client=SimpleNamespace(host="takeaway-smoke"))
 
     async with takeaway_engine.connect() as connection:

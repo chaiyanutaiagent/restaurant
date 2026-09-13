@@ -2,7 +2,7 @@
 
 วันที่วางแผน: 2026-09-13
 
-สถานะ: **planned — พร้อมเริ่มเมื่อ Platform Owner อนุมัติ implementation**
+สถานะ: **completed_local — implementation และ automated gate ผ่าน; ยังไม่ deploy**
 
 Baseline: `pre-foodchainservice-platform-20260913`
 
@@ -111,17 +111,17 @@ deployment หรือ public route ต้องหยุดและขอ Sco
 
 ## Acceptance criteria
 
-- [ ] ชื่อส่วนกลางทั้งหมดใช้ `Foodchainservice` จาก contract เดียว
-- [ ] ชื่อ Restaurant/Takeaway/Retail ยังอยู่เฉพาะบริบทโมดูลของตัวเอง
-- [ ] selector และ signup ใช้ module key/status จาก registry เดียวกัน
-- [ ] ผู้ไม่มี permission ไม่เห็นลิงก์เข้าโมดูลที่ห้ามใช้ และ backend guard เดิมยังทำงาน
-- [ ] Takeaway ยังเป็น dark launch และ Hotel ยังเป็น planned
-- [ ] URL/QR เดิมของ Restaurant และ Takeaway ไม่เปลี่ยน
-- [ ] ไม่มี migration และ migration heads ทั้งสี่ยังคงเดิม
-- [ ] frontend tests, type-check และ production build ผ่าน
-- [ ] backend regression `251` tests หรือมากกว่าผ่าน
-- [ ] tracked secret scan ไม่มี finding
-- [ ] ไม่มี UAT/Production deployment ระหว่าง WP1
+- [x] ชื่อส่วนกลางทั้งหมดใช้ `Foodchainservice` จาก contract เดียว
+- [x] ชื่อ Restaurant/Takeaway/Retail ยังอยู่เฉพาะบริบทโมดูลของตัวเอง
+- [x] selector และ signup ใช้ module key/status จาก registry เดียวกัน
+- [x] ผู้ไม่มี permission ไม่เห็นลิงก์เข้าโมดูลที่ห้ามใช้ และ backend guard เดิมยังทำงาน
+- [x] Takeaway ยังเป็น dark launch และ Hotel ยังเป็น planned
+- [x] URL/QR เดิมของ Restaurant และ Takeaway ไม่เปลี่ยน
+- [x] ไม่มี migration และ migration heads ทั้งสี่ยังคงเดิม
+- [x] frontend tests, type-check และ production build ผ่าน
+- [x] backend regression `251` tests หรือมากกว่าผ่าน
+- [x] tracked secret scan ไม่มี finding
+- [x] ไม่มี UAT/Production deployment ระหว่าง WP1
 
 ## Rollback
 
@@ -136,3 +136,5 @@ deployment หรือ public route ต้องหยุดและขอ Sco
 WP2 ควรออกแบบ Company-level module subscription/entitlement ใน `platform_core` และ onboarding
 ให้ module registry รับสถานะจาก server อย่างแท้จริง งานนั้นต้องมี migration, API, audit และ rollback
 plan แยกจาก WP1 และยังไม่ถือว่าอนุมัติจากเอกสารนี้
+
+ผลตรวจรับ implementation อยู่ที่ `docs/scopes/WP1-PHASE-GATE-02.md`

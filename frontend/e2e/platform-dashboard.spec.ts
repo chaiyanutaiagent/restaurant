@@ -311,6 +311,7 @@ test("Platform Owner login opens dashboard and can reach company and audit views
   await page.getByRole("button", { name: "เข้าสู่ Platform Console" }).click();
 
   await expect(page).toHaveURL(/\/platform\/dashboard$/);
+  await expect(page.getByText("Foodchainservice Platform", { exact: true })).toBeVisible();
   await expect(page.getByLabel("กำลังโหลดภาพรวม Platform")).toBeVisible();
   await expect(page.getByRole("heading", { name: "ภาพรวมระบบ" })).toBeVisible();
   await expect(page.getByText("PILOT", { exact: true })).toBeVisible();
@@ -518,7 +519,7 @@ test("missing or rejected Platform credentials return to the restricted login", 
   });
   await page.goto("/platform/dashboard");
   await expect(page).toHaveURL(/\/platform\/login\?next=/);
-  await expect(page.getByText("Restricted workspace", { exact: true })).toBeVisible();
+  await expect(page.getByText("Foodchainservice Platform", { exact: true })).toBeVisible();
 });
 
 test("Platform Owner can enroll MFA and receives one-time recovery codes", async ({ page }) => {
@@ -547,6 +548,66 @@ test("Platform Owner can enroll MFA and receives one-time recovery codes", async
   await page.getByRole("button", { name: "ยืนยันและเปิด MFA" }).click();
   await expect(page.getByText("ABCD-EFGH-JKLM", { exact: true })).toBeVisible();
   await expect(page.getByText(/ระบบจะแสดงครั้งเดียว/)).toBeVisible();
+});
+
+test("Foodchainservice public workspace shows active modules without exposing dark launch routes", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page).toHaveTitle("Foodchainservice");
+  await expect(page.getByText("Foodchainservice", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("workspace-module-erp")).toHaveAttribute("href", "/login?next=%2Fadmin");
+  await expect(page.getByTestId("workspace-module-central_kitchen")).toHaveAttribute(
+    "href",
+    "/login?next=%2Frestaurant%2Fbrands",
+  );
+  await expect(page.getByTestId("workspace-module-restaurant_pos")).toBeVisible();
+  await expect(page.getByTestId("workspace-module-retail_pos")).toBeVisible();
+  await expect(page.getByTestId("workspace-module-hotel_pms")).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByTestId("workspace-module-takeaway_pos")).toHaveCount(0);
+});
+
+test("Foodchainservice workspace reveals dark launch Takeaway only to an authorized user", async ({ page }) => {
+  await page.addInitScript(({ company, token }) => {
+    window.localStorage.setItem("erp-auth", JSON.stringify({
+      state: {
+        accessToken: token,
+        refreshToken: "tenant-refresh-token",
+        user: {
+          id: "77777777-7777-4777-8777-777777777777",
+          company_id: company,
+          username: "takeaway.operator",
+          display_name: "Takeaway Operator",
+          is_active: true,
+        },
+        companyId: company,
+        businessSlug: "takeaway-test",
+        branchId: null,
+        stationKey: null,
+        permissions: ["takeaway.catalog.view"],
+      },
+      version: 0,
+    }));
+  }, { company: companyId, token: tenantAccessToken });
+  await page.route("**/api/v1/restaurant/me/brand-navigation", async (route) => {
+    await fulfill(route, response([]));
+  });
+
+  await page.goto("/");
+
+  await expect(page.getByTestId("workspace-module-takeaway_pos")).toHaveAttribute("href", "/takeaway");
+  await expect(page.getByTestId("workspace-module-restaurant_pos")).toHaveCount(0);
+  await expect(page.getByTestId("workspace-module-retail_pos")).toHaveCount(0);
+  await expect(page.getByTestId("workspace-module-central_kitchen")).toHaveCount(0);
+  await expect(page.getByTestId("workspace-module-erp")).toBeVisible();
+  await expect(page.getByTestId("workspace-module-hotel_pms")).toHaveAttribute("aria-disabled", "true");
+});
+
+test("Restaurant, Retail, and Takeaway entry routes keep their existing authentication guards", async ({ page }) => {
+  for (const path of ["/restaurant", "/pos", "/takeaway"]) {
+    await page.goto(path);
+    await expect(page).toHaveURL(new RegExp(`/login\\?next=${encodeURIComponent(path)}$`));
+    await expect(page.getByText("Foodchainservice Company Admin", { exact: true })).toBeVisible();
+  }
 });
 
 test("public SaaS owner can complete signup, verification, and password recovery pages", async ({ page }) => {
@@ -582,13 +643,17 @@ test("public SaaS owner can complete signup, verification, and password recovery
   });
 
   await page.goto("/signup");
+  await expect(page).toHaveTitle("Foodchainservice");
+  await expect(page.getByText("Foodchainservice Customer Register", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "เลือกประเภทระบบสำหรับธุรกิจของคุณ" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Restaurant & Cafe" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Restaurant POS" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Retail POS" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Takeaway Shop" })).toBeVisible();
-  await expect(page.getByTestId("signup-product-retail")).toHaveAttribute("aria-disabled", "true");
-  await expect(page.getByTestId("signup-product-takeaway")).toHaveAttribute("aria-disabled", "true");
-  await page.getByTestId("signup-product-restaurant").click();
+  await expect(page.getByRole("heading", { name: "Takeaway POS" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Hotel PMS" })).toBeVisible();
+  await expect(page.getByTestId("signup-product-retail_pos")).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByTestId("signup-product-takeaway_pos")).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByTestId("signup-product-hotel_pms")).toHaveAttribute("aria-disabled", "true");
+  await page.getByTestId("signup-product-restaurant_pos").click();
   await expect(page).toHaveURL(/\/signup\/restaurant$/);
   await page.locator("#company_name").fill("ร้านสมาชิก SaaS");
   await page.locator("#business_slug").fill("public-saas-restaurant");
@@ -779,7 +844,7 @@ test("business admin resolves Company ID, hides UUID entry, and keeps the canoni
 
   await page.goto("/alpha-cafe/admin");
   await expect(page).toHaveURL(/\/alpha-cafe\/login\?next=/);
-  await expect(page.getByText("พื้นที่ธุรกิจ /alpha-cafe", { exact: true })).toBeVisible();
+  await expect(page.getByText("Foodchainservice · พื้นที่ธุรกิจ /alpha-cafe", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Company ID")).toBeHidden();
   await page.getByLabel("Username").fill("alpha.owner");
   await page.getByLabel("Password").fill("Routing-Owner-Password!");
@@ -788,7 +853,7 @@ test("business admin resolves Company ID, hides UUID entry, and keeps the canoni
   await expect(page).toHaveURL(/\/alpha-cafe\/admin$/);
   await expect.poll(() => loginCompanyHeader).toBe(companyId);
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "ERP Admin" }).first()).toHaveAttribute("href", "/alpha-cafe/admin");
+  await expect(page.getByRole("link", { name: "Company Admin" }).first()).toHaveAttribute("href", "/alpha-cafe/admin");
 });
 
 test("business admin rejects a session belonging to another Tenant", async ({ page }) => {

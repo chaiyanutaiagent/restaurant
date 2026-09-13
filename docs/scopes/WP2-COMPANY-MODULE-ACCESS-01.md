@@ -1,0 +1,124 @@
+# WP2-COMPANY-MODULE-ACCESS-01 — Server-owned Company Module Access
+
+วันที่วางแผน: 2026-09-13
+
+สถานะ: **next_planned — ยังไม่เริ่ม implementation**
+
+Baseline: WP1 gate บน branch `codex/foodchainservice-platform`
+
+## Problem
+
+WP1 ทำ module registry ฝั่ง frontend ให้ชื่อและสถานะตรงกันแล้ว แต่ runtime access ของ Company
+ยังไม่ได้อ่านรายการโมดูลจาก server โดยตรง ปัจจุบัน Platform มี `feature_flags` ใน plan และ tenant
+profile อยู่แล้ว ขณะที่ Brand entitlement เดิมใช้เฉพาะความสามารถย่อยของ Restaurant จึงไม่ควรสร้าง
+entitlement ซ้ำหรือให้ frontend เดาสถานะจาก permission เพียงอย่างเดียว
+
+## User outcome
+
+- Platform Owner เปิดหรือปิดโมดูลของแต่ละ Company ได้จากแหล่งข้อมูลกลางพร้อมเหตุผลและ audit
+- Company Admin เห็นโมดูลที่ Company สมัครใช้และตัวเองมีสิทธิ์ทำงานเท่านั้น
+- การปิดโมดูลหยุด entry/API ใหม่โดยไม่ลบประวัติหรือข้อมูล operational เดิม
+- Customer Register ตั้งค่าโมดูลแรกให้ Company ใหม่อย่าง deterministic
+- Takeaway ยังคง dark launch จนกว่าจะมี activation gate แยก
+
+## Proposed contract
+
+ใช้ stable module keys จาก WP1:
+
+```text
+erp
+central_kitchen
+restaurant_pos
+takeaway_pos
+retail_pos
+hotel_pms
+```
+
+Company module response ต้องมีอย่างน้อย:
+
+- `module_key`
+- `lifecycle`: `active`, `dark_launch`, `planned`
+- `company_enabled`
+- `plan_included`
+- `effective_access`
+- `reason_code`
+- `updated_at` และ actor/audit reference สำหรับ Platform view
+
+กติกา effective access:
+
+```text
+catalog lifecycle อนุญาต
+AND plan รวมโมดูล
+AND Company เปิดโมดูล
+AND user permission/scope ผ่าน
+AND operational runtime พร้อม
+```
+
+frontend ไม่สามารถส่ง database หรือ business type มาเลือกเอง
+
+## In scope
+
+### WP2-A — Existing control audit และ canonical mapping
+
+- ตรวจ semantics ของ `SaasPlan.feature_flags` และ `PlatformTenantProfile.feature_flags`
+- กำหนด mapping เดิม `restaurant`, `retail_pos`, `takeaway` ไป stable WP1 keys
+- กำหนด default ที่ fail closed สำหรับ key ที่ไม่รู้จัก
+- เลือกวิธี compatibility ที่ไม่ทำให้ tenant เดิมเสีย
+
+### WP2-B — Server-owned module API
+
+- เพิ่ม Company-user read API สำหรับ effective module access
+- เพิ่ม Platform Owner read/update API โดยต้องส่ง reason และบันทึก audit
+- validate key/state ด้วย allowlist; ไม่รับ arbitrary feature key ใน module endpoint
+- response ไม่เปิดเผย tenant อื่นหรือ operational record
+
+### WP2-C — Signup และ Company Admin integration
+
+- Restaurant signup เปิดเฉพาะ `restaurant_pos` ตาม plan/default ที่อนุมัติ
+- workspace selector ใช้ server response ร่วมกับ user permission
+- Company Admin แสดงสถานะ plan/company/runtime แยกกันอย่างเข้าใจง่าย
+- network/API failure ต้อง fail closed สำหรับ dark-launch/planned modules
+
+### WP2-D — Migration/compatibility gate
+
+- หาก canonical key จำเป็นต้องเขียนข้อมูล ให้ใช้ Platform migration chain เท่านั้น
+- migration ต้อง backfill แบบ idempotent และมี downgrade/rollback ชัดเจน
+- ทดสอบ tenant isolation, concurrent update, audit, suspension และ legacy key compatibility
+- backup/restore drill เฉพาะฐานที่ migration กระทบ
+
+## Out of scope
+
+- ไม่เปิด billing collection หรือเปลี่ยนราคา plan
+- ไม่ activate Takeaway/Hotel/Retail ให้ลูกค้าจริง
+- ไม่สร้าง Hotel operational tables
+- ไม่ย้าย Central Kitchen ออกจาก Restaurant database
+- ไม่เปลี่ยน Restaurant/Takeaway operational schema หรือ public URLs
+- ไม่ rename repository, Docker, database หรือ Cloudflare resources
+- ไม่ทำ production deployment
+
+## Acceptance criteria
+
+- [ ] Company module access มี server-owned endpoint และ stable key allowlist
+- [ ] Platform Owner update ต้องมี reason, CSRF/session guard และ audit record
+- [ ] Company A อ่านหรือแก้ module state ของ Company B ไม่ได้
+- [ ] plan, Company flag, lifecycle, permission และ runtime readiness ถูกประเมินแยกกัน
+- [ ] unknown/planned/dark-launch state fail closed
+- [ ] tenant เดิมที่ใช้ `restaurant`, `retail_pos`, `takeaway` ไม่เสีย compatibility
+- [ ] Customer Register สร้าง Company ด้วย module state ที่คาดเดาได้และยิงซ้ำไม่สร้างซ้ำ
+- [ ] frontend selector ใช้ server response แต่ backend guard เดิมยังเป็น enforcement
+- [ ] migration upgrade/downgrade และ backup/restore ผ่าน หากมี data change
+- [ ] backend/frontend/browser regression ผ่าน
+- [ ] ไม่มี UAT/Production activation ระหว่าง WP2
+
+## Rollback
+
+- ปิดการอ่าน module API ใหม่ด้วย feature flag และกลับไป WP1 static registry
+- revert frontend integration ก่อน backend endpoint
+- downgrade Platform migration เฉพาะเมื่อ restore drill ผ่านและไม่มี write ใหม่ค้างอยู่
+- ใช้ tag `pre-foodchainservice-platform-20260913` และ WP0 backup เป็น disaster fallback
+
+## Decision gate ก่อนเริ่ม WP2
+
+ต้องยืนยันใน WP2-A ก่อนว่า existing JSON `feature_flags` เพียงพอหรือจำเป็นต้องเพิ่มตาราง
+Company module state ใหม่ ห้ามเพิ่ม migration จนกว่าจะบันทึกเหตุผล, data ownership และ downgrade
+ไว้ใน Scope Change ของ WP2

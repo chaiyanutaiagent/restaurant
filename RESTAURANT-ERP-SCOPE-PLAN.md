@@ -966,3 +966,7 @@ WP0 เป็น baseline ก่อนปรับโครงสร้างแ
 
 แผนงานถัดไปอยู่ที่ `docs/scopes/WP1-PLATFORM-SHELL-MODULE-MAP-01.md` โดย WP1 จำกัดอยู่ที่
 product identity, module map และ shared entry shells เท่านั้น ยังไม่เปลี่ยน database หรือ route เดิม
+
+WP1 ผ่าน local automated gate แล้วตาม `docs/scopes/WP1-PHASE-GATE-02.md` งานถัดไปคือ
+`docs/scopes/WP2-COMPANY-MODULE-ACCESS-01.md` เพื่อย้าย module access ให้เป็น server-owned
+Company contract โดยยังไม่เปิดโมดูลหรือ deploy ระบบจริง

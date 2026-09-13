@@ -1,6 +1,6 @@
 # Foodchainservice Platform Module Map
 
-สถานะ: WP2 server-owned Company access contract
+สถานะ: WP3 server-owned Company access และ Workspace directory contract
 
 Foodchainservice แยกทางเข้าและโมดูลตามความรับผิดชอบดังนี้:
 
@@ -33,6 +33,14 @@ Server source of truth สำหรับสิทธิ์ระดับ Compa
 - `GET /api/v1/membership/modules` — สถานะ effective ของ Company/user ปัจจุบัน
 - `GET/PUT /api/v1/platform/companies/{company_id}/modules[...]` — การอ่าน/แก้ไขของ Platform Owner
 
+Server source of truth สำหรับ Company Workspace อยู่ที่:
+
+- Company/Brand/Branch/BrandBranch — identity และความสัมพันธ์ของ Workspace
+- `GET /api/v1/membership/workspaces` — directory ที่ผูก Company และ module state จาก signed session
+- `POST /api/v1/membership/workspaces` — idempotent provisioning ที่ server derive business boundary
+- `PATCH /api/v1/membership/workspaces/{workspace_id}` — พัก/คืนค่า link พร้อม reason และ audit
+- `/workspaces` — Company Admin surface; ไม่มี target database control ใน frontend
+
 ## Stable module keys
 
 | Key | Group | Runtime state | Registration | Operational boundary |
@@ -63,6 +71,8 @@ Server source of truth สำหรับสิทธิ์ระดับ Compa
 - Restaurant QR URLs, Takeaway ordering/pickup URLs และ device routes ต้องคงเดิม
 - Company Admin และ Platform Owner ใช้ authentication store/guard คนละชุดเหมือนเดิม
 - Central Kitchen ยังใช้ Restaurant pages เป็น temporary entry จน work package แยก service ได้รับอนุมัติ
+- Company Admin สร้างได้เฉพาะ workspace collection ที่ server ตอบ `can_provision=true`; shared service
+  ไม่มี Brand/Branch provisioning และ Hotel ไม่มี create contract
 - key เดิม `restaurant`, `takeaway`, `retail_pos` ถูก map เข้าชื่อ canonical โดยไม่บังคับ data migration
 - plan code เดิมที่ยังไม่มี `SaasPlan` ใช้ profile เดิมชั่วคราวเพื่อไม่ตัดสิทธิ์ tenant โดยไม่ตั้งใจ
 - การเปลี่ยนแพ็กเกจจะไม่เขียนทับ Company module switches ที่ Platform Owner ตั้งไว้

@@ -976,3 +976,9 @@ JSON controls เดิม จึงไม่ต้อง migration และเ
 Platform Owner controls กับ audit โดย Takeaway/Hotel ยังคงปิดตาม gate เดิม งานถัดไปคือ
 `docs/scopes/WP3-COMPANY-WORKSPACE-PROVISIONING-01.md` เพื่อจัด Company/Brand/Branch workspace
 ตาม module access โดยยังไม่ deploy หรือ activate ระบบจริง
+
+WP3 ผ่าน local automated gate แล้วตาม `docs/scopes/WP3-PHASE-GATE-02.md` โดยเพิ่ม Company
+Workspace directory, idempotent Restaurant provisioning, deactivate/reactivate พร้อม audit และหน้า
+Company Admin `/workspaces` โดยไม่เพิ่ม migration และไม่ให้ client เลือก target database งานถัดไปคือ
+`docs/scopes/WP4-SHARED-ERP-REPORTING-CONTRACT-01.md` เพื่อกำหนด ownership และรายงานรวมที่แยก
+module/Brand/Branch ก่อนย้าย Central Kitchen หรือเปิดระบบจริง

@@ -12,6 +12,12 @@ import type { SaasActionResponse, SaasBusiness, SaasMembership, SaasSignupRespon
 import type { SaasBillingSummary } from "@/types/billing";
 import type { PrivacyRequest, SupportAccessGrant, SupportMessage, SupportTicket } from "@/types/privacySupport";
 import type { CompanyModuleAccess } from "@/types/moduleAccess";
+import type {
+  CompanyWorkspace,
+  CompanyWorkspaceDirectory,
+  CompanyWorkspaceProvisionRequest,
+  CompanyWorkspaceProvisionResult,
+} from "@/types/companyWorkspace";
 
 type RetryableConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -195,7 +201,15 @@ export const membershipApi = {
     }),
   me: () => api.get<ApiResponse<SaasMembership>>("/membership/me"),
   billing: () => api.get<ApiResponse<SaasBillingSummary>>("/membership/billing"),
-  modules: () => api.get<ApiResponse<CompanyModuleAccess[]>>("/membership/modules")
+  modules: () => api.get<ApiResponse<CompanyModuleAccess[]>>("/membership/modules"),
+  workspaces: () => api.get<ApiResponse<CompanyWorkspaceDirectory>>("/membership/workspaces"),
+  provisionWorkspace: (data: CompanyWorkspaceProvisionRequest) =>
+    api.post<ApiResponse<CompanyWorkspaceProvisionResult>>("/membership/workspaces", data),
+  updateWorkspaceStatus: (workspaceId: string, active: boolean, reason: string) =>
+    api.patch<ApiResponse<CompanyWorkspace>>(`/membership/workspaces/${workspaceId}`, {
+      active,
+      reason,
+    })
 };
 
 export const privacySupportApi = {

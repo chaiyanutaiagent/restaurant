@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from typing import Any
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +20,12 @@ from app.schemas.membership import (
     SaasSignupRead,
     SaasSignupRequest,
 )
+from app.schemas.company_workspace import (
+    CompanyWorkspaceProvisionRequest,
+    CompanyWorkspaceStatusUpdate,
+)
 from app.services.company_module_access_service import CompanyModuleAccessService
+from app.services.company_workspace_service import CompanyWorkspaceService
 from app.services.saas_email_service import deliver_membership_email
 from app.services.saas_membership_service import SaasMembershipService
 from app.services.saas_billing_service import SaasBillingService
@@ -250,3 +256,46 @@ async def my_company_modules(
         permissions=current.permissions,
     )
     return ok([module.model_dump(mode="json") for module in modules])
+
+
+@router.get("/workspaces")
+async def my_company_workspaces(
+    current: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    directory = await CompanyWorkspaceService(db).directory(current)
+    return ok(directory.model_dump(mode="json"))
+
+
+@router.post("/workspaces")
+async def provision_company_workspace(
+    payload: CompanyWorkspaceProvisionRequest,
+    request: Request,
+    current: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    result = await CompanyWorkspaceService(db).provision(
+        current,
+        payload,
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return ok(result.model_dump(mode="json"))
+
+
+@router.patch("/workspaces/{workspace_id}")
+async def update_company_workspace_status(
+    workspace_id: uuid.UUID,
+    payload: CompanyWorkspaceStatusUpdate,
+    request: Request,
+    current: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    workspace = await CompanyWorkspaceService(db).update_status(
+        current,
+        workspace_id,
+        payload,
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return ok(workspace.model_dump(mode="json"))

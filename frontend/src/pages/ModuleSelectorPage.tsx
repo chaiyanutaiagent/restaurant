@@ -215,10 +215,10 @@ export default function ModuleSelectorPage(): JSX.Element {
               </div>
               {stores.length > 0 && hasPermission("fb.settings.manage") ? (
                 <Link
-                  to="/restaurant/brands"
+                  to={hasPermission("system.company.edit") ? "/workspaces" : "/restaurant/brands"}
                   className="text-sm font-semibold text-violet-700 hover:text-violet-900"
                 >
-                  จัดการแบรนด์และสาขา
+                  จัดการพื้นที่ทำงาน
                 </Link>
               ) : null}
             </div>
@@ -312,10 +312,15 @@ export default function ModuleSelectorPage(): JSX.Element {
                     && canAccessPlatformModule(module, true, hasPermission)
                   )
                 : canAccessPlatformModule(module, false, hasPermission);
-              const destination = module.entryRoute
+              const managedWorkspaceDestination = isAuthenticated
+                && hasPermission("system.company.edit")
+                && ["central_kitchen", "restaurant_pos"].includes(module.key)
+                ? "/workspaces"
+                : module.entryRoute;
+              const destination = managedWorkspaceDestination
                 ? isAuthenticated
-                  ? module.entryRoute
-                  : `/login?next=${encodeURIComponent(module.entryRoute)}`
+                  ? managedWorkspaceDestination
+                  : `/login?next=${encodeURIComponent(managedWorkspaceDestination)}`
                 : null;
               const content = (
                 <>

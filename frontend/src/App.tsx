@@ -92,6 +92,7 @@ import PlatformOperationsPage from "@/pages/platform/PlatformOperationsPage";
 import PlatformBillingPage from "@/pages/platform/PlatformBillingPage";
 import TenantBillingPage from "@/pages/billing/TenantBillingPage";
 import TenantPrivacySupportPage from "@/pages/support/TenantPrivacySupportPage";
+import CompanyWorkspacesPage from "@/pages/workspaces/CompanyWorkspacesPage";
 import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
 import TakeawayDashboardPage from "@/pages/takeaway/TakeawayDashboardPage";
 import TakeawayCounterPage from "@/pages/takeaway/TakeawayCounterPage";
@@ -325,6 +326,7 @@ export default function App(): JSX.Element {
                 <Route path="/hr" element={<HRPage />} />
               </Route>
               <Route element={<ProtectedRoute permission="system.company.edit" />}>
+                <Route path="/workspaces" element={<CompanyWorkspacesPage />} />
                 <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Route>

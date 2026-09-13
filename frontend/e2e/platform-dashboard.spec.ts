@@ -63,6 +63,37 @@ function companyModules(overrides: Partial<Record<string, Record<string, unknown
   });
 }
 
+function companyWorkspaceDirectory(workspaces: Array<Record<string, unknown>> = []) {
+  const accessRows = companyModules();
+  return {
+    company_id: companyId,
+    generated_at: "2026-09-13T09:00:00Z",
+    modules: accessRows.map((access) => ({
+      module_key: access.module_key,
+      kind: access.module_key === "erp" || access.module_key === "central_kitchen"
+        ? "shared_service"
+        : access.module_key === "hotel_pms"
+          ? "planned"
+          : "workspace_collection",
+      entry_route: access.module_key === "erp"
+        ? "/admin"
+        : access.module_key === "central_kitchen"
+          ? "/restaurant/brands"
+          : access.module_key === "restaurant_pos"
+            ? "/restaurant"
+            : access.module_key === "takeaway_pos"
+              ? "/takeaway"
+              : access.module_key === "retail_pos"
+                ? "/pos"
+                : null,
+      can_provision: ["restaurant_pos", "takeaway_pos", "retail_pos"].includes(access.module_key)
+        && access.effective_access,
+      access,
+      workspaces: workspaces.filter((workspace) => workspace.module_key === access.module_key),
+    })),
+  };
+}
+
 const starterPlan = {
   id: "55555555-5555-4555-8555-555555555555",
   code: "starter",
@@ -652,6 +683,103 @@ test("Foodchainservice workspace reveals dark launch Takeaway only to an authori
   await expect(page.getByTestId("workspace-module-central_kitchen")).toHaveCount(0);
   await expect(page.getByTestId("workspace-module-erp")).toBeVisible();
   await expect(page.getByTestId("workspace-module-hotel_pms")).toHaveAttribute("aria-disabled", "true");
+});
+
+test("Company Admin provisions and safely pauses a server-owned Restaurant workspace", async ({ page }) => {
+  const workspaceId = "12345678-1234-4234-8234-123456789012";
+  const branchId = "22345678-1234-4234-8234-123456789012";
+  const brandId = "32345678-1234-4234-8234-123456789012";
+  const workspace = {
+    workspace_id: workspaceId,
+    module_key: "restaurant_pos",
+    business_type: "restaurant",
+    brand_id: brandId,
+    brand_slug: "sample-cafe",
+    brand_name: "Sample Cafe",
+    branch_id: branchId,
+    branch_code: "BKK-01",
+    branch_name: "Main Branch",
+    branch_type: "company_owned",
+    storefront_mode: "food_stall",
+    is_active: true,
+    can_open: true,
+    entry_route: "/restaurant",
+  };
+  await page.addInitScript(({ company, token }) => {
+    window.localStorage.setItem("erp-auth", JSON.stringify({
+      state: {
+        accessToken: token,
+        refreshToken: "tenant-refresh-token",
+        user: {
+          id: "77777777-7777-4777-8777-777777777777",
+          company_id: company,
+          username: "company.owner",
+          display_name: "Company Owner",
+          is_active: true,
+        },
+        companyId: company,
+        businessSlug: "sample-company",
+        branchId: null,
+        stationKey: null,
+        permissions: ["system.company.edit", "fb.settings.manage"],
+      },
+      version: 0,
+    }));
+  }, { company: companyId, token: tenantAccessToken });
+
+  let workspaceRows: Array<Record<string, unknown>> = [];
+  let provisionPayload: Record<string, unknown> | null = null;
+  let statusPayload: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/system/me/branches", async (route) => {
+    await fulfill(route, response([]));
+  });
+  await page.route("**/api/v1/restaurant/me/brand-navigation", async (route) => {
+    await fulfill(route, response([]));
+  });
+  await page.route("**/api/v1/membership/workspaces", async (route) => {
+    if (route.request().method() === "POST") {
+      provisionPayload = route.request().postDataJSON() as Record<string, unknown>;
+      workspaceRows = [workspace];
+      await fulfill(route, response({
+        created: true,
+        created_resources: ["brand", "branch", "workspace"],
+        workspace,
+      }));
+      return;
+    }
+    await fulfill(route, response(companyWorkspaceDirectory(workspaceRows)));
+  });
+  await page.route(`**/api/v1/membership/workspaces/${workspaceId}`, async (route) => {
+    statusPayload = route.request().postDataJSON() as Record<string, unknown>;
+    workspaceRows = [{ ...workspace, is_active: false, can_open: false }];
+    await fulfill(route, response(workspaceRows[0]));
+  });
+
+  await page.goto("/workspaces");
+  await expect(page.getByRole("heading", { name: "พื้นที่ทำงานของบริษัท" }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ระบบส่วนกลางของบริษัท" })).toBeVisible();
+  await expect(page.getByTestId("company-workspace-module-restaurant_pos")).toBeVisible();
+  await expect(page.getByTestId("company-workspace-module-takeaway_pos")).toContainText("ไม่รวมในแพ็กเกจ");
+  await expect(page.getByTestId("company-workspace-module-hotel_pms")).toContainText("อยู่ในแผนพัฒนา");
+  await expect(page.getByLabel(/target database/i)).toHaveCount(0);
+
+  await page.getByLabel("ชื่อแบรนด์").fill("Sample Cafe");
+  await page.getByLabel("รหัสแบรนด์ (slug)").fill("sample-cafe");
+  await page.getByLabel("ชื่อสาขา").fill("Main Branch");
+  await page.getByLabel("รหัสสาขา").fill("BKK-01");
+  await page.getByRole("button", { name: "สร้าง Workspace" }).click();
+  await expect.poll(() => provisionPayload?.module_key).toBe("restaurant_pos");
+  await expect.poll(() => provisionPayload?.idempotency_key).toBeTruthy();
+  expect(provisionPayload).not.toHaveProperty("target_database");
+  await expect(page.getByTestId(`company-workspace-${workspaceId}`)).toContainText("Sample Cafe");
+
+  page.once("dialog", async (dialog) => {
+    await dialog.accept("พักเพื่อทดสอบ rollback");
+  });
+  await page.getByTestId(`company-workspace-${workspaceId}`).getByRole("button", { name: "พัก" }).click();
+  await expect.poll(() => statusPayload?.active).toBe(false);
+  await expect.poll(() => statusPayload?.reason).toBe("พักเพื่อทดสอบ rollback");
+  await expect(page.getByTestId(`company-workspace-${workspaceId}`).getByRole("button", { name: "คืนค่า" })).toBeVisible();
 });
 
 test("Restaurant, Retail, and Takeaway entry routes keep their existing authentication guards", async ({ page }) => {

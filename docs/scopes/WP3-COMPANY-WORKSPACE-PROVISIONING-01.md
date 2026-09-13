@@ -2,7 +2,7 @@
 
 วันที่วางแผน: 2026-09-13
 
-สถานะ: **next_planned — ยังไม่เริ่ม implementation**
+สถานะ: **completed_local — implementation และ automated gate ผ่าน; ยังไม่ deploy**
 
 Baseline: WP2 gate บน branch `codex/foodchainservice-platform`
 
@@ -67,16 +67,16 @@ WP3 ใช้ Company/Brand/Branch และ business context ที่มีอ
 
 ## Acceptance criteria
 
-- [ ] workspace directory มาจาก server และผูกกับ Company/module/business context
-- [ ] Company Admin สร้าง workspace ได้เฉพาะ module ที่ effective และตัวเองมีสิทธิ์
-- [ ] provisioning ซ้ำเป็น idempotent และไม่สร้างข้อมูลซ้ำ
-- [ ] client เลือก target database เองไม่ได้
-- [ ] Central Kitchen/Restaurant hierarchy แสดงตรงกับโครงสร้าง Foodchainservice
-- [ ] Takeaway ยัง dark launch, Hotel ยัง planned และ Retail ยัง compatibility
-- [ ] tenant isolation, audit และ backend route guards ผ่าน
-- [ ] ไม่มี migration โดยไม่จำเป็น; ถ้าจำเป็นต้องมี isolated backup/restore rehearsal
-- [ ] backend/frontend/browser regression ผ่าน
-- [ ] ไม่มี UAT/Production activation ระหว่าง WP3
+- [x] workspace directory มาจาก server และผูกกับ Company/module/business context
+- [x] Company Admin สร้าง workspace ได้เฉพาะ module ที่ effective และตัวเองมีสิทธิ์
+- [x] provisioning ซ้ำเป็น idempotent และไม่สร้างข้อมูลซ้ำ
+- [x] client เลือก target database เองไม่ได้
+- [x] Central Kitchen/Restaurant hierarchy แสดงตรงกับโครงสร้าง Foodchainservice
+- [x] Takeaway ยัง dark launch, Hotel ยัง planned และ Retail ยัง compatibility
+- [x] tenant isolation, audit และ backend route guards ผ่าน
+- [x] ไม่มี migration โดยไม่จำเป็น; ใช้ isolated database rehearsal ยืนยันแทน
+- [x] backend/frontend/browser regression ผ่าน
+- [x] ไม่มี UAT/Production activation ระหว่าง WP3
 
 ## Rollback
 
@@ -84,3 +84,22 @@ WP3 ใช้ Company/Brand/Branch และ business context ที่มีอ
 - revert workspace directory/provisioning API โดยคง Brand/Branch เดิมไว้
 - ห้ามลบ workspace ที่สร้างแล้วอัตโนมัติ; ใช้ deactivate พร้อม audit
 - ใช้ WP2 commit เป็น code rollback point
+
+## Implementation decision
+
+- ใช้ Company/Brand/Branch/BrandBranch เดิมเป็น identity ของ Workspace จึงไม่สร้างตารางซ้ำ
+- `GET /api/v1/membership/workspaces` เป็น directory กลางของ Company Admin และอ่าน Company
+  จาก signed session เท่านั้น
+- `POST /api/v1/membership/workspaces` รับ stable module key กับ business identity แต่ไม่รับชื่อฐานข้อมูล
+  โดย server เป็นผู้ derive business type และ operational entry route
+- provisioning ล็อก Company, ตรวจ permission/module/plan limit, รองรับ idempotency key และ natural
+  Brand/Branch identity และบันทึก `company.workspace.provision` ใน Audit Log
+- การพัก/คืนค่าเปลี่ยนเฉพาะ BrandBranch link พร้อมเหตุผลและ Audit Log จึงไม่ลบ Brand, Branch
+  หรือประวัติ operational เดิม
+- ถ้า identity อยู่ `platform_core` จะส่ง reference outbox เฉพาะ aggregate ที่สร้าง/เปลี่ยนจริง
+- Company Admin UI อยู่ที่ `/workspaces`; ERP และ Central Kitchen เป็น shared service ส่วน POS
+  แสดงแยกตาม Brand/Branch และสถานะจาก WP2
+
+หลักฐานตรวจรับอยู่ที่ `docs/scopes/WP3-PHASE-GATE-02.md`
+
+งานถัดไปที่กำหนดไว้คือ `docs/scopes/WP4-SHARED-ERP-REPORTING-CONTRACT-01.md`

@@ -62,6 +62,7 @@ type NavItem = {
 
 const mainItems: NavItem[] = [
   { label: "Company Admin", to: "/admin", icon: LayoutDashboard },
+  { label: "พื้นที่ทำงาน", to: "/workspaces", icon: Store, permission: "system.company.edit" },
   { label: "แพ็กเกจ SaaS", to: "/billing", icon: CreditCard },
   { label: "Privacy & Support", to: "/privacy-support", icon: Shield },
   { label: "ผู้ใช้งาน", to: "/users", icon: Users, permission: "system.user.view" },

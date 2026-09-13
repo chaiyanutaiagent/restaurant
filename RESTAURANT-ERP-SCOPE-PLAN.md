@@ -963,3 +963,6 @@ WP0 เป็น baseline ก่อนปรับโครงสร้างแ
 จนกว่าจะมี Scope Change ที่อนุมัติอย่างชัดเจน
 
 หลักฐาน WP0 อยู่ที่ `docs/scopes/WP0-FOODCHAINSERVICE-PLATFORM-BASELINE-01.md`
+
+แผนงานถัดไปอยู่ที่ `docs/scopes/WP1-PLATFORM-SHELL-MODULE-MAP-01.md` โดย WP1 จำกัดอยู่ที่
+product identity, module map และ shared entry shells เท่านั้น ยังไม่เปลี่ยน database หรือ route เดิม

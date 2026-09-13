@@ -115,6 +115,16 @@ Boundary backup:
 Backup ใน `/private/tmp` เป็น local rollback artifact อาจถูกระบบปฏิบัติการล้างได้ จึงไม่ใช้แทน
 production/off-device backup ก่อน migration หรือ deployment จริง
 
+สำเนาถาวรบน Mac ถูกเก็บไว้ที่:
+
+`/Users/user/Backups/Foodchainservice/WP0-20260913`
+
+- `full-system/` เก็บ legacy PostgreSQL, Redis และ uploads
+- `database-boundaries/` เก็บ Platform, Restaurant และ Takeaway
+- ตรวจไฟล์กับต้นฉบับด้วย directory comparison และ SHA-256 แล้วตรงกันทั้งหมด
+- ไฟล์ทุกชุดคง permission แบบ owner-only (`0600`)
+- สำเนานี้อยู่คนละ directory กับ Git repository และไม่ถูกนำเข้า commit
+
 ## WP0 Gate
 
 - [x] freeze baseline และยืนยันความสัมพันธ์กับ `origin/main`

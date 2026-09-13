@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_identity_db
+from app.database import get_identity_db, get_platform_db
 from app.dependencies import TokenData, get_current_user
 from app.models.company import Company
 from app.schemas.membership import (
@@ -24,8 +25,10 @@ from app.schemas.company_workspace import (
     CompanyWorkspaceProvisionRequest,
     CompanyWorkspaceStatusUpdate,
 )
+from app.schemas.shared_reporting import ReportingModuleKey
 from app.services.company_module_access_service import CompanyModuleAccessService
 from app.services.company_workspace_service import CompanyWorkspaceService
+from app.services.shared_reporting_service import SharedReportingService
 from app.services.saas_email_service import deliver_membership_email
 from app.services.saas_membership_service import SaasMembershipService
 from app.services.saas_billing_service import SaasBillingService
@@ -299,3 +302,24 @@ async def update_company_workspace_status(
         user_agent=request.headers.get("user-agent"),
     )
     return ok(workspace.model_dump(mode="json"))
+
+
+@router.get("/reports/shared-sales")
+async def my_company_shared_sales_report(
+    date_from: date = Query(...),
+    date_to: date = Query(...),
+    module_key: ReportingModuleKey | None = Query(default=None),
+    brand_id: uuid.UUID | None = Query(default=None),
+    branch_id: uuid.UUID | None = Query(default=None),
+    current: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_platform_db),
+) -> dict[str, Any]:
+    report = await SharedReportingService(db).sales_report(
+        current,
+        date_from=date_from,
+        date_to=date_to,
+        module_key=module_key,
+        brand_id=brand_id,
+        branch_id=branch_id,
+    )
+    return ok(report.model_dump(mode="json"))

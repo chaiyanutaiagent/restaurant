@@ -81,6 +81,7 @@ const comingSoonItems: NavItem[] = [
 ];
 
 const reportItems: NavItem[] = [
+  { label: "รายงานรวมบริษัท", to: "/reports/company", icon: BarChart2, permission: "system.company.edit" },
   { label: "รายงาน", to: "/reports", icon: BarChart2, permission: "pos.report.view" },
   { label: "ประวัติกะ", to: "/shift-history", icon: Clock, permission: "pos.report.view" }
 ];
@@ -421,7 +422,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">รายงาน</p>
           {reportItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}

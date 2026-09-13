@@ -18,6 +18,7 @@ import type {
   CompanyWorkspaceProvisionRequest,
   CompanyWorkspaceProvisionResult,
 } from "@/types/companyWorkspace";
+import type { SharedSalesReport, SharedSalesReportFilters } from "@/types/sharedReporting";
 
 type RetryableConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -209,7 +210,9 @@ export const membershipApi = {
     api.patch<ApiResponse<CompanyWorkspace>>(`/membership/workspaces/${workspaceId}`, {
       active,
       reason,
-    })
+    }),
+  sharedSalesReport: (params: SharedSalesReportFilters) =>
+    api.get<ApiResponse<SharedSalesReport>>("/membership/reports/shared-sales", { params })
 };
 
 export const privacySupportApi = {

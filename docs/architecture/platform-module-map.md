@@ -1,6 +1,6 @@
 # Foodchainservice Platform Module Map
 
-สถานะ: WP3 server-owned Company access และ Workspace directory contract
+สถานะ: WP4 server-owned Company access, Workspace directory และ shared reporting contract
 
 Foodchainservice แยกทางเข้าและโมดูลตามความรับผิดชอบดังนี้:
 
@@ -10,7 +10,8 @@ Foodchainservice
 ├── Company Admin                    /admin
 ├── Platform Owner Control Plane     /platform/*
 └── Company workspaces               /
-    ├── ERP และรายงาน                /admin
+    ├── ERP                           /admin
+    ├── รายงานรวม                    /reports/company (shadow)
     ├── Central Kitchen/Supply Chain /restaurant/brands (temporary entry)
     ├── Restaurant POS               /restaurant/*
     ├── Takeaway POS                 /takeaway/*
@@ -40,6 +41,15 @@ Server source of truth สำหรับ Company Workspace อยู่ที�
 - `POST /api/v1/membership/workspaces` — idempotent provisioning ที่ server derive business boundary
 - `PATCH /api/v1/membership/workspaces/{workspace_id}` — พัก/คืนค่า link พร้อม reason และ audit
 - `/workspaces` — Company Admin surface; ไม่มี target database control ใน frontend
+
+Server source of truth สำหรับรายงานรวมอยู่ที่:
+
+- operational outbox allow-list — completion/refund/void metadata โดยไม่ส่ง customer PII
+- `CompanyReportingFact` — snapshot ต่อ source document แยก Company/module/Brand/Branch
+- `CompanyReportingEventReceipt` — replay/correction audit และ payload digest
+- `CompanyReportingSourceState` — cursor, lag, failure และ dead-letter health
+- `GET /api/v1/membership/reports/shared-sales` — Company Admin read contract จาก signed Company
+- `/reports/company` — Shadow dashboard; ไม่ใช่ source of truth และไม่เปิด projector โดยค่าเริ่มต้น
 
 ## Stable module keys
 
@@ -76,3 +86,5 @@ Server source of truth สำหรับ Company Workspace อยู่ที�
 - key เดิม `restaurant`, `takeaway`, `retail_pos` ถูก map เข้าชื่อ canonical โดยไม่บังคับ data migration
 - plan code เดิมที่ยังไม่มี `SaasPlan` ใช้ profile เดิมชั่วคราวเพื่อไม่ตัดสิทธิ์ tenant โดยไม่ตั้งใจ
 - การเปลี่ยนแพ็กเกจจะไม่เขียนทับ Company module switches ที่ Platform Owner ตั้งไว้
+- shared report รวมได้เฉพาะ Restaurant/Takeaway/Retail; Hotel planned ไม่ถูกนับเป็นโมดูลเปิด
+- drill-down กลับ entry route เดิม และไม่เปิด cross-database transaction/join

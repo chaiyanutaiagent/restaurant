@@ -982,3 +982,12 @@ Workspace directory, idempotent Restaurant provisioning, deactivate/reactivate �
 Company Admin `/workspaces` โดยไม่เพิ่ม migration และไม่ให้ client เลือก target database งานถัดไปคือ
 `docs/scopes/WP4-SHARED-ERP-REPORTING-CONTRACT-01.md` เพื่อกำหนด ownership และรายงานรวมที่แยก
 module/Brand/Branch ก่อนย้าย Central Kitchen หรือเปิดระบบจริง
+
+WP4 ผ่าน local implementation และ isolated migration gate แล้ว โดยเพิ่ม Platform-owned reporting
+projection, replay/correction/refund/void audit, Company Admin `/reports/company` และสถานะ freshness แบบ
+Shadow/read-only ทั้งหมดไม่เปิด UAT/Production และไม่เปลี่ยน operational system of record หลักฐานอยู่ที่
+`docs/architecture/shared-erp-reporting.md` และ `docs/scopes/WP4-PHASE-GATE-02.md`
+
+งานถัดไปคือ `docs/scopes/WP5-CENTRAL-KITCHEN-SHARED-STOCK-01.md` เพื่อให้หลาย Brand ใช้วัตถุดิบ
+Company กองเดียวกันได้ โดยแยกสูตร ผลผลิต คำสั่งผลิต ต้นทุน และรายงานตาม Brand ก่อนเริ่มต้อง audit
+stock/recipe/production เดิมและผ่าน migration/rollback gate แยก ห้ามเปิดตัดสต๊อกจริงโดยอัตโนมัติ

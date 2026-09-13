@@ -782,6 +782,79 @@ test("Company Admin provisions and safely pauses a server-owned Restaurant works
   await expect(page.getByTestId(`company-workspace-${workspaceId}`).getByRole("button", { name: "คืนค่า" })).toBeVisible();
 });
 
+test("Company Admin reviews tenant-safe shared sales in shadow mode", async ({ page }) => {
+  const restaurantBrandId = "32345678-1234-4234-8234-123456789012";
+  const restaurantBranchId = "22345678-1234-4234-8234-123456789012";
+  await page.addInitScript(({ company, token }) => {
+    window.localStorage.setItem("erp-auth", JSON.stringify({
+      state: {
+        accessToken: token,
+        refreshToken: "tenant-refresh-token",
+        user: {
+          id: "77777777-7777-4777-8777-777777777777",
+          company_id: company,
+          username: "company.owner",
+          display_name: "Company Owner",
+          is_active: true,
+        },
+        companyId: company,
+        businessSlug: "sample-company",
+        branchId: null,
+        stationKey: null,
+        permissions: ["system.company.edit"],
+      },
+      version: 0,
+    }));
+  }, { company: companyId, token: tenantAccessToken });
+
+  let reportUrl = "";
+  let reportCompanyHeader: string | undefined;
+  await page.route("**/api/v1/system/me/branches", async (route) => { await fulfill(route, response([])); });
+  await page.route("**/api/v1/restaurant/me/brand-navigation", async (route) => { await fulfill(route, response([])); });
+  await page.route("**/api/v1/membership/reports/shared-sales**", async (route) => {
+    reportUrl = route.request().url();
+    reportCompanyHeader = route.request().headers()["x-company-id"];
+    await fulfill(route, response({
+      company_id: companyId,
+      date_from: "2026-09-08",
+      date_to: "2026-09-14",
+      generated_at: "2026-09-14T10:00:00Z",
+      freshness: {
+        status: "current",
+        projector_enabled: true,
+        projection_mode: "shadow",
+        is_source_of_truth: false,
+        last_projected_at: "2026-09-14T09:59:58Z",
+        last_polled_at: "2026-09-14T09:59:59Z",
+        lag_seconds: 2,
+        failed_sources: [],
+      },
+      totals: { order_count: 3, void_count: 1, refund_count: 1, gross_sales: "450.00", discount_amount: "20.00", tax_amount: "28.00", refund_amount: "50.00", net_sales: "380.00" },
+      modules: [
+        { module_key: "restaurant_pos", order_count: 1, void_count: 1, refund_count: 1, gross_sales: "200.00", discount_amount: "10.00", tax_amount: "12.00", refund_amount: "50.00", net_sales: "140.00" },
+        { module_key: "takeaway_pos", order_count: 1, void_count: 0, refund_count: 0, gross_sales: "100.00", discount_amount: "0.00", tax_amount: "7.00", refund_amount: "0.00", net_sales: "100.00" },
+        { module_key: "retail_pos", order_count: 1, void_count: 0, refund_count: 0, gross_sales: "150.00", discount_amount: "10.00", tax_amount: "9.00", refund_amount: "0.00", net_sales: "140.00" },
+      ],
+      workspaces: [{ module_key: "restaurant_pos", brand_id: restaurantBrandId, brand_name: "Sample Cafe", branch_id: restaurantBranchId, branch_name: "Main Branch", order_count: 1, void_count: 1, refund_count: 1, gross_sales: "200.00", discount_amount: "10.00", tax_amount: "12.00", refund_amount: "50.00", net_sales: "140.00" }],
+      daily: [{ business_date: "2026-09-14", order_count: 3, void_count: 1, refund_count: 1, gross_sales: "450.00", discount_amount: "20.00", tax_amount: "28.00", refund_amount: "50.00", net_sales: "380.00" }],
+      recent_documents: [{ module_key: "restaurant_pos", brand_id: restaurantBrandId, brand_name: "Sample Cafe", branch_id: restaurantBranchId, branch_name: "Main Branch", business_date: "2026-09-14", source_document_type: "sale_order", source_document_id: "42345678-1234-4234-8234-123456789012", document_number: "SO20260914-0001", source_status: "partially_refunded", gross_sales: "200.00", refund_amount: "50.00", net_sales: "140.00", entry_route: "/restaurant" }],
+    }));
+  });
+
+  await page.goto("/reports/company");
+  await expect(page.getByRole("heading", { name: "รายงานยอดขายรวมทุกระบบ" })).toBeVisible();
+  await expect(page.getByTestId("report-freshness-current")).toContainText("ข้อมูล Shadow ล่าสุด");
+  await expect(page.getByTestId("report-module-restaurant_pos")).toContainText("Restaurant POS");
+  await expect(page.getByTestId("report-module-takeaway_pos")).toContainText("Takeaway POS");
+  await expect(page.getByTestId("report-module-retail_pos")).toContainText("Retail POS");
+  await expect(page.getByText("Sample Cafe", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("SO20260914-0001", { exact: true })).toBeVisible();
+  await expect.poll(() => reportCompanyHeader).toBe(companyId);
+  expect(new URL(reportUrl).searchParams.has("company_id")).toBe(false);
+  await page.getByLabel("ระบบ").selectOption("takeaway_pos");
+  await expect.poll(() => new URL(reportUrl).searchParams.get("module_key")).toBe("takeaway_pos");
+});
+
 test("Restaurant, Retail, and Takeaway entry routes keep their existing authentication guards", async ({ page }) => {
   for (const path of ["/restaurant", "/pos", "/takeaway"]) {
     await page.goto(path);

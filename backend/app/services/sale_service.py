@@ -34,7 +34,10 @@ from app.services.accounting_service import AccountingService
 from app.services.approval_service import ApprovalEvidence
 from app.services.crm_service import CRMService
 from app.services.notification_service import NotificationService
-from app.services.operational_handoff_service import ensure_sale_completed_handoff
+from app.services.operational_handoff_service import (
+    ensure_sale_completed_handoff,
+    ensure_sale_state_changed_handoff,
+)
 from app.services.stock_service import StockService
 from app.utils.webhook_dispatcher import trigger_event
 from app.schemas.crm import EarnPointsRequest
@@ -792,6 +795,18 @@ class SaleService:
             await crm_svc.void_earn(company_id, user_id, str(order.id))
         except Exception as e:
             logger.error(f"Points void failed: {e}")
+        brand_context = await self._get_store_brand_context(order)
+        await ensure_sale_state_changed_handoff(
+            self.db,
+            company_id=company_id,
+            brand_id=brand_context.brand_id if brand_context is not None else None,
+            branch_id=order.branch_id,
+            order_id=order.id,
+            order_number=order.order_number,
+            source_status=order.status,
+            total_amount=Decimal(order.total_amount),
+            refund_amount=Decimal(order.refund_amount or 0),
+        )
         await self.db.commit()
         return await self.get_sale(order.id, company_id)
 
@@ -1107,6 +1122,18 @@ class SaleService:
                     ],
                 },
             )
+        )
+        brand_context = await self._get_store_brand_context(order)
+        await ensure_sale_state_changed_handoff(
+            self.db,
+            company_id=company_id,
+            brand_id=brand_context.brand_id if brand_context is not None else None,
+            branch_id=order.branch_id,
+            order_id=order.id,
+            order_number=order.order_number,
+            source_status=order.status,
+            total_amount=Decimal(order.total_amount),
+            refund_amount=Decimal(order.refund_amount or 0),
         )
         return refund_total
 

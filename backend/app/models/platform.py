@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -374,3 +375,159 @@ class PlatformOperationsSnapshot(UUIDMixin, Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+
+
+class CompanyReportingFact(UUIDMixin, TimestampMixin, Base):
+    """PII-free sales document projection owned by the Platform reporting boundary."""
+
+    __tablename__ = "company_reporting_facts"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "module_key",
+            "source_document_type",
+            "source_document_id",
+            name="company_module_source_document",
+        ),
+        CheckConstraint(
+            "module_key IN ('restaurant_pos', 'takeaway_pos', 'retail_pos')",
+            name="module_key_valid",
+        ),
+        CheckConstraint(
+            "business_type IN ('restaurant', 'takeaway', 'retail_pos')",
+            name="business_type_valid",
+        ),
+        CheckConstraint(
+            "source_status IN ('completed', 'paid', 'partially_refunded', 'refunded', 'voided')",
+            name="source_status_valid",
+        ),
+        CheckConstraint(
+            "gross_sales >= 0 AND discount_amount >= 0 AND tax_amount >= 0 "
+            "AND refund_amount >= 0 AND net_sales >= 0",
+            name="amounts_nonnegative",
+        ),
+        Index(
+            "ix_company_reporting_facts_company_date_module",
+            "company_id",
+            "business_date",
+            "module_key",
+        ),
+        Index(
+            "ix_company_reporting_facts_workspace_date",
+            "company_id",
+            "brand_id",
+            "branch_id",
+            "business_date",
+        ),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    module_key: Mapped[str] = mapped_column(String(30), nullable=False)
+    business_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brands.id"),
+        nullable=False,
+    )
+    branch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("branches.id"),
+        nullable=False,
+    )
+    business_date: Mapped[date] = mapped_column(Date, nullable=False)
+    source_document_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    document_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, server_default=text("'THB'")
+    )
+    gross_sales: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("0")
+    )
+    discount_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("0")
+    )
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("0")
+    )
+    refund_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("0")
+    )
+    net_sales: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("0")
+    )
+    source_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    source_stream: Mapped[str] = mapped_column(String(50), nullable=False)
+    last_source_event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_projected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class CompanyReportingEventReceipt(UUIDMixin, Base):
+    """Exactly-once consumer receipt without copying operational payload or customer data."""
+
+    __tablename__ = "company_reporting_event_receipts"
+    __table_args__ = (
+        UniqueConstraint("source_stream", "source_event_id", name="source_stream_event"),
+        CheckConstraint(
+            "status IN ('processed', 'dead_letter')",
+            name="status_valid",
+        ),
+        Index(
+            "ix_company_reporting_receipts_company_processed",
+            "company_id",
+            "processed_at",
+        ),
+    )
+
+    source_stream: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    module_key: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class CompanyReportingSourceState(UUIDMixin, TimestampMixin, Base):
+    """Cursor and health heartbeat for one operational reporting source stream."""
+
+    __tablename__ = "company_reporting_source_states"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('idle', 'healthy', 'failed', 'degraded')",
+            name="status_valid",
+        ),
+    )
+
+    source_stream: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'idle'")
+    )
+    cursor_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cursor_event_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_event_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    failure_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    last_error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)

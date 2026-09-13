@@ -45,6 +45,7 @@ from app.services.reference_projector_worker import (
 )
 from app.services.platform_operations_service import collect_runtime_state
 from app.services.takeaway_reference_projector import run_takeaway_reference_projector
+from app.services.shared_reporting_worker import run_shared_reporting_projector
 
 
 @asynccontextmanager
@@ -111,6 +112,19 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             name="takeaway-reference-projector",
         )
 
+    reporting_projector_stop: asyncio.Event | None = None
+    reporting_projector_task: asyncio.Task[None] | None = None
+    if settings.shared_reporting_projector_enabled:
+        reporting_projector_stop = asyncio.Event()
+        reporting_projector_task = asyncio.create_task(
+            run_shared_reporting_projector(
+                reporting_projector_stop,
+                poll_seconds=settings.shared_reporting_projector_poll_seconds,
+                batch_size=settings.shared_reporting_projector_batch_size,
+            ),
+            name="shared-reporting-projector",
+        )
+
     try:
         yield
     finally:
@@ -130,6 +144,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             except TimeoutError:  # pragma: no cover - shutdown timeout path
                 takeaway_projector_task.cancel()
                 await asyncio.gather(takeaway_projector_task, return_exceptions=True)
+        if reporting_projector_stop is not None:
+            reporting_projector_stop.set()
+        if reporting_projector_task is not None:
+            try:
+                await asyncio.wait_for(reporting_projector_task, timeout=5)
+            except TimeoutError:  # pragma: no cover - shutdown timeout path
+                reporting_projector_task.cancel()
+                await asyncio.gather(reporting_projector_task, return_exceptions=True)
 
 
 app = FastAPI(

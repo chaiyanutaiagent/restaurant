@@ -97,6 +97,21 @@ def validate_takeaway_runtime_config(
         raise ValueError("Staging and production Takeaway databases cannot use localhost")
 
 
+def validate_shared_reporting_runtime_config(
+    *,
+    enabled: bool,
+    identity_database: str,
+    reference_projector_enabled: bool,
+) -> None:
+    """Reporting projection can activate only after Platform identity projection is authoritative."""
+    if not enabled:
+        return
+    if identity_database != "platform_core":
+        raise ValueError("Shared reporting requires IDENTITY_DATABASE=platform_core")
+    if not reference_projector_enabled:
+        raise ValueError("Shared reporting requires REFERENCE_PROJECTOR_ENABLED=true")
+
+
 class Settings(BaseSettings):
     postgres_db: str
     postgres_user: str
@@ -114,6 +129,9 @@ class Settings(BaseSettings):
     reference_projector_enabled: bool = False
     reference_projector_poll_seconds: float = Field(default=1.0, ge=0.1, le=60.0)
     reference_projector_batch_size: int = Field(default=100, ge=1, le=1000)
+    shared_reporting_projector_enabled: bool = False
+    shared_reporting_projector_poll_seconds: float = Field(default=5.0, ge=0.5, le=300.0)
+    shared_reporting_projector_batch_size: int = Field(default=100, ge=1, le=1000)
     redis_url: str
     secret_key: str
     algorithm: str
@@ -200,6 +218,11 @@ class Settings(BaseSettings):
             enabled=self.takeaway_feature_enabled,
             service_database=self.takeaway_service_database,
             database_url=self.takeaway_database_url,
+            identity_database=self.identity_database,
+            reference_projector_enabled=self.reference_projector_enabled,
+        )
+        validate_shared_reporting_runtime_config(
+            enabled=self.shared_reporting_projector_enabled,
             identity_database=self.identity_database,
             reference_projector_enabled=self.reference_projector_enabled,
         )

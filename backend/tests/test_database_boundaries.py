@@ -4,6 +4,7 @@ from app.config import (
     Settings,
     effective_database_url,
     settings,
+    validate_shared_reporting_runtime_config,
     validate_takeaway_runtime_config,
 )
 from app.database import (
@@ -13,6 +14,7 @@ from app.database import (
     TakeawaySessionLocal,
     active_identity_session_factory,
     active_restaurant_service_session_factory,
+    active_takeaway_service_session_factory,
     session_factory_for,
 )
 from app.models.integration import OperationalOutboxEvent
@@ -52,6 +54,7 @@ class DatabaseBoundaryTests(unittest.TestCase):
         self.assertFalse(settings.reference_projector_enabled)
         self.assertEqual(settings.takeaway_service_database, "disabled")
         self.assertFalse(settings.takeaway_feature_enabled)
+        self.assertFalse(settings.shared_reporting_projector_enabled)
         self.assertIs(active_identity_session_factory(), AsyncSessionLocal)
         self.assertIs(
             active_restaurant_service_session_factory(),
@@ -71,8 +74,12 @@ class DatabaseBoundaryTests(unittest.TestCase):
         self.assertEqual(list(TakeawayStockBalance.__table__.foreign_keys), [])
 
     def test_takeaway_boundary_is_explicit_and_dark_by_default(self) -> None:
-        self.assertIsNone(settings.takeaway_database_url)
-        self.assertIsNone(TakeawaySessionLocal)
+        self.assertEqual(settings.takeaway_service_database, "disabled")
+        self.assertFalse(settings.takeaway_feature_enabled)
+        with self.assertRaisesRegex(ValueError, "not enabled"):
+            active_takeaway_service_session_factory()
+        if settings.takeaway_database_url is None:
+            self.assertIsNone(TakeawaySessionLocal)
         with self.assertRaisesRegex(ValueError, "TAKEAWAY_SERVICE_DATABASE"):
             validate_takeaway_runtime_config(
                 environment="development",
@@ -91,3 +98,27 @@ class DatabaseBoundaryTests(unittest.TestCase):
                 identity_database="platform_core",
                 reference_projector_enabled=True,
             )
+
+    def test_shared_reporting_projector_requires_platform_identity_projection(self) -> None:
+        validate_shared_reporting_runtime_config(
+            enabled=False,
+            identity_database="legacy",
+            reference_projector_enabled=False,
+        )
+        with self.assertRaisesRegex(ValueError, "IDENTITY_DATABASE"):
+            validate_shared_reporting_runtime_config(
+                enabled=True,
+                identity_database="legacy",
+                reference_projector_enabled=True,
+            )
+        with self.assertRaisesRegex(ValueError, "REFERENCE_PROJECTOR_ENABLED"):
+            validate_shared_reporting_runtime_config(
+                enabled=True,
+                identity_database="platform_core",
+                reference_projector_enabled=False,
+            )
+        validate_shared_reporting_runtime_config(
+            enabled=True,
+            identity_database="platform_core",
+            reference_projector_enabled=True,
+        )

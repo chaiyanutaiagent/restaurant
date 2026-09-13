@@ -46,6 +46,11 @@ Restaurant-owned tables include Restaurant menu/recipe, dining, kitchen, central
 - Cross-domain propagation must use a versioned API or idempotent outbox/event; a request must not commit one SQLAlchemy transaction across two engines.
 - A router moves away from the legacy connection only after its table set, cross-boundary references, migration, rollback and UAT are documented in a separate Scope ID.
 
+WP4 เพิ่ม `CompanyReportingFact`, receipt และ source cursor ใน Platform core เป็น derived reporting
+projection เท่านั้น Worker อ่าน operational outbox ทีละฐานและปิด read transaction ก่อน commit Platform
+จึงไม่มี cross-database join/foreign key/transaction รายละเอียด ownership, event และ rollback อยู่ที่
+`docs/architecture/shared-erp-reporting.md`
+
 ## Cutover Sequence
 
 1. Establish and verify independent physical connections, migration histories and backup/restore tooling.

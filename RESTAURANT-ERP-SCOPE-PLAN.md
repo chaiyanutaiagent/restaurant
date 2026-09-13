@@ -948,3 +948,18 @@ Phase 7 เป็นแผนล่วงหน้า ยังไม่ถื�
 | 0.1 | 2026-07-31 | Initial scope draft | Pending |
 | 0.2 | 2026-07-31 | ล็อกลำดับ Restaurant → Takeaway → Retail POS alignment | Pending |
 | 0.3 | 2026-07-31 | แยก Control Plane และ operational database ตาม business type | Approved by Platform Owner |
+
+---
+
+## 14. Foodchainservice Platform Restructure Decision
+
+ตั้งแต่ 13 กันยายน 2026 ใช้ชื่อผลิตภัณฑ์ `Foodchainservice` และชื่อโครงการเป้าหมาย
+`Foodchainservice Platform` โดยจัด Customer Register / Company Admin เป็นทางเข้ากลาง แล้วแยก
+Restaurant POS, Takeaway POS, Retail POS และ Hotel PMS เป็นโมดูลบริการ ภายใต้ ERP, รายงานรวม,
+Central Kitchen และ Supply Chain ที่ใช้ร่วมกันตาม contract
+
+WP0 เป็น baseline ก่อนปรับโครงสร้างและแทนลำดับ “งานถัดไป” ในหัวข้อ 11 เท่านั้น
+กติกา tenant isolation, database boundary, permission, audit และ scope control ในเอกสารนี้ยังคงใช้
+จนกว่าจะมี Scope Change ที่อนุมัติอย่างชัดเจน
+
+หลักฐาน WP0 อยู่ที่ `docs/scopes/WP0-FOODCHAINSERVICE-PLATFORM-BASELINE-01.md`

@@ -2,6 +2,7 @@ import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { PLATFORM_BRAND } from "./src/config/platformBrand";
 
 const apiTarget =
   process.env.DOCKER === "true" ? "http://backend:8000" : "http://localhost:8001";
@@ -14,8 +15,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["favicon.ico"],
       manifest: {
-        name: "Restaurant POS",
-        short_name: "Restaurant",
+        name: PLATFORM_BRAND.productName,
+        short_name: PLATFORM_BRAND.productName,
         theme_color: "#1a56db",
         background_color: "#ffffff",
         display: "standalone",

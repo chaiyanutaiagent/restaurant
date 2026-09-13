@@ -1,6 +1,10 @@
 # Module Boundaries
 
-## ERP Admin
+ชื่อและ entry state ระดับผลิตภัณฑ์อ้างอิง [Foodchainservice Platform Module Map](./platform-module-map.md)
+ส่วนเอกสารนี้ระบุ ownership ของ operational modules เดิม ซึ่ง WP1 ยังไม่เปลี่ยน database boundary
+หรือ route ใด
+
+## Foodchainservice Company Admin / ERP
 
 Route root: `/admin` with legacy `/dashboard`.
 

@@ -216,4 +216,4 @@ async def health_ready() -> JSONResponse:
 
 @app.get("/")
 async def root() -> dict[str, str]:
-    return {"message": "Restaurant POS API", "docs": "/docs"}
+    return {"message": f"{settings.app_name} API", "docs": "/docs"}

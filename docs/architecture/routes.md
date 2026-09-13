@@ -2,12 +2,15 @@
 
 ## Module Launcher
 
-- `/` - module launcher
+- `/` - Foodchainservice workspace/module launcher
+- `/signup` - Foodchainservice Customer Register และ product selector
+- `/platform/login` - Platform Owner login ที่แยกจาก Company identity
+- `/platform/*` - Foodchainservice Platform Control Plane
 - `/store` - public storefront
 
-## ERP Admin
+## Company Admin / ERP
 
-- `/admin` - canonical ERP Admin entry
+- `/admin` - canonical Foodchainservice Company Admin / ERP entry
 - `/erp` - ERP alias, redirects to `/admin`
 - `/dashboard` - legacy ERP dashboard kept during migration
 - `/integrations` - API keys, webhooks, and external orders

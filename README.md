@@ -1,10 +1,11 @@
-# Restaurant POS
+# Foodchainservice Platform
 
 ## 1. Project overview
 
-Restaurant operations and POS system for Thailand with multi-tenant, multi-branch,
-offline-ready ordering, kitchen, recipes, inventory, and Docker-based deployment
-for Ubuntu VPS environments.
+Multi-business SaaS platform for Thailand with Company Admin, shared ERP and supply-chain
+services, Restaurant POS, Retail POS, Takeaway POS, and a planned Hotel PMS module.
+Restaurant and Takeaway operations are offline-aware and each operational domain is kept
+behind an explicit database and permission boundary.
 
 This repository starts from a clean source snapshot. It intentionally contains no
 production database, secrets, brand-specific menu seed, receipt artwork, or

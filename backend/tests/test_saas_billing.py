@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 import unittest
 import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -13,6 +14,7 @@ from app.schemas.saas_billing import (
     SaasBillingEventImport,
     SaasInvoiceCreate,
     SaasPlanUpsert,
+    SaasSubscriptionUpdate,
 )
 from app.services.saas_billing_service import SaasBillingService, _event_digest
 
@@ -118,6 +120,55 @@ class SaasBillingEventTests(unittest.TestCase):
             )
         self.assertEqual(caught.exception.status_code, 409)
 
+
+class SaasBillingModuleControlTests(unittest.IsolatedAsyncioTestCase):
+    async def test_plan_change_preserves_company_module_switches(self) -> None:
+        company_id = uuid.uuid4()
+        plan_id = uuid.uuid4()
+        subscription_id = uuid.uuid4()
+        plan = SimpleNamespace(
+            id=plan_id,
+            code="growth",
+            feature_flags={"restaurant": True, "takeaway": True},
+            plan_limits={"users": 50},
+        )
+        subscription = SimpleNamespace(
+            id=subscription_id,
+            plan_id=uuid.uuid4(),
+            status="active",
+            cancel_at_period_end=False,
+        )
+        profile = SimpleNamespace(
+            plan_code="starter",
+            feature_flags={"restaurant": False, "takeaway": False},
+            plan_limits={"users": 10},
+        )
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.get.return_value = SimpleNamespace(id=company_id)
+        db.scalar.side_effect = [plan, subscription, profile]
+        service = SaasBillingService(db, operator_id=uuid.uuid4())
+        service.summary = AsyncMock(return_value="updated-summary")
+
+        result = await service.update_subscription(
+            company_id,
+            SaasSubscriptionUpdate(
+                plan_code="growth",
+                status="active",
+                reason="เปลี่ยนแพ็กเกจโดยคงสวิตช์บริษัท",
+            ),
+            ip_address="127.0.0.1",
+            user_agent="test",
+        )
+
+        self.assertEqual(result, "updated-summary")
+        self.assertEqual(profile.plan_code, "growth")
+        self.assertEqual(profile.plan_limits, {"users": 50})
+        self.assertEqual(
+            profile.feature_flags,
+            {"restaurant": False, "takeaway": False},
+        )
+        db.commit.assert_awaited_once()
 
 if __name__ == "__main__":
     unittest.main()

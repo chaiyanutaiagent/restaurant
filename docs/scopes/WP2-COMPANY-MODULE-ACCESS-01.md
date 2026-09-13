@@ -2,7 +2,7 @@
 
 วันที่วางแผน: 2026-09-13
 
-สถานะ: **next_planned — ยังไม่เริ่ม implementation**
+สถานะ: **completed_local — implementation และ automated gate ผ่าน; ยังไม่ deploy**
 
 Baseline: WP1 gate บน branch `codex/foodchainservice-platform`
 
@@ -98,27 +98,31 @@ frontend ไม่สามารถส่ง database หรือ business typ
 
 ## Acceptance criteria
 
-- [ ] Company module access มี server-owned endpoint และ stable key allowlist
-- [ ] Platform Owner update ต้องมี reason, CSRF/session guard และ audit record
-- [ ] Company A อ่านหรือแก้ module state ของ Company B ไม่ได้
-- [ ] plan, Company flag, lifecycle, permission และ runtime readiness ถูกประเมินแยกกัน
-- [ ] unknown/planned/dark-launch state fail closed
-- [ ] tenant เดิมที่ใช้ `restaurant`, `retail_pos`, `takeaway` ไม่เสีย compatibility
-- [ ] Customer Register สร้าง Company ด้วย module state ที่คาดเดาได้และยิงซ้ำไม่สร้างซ้ำ
-- [ ] frontend selector ใช้ server response แต่ backend guard เดิมยังเป็น enforcement
-- [ ] migration upgrade/downgrade และ backup/restore ผ่าน หากมี data change
-- [ ] backend/frontend/browser regression ผ่าน
-- [ ] ไม่มี UAT/Production activation ระหว่าง WP2
+- [x] Company module access มี server-owned endpoint และ stable key allowlist
+- [x] Platform Owner update ต้องมี reason, session guard และ audit record
+- [x] Company A อ่าน module state ได้จาก Company ID ใน signed session เท่านั้น
+- [x] plan, Company flag, lifecycle, permission และ runtime readiness ถูกประเมินแยกกัน
+- [x] unknown/planned/dark-launch state fail closed
+- [x] tenant เดิมที่ใช้ `restaurant`, `retail_pos`, `takeaway` ไม่เสีย compatibility
+- [x] Customer Register สร้าง Company ด้วย module state ที่คาดเดาได้และยิงซ้ำไม่สร้างซ้ำ
+- [x] frontend selector ใช้ server response แต่ backend guard เดิมยังเป็น enforcement
+- [x] ไม่ต้อง migration เพราะใช้ JSON controls เดิม; migration heads จึงไม่เปลี่ยน
+- [x] backend/frontend/browser regression ผ่าน
+- [x] ไม่มี UAT/Production activation ระหว่าง WP2
 
 ## Rollback
 
-- ปิดการอ่าน module API ใหม่ด้วย feature flag และกลับไป WP1 static registry
-- revert frontend integration ก่อน backend endpoint
-- downgrade Platform migration เฉพาะเมื่อ restore drill ผ่านและไม่มี write ใหม่ค้างอยู่
+- revert frontend server-state integration เพื่อกลับไป WP1 static registry ก่อน
+- จากนั้น revert backend endpoint/service โดยไม่แก้ JSON controls เดิม
+- ไม่มี Platform migration ใน WP2 จึงไม่ต้อง downgrade หรือ restore ฐานข้อมูลสำหรับ rollback ปกติ
 - ใช้ tag `pre-foodchainservice-platform-20260913` และ WP0 backup เป็น disaster fallback
 
-## Decision gate ก่อนเริ่ม WP2
+## WP2-A decision
 
-ต้องยืนยันใน WP2-A ก่อนว่า existing JSON `feature_flags` เพียงพอหรือจำเป็นต้องเพิ่มตาราง
-Company module state ใหม่ ห้ามเพิ่ม migration จนกว่าจะบันทึกเหตุผล, data ownership และ downgrade
-ไว้ใน Scope Change ของ WP2
+existing JSON `SaasPlan.feature_flags` และ `PlatformTenantProfile.feature_flags` เพียงพอ โดยแยก
+ความหมายเป็น plan inclusion กับ Company switch ใน service และ map legacy keys ขณะอ่าน/เขียน
+จึงไม่เพิ่ม table, backfill หรือ migration ใน WP2
+
+ผลตรวจรับอยู่ที่ `docs/scopes/WP2-PHASE-GATE-03.md`
+
+งานถัดไปที่กำหนดไว้คือ `docs/scopes/WP3-COMPANY-WORKSPACE-PROVISIONING-01.md`

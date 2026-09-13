@@ -1,6 +1,7 @@
 import axios, { type AxiosError } from "axios";
 import type { SaasBillingOverview, SaasBillingSummary, SaasInvoice, SaasPlan } from "@/types/billing";
 import type { PrivacyRequest, SupportAccessGrant, SupportContext, SupportMessage, SupportTicket } from "@/types/privacySupport";
+import type { CompanyModuleAccess } from "@/types/moduleAccess";
 import { usePlatformAuthStore } from "@/stores/platform-auth.store";
 import type {
   PlatformAuditEvent,
@@ -164,6 +165,16 @@ export const platformApi = {
     }),
   company: (companyId: string) =>
     platformApiClient.get<PlatformApiResponse<PlatformCompanyDetail>>(`/companies/${companyId}`),
+  companyModules: (companyId: string) =>
+    platformApiClient.get<PlatformApiResponse<CompanyModuleAccess[]>>(`/companies/${companyId}/modules`),
+  updateCompanyModule: (
+    companyId: string,
+    moduleKey: CompanyModuleAccess["module_key"],
+    payload: { enabled: boolean; reason: string },
+  ) => platformApiClient.put<PlatformApiResponse<CompanyModuleAccess>>(
+    `/companies/${companyId}/modules/${moduleKey}`,
+    payload,
+  ),
   companyUsage: (companyId: string) =>
     platformApiClient.get<PlatformApiResponse<PlatformTenantUsage>>(`/companies/${companyId}/usage`),
   companyUsageHistory: (companyId: string) =>

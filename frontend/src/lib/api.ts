@@ -11,6 +11,7 @@ import type { Branch, Permission, User, UserBranch } from "@/types/user";
 import type { SaasActionResponse, SaasBusiness, SaasMembership, SaasSignupResponse } from "@/types/membership";
 import type { SaasBillingSummary } from "@/types/billing";
 import type { PrivacyRequest, SupportAccessGrant, SupportMessage, SupportTicket } from "@/types/privacySupport";
+import type { CompanyModuleAccess } from "@/types/moduleAccess";
 
 type RetryableConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -193,7 +194,8 @@ export const membershipApi = {
       new_password: newPassword
     }),
   me: () => api.get<ApiResponse<SaasMembership>>("/membership/me"),
-  billing: () => api.get<ApiResponse<SaasBillingSummary>>("/membership/billing")
+  billing: () => api.get<ApiResponse<SaasBillingSummary>>("/membership/billing"),
+  modules: () => api.get<ApiResponse<CompanyModuleAccess[]>>("/membership/modules")
 };
 
 export const privacySupportApi = {

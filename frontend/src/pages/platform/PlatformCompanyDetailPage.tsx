@@ -1,11 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Circle, CreditCard, Download, KeyRound, Save, ShieldOff, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Boxes, CheckCircle2, Circle, CreditCard, Download, KeyRound, Save, ShieldOff, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { platformModule } from "@/config/platformModules";
 import { platformApi, platformErrorMessage } from "@/lib/platformApi";
+import type { CompanyModuleAccess } from "@/types/moduleAccess";
+
+const moduleReasonLabel: Record<CompanyModuleAccess["reason_code"], string> = {
+  enabled: "ใช้งานได้",
+  company_inactive: "บริษัทถูกระงับ",
+  lifecycle_planned: "อยู่ในแผนพัฒนา",
+  not_in_plan: "ไม่รวมในแพ็กเกจ",
+  company_disabled: "บริษัทปิดไว้",
+  runtime_unavailable: "ระบบยังไม่พร้อม",
+  permission_denied: "ผู้ใช้ไม่มีสิทธิ์",
+};
 
 export default function PlatformCompanyDetailPage(): JSX.Element {
   const { companyId = "" } = useParams();
@@ -14,6 +26,11 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
     queryKey: ["platform", "company", companyId],
     queryFn: async () => (await platformApi.company(companyId)).data.data,
     enabled: Boolean(companyId)
+  });
+  const modules = useQuery({
+    queryKey: ["platform", "company", companyId, "modules"],
+    queryFn: async () => (await platformApi.companyModules(companyId)).data.data,
+    enabled: Boolean(companyId),
   });
   const usage = useQuery({
     queryKey: ["platform", "company", companyId, "usage"],
@@ -54,6 +71,7 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
       queryClient.invalidateQueries({ queryKey: ["platform", "companies"] }),
       queryClient.invalidateQueries({ queryKey: ["platform", "company", companyId, "usage"] }),
       queryClient.invalidateQueries({ queryKey: ["platform", "company", companyId, "billing"] }),
+      queryClient.invalidateQueries({ queryKey: ["platform", "company", companyId, "modules"] }),
     ]);
   };
   const lifecycle = useMutation({
@@ -82,6 +100,16 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
       setReason("");
       void refresh();
     }
+  });
+  const updateModule = useMutation({
+    mutationFn: async ({ moduleKey, enabled }: { moduleKey: CompanyModuleAccess["module_key"]; enabled: boolean }) => {
+      if (!reason.trim()) throw new Error("กรุณาระบุเหตุผลเพื่อบันทึก Audit Log");
+      return platformApi.updateCompanyModule(companyId, moduleKey, { enabled, reason });
+    },
+    onSuccess: () => {
+      setReason("");
+      void refresh();
+    },
   });
   const exportCompany = useMutation({
     mutationFn: async () => {
@@ -133,7 +161,7 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
   if (company.isLoading) return <p className="text-slate-400">กำลังโหลด Company...</p>;
   if (company.error || !company.data) return <p className="text-red-300">{platformErrorMessage(company.error)}</p>;
   const data = company.data;
-  const mutationError = lifecycle.error ?? saveControls.error ?? exportCompany.error ?? updateBilling.error ?? createInvoice.error;
+  const mutationError = lifecycle.error ?? saveControls.error ?? updateModule.error ?? exportCompany.error ?? updateBilling.error ?? createInvoice.error;
 
   return (
     <div className="space-y-6">
@@ -210,6 +238,46 @@ export default function PlatformCompanyDetailPage(): JSX.Element {
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6">
+        <div className="flex items-center gap-3"><Boxes className="h-6 w-6 text-sky-300" /><div><p className="text-sm text-sky-300">Company modules</p><h3 className="text-xl font-semibold">โมดูลที่เปิดให้บริษัท</h3></div></div>
+        <p className="mt-2 text-sm text-slate-400">ระบบประเมินแพ็กเกจ สวิตช์บริษัท สถานะระบบ และ lifecycle แยกกัน โมดูล planned/dark launch จะไม่เปิดเอง</p>
+        <div className="mt-4 max-w-xl space-y-2"><Label className="text-slate-300">เหตุผลก่อนเปิด/ปิดโมดูล</Label><Input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="จำเป็นสำหรับ Audit Log" /></div>
+        {modules.isLoading ? <p className="mt-5 text-sm text-slate-400">กำลังโหลดสถานะโมดูล...</p> : null}
+        {modules.error ? <p className="mt-5 text-sm text-red-300">{platformErrorMessage(modules.error)}</p> : null}
+        {modules.data ? (
+          <div className="mt-5 grid gap-3 md:grid-cols-2">
+            {modules.data.map((module) => {
+              const definition = platformModule(module.module_key);
+              return (
+                <article key={module.module_key} className="rounded-xl border border-slate-700 bg-slate-950/40 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div><p className="font-semibold text-slate-100">{definition.title}</p><p className="mt-1 text-xs text-slate-500">{module.module_key} · {module.lifecycle}</p></div>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${module.effective_access ? "bg-emerald-400/15 text-emerald-300" : "bg-amber-400/10 text-amber-300"}`}>{moduleReasonLabel[module.reason_code]}</span>
+                  </div>
+                  <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="rounded-lg bg-slate-900 px-2 py-2"><p className="text-slate-500">แพ็กเกจ</p><p className={module.plan_included ? "mt-1 text-emerald-300" : "mt-1 text-red-300"}>{module.plan_included ? "รวม" : "ไม่รวม"}</p></div>
+                    <div className="rounded-lg bg-slate-900 px-2 py-2"><p className="text-slate-500">บริษัท</p><p className={module.company_enabled ? "mt-1 text-emerald-300" : "mt-1 text-red-300"}>{module.company_enabled ? "เปิด" : "ปิด"}</p></div>
+                    <div className="rounded-lg bg-slate-900 px-2 py-2"><p className="text-slate-500">Runtime</p><p className={module.runtime_ready ? "mt-1 text-emerald-300" : "mt-1 text-red-300"}>{module.runtime_ready ? "พร้อม" : "ยังไม่พร้อม"}</p></div>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <p className="text-[11px] text-slate-500">อัปเดต {new Date(module.updated_at).toLocaleString("th-TH")}{module.audit_id ? ` · audit ${module.audit_id.slice(0, 8)}` : ""}</p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={updateModule.isPending}
+                      onClick={() => updateModule.mutate({ moduleKey: module.module_key, enabled: !module.company_enabled })}
+                    >
+                      {module.company_enabled ? "ปิดโมดูล" : "เปิดโมดูล"}
+                    </Button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
+        <p className="mt-4 text-xs text-amber-300">ทุกการเปิด/ปิดโมดูลจะมี Audit Log และไม่ลบข้อมูล operational เดิม</p>
       </section>
 
       <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6">

@@ -19,6 +19,7 @@ from app.schemas.membership import (
     SaasSignupRead,
     SaasSignupRequest,
 )
+from app.services.company_module_access_service import CompanyModuleAccessService
 from app.services.saas_email_service import deliver_membership_email
 from app.services.saas_membership_service import SaasMembershipService
 from app.services.saas_billing_service import SaasBillingService
@@ -237,3 +238,15 @@ async def my_billing(
         )
     summary = await SaasBillingService(db, operator_id=None).summary(current.company_id)
     return ok(summary.model_dump(mode="json"))
+
+
+@router.get("/modules")
+async def my_company_modules(
+    current: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    modules = await CompanyModuleAccessService(db).list_for_company(
+        current.company_id,
+        permissions=current.permissions,
+    )
+    return ok([module.model_dump(mode="json") for module in modules])

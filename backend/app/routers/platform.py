@@ -22,6 +22,7 @@ from app.schemas.platform import (
     PlatformTenantControlsUpdate,
     PlatformTenantExportRequest,
 )
+from app.schemas.module_access import CompanyModuleAccessUpdate
 from app.schemas.saas_billing import (
     SaasBillingEventImport,
     SaasInvoiceCreate,
@@ -38,6 +39,7 @@ from app.schemas.saas_privacy_support import (
     SupportTicketUpdate,
 )
 from app.services.saas_billing_service import SaasBillingService
+from app.services.company_module_access_service import CompanyModuleAccessService
 from app.services.saas_privacy_support_service import SaasPrivacySupportService
 from app.services.platform_service import PlatformAuthService, PlatformTenantService
 from app.services.platform_operations_service import PlatformOperationsService
@@ -609,6 +611,44 @@ async def get_company(
 ) -> dict[str, Any]:
     company = await _tenant_service(db, restaurant_db, current).get_company(company_id)
     return ok(company.model_dump(mode="json"))
+
+
+@router.get("/companies/{company_id}/modules")
+async def get_company_modules(
+    company_id: uuid.UUID,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    _require_platform_owner(current)
+    modules = await CompanyModuleAccessService(
+        db,
+        operator_id=current.operator_id,
+    ).list_for_company(company_id, permissions=None, include_audit=True)
+    return ok([module.model_dump(mode="json") for module in modules])
+
+
+@router.put("/companies/{company_id}/modules/{module_key}")
+async def update_company_module(
+    company_id: uuid.UUID,
+    module_key: str,
+    payload: CompanyModuleAccessUpdate,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    _require_platform_owner(current)
+    ip_address, user_agent = _client(request)
+    module = await CompanyModuleAccessService(
+        db,
+        operator_id=current.operator_id,
+    ).update_company_module(
+        company_id,
+        module_key,
+        payload,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(module.model_dump(mode="json"))
 
 
 @router.get("/companies/{company_id}/usage")

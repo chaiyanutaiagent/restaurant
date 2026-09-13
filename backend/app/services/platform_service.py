@@ -55,6 +55,7 @@ from app.schemas.platform import (
     PlatformTokenResponse,
 )
 from app.services.platform_reference_projection import enqueue_reference_event
+from app.services.company_module_access_service import synchronize_legacy_module_flags
 from app.services.business_directory_service import allocate_business_slug
 from app.services.saas_membership_service import SaasMembershipService
 from app.services.tenant_export_service import TenantExportBoundary, build_tenant_export
@@ -1184,7 +1185,7 @@ class PlatformTenantService:
             profile = PlatformTenantProfile(
                 company_id=company.id,
                 plan_code=data.plan_code,
-                feature_flags=data.feature_flags,
+                feature_flags=synchronize_legacy_module_flags(data.feature_flags),
                 plan_limits=data.plan_limits,
                 created_by=self.operator_id,
             )
@@ -1380,7 +1381,7 @@ class PlatformTenantService:
         profile = await self._ensure_profile(company.id)
         old_value = self._controls(profile).model_dump()
         profile.plan_code = data.plan_code
-        profile.feature_flags = data.feature_flags
+        profile.feature_flags = synchronize_legacy_module_flags(data.feature_flags)
         profile.plan_limits = data.plan_limits
         self._audit(
             company_id=company.id,

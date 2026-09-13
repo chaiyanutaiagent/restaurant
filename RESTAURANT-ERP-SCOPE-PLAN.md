@@ -970,3 +970,9 @@ product identity, module map และ shared entry shells เท่านั้
 WP1 ผ่าน local automated gate แล้วตาม `docs/scopes/WP1-PHASE-GATE-02.md` งานถัดไปคือ
 `docs/scopes/WP2-COMPANY-MODULE-ACCESS-01.md` เพื่อย้าย module access ให้เป็น server-owned
 Company contract โดยยังไม่เปิดโมดูลหรือ deploy ระบบจริง
+
+WP2 ผ่าน local automated gate แล้วตาม `docs/scopes/WP2-PHASE-GATE-03.md` โดยใช้ plan/profile
+JSON controls เดิม จึงไม่ต้อง migration และเพิ่ม server-owned effective access, Company Admin status,
+Platform Owner controls กับ audit โดย Takeaway/Hotel ยังคงปิดตาม gate เดิม งานถัดไปคือ
+`docs/scopes/WP3-COMPANY-WORKSPACE-PROVISIONING-01.md` เพื่อจัด Company/Brand/Branch workspace
+ตาม module access โดยยังไม่ deploy หรือ activate ระบบจริง

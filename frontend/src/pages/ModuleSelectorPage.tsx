@@ -23,13 +23,14 @@ import {
   type PlatformModuleAvailability,
   type PlatformModuleKey,
 } from "@/config/platformModules";
-import { authApi } from "@/lib/api";
+import { authApi, membershipApi } from "@/lib/api";
 import {
   brandNavigationApi,
   type BrandNavigationBranch,
   type BrandNavigationItem,
 } from "@/lib/brandNavigationApi";
 import { useAuthStore } from "@/stores/auth.store";
+import type { CompanyModuleAccess } from "@/types/moduleAccess";
 
 type StoreEntry = {
   brand: BrandNavigationItem;
@@ -102,6 +103,23 @@ function storeKey(store: StoreEntry): string {
   return `${store.brand.slug}:${store.branch.branch_id}`;
 }
 
+function accessLabel(
+  moduleAvailability: PlatformModuleAvailability,
+  access: CompanyModuleAccess | undefined,
+): string {
+  if (!access) return availabilityLabel[moduleAvailability];
+  const labels: Record<CompanyModuleAccess["reason_code"], string> = {
+    enabled: "พร้อมใช้งาน",
+    company_inactive: "บริษัทถูกระงับ",
+    lifecycle_planned: "อยู่ในแผนพัฒนา",
+    not_in_plan: "ไม่รวมในแพ็กเกจ",
+    company_disabled: "บริษัทปิดไว้",
+    runtime_unavailable: "ระบบยังไม่เปิด",
+    permission_denied: "ไม่มีสิทธิ์ใช้งาน",
+  };
+  return labels[access.reason_code];
+}
+
 export default function ModuleSelectorPage(): JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -121,6 +139,13 @@ export default function ModuleSelectorPage(): JSX.Element {
     enabled: isAuthenticated,
     staleTime: 60_000,
   });
+  const moduleAccessQuery = useQuery({
+    queryKey: ["membership", "modules", companyId],
+    queryFn: async () => (await membershipApi.modules()).data.data,
+    enabled: isAuthenticated,
+    retry: false,
+    staleTime: 60_000,
+  });
 
   const stores = useMemo<StoreEntry[]>(() => {
     const entries = (navigationQuery.data ?? []).flatMap((brand) =>
@@ -133,9 +158,16 @@ export default function ModuleSelectorPage(): JSX.Element {
       return left.branch.branch_name.localeCompare(right.branch.branch_name, "th");
     });
   }, [navigationQuery.data]);
-  const workspaceModules = PLATFORM_MODULES.filter((module) =>
-    shouldShowWorkspaceModule(module, isAuthenticated, hasPermission),
+  const moduleAccessByKey = useMemo(
+    () => new Map((moduleAccessQuery.data ?? []).map((module) => [module.module_key, module])),
+    [moduleAccessQuery.data],
   );
+  const workspaceModules = PLATFORM_MODULES.filter((module) => {
+    if (!shouldShowWorkspaceModule(module, isAuthenticated, hasPermission)) return false;
+    if (!isAuthenticated || module.key === "company_admin") return true;
+    const access = moduleAccessByKey.get(module.key);
+    return access ? access.user_permitted : module.availability !== "dark_launch";
+  });
 
   async function openStore(store: StoreEntry): Promise<void> {
     const key = storeKey(store);
@@ -261,11 +293,25 @@ export default function ModuleSelectorPage(): JSX.Element {
             </h2>
           </div>
 
+          {isAuthenticated && moduleAccessQuery.error ? (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              ตรวจสอบสิทธิ์โมดูลจากระบบกลางไม่ได้ชั่วคราว จึงปิดปุ่มเข้าใช้งานไว้เพื่อความปลอดภัย
+            </div>
+          ) : null}
+
           <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {workspaceModules.map((module) => {
               const presentation = modulePresentation[module.key];
               const ModuleIcon = presentation.icon;
-              const canOpen = canAccessPlatformModule(module, isAuthenticated, hasPermission);
+              const serverAccess = module.key === "company_admin"
+                ? undefined
+                : moduleAccessByKey.get(module.key);
+              const canOpen = isAuthenticated
+                ? Boolean(
+                    serverAccess?.effective_access
+                    && canAccessPlatformModule(module, true, hasPermission)
+                  )
+                : canAccessPlatformModule(module, false, hasPermission);
               const destination = module.entryRoute
                 ? isAuthenticated
                   ? module.entryRoute
@@ -279,7 +325,7 @@ export default function ModuleSelectorPage(): JSX.Element {
                         <ModuleIcon className="h-6 w-6" />
                       </div>
                       <span className="rounded-full bg-white/80 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-600">
-                        {availabilityLabel[module.availability]}
+                        {accessLabel(module.availability, serverAccess)}
                       </span>
                     </div>
                     <p className={`mt-5 text-xs font-bold uppercase tracking-[0.16em] ${presentation.text}`}>
@@ -287,6 +333,19 @@ export default function ModuleSelectorPage(): JSX.Element {
                     </p>
                     <h3 className="mt-1 text-xl font-black">{module.title}</h3>
                     <p className="mt-2 text-sm leading-6 text-slate-600">{module.description}</p>
+                    {serverAccess ? (
+                      <div className="mt-4 flex flex-wrap gap-1.5 text-[10px] font-semibold text-slate-600">
+                        <span className="rounded-full bg-white/70 px-2 py-1">
+                          แพ็กเกจ {serverAccess.plan_included ? "รวม" : "ไม่รวม"}
+                        </span>
+                        <span className="rounded-full bg-white/70 px-2 py-1">
+                          บริษัท {serverAccess.company_enabled ? "เปิด" : "ปิด"}
+                        </span>
+                        <span className="rounded-full bg-white/70 px-2 py-1">
+                          ระบบ {serverAccess.runtime_ready ? "พร้อม" : "ยังไม่พร้อม"}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                   <div className={`mt-8 flex items-center justify-between text-sm font-bold ${presentation.text}`}>
                     <span>{canOpen ? "เข้าใช้งาน" : "ยังไม่เปิดใช้งาน"}</span>

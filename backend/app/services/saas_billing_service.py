@@ -235,7 +235,8 @@ class SaasBillingService:
             self.db.add(profile)
         else:
             profile.plan_code = plan.code
-            profile.feature_flags = dict(plan.feature_flags)
+            # WP2 separates plan inclusion from the Company's explicit module
+            # switches. A plan change must preserve manual module decisions.
             profile.plan_limits = dict(plan.plan_limits)
         await self.db.flush()
         self._audit(

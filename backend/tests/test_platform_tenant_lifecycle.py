@@ -175,6 +175,15 @@ class TenantControlPolicyTests(unittest.IsolatedAsyncioTestCase):
             await TenantControlPolicy(db).require_feature(uuid.uuid4(), "restaurant")
         self.assertEqual(raised.exception.status_code, 403)
 
+    async def test_canonical_module_flag_overrides_legacy_guard(self) -> None:
+        db = AsyncMock()
+        db.scalar.return_value = SimpleNamespace(
+            feature_flags={"restaurant": True, "restaurant_pos": False}
+        )
+        with self.assertRaises(HTTPException) as raised:
+            await TenantControlPolicy(db).require_feature(uuid.uuid4(), "restaurant")
+        self.assertEqual(raised.exception.status_code, 403)
+
     async def test_capacity_limit_is_denied_at_limit(self) -> None:
         db = AsyncMock()
         db.scalar.side_effect = [

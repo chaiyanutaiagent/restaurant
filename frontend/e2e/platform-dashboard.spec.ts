@@ -27,6 +27,42 @@ const company = {
 
 const tenantAccessToken = `header.${Buffer.from(JSON.stringify({ permissions: [], branch_id: null })).toString("base64url")}.signature`;
 
+function companyModules(overrides: Partial<Record<string, Record<string, unknown>>> = {}) {
+  const definitions = [
+    ["erp", "active", true, true, true],
+    ["central_kitchen", "active", true, true, true],
+    ["restaurant_pos", "active", true, true, true],
+    ["takeaway_pos", "dark_launch", false, false, false],
+    ["retail_pos", "active", false, false, true],
+    ["hotel_pms", "planned", false, false, false],
+  ] as const;
+  return definitions.map(([module_key, lifecycle, company_enabled, plan_included, runtime_ready]) => {
+    const effective_access = lifecycle !== "planned" && company_enabled && plan_included && runtime_ready;
+    return {
+      module_key,
+      lifecycle,
+      company_enabled,
+      plan_included,
+      runtime_ready,
+      user_permitted: true,
+      effective_access,
+      reason_code: effective_access
+        ? "enabled"
+        : lifecycle === "planned"
+          ? "lifecycle_planned"
+          : !plan_included
+            ? "not_in_plan"
+            : !company_enabled
+              ? "company_disabled"
+              : "runtime_unavailable",
+      updated_at: "2026-08-03T08:00:00Z",
+      updated_by: operator.id,
+      audit_id: null,
+      ...(overrides[module_key] ?? {}),
+    };
+  });
+}
+
 const starterPlan = {
   id: "55555555-5555-4555-8555-555555555555",
   code: "starter",
@@ -255,6 +291,9 @@ test("Platform Owner login opens dashboard and can reach company and audit views
       updated_at: "2026-08-03T08:00:00Z",
     }));
   });
+  await page.route(`**/api/v1/platform/companies/${companyId}/modules`, async (route) => {
+    await fulfill(route, response(companyModules()));
+  });
   await page.route(`**/api/v1/platform/companies/${companyId}/usage`, async (route) => {
     await fulfill(route, response({
       company_id: companyId,
@@ -327,6 +366,8 @@ test("Platform Owner login opens dashboard and can reach company and audit views
   await expect(page.getByRole("heading", { name: company.name })).toBeVisible();
   await expect(page.getByText("Restaurant pilot", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "การใช้ทรัพยากรตาม Plan" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "โมดูลที่เปิดให้บริษัท" })).toBeVisible();
+  await expect(page.getByText("Restaurant POS", { exact: true })).toBeVisible();
   await expect(page.getByText("trial_active", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Subscription และ Invoice" })).toBeVisible();
 
@@ -591,6 +632,17 @@ test("Foodchainservice workspace reveals dark launch Takeaway only to an authori
   await page.route("**/api/v1/restaurant/me/brand-navigation", async (route) => {
     await fulfill(route, response([]));
   });
+  await page.route("**/api/v1/membership/modules", async (route) => {
+    await fulfill(route, response(companyModules({
+      takeaway_pos: {
+        company_enabled: true,
+        plan_included: true,
+        runtime_ready: true,
+        effective_access: true,
+        reason_code: "enabled",
+      },
+    })));
+  });
 
   await page.goto("/");
 
@@ -841,6 +893,7 @@ test("business admin resolves Company ID, hides UUID entry, and keeps the canoni
   await page.route("**/api/v1/stock/balances**", async (route) => { await fulfill(route, response([])); });
   await page.route("**/api/v1/system/me/branches", async (route) => { await fulfill(route, response([])); });
   await page.route("**/api/v1/restaurant/me/brand-navigation", async (route) => { await fulfill(route, response([])); });
+  await page.route("**/api/v1/membership/modules", async (route) => { await fulfill(route, response(companyModules())); });
 
   await page.goto("/alpha-cafe/admin");
   await expect(page).toHaveURL(/\/alpha-cafe\/login\?next=/);
@@ -853,6 +906,8 @@ test("business admin resolves Company ID, hides UUID entry, and keeps the canoni
   await expect(page).toHaveURL(/\/alpha-cafe\/admin$/);
   await expect.poll(() => loginCompanyHeader).toBe(companyId);
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(page.getByText("โมดูลของบริษัท", { exact: true })).toBeVisible();
+  await expect(page.getByText("Restaurant POS", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Company Admin" }).first()).toHaveAttribute("href", "/alpha-cafe/admin");
 });
 

@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/use-toast";
 import ManagerPinDialog from "@/components/approval/ManagerPinDialog";
+import { PLATFORM_BRAND } from "@/config/platformBrand";
 
 type TopBarProps = {
   title: string;
@@ -91,7 +92,7 @@ export default function TopBar({ title, onMenuClick, workspace = "admin" }: TopB
         </Button>
         <div>
           <p className={cn("text-lg font-bold", workspace === "restaurant" ? "text-orange-600" : "text-blue-600")}>
-            {workspace === "restaurant" ? "Restaurant" : "Restaurant POS"}
+            {workspace === "restaurant" ? "Restaurant" : PLATFORM_BRAND.productName}
           </p>
           <p className="hidden text-sm text-gray-500 lg:block">
             {workspace === "restaurant" ? "F&B Workspace" : title}

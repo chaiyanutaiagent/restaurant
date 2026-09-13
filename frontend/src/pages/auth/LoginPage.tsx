@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLogin, useUatAutoLogin } from "@/hooks/useAuth";
 import { membershipApi } from "@/lib/api";
+import { PLATFORM_BRAND } from "@/config/platformBrand";
 
 const loginSchema = z.object({
   company_id: z.string().uuid("กรุณากรอก Company ID ให้ถูกต้อง"),
@@ -73,7 +74,13 @@ export default function LoginPage(): JSX.Element {
             <ShieldCheck className="h-8 w-8" />
           </div>
           <CardTitle className="text-2xl">เข้าสู่ระบบ{business.data ? ` · ${business.data.name}` : ""}</CardTitle>
-          <CardDescription>{isNativeApp ? "RESTAURANT POS · เข้าสู่ระบบพนักงาน" : canonicalSlug ? `พื้นที่ธุรกิจ /${canonicalSlug}` : "Restaurant POS System"}</CardDescription>
+          <CardDescription>
+            {isNativeApp
+              ? "RESTAURANT POS · เข้าสู่ระบบพนักงาน"
+              : canonicalSlug
+                ? `${PLATFORM_BRAND.productName} · พื้นที่ธุรกิจ /${canonicalSlug}`
+                : PLATFORM_BRAND.companyAdminName}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {isUatPublicHost && isAutoLoginLoading ? (

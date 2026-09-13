@@ -4,6 +4,7 @@ import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
 import PosWorkspaceHeader from "@/components/pos/PosWorkspaceHeader";
 import PosWorkspaceNav from "@/components/pos/PosWorkspaceNav";
+import { PLATFORM_BRAND } from "@/config/platformBrand";
 
 type AppShellProps = {
   workspace?: "admin" | "restaurant";
@@ -37,7 +38,7 @@ export default function AppShell({ workspace = "admin" }: AppShellProps): JSX.El
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation();
 
-  const title = titleMap[location.pathname] ?? (workspace === "restaurant" ? "ร้านอาหาร" : "Restaurant POS");
+  const title = titleMap[location.pathname] ?? (workspace === "restaurant" ? "ร้านอาหาร" : PLATFORM_BRAND.companyAdminName);
   const isPosWorkspace = location.pathname === "/crm"
     || location.pathname === "/restaurant/tables"
     || location.pathname === "/restaurant/wap"

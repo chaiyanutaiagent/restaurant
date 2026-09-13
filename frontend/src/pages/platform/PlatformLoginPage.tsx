@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { platformApi, platformErrorMessage } from "@/lib/platformApi";
 import { usePlatformAuthStore } from "@/stores/platform-auth.store";
+import { PLATFORM_BRAND } from "@/config/platformBrand";
 
 export default function PlatformLoginPage(): JSX.Element {
   const [username, setUsername] = useState("");
@@ -43,7 +44,7 @@ export default function PlatformLoginPage(): JSX.Element {
             <ShieldCheck className="h-9 w-9" />
           </div>
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-300">
-            Restricted workspace
+            {PLATFORM_BRAND.platformName}
           </p>
           <h1 className="mt-2 text-3xl font-bold">Platform Owner</h1>
           <p className="mt-2 text-sm text-slate-400">

@@ -80,7 +80,7 @@ export default function StorefrontPage(): JSX.Element {
                 Storefront + Locator
               </div>
               <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">
-                {company?.name ?? "Restaurant POS Store"}
+                {company?.name ?? "Foodchainservice Store"}
               </h1>
               <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600 md:text-lg">
                 เลือกชมสินค้า ตรวจสอบสาขา และวางแผนไปรับสินค้าที่ร้านได้จากหน้าสาธารณะเดียวกัน

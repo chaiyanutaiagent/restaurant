@@ -43,6 +43,7 @@ import { syncStockBalances, useLowStockCount } from "@/lib/syncService";
 import { branchApi, userApi } from "@/lib/adminApi";
 import { fbApi } from "@/lib/fbApi";
 import { brandNavigationApi } from "@/lib/brandNavigationApi";
+import { PLATFORM_BRAND } from "@/config/platformBrand";
 
 type SidebarProps = {
   workspace?: "admin" | "restaurant";
@@ -60,7 +61,7 @@ type NavItem = {
 };
 
 const mainItems: NavItem[] = [
-  { label: "ERP Admin", to: "/admin", icon: LayoutDashboard },
+  { label: "Company Admin", to: "/admin", icon: LayoutDashboard },
   { label: "แพ็กเกจ SaaS", to: "/billing", icon: CreditCard },
   { label: "Privacy & Support", to: "/privacy-support", icon: Shield },
   { label: "ผู้ใช้งาน", to: "/users", icon: Users, permission: "system.user.view" },
@@ -181,10 +182,10 @@ export default function Sidebar({
     ? fbSettingsQuery.data.fb_service_mode !== "quick_service"
     : false;
   const activeColor = workspace === "restaurant" ? "bg-orange-600" : "bg-blue-600";
-  const brandTitle = workspace === "restaurant" ? (currentBrand?.name ?? "Restaurant") : "Restaurant POS";
+  const brandTitle = workspace === "restaurant" ? (currentBrand?.name ?? "Restaurant") : PLATFORM_BRAND.productName;
   const brandSubtitle = workspace === "restaurant"
     ? `Restaurant${currentBrandBranch ? ` · ${currentBrandBranch.branch_name}` : ""}`
-    : "Admin Console";
+    : "Company Admin";
 
   useEffect(() => {
     if (hasPermission("inventory.stock.view") || hasPermission("inventory.stock.adjust.request")) {

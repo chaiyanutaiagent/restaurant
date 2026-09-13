@@ -2,6 +2,7 @@ import { Activity, Building2, ClipboardList, CreditCard, Headphones, KeyRound, L
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { usePlatformAuthStore } from "@/stores/platform-auth.store";
 import { platformApi } from "@/lib/platformApi";
+import { PLATFORM_BRAND } from "@/config/platformBrand";
 
 export default function PlatformShell(): JSX.Element {
   const operator = usePlatformAuthStore((state) => state.operator);
@@ -20,7 +21,7 @@ export default function PlatformShell(): JSX.Element {
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">
                 Platform Control Plane
               </p>
-              <h1 className="text-lg font-semibold">Restaurant Platform</h1>
+              <h1 className="text-lg font-semibold">{PLATFORM_BRAND.platformName}</h1>
             </div>
           </div>
           <div className="flex items-center gap-4 text-sm">

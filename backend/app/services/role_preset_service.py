@@ -48,6 +48,8 @@ class RolePresetPolicy:
 
 
 COMPANY_OWNER_PERMISSION_CODES = (
+    "company.kitchen.view",
+    "company.kitchen.manage",
     "system.company.view",
     "system.company.edit",
     "system.branch.view",

@@ -132,6 +132,7 @@ class Settings(BaseSettings):
     shared_reporting_projector_enabled: bool = False
     shared_reporting_projector_poll_seconds: float = Field(default=5.0, ge=0.5, le=300.0)
     shared_reporting_projector_batch_size: int = Field(default=100, ge=1, le=1000)
+    company_kitchen_writes_enabled: bool = False
     redis_url: str
     secret_key: str
     algorithm: str

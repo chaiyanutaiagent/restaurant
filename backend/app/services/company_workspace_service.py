@@ -41,7 +41,7 @@ MODULE_BUSINESS_TYPE = {
 BUSINESS_TYPE_MODULE = {value: key for key, value in MODULE_BUSINESS_TYPE.items()}
 MODULE_ENTRY_ROUTE = {
     "erp": "/admin",
-    "central_kitchen": "/restaurant/brands",
+    "central_kitchen": "/company-kitchen",
     "restaurant_pos": "/restaurant",
     "takeaway_pos": "/takeaway",
     "retail_pos": "/pos",

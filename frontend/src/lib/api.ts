@@ -19,6 +19,7 @@ import type {
   CompanyWorkspaceProvisionResult,
 } from "@/types/companyWorkspace";
 import type { SharedSalesReport, SharedSalesReportFilters } from "@/types/sharedReporting";
+import type { CompanyKitchenDashboard, CompanyKitchenReport, CompanyProductionOrder } from "@/types/sharedKitchen";
 
 type RetryableConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -213,6 +214,34 @@ export const membershipApi = {
     }),
   sharedSalesReport: (params: SharedSalesReportFilters) =>
     api.get<ApiResponse<SharedSalesReport>>("/membership/reports/shared-sales", { params })
+};
+
+export const companyKitchenApi = {
+  dashboard: () => api.get<ApiResponse<CompanyKitchenDashboard>>("/company-kitchen/dashboard"),
+  report: (dateFrom: string, dateTo: string) =>
+    api.get<ApiResponse<CompanyKitchenReport>>("/company-kitchen/report", {
+      params: { date_from: dateFrom, date_to: dateTo }
+    }),
+  configure: (data: Record<string, unknown>) =>
+    api.put<ApiResponse<unknown>>("/company-kitchen/configuration", data),
+  createIngredient: (data: Record<string, unknown>) =>
+    api.post<ApiResponse<unknown>>("/company-kitchen/ingredients", data),
+  createAlias: (data: Record<string, unknown>) =>
+    api.post<ApiResponse<unknown>>("/company-kitchen/ingredient-aliases", data),
+  receive: (data: Record<string, unknown>) =>
+    api.post<ApiResponse<unknown>>("/company-kitchen/receipts", data),
+  createDemand: (data: Record<string, unknown>) =>
+    api.post<ApiResponse<unknown>>("/company-kitchen/demands", data),
+  createOrder: (data: Record<string, unknown>) =>
+    api.post<ApiResponse<CompanyProductionOrder>>("/company-kitchen/production-orders", data),
+  startOrder: (orderId: string) =>
+    api.post<ApiResponse<CompanyProductionOrder>>(`/company-kitchen/production-orders/${orderId}/start`),
+  completeOrder: (orderId: string, data: Record<string, unknown>) =>
+    api.post<ApiResponse<CompanyProductionOrder>>(`/company-kitchen/production-orders/${orderId}/complete`, data),
+  reverseOrder: (orderId: string, data: Record<string, unknown>) =>
+    api.post<ApiResponse<CompanyProductionOrder>>(`/company-kitchen/production-orders/${orderId}/reverse`, data),
+  cancelOrder: (orderId: string, reason: string) =>
+    api.post<ApiResponse<CompanyProductionOrder>>(`/company-kitchen/production-orders/${orderId}/cancel`, { reason }),
 };
 
 export const privacySupportApi = {

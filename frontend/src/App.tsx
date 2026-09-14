@@ -94,6 +94,7 @@ import TenantBillingPage from "@/pages/billing/TenantBillingPage";
 import TenantPrivacySupportPage from "@/pages/support/TenantPrivacySupportPage";
 import CompanyWorkspacesPage from "@/pages/workspaces/CompanyWorkspacesPage";
 import CompanyReportsPage from "@/pages/reports/CompanyReportsPage";
+import CompanyKitchenPage from "@/pages/kitchen/CompanyKitchenPage";
 import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
 import TakeawayDashboardPage from "@/pages/takeaway/TakeawayDashboardPage";
 import TakeawayCounterPage from "@/pages/takeaway/TakeawayCounterPage";
@@ -331,6 +332,9 @@ export default function App(): JSX.Element {
                 <Route path="/reports/company" element={<CompanyReportsPage />} />
                 <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permissions={["company.kitchen.view", "company.kitchen.manage", "system.company.edit"]} />}>
+                <Route path="/company-kitchen" element={<CompanyKitchenPage />} />
               </Route>
               <Route element={<ProtectedRoute permission="pos.sale.view" />}>
                 <Route path="/crm" element={<CRMPage />} />

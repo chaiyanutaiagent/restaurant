@@ -314,7 +314,7 @@ export default function ModuleSelectorPage(): JSX.Element {
                 : canAccessPlatformModule(module, false, hasPermission);
               const managedWorkspaceDestination = isAuthenticated
                 && hasPermission("system.company.edit")
-                && ["central_kitchen", "restaurant_pos"].includes(module.key)
+                && module.key === "restaurant_pos"
                 ? "/workspaces"
                 : module.entryRoute;
               const destination = managedWorkspaceDestination

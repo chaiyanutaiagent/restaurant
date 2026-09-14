@@ -48,6 +48,8 @@ from app.utils.security import hash_password, verify_password
 DEFAULT_RECEIPT_FOOTER = "ขอบคุณที่ใช้บริการ"
 
 BRANCH_ROLE_FORBIDDEN_PERMISSIONS = {
+    "company.kitchen.view",
+    "company.kitchen.manage",
     "system.company.edit",
     "system.branch.create",
     "system.branch.edit",

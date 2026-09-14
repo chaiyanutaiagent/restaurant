@@ -78,7 +78,7 @@ function companyWorkspaceDirectory(workspaces: Array<Record<string, unknown>> = 
       entry_route: access.module_key === "erp"
         ? "/admin"
         : access.module_key === "central_kitchen"
-          ? "/restaurant/brands"
+          ? "/company-kitchen"
           : access.module_key === "restaurant_pos"
             ? "/restaurant"
             : access.module_key === "takeaway_pos"
@@ -630,7 +630,7 @@ test("Foodchainservice public workspace shows active modules without exposing da
   await expect(page.getByTestId("workspace-module-erp")).toHaveAttribute("href", "/login?next=%2Fadmin");
   await expect(page.getByTestId("workspace-module-central_kitchen")).toHaveAttribute(
     "href",
-    "/login?next=%2Frestaurant%2Fbrands",
+    "/login?next=%2Fcompany-kitchen",
   );
   await expect(page.getByTestId("workspace-module-restaurant_pos")).toBeVisible();
   await expect(page.getByTestId("workspace-module-retail_pos")).toBeVisible();

@@ -16,6 +16,7 @@ RESERVED_BUSINESS_SLUGS = frozenset(
         "central",
         "counter",
         "crm",
+        "company-kitchen",
         "dashboard",
         "device",
         "devices",

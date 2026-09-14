@@ -1,6 +1,6 @@
 # Foodchainservice Platform Module Map
 
-สถานะ: WP4 server-owned Company access, Workspace directory และ shared reporting contract
+สถานะ: WP5 เพิ่ม Company Central Kitchen เป็น shared service แบบ dark launch
 
 Foodchainservice แยกทางเข้าและโมดูลตามความรับผิดชอบดังนี้:
 
@@ -12,7 +12,7 @@ Foodchainservice
 └── Company workspaces               /
     ├── ERP                           /admin
     ├── รายงานรวม                    /reports/company (shadow)
-    ├── Central Kitchen/Supply Chain /restaurant/brands (temporary entry)
+    ├── Central Kitchen/Supply Chain /company-kitchen (dark launch)
     ├── Restaurant POS               /restaurant/*
     ├── Takeaway POS                 /takeaway/*
     ├── Retail POS                   /pos/*
@@ -57,7 +57,7 @@ Server source of truth สำหรับรายงานรวมอยู่
 | --- | --- | --- | --- | --- |
 | `company_admin` | control | active | not applicable | Platform/legacy during cutover |
 | `erp` | shared service | active | not applicable | Legacy ERP during cutover |
-| `central_kitchen` | shared service | active ผ่านหน้าเดิม | not applicable | Restaurant boundary ปัจจุบัน |
+| `central_kitchen` | shared service | active / write dark launch | not applicable | Legacy ERP company boundary |
 | `restaurant_pos` | POS | active | open | Restaurant database เมื่อ cutover |
 | `takeaway_pos` | POS | dark launch | closed | Takeaway database |
 | `retail_pos` | POS | active compatibility | closed | Legacy/Retail target boundary |
@@ -80,7 +80,7 @@ Server source of truth สำหรับรายงานรวมอยู่
 - WP1 ไม่เปลี่ยน public หรือ authenticated route เดิม
 - Restaurant QR URLs, Takeaway ordering/pickup URLs และ device routes ต้องคงเดิม
 - Company Admin และ Platform Owner ใช้ authentication store/guard คนละชุดเหมือนเดิม
-- Central Kitchen ยังใช้ Restaurant pages เป็น temporary entry จน work package แยก service ได้รับอนุมัติ
+- Central Kitchen ใช้ `/company-kitchen`; การอ่าน/รายงานเปิดได้ แต่ write path ยังปิดด้วย server flag จนอนุมัติ rollout
 - Company Admin สร้างได้เฉพาะ workspace collection ที่ server ตอบ `can_provision=true`; shared service
   ไม่มี Brand/Branch provisioning และ Hotel ไม่มี create contract
 - key เดิม `restaurant`, `takeaway`, `retail_pos` ถูก map เข้าชื่อ canonical โดยไม่บังคับ data migration

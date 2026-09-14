@@ -7,6 +7,18 @@ from app.models.role import Permission
 
 PERMISSIONS: list[dict[str, str]] = [
     {
+        "code": "company.kitchen.view",
+        "name": "View Company Central Kitchen",
+        "module": "company",
+        "description": "View Company-owned shared ingredients, demand, production, and cost reports.",
+    },
+    {
+        "code": "company.kitchen.manage",
+        "name": "Manage Company Central Kitchen",
+        "module": "company",
+        "description": "Configure and operate the Company shared raw-material and production ledger.",
+    },
+    {
         "code": "system.company.view",
         "name": "View Company",
         "module": "system",

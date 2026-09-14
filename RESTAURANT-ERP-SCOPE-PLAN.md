@@ -991,3 +991,12 @@ Shadow/read-only ทั้งหมดไม่เปิด UAT/Production แ�
 งานถัดไปคือ `docs/scopes/WP5-CENTRAL-KITCHEN-SHARED-STOCK-01.md` เพื่อให้หลาย Brand ใช้วัตถุดิบ
 Company กองเดียวกันได้ โดยแยกสูตร ผลผลิต คำสั่งผลิต ต้นทุน และรายงานตาม Brand ก่อนเริ่มต้อง audit
 stock/recipe/production เดิมและผ่าน migration/rollback gate แยก ห้ามเปิดตัดสต๊อกจริงโดยอัตโนมัติ
+
+WP5 ผ่าน local implementation และ automated gate แล้ว โดยเพิ่ม Company-level canonical ingredient,
+shared FIFO lot/ledger, demand/production/reversal ที่แยก Brand และหน้า Company Admin `/company-kitchen`
+พร้อม dedicated permission ค่า write flag ยังคงปิดและไม่ได้ migrate/deploy UAT/Production หลักฐานอยู่ที่
+`docs/architecture/company-shared-kitchen.md` และ `docs/scopes/WP5-PHASE-GATE-02.md`
+
+งานถัดไปคือ owner ทำ physical Safari/iPad UAT และยืนยัน opening-lot mapping จากการตรวจนับจริง
+ก่อนอนุมัติ migration/deploy และเปิด `COMPANY_KITCHEN_WRITES_ENABLED`; ห้ามรวม stock เดิมจากชื่อหรือ SKU
+แบบอัตโนมัติ

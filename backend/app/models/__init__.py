@@ -30,6 +30,16 @@ from app.models.product import (
     PriceListItem,
 )
 from app.models.stock import StockLocation, StockBalance, StockMovement
+from app.models.shared_kitchen import (
+    CompanyIngredient,
+    CompanyIngredientAlias,
+    CompanyIngredientLot,
+    CompanyKitchen,
+    CompanyKitchenMovement,
+    CompanyProductionDemand,
+    CompanyProductionInput,
+    CompanyProductionOrder,
+)
 from app.models.pos import CashierShift, SaleOrder, SaleOrderItem, Payment
 from app.models.purchase import (
     Supplier,
@@ -171,6 +181,14 @@ __all__ = [
     "StockLocation",
     "StockBalance",
     "StockMovement",
+    "CompanyKitchen",
+    "CompanyIngredient",
+    "CompanyIngredientAlias",
+    "CompanyIngredientLot",
+    "CompanyKitchenMovement",
+    "CompanyProductionDemand",
+    "CompanyProductionOrder",
+    "CompanyProductionInput",
     "CashierShift",
     "SaleOrder",
     "SaleOrderItem",

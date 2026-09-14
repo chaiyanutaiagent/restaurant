@@ -1,8 +1,9 @@
 # WP5-CENTRAL-KITCHEN-SHARED-STOCK-01 — ครัวกลางและวัตถุดิบร่วมหลายแบรนด์
 
 วันที่วางแผน: 2026-09-14
+วันที่ตรวจรับ local: 2026-09-14
 
-สถานะ: **next_planned — รอเริ่มหลัง WP4 gate; ยังไม่อนุญาต UAT/Production activation**
+สถานะ: **completed_local — WP5-A ถึง WP5-D ผ่าน automated local gate; ยังไม่อนุญาต UAT/Production activation**
 
 Baseline: WP4 shared ERP/reporting local gate บน branch `codex/foodchainservice-platform`
 
@@ -59,14 +60,14 @@ Company shared raw-material stock
 
 ## Acceptance criteria
 
-- [ ] วัตถุดิบจริงหนึ่งตัวมี Company identity เดียวและหลาย Brand recipe อ้างร่วมได้
-- [ ] ทุก issue/receive/transfer/reversal มี Company, Brand, location, lot และ source identity
-- [ ] replay ไม่ตัดซ้ำ และ concurrent production ไม่ทำให้ stock ติดลบเกิน policy
-- [ ] Brand A/B ใช้ stock หมูเดียวกัน แต่ finished goods/cost/report ไม่ปะปน
-- [ ] tenant/role/scope isolation ผ่าน
-- [ ] migration, restore, downgrade และ stock reconciliation ผ่านบนฐานชั่วคราว
-- [ ] backend/frontend/browser regression ผ่าน
-- [ ] ไม่มี UAT/Production activation โดยไม่ได้รับอนุมัติ
+- [x] วัตถุดิบจริงหนึ่งตัวมี Company identity เดียวและหลาย Brand recipe อ้างร่วมได้
+- [x] RAW issue/receive/reversal มี Company/location/lot/source; production และ finished Stock/Transfer ledger ระบุ Brand
+- [x] replay ไม่ตัดซ้ำ และ concurrent production ไม่ทำให้ stock ติดลบเกิน policy
+- [x] Brand A/B ใช้ stock หมูเดียวกัน แต่ finished goods/cost/report ไม่ปะปน
+- [x] tenant/role/scope isolation ผ่าน
+- [x] migration, restore, downgrade และ stock reconciliation ผ่านบนฐานชั่วคราว
+- [x] backend/frontend/local browser regression ผ่าน; physical UAT คงพักตามคำสั่ง owner
+- [x] ไม่มี UAT/Production activation โดยไม่ได้รับอนุมัติ
 
 ## Rollback
 
@@ -74,3 +75,16 @@ Company shared raw-material stock
 - หยุด consumer/projector ก่อน rollback schema
 - ledger ใหม่ห้ามถูกลบเงียบ; export manifest และ reconcile ก่อน restore
 - operational sale และ WP4 reporting ต้องไม่ขึ้นกับการเปิด WP5
+
+## Implementation decision
+
+- shared RAW balance ใช้ `CompanyIngredientLot` เป็น authority ใหม่และไม่รวม Brand balance เดิมแบบเดา
+- `CompanyKitchenMovement` เป็น append-only audit ledger พร้อม idempotency/reversal และ location identity
+- production ใช้ Brand recipe เดิมผ่าน alias → canonical ingredient; output เข้า Brand READY `StockBalance`
+- transfer finished goods ไปสาขา reuse Transfer/Stock ledger เดิม ไม่สร้าง transfer source of truth ซ้ำ
+- API และ Company Admin page อยู่ที่ `/api/v1/company-kitchen/*` และ `/company-kitchen`
+- read/report เปิดสำหรับตรวจ setup; write path ปิดด้วย `COMPANY_KITCHEN_WRITES_ENABLED=false`
+- report ใช้ timezone ของ kitchen และ group ต้นทุน/ผลผลิตตาม Brand
+
+Ownership และ rollout contract อยู่ที่ `docs/architecture/company-shared-kitchen.md`
+หลักฐานตรวจรับอยู่ที่ `docs/scopes/WP5-PHASE-GATE-02.md`

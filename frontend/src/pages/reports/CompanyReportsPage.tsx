@@ -5,6 +5,7 @@ import {
   Building2,
   CircleDollarSign,
   Clock3,
+  Factory,
   ReceiptText,
   RefreshCw,
   RotateCcw,
@@ -139,9 +140,14 @@ export default function CompanyReportsPage(): JSX.Element {
             <h1 className="mt-2 text-2xl font-black md:text-3xl">รายงานยอดขายรวมทุกระบบ</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">รวมยอดระดับ Company แต่ยังคงแยกโมดูล แบรนด์ และสาขา ข้อมูลนี้ใช้ตรวจเทียบระหว่างช่วงปรับระบบเท่านั้น</p>
           </div>
-          <Button variant="outline" className="border-slate-600 bg-slate-900 text-white hover:bg-slate-800" onClick={() => void reportQuery.refetch()} disabled={reportQuery.isFetching}>
-            <RefreshCw className={`h-4 w-4 ${reportQuery.isFetching ? "animate-spin" : ""}`} /> โหลดล่าสุด
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" className="border-slate-600 bg-slate-900 text-white hover:bg-slate-800">
+              <Link to="/company-kitchen"><Factory className="h-4 w-4" /> รายงานครัวกลาง</Link>
+            </Button>
+            <Button variant="outline" className="border-slate-600 bg-slate-900 text-white hover:bg-slate-800" onClick={() => void reportQuery.refetch()} disabled={reportQuery.isFetching}>
+              <RefreshCw className={`h-4 w-4 ${reportQuery.isFetching ? "animate-spin" : ""}`} /> โหลดล่าสุด
+            </Button>
+          </div>
         </div>
       </header>
 

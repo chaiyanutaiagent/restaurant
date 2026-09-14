@@ -67,6 +67,8 @@ export const PLATFORM_MODULES = [
     registration: "not_applicable",
     registrationRoute: null,
     permissionHints: [
+      "company.distribution.view",
+      "company.distribution.manage",
       "company.kitchen.view",
       "company.kitchen.manage",
     ],

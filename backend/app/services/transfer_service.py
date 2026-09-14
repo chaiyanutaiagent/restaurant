@@ -430,7 +430,13 @@ class TransferService:
         return await self.get_to(transfer_order.id, company_id)
 
     async def cancel_to(
-        self, to_id: uuid.UUID, company_id: uuid.UUID, user_id: uuid.UUID, reason: str
+        self,
+        to_id: uuid.UUID,
+        company_id: uuid.UUID,
+        user_id: uuid.UUID,
+        reason: str,
+        *,
+        commit: bool = True,
     ) -> TransferOrder:
         transfer_order = await self._get_to_entity(to_id, company_id)
         if transfer_order.status not in {"draft", "pending_approval", "approved"}:
@@ -454,7 +460,10 @@ class TransferService:
         transfer_order.cancelled_at = datetime.now(timezone.utc)
         transfer_order.cancel_reason = reason
         self._audit(company_id, user_id, "inventory.transfer.cancel", str(transfer_order.id), {"reason": reason})
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         return await self.get_to(transfer_order.id, company_id)
 
     async def get_to(self, to_id: uuid.UUID, company_id: uuid.UUID) -> TransferOrder:
@@ -629,11 +638,13 @@ class TransferService:
 
     async def _generate_number(self, company_id: uuid.UUID, target_date: date) -> str:
         day_prefix = f"TO{target_date:%Y%m%d}-"
-        lock_key = hash(str(company_id) + target_date.strftime("%Y%m%d") + "TRANSFER") % (2**31)
+        # ``to_number`` is globally unique, so its sequence and advisory lock
+        # must also be global for the day. A Company-scoped counter can issue
+        # the same number concurrently to two tenants.
+        lock_key = hash(target_date.strftime("%Y%m%d") + "TRANSFER") % (2**31)
         await self.db.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
         count = await self.db.scalar(
             select(func.count(TransferOrder.id)).where(
-                TransferOrder.company_id == company_id,
                 TransferOrder.to_number.like(f"{day_prefix}%"),
             )
         ) or 0

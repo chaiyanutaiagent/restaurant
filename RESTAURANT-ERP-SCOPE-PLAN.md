@@ -997,6 +997,18 @@ shared FIFO lot/ledger, demand/production/reversal ที่แยก Brand แ�
 พร้อม dedicated permission ค่า write flag ยังคงปิดและไม่ได้ migrate/deploy UAT/Production หลักฐานอยู่ที่
 `docs/architecture/company-shared-kitchen.md` และ `docs/scopes/WP5-PHASE-GATE-02.md`
 
-งานถัดไปคือ owner ทำ physical Safari/iPad UAT และยืนยัน opening-lot mapping จากการตรวจนับจริง
-ก่อนอนุมัติ migration/deploy และเปิด `COMPANY_KITCHEN_WRITES_ENABLED`; ห้ามรวม stock เดิมจากชื่อหรือ SKU
-แบบอัตโนมัติ
+physical Safari/iPad UAT และ opening-lot mapping ของ WP5 ยังคงพักตามคำสั่ง owner และห้ามเปิด
+`COMPANY_KITCHEN_WRITES_ENABLED` หรือรวม stock เดิมจากชื่อ/SKU แบบอัตโนมัติ
+
+WP6 ใหม่ใช้ Scope ID `WP6-SUPPLY-CHAIN-DISTRIBUTION-01` (ไม่ใช่ Phase 6 Takeaway เดิม) เพื่อรวม
+Demand จาก Restaurant POS, Takeaway POS และ Retail POS แล้วกระจาย finished goods จาก Brand READY
+ไปสาขาผ่าน Transfer/Stock ledger เดิม พร้อม send/receive/reject/return และ reconciliation แยก
+Module/Brand/Branch การพัฒนาทำแบบ dark launch, ไม่ query ข้าม database, ไม่ import Chambo จริง
+และไม่ deploy/migrate UAT/Production รายละเอียดอยู่ที่
+`docs/scopes/WP6-SUPPLY-CHAIN-DISTRIBUTION-01.md`
+
+WP6 ผ่าน local implementation และ automated gate แล้ว โดย normalized Demand ทั้งสาม POS, shipment
+ที่ reuse Transfer/Stock ledger เดิม, receive/reject/reverse return, idempotency, tenant/module isolation,
+Company Admin `/company-distribution` และ reconciliation แยก Module/Brand/Branch ทำงานครบ
+`COMPANY_DISTRIBUTION_WRITES_ENABLED=false` และ `COMPANY_KITCHEN_WRITES_ENABLED=false` ยังปิด,
+ไม่มี UAT/Production migration/deployment หลักฐานอยู่ที่ `docs/scopes/WP6-PHASE-GATE-02.md`

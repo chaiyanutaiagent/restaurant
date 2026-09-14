@@ -20,6 +20,7 @@ import type {
 } from "@/types/companyWorkspace";
 import type { SharedSalesReport, SharedSalesReportFilters } from "@/types/sharedReporting";
 import type { CompanyKitchenDashboard, CompanyKitchenReport, CompanyProductionOrder } from "@/types/sharedKitchen";
+import type { DistributionDashboard, DistributionReport, DistributionShipment } from "@/types/distribution";
 
 type RetryableConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -242,6 +243,28 @@ export const companyKitchenApi = {
     api.post<ApiResponse<CompanyProductionOrder>>(`/company-kitchen/production-orders/${orderId}/reverse`, data),
   cancelOrder: (orderId: string, reason: string) =>
     api.post<ApiResponse<CompanyProductionOrder>>(`/company-kitchen/production-orders/${orderId}/cancel`, { reason }),
+};
+
+export const companyDistributionApi = {
+  dashboard: () => api.get<ApiResponse<DistributionDashboard>>("/company-distribution/dashboard"),
+  report: (dateFrom: string, dateTo: string) =>
+    api.get<ApiResponse<DistributionReport>>("/company-distribution/report", {
+      params: { date_from: dateFrom, date_to: dateTo },
+    }),
+  createDemand: (data: Record<string, unknown>) =>
+    api.post<ApiResponse<unknown>>("/company-distribution/demands", data),
+  planShipment: (data: Record<string, unknown>) =>
+    api.post<ApiResponse<DistributionShipment>>("/company-distribution/shipments", data),
+  dispatch: (shipmentId: string, data: Record<string, unknown>) =>
+    api.post<ApiResponse<DistributionShipment>>(`/company-distribution/shipments/${shipmentId}/dispatch`, data),
+  receive: (shipmentId: string, data: Record<string, unknown>) =>
+    api.post<ApiResponse<DistributionShipment>>(`/company-distribution/shipments/${shipmentId}/receive`, data),
+  reject: (shipmentId: string, data: Record<string, unknown>) =>
+    api.post<ApiResponse<DistributionShipment>>(`/company-distribution/shipments/${shipmentId}/reject`, data),
+  returnGoods: (shipmentId: string, data: Record<string, unknown>) =>
+    api.post<ApiResponse<DistributionShipment>>(`/company-distribution/shipments/${shipmentId}/return`, data),
+  cancel: (shipmentId: string, data: Record<string, unknown>) =>
+    api.post<ApiResponse<DistributionShipment>>(`/company-distribution/shipments/${shipmentId}/cancel`, data),
 };
 
 export const privacySupportApi = {

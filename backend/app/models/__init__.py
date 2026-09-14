@@ -40,6 +40,11 @@ from app.models.shared_kitchen import (
     CompanyProductionInput,
     CompanyProductionOrder,
 )
+from app.models.distribution import (
+    CompanyDistributionDemand,
+    CompanyDistributionEvent,
+    CompanyDistributionShipment,
+)
 from app.models.pos import CashierShift, SaleOrder, SaleOrderItem, Payment
 from app.models.purchase import (
     Supplier,
@@ -189,6 +194,9 @@ __all__ = [
     "CompanyProductionDemand",
     "CompanyProductionOrder",
     "CompanyProductionInput",
+    "CompanyDistributionDemand",
+    "CompanyDistributionShipment",
+    "CompanyDistributionEvent",
     "CashierShift",
     "SaleOrder",
     "SaleOrderItem",

@@ -7,6 +7,18 @@ from app.models.role import Permission
 
 PERMISSIONS: list[dict[str, str]] = [
     {
+        "code": "company.distribution.view",
+        "name": "View Company Distribution",
+        "module": "company",
+        "description": "View POS demand, finished-goods shipments, returns, and reconciliation.",
+    },
+    {
+        "code": "company.distribution.manage",
+        "name": "Manage Company Distribution",
+        "module": "company",
+        "description": "Plan, dispatch, receive, reject, and return Company finished goods.",
+    },
+    {
         "code": "company.kitchen.view",
         "name": "View Company Central Kitchen",
         "module": "company",

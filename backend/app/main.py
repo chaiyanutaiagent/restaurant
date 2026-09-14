@@ -27,7 +27,7 @@ from app.middleware.branch_context import BranchContextMiddleware
 from app.middleware.request_id import RequestIDMiddleware
 from app.routers import accounting as accounting_router
 from app.routers import platform as platform_router
-from app.routers import api_mgmt, approvals, company_kitchen, device_workspaces, devices, incoming_webhook, public_api, storefront
+from app.routers import api_mgmt, approvals, company_distribution, company_kitchen, device_workspaces, devices, incoming_webhook, public_api, storefront
 from app.routers import crm as crm_router
 from app.routers import etax as etax_router
 from app.routers import hr as hr_router
@@ -188,6 +188,7 @@ app.include_router(devices.auth_router)
 app.include_router(device_workspaces.router)
 app.include_router(system.router)
 app.include_router(company_kitchen.router)
+app.include_router(company_distribution.router)
 app.include_router(products.router)
 app.include_router(stock.router)
 app.include_router(stock_count_router.router)

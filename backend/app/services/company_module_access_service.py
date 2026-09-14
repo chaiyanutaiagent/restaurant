@@ -38,6 +38,10 @@ COMPANY_MODULE_CATALOG: tuple[CompanyModuleDefinition, ...] = (
         "active",
         ("restaurant",),
         (
+            "company.kitchen.view",
+            "company.kitchen.manage",
+            "company.distribution.view",
+            "company.distribution.manage",
             "brand.central.raw_stock.view",
             "brand.central.ready_stock.view",
             "brand.central.production.view",

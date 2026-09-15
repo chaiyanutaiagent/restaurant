@@ -472,12 +472,12 @@ class DeviceService:
         context = await load_branch_business_context(self.db, company_id, branch_id)
         if (
             context is None
-            or context.business_type not in {"restaurant", "takeaway"}
+            or context.business_type not in {"restaurant", "retail_pos", "takeaway"}
             or context.target_database != context.business_type
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Devices in this scope require a Restaurant or Takeaway Branch",
+                detail="Devices in this scope require a Restaurant, Retail or Takeaway Branch",
             )
         if context.business_type == "takeaway" and not settings.takeaway_feature_enabled:
             raise HTTPException(
@@ -486,6 +486,8 @@ class DeviceService:
             )
         if context.business_type == "takeaway":
             await TenantControlPolicy(self.db).require_feature(company_id, "takeaway")
+        if context.business_type == "retail_pos":
+            await TenantControlPolicy(self.db).require_feature(company_id, "retail_pos")
         return context
 
     async def _canonical_station(
@@ -496,6 +498,13 @@ class DeviceService:
         station_key: str | None,
         business_type: str,
     ) -> str | None:
+        if business_type == "retail_pos":
+            if device_type != "counter":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Retail Branches support Counter devices only",
+                )
+            return None
         if device_type != "kitchen":
             return None
         if business_type == "takeaway":

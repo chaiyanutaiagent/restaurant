@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import unittest
 import uuid
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -158,6 +159,73 @@ class DeviceCredentialPolicyTests(unittest.TestCase):
         payload = decode_token(token)
         self.assertEqual(payload["business_type"], "takeaway")
         self.assertEqual(payload["target_database"], "takeaway")
+
+    def test_retail_counter_token_is_bound_to_retail_database(self) -> None:
+        token = create_device_access_token(
+            device_id=self.device_id,
+            company_id=self.company_id,
+            brand_id=self.brand_id,
+            branch_id=self.branch_id,
+            device_type="counter",
+            station_key=None,
+            credential_version=1,
+            business_type="retail_pos",
+            target_database="retail_pos",
+            expires_delta=timedelta(minutes=5),
+        )
+        payload = decode_token(token)
+        self.assertEqual(payload["business_type"], "retail_pos")
+        self.assertEqual(payload["target_database"], "retail_pos")
+
+    def test_retail_rejects_non_counter_device_types(self) -> None:
+        service = DeviceService(AsyncMock())
+        self.assertIsNone(
+            asyncio.run(
+                service._canonical_station(
+                    self.company_id,
+                    self.branch_id,
+                    "counter",
+                    None,
+                    "retail_pos",
+                )
+            )
+        )
+        with self.assertRaises(HTTPException) as raised:
+            asyncio.run(
+                service._canonical_station(
+                    self.company_id,
+                    self.branch_id,
+                    "kitchen",
+                    "main",
+                    "retail_pos",
+                )
+            )
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_retail_device_context_requires_company_entitlement(self) -> None:
+        context = SimpleNamespace(
+            company_id=self.company_id,
+            brand_id=self.brand_id,
+            branch_id=self.branch_id,
+            business_type="retail_pos",
+            target_database="retail_pos",
+        )
+        service = DeviceService(AsyncMock())
+        with (
+            patch(
+                "app.services.device_service.load_branch_business_context",
+                new=AsyncMock(return_value=context),
+            ),
+            patch(
+                "app.services.device_service.TenantControlPolicy.require_feature",
+                new=AsyncMock(),
+            ) as require_feature,
+        ):
+            resolved = asyncio.run(
+                service._device_context(self.company_id, self.branch_id)
+            )
+        self.assertIs(resolved, context)
+        require_feature.assert_awaited_once_with(self.company_id, "retail_pos")
 
     def test_non_company_manager_is_limited_to_current_branch(self) -> None:
         current = TokenData(

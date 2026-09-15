@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from datetime import datetime
 
-from sqlalchemy import DateTime, MetaData, func
+from sqlalchemy import DateTime, MetaData, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -75,6 +75,11 @@ takeaway_engine = (
     if settings.takeaway_database_url
     else None
 )
+retail_engine = (
+    _create_engine(settings.retail_database_url)
+    if settings.retail_database_url
+    else None
+)
 
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 PlatformSessionLocal = async_sessionmaker(
@@ -92,11 +97,18 @@ TakeawaySessionLocal = (
     if takeaway_engine is not None
     else None
 )
+RetailSessionLocal = (
+    async_sessionmaker(retail_engine, expire_on_commit=False, class_=AsyncSession)
+    if retail_engine is not None
+    else None
+)
 
 TARGET_DATABASE_SESSION_FACTORIES = {
     "platform_core": PlatformSessionLocal,
     "restaurant": RestaurantSessionLocal,
 }
+if RetailSessionLocal is not None:
+    TARGET_DATABASE_SESSION_FACTORIES["retail_pos"] = RetailSessionLocal
 IDENTITY_DATABASE_SESSION_FACTORIES = {
     "legacy": AsyncSessionLocal,
     "platform_core": PlatformSessionLocal,
@@ -106,6 +118,9 @@ RESTAURANT_SERVICE_SESSION_FACTORIES = {
     "legacy": AsyncSessionLocal,
     "restaurant": RestaurantSessionLocal,
 }
+RETAIL_SERVICE_SESSION_FACTORIES = {"legacy": AsyncSessionLocal}
+if RetailSessionLocal is not None:
+    RETAIL_SERVICE_SESSION_FACTORIES["retail"] = RetailSessionLocal
 
 
 def session_factory_for(
@@ -145,6 +160,21 @@ def active_restaurant_service_session_factory() -> async_sessionmaker[AsyncSessi
     return restaurant_service_session_factory_for(settings.restaurant_service_database)
 
 
+def retail_service_session_factory_for(
+    retail_service_database: str,
+) -> async_sessionmaker[AsyncSession]:
+    try:
+        return RETAIL_SERVICE_SESSION_FACTORIES[retail_service_database]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported Retail service database: {retail_service_database}"
+        ) from exc
+
+
+def active_retail_service_session_factory() -> async_sessionmaker[AsyncSession]:
+    return retail_service_session_factory_for(settings.retail_service_database)
+
+
 def takeaway_service_session_factory_for(
     takeaway_service_database: str,
 ) -> async_sessionmaker[AsyncSession]:
@@ -167,6 +197,8 @@ def validate_runtime_database_names(
     legacy_database_name: str,
     platform_database_name: str,
     restaurant_database_name: str,
+    retail_service_database: str = "legacy",
+    retail_database_name: str | None = None,
     takeaway_service_database: str = "disabled",
     takeaway_feature_enabled: bool = False,
     takeaway_database_name: str | None = None,
@@ -182,6 +214,17 @@ def validate_runtime_database_names(
         raise RuntimeError(
             "Platform identity cutover requires REFERENCE_PROJECTOR_ENABLED=true"
         )
+    if retail_service_database == "retail":
+        if identity_database != "platform_core":
+            raise RuntimeError(
+                "Retail service cutover requires IDENTITY_DATABASE=platform_core"
+            )
+        if not reference_projector_enabled:
+            raise RuntimeError(
+                "Retail service cutover requires REFERENCE_PROJECTOR_ENABLED=true"
+            )
+        if retail_database_name is None:
+            raise RuntimeError("Retail service cutover requires a physical Retail database")
     if takeaway_feature_enabled:
         if takeaway_service_database != "takeaway":
             raise RuntimeError(
@@ -200,6 +243,7 @@ def validate_runtime_database_names(
     if (
         identity_database != "platform_core"
         and restaurant_service_database != "restaurant"
+        and retail_service_database != "retail"
         and not reference_projector_enabled
     ):
         return
@@ -209,13 +253,75 @@ def validate_runtime_database_names(
         restaurant_database_name,
     }
     expected_count = 3
+    if retail_service_database == "retail" and retail_database_name is not None:
+        required_names.add(retail_database_name)
+        expected_count += 1
     if takeaway_feature_enabled and takeaway_database_name is not None:
         required_names.add(takeaway_database_name)
-        expected_count = 4
+        expected_count += 1
     if len(required_names) != expected_count:
         raise RuntimeError(
             "Runtime cutover requires distinct legacy, Platform, Restaurant and enabled service databases"
         )
+
+
+RETAIL_RUNTIME_REQUIRED_TABLES = {
+    "companies",
+    "brands",
+    "branches",
+    "brand_branches",
+    "users",
+    "units",
+    "categories",
+    "products",
+    "product_variants",
+    "stock_locations",
+    "stock_balances",
+    "stock_movements",
+    "cashier_shifts",
+    "sale_orders",
+    "sale_order_items",
+    "payments",
+    "audit_logs",
+    "branch_settings",
+    "approval_grant_usages",
+    "operational_outbox_events",
+}
+
+
+async def validate_retail_schema_readiness(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Prevent routing Retail traffic to a new but still empty boundary."""
+    async with session_factory() as session:
+        rows = await session.scalars(
+            text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public'"
+            )
+        )
+        table_names = {str(value) for value in rows}
+        boundary_row = None
+        if "database_boundary_metadata" in table_names:
+            boundary_row = (
+                await session.execute(
+                    text(
+                        "SELECT boundary_name, schema_contract_version "
+                        "FROM database_boundary_metadata "
+                        "WHERE boundary_name = 'retail'"
+                    )
+                )
+            ).one_or_none()
+    missing = sorted(RETAIL_RUNTIME_REQUIRED_TABLES - table_names)
+    boundary_ready = (
+        boundary_row is not None
+        and boundary_row[0] == "retail"
+        and int(boundary_row[1]) >= 2
+    )
+    if not boundary_ready or missing:
+        detail = ", ".join(missing[:5])
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"Retail database schema is not cutover-ready{suffix}")
 
 
 async def current_database_name(
@@ -250,6 +356,13 @@ async def get_takeaway_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def get_retail_db() -> AsyncGenerator[AsyncSession, None]:
+    if RetailSessionLocal is None:
+        raise RuntimeError("Retail database is not configured")
+    async with RetailSessionLocal() as session:
+        yield session
+
+
 async def get_identity_db() -> AsyncGenerator[AsyncSession, None]:
     session_factory = active_identity_session_factory()
     async with session_factory() as session:
@@ -271,6 +384,8 @@ async def get_takeaway_service_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     checked_engine_ids: set[int] = set()
     candidates = [engine, platform_engine, restaurant_engine]
+    if retail_engine is not None:
+        candidates.append(retail_engine)
     if takeaway_engine is not None:
         candidates.append(takeaway_engine)
     for candidate in candidates:

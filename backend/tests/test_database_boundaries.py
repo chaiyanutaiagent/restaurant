@@ -5,15 +5,18 @@ from app.config import (
     effective_database_url,
     settings,
     validate_shared_reporting_runtime_config,
+    validate_retail_runtime_config,
     validate_takeaway_runtime_config,
 )
 from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
     RestaurantSessionLocal,
+    RetailSessionLocal,
     TakeawaySessionLocal,
     active_identity_session_factory,
     active_restaurant_service_session_factory,
+    active_retail_service_session_factory,
     active_takeaway_service_session_factory,
     session_factory_for,
 )
@@ -51,6 +54,7 @@ class DatabaseBoundaryTests(unittest.TestCase):
     def test_identity_database_defaults_to_legacy(self) -> None:
         self.assertEqual(settings.identity_database, "legacy")
         self.assertEqual(settings.restaurant_service_database, "legacy")
+        self.assertEqual(settings.retail_service_database, "legacy")
         self.assertFalse(settings.reference_projector_enabled)
         self.assertEqual(settings.takeaway_service_database, "disabled")
         self.assertFalse(settings.takeaway_feature_enabled)
@@ -60,6 +64,7 @@ class DatabaseBoundaryTests(unittest.TestCase):
             active_restaurant_service_session_factory(),
             AsyncSessionLocal,
         )
+        self.assertIs(active_retail_service_session_factory(), AsyncSessionLocal)
 
     def test_restaurant_handoff_has_no_cross_database_foreign_key(self) -> None:
         self.assertEqual(list(OperationalOutboxEvent.__table__.foreign_keys), [])
@@ -98,6 +103,35 @@ class DatabaseBoundaryTests(unittest.TestCase):
                 identity_database="platform_core",
                 reference_projector_enabled=True,
             )
+
+    def test_retail_boundary_is_explicit_and_cutover_is_fail_closed(self) -> None:
+        self.assertEqual(settings.retail_service_database, "legacy")
+        self.assertIs(active_retail_service_session_factory(), AsyncSessionLocal)
+        if settings.retail_database_url is None:
+            self.assertIsNone(RetailSessionLocal)
+        with self.assertRaisesRegex(ValueError, "RETAIL_DATABASE_URL"):
+            validate_retail_runtime_config(
+                environment="development",
+                service_database="retail",
+                database_url=None,
+                identity_database="platform_core",
+                reference_projector_enabled=True,
+            )
+        with self.assertRaisesRegex(ValueError, "IDENTITY_DATABASE"):
+            validate_retail_runtime_config(
+                environment="development",
+                service_database="retail",
+                database_url="postgresql+asyncpg://db/retail",
+                identity_database="legacy",
+                reference_projector_enabled=True,
+            )
+        validate_retail_runtime_config(
+            environment="development",
+            service_database="retail",
+            database_url="postgresql+asyncpg://db/retail",
+            identity_database="platform_core",
+            reference_projector_enabled=True,
+        )
 
     def test_shared_reporting_projector_requires_platform_identity_projection(self) -> None:
         validate_shared_reporting_runtime_config(

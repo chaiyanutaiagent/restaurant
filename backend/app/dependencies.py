@@ -14,6 +14,7 @@ from app.config import settings
 from app.database import (
     AsyncSessionLocal,
     active_restaurant_service_session_factory,
+    active_retail_service_session_factory,
     active_takeaway_service_session_factory,
     get_identity_db,
     get_restaurant_service_db,
@@ -212,6 +213,24 @@ async def get_scoped_operational_db(
         yield session
 
 
+async def get_legacy_model_operational_db(
+    current: TokenData = Depends(get_current_user),
+) -> AsyncGenerator[AsyncSession, None]:
+    """Route generic Restaurant/Retail models without leaking them into Takeaway."""
+    session_factory = legacy_model_session_factory_for(current)
+    async with session_factory() as session:
+        yield session
+
+
+def legacy_model_session_factory_for(current: TokenData):
+    if current.target_database == "takeaway":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operational API is unavailable for Takeaway context",
+        )
+    return operational_session_factory_for(current)
+
+
 async def get_takeaway_operational_db() -> AsyncGenerator[AsyncSession, None]:
     try:
         session_factory = active_takeaway_service_session_factory()
@@ -227,8 +246,16 @@ async def get_takeaway_operational_db() -> AsyncGenerator[AsyncSession, None]:
 def operational_session_factory_for(current: TokenData):
     if current.target_database == "restaurant":
         return active_restaurant_service_session_factory()
-    elif current.target_database in {None, "retail_pos"}:
+    elif current.target_database is None:
         return AsyncSessionLocal
+    elif current.target_database == "retail_pos":
+        try:
+            return active_retail_service_session_factory()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Retail operational service is not available",
+            ) from exc
     elif current.target_database == "takeaway":
         try:
             return active_takeaway_service_session_factory()
@@ -289,7 +316,7 @@ async def resolve_device_token(
     if (
         context is None
         or context.brand_id != brand_id
-        or context.business_type not in {"restaurant", "takeaway"}
+        or context.business_type not in {"restaurant", "retail_pos", "takeaway"}
         or context.target_database != context.business_type
         or payload.get("business_type") != context.business_type
         or payload.get("target_database") != context.target_database
@@ -301,6 +328,13 @@ async def resolve_device_token(
     if context.business_type == "takeaway":
         try:
             await TenantControlPolicy(db).require_feature(company_id, "takeaway")
+        except HTTPException as exc:
+            raise _device_unauthorized() from exc
+    if context.business_type == "retail_pos":
+        if device.device_type != "counter":
+            raise _device_unauthorized()
+        try:
+            await TenantControlPolicy(db).require_feature(company_id, "retail_pos")
         except HTTPException as exc:
             raise _device_unauthorized() from exc
 
@@ -359,6 +393,11 @@ async def get_device_operational_db(
     elif current.target_database == "takeaway":
         try:
             session_factory = active_takeaway_service_session_factory()
+        except ValueError as exc:
+            raise _device_unauthorized() from exc
+    elif current.target_database == "retail_pos":
+        try:
+            session_factory = active_retail_service_session_factory()
         except ValueError as exc:
             raise _device_unauthorized() from exc
     else:

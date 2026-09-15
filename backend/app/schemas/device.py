@@ -121,8 +121,8 @@ class DeviceContextRead(BaseSchema):
     name: str
     device_type: DeviceType
     station_key: str | None = None
-    business_type: Literal["restaurant", "takeaway"]
-    target_database: Literal["restaurant", "takeaway"]
+    business_type: Literal["restaurant", "retail_pos", "takeaway"]
+    target_database: Literal["restaurant", "retail_pos", "takeaway"]
     credential_version: int
     paired_at: datetime
     last_seen_at: datetime

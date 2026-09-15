@@ -19,6 +19,7 @@ from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
     RestaurantSessionLocal,
+    RetailSessionLocal,
     TakeawaySessionLocal,
 )
 from app.models.audit import AuditLog
@@ -84,6 +85,11 @@ async def collect_runtime_state() -> PlatformRuntimeRead:
         "legacy_database": legacy,
         "platform_database": platform,
         "restaurant_database": restaurant,
+        "retail_database": (
+            await _database_check(RetailSessionLocal)
+            if RetailSessionLocal is not None
+            else "disabled"
+        ),
         "takeaway_database": (
             await _database_check(TakeawaySessionLocal)
             if settings.takeaway_feature_enabled and TakeawaySessionLocal is not None

@@ -2,15 +2,19 @@
 
 ## Runtime Boundaries
 
-The target architecture uses three explicit connection identities:
+The target architecture uses explicit connection identities per boundary:
 
 | Connection | Responsibility | Scope P1-DATABASE-BOUNDARY-03 |
 |---|---|---|
 | `DATABASE_URL` | Existing monolith and rollback source | Remains the runtime system of record |
 | `PLATFORM_DATABASE_URL` | Company, Brand, Branch, identity, assignments and platform audit | Physical database and independent migration history are initialized |
 | `RESTAURANT_DATABASE_URL` | Restaurant masters and operations | Physical database and independent migration history are initialized |
+| `RETAIL_DATABASE_URL` | Retail catalog, stock, shift and sales | WP7 standby database and independent migration history are initialized; cutover remains blocked until WP8 |
+| `TAKEAWAY_DATABASE_URL` | Takeaway catalog, order, kitchen and pickup | Physical database and independent migration history are initialized |
 
-The two explicit URLs fall back to `DATABASE_URL` when absent so older deployments continue to start. A deployment is not considered physically separated while either explicit URL resolves to the legacy URL.
+Platform and Restaurant URLs retain their compatibility fallback. Retail and Takeaway require explicit URLs
+for their own migrations/runtime. A deployment is not considered physically separated while an operational
+service still resolves to Legacy.
 
 ## Initial Ownership Manifest
 
@@ -33,6 +37,11 @@ Platform-owned tables for the data-cutover design:
 - platform-owned `audit_logs`
 
 Restaurant-owned tables include Restaurant menu/recipe, dining, kitchen, central production, Restaurant stock, purchase, transfer, payment, receipt, accounting and operational audit data. Generic tables currently shared with legacy Retail require an explicit compatibility decision before cutover and must not be moved implicitly.
+
+WP7 adds the Retail boundary at schema contract version 1. It is intentionally not cutover-ready. Generic
+Retail Product/Stock/POS routers now use a server-owned operational factory, but default to Legacy until the
+WP8 selective copy, continuous reference projection, parity and physical UAT gates pass. See
+`retail-pos-boundary.md`.
 
 ## Cross-Database Rules
 

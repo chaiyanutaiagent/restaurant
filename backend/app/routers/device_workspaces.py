@@ -36,6 +36,7 @@ def ok(data: Any) -> dict[str, Any]:
             "version": settings.app_version,
             "identity_database": settings.identity_database,
             "restaurant_service_database": settings.restaurant_service_database,
+            "retail_service_database": settings.retail_service_database,
             "takeaway_service_database": settings.takeaway_service_database,
         },
         "error": None,

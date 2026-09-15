@@ -18,9 +18,11 @@ from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
     RestaurantSessionLocal,
+    RetailSessionLocal,
     TakeawaySessionLocal,
     current_database_name,
     init_db,
+    validate_retail_schema_readiness,
     validate_runtime_database_names,
 )
 from app.middleware.branch_context import BranchContextMiddleware
@@ -61,6 +63,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if settings.takeaway_feature_enabled and TakeawaySessionLocal is not None
         else None
     )
+    retail_database_name = (
+        await current_database_name(RetailSessionLocal)
+        if settings.retail_service_database == "retail" and RetailSessionLocal is not None
+        else None
+    )
     validate_runtime_database_names(
         identity_database=settings.identity_database,
         restaurant_service_database=settings.restaurant_service_database,
@@ -68,10 +75,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         legacy_database_name=legacy_database_name,
         platform_database_name=platform_database_name,
         restaurant_database_name=restaurant_database_name,
+        retail_service_database=settings.retail_service_database,
+        retail_database_name=retail_database_name,
         takeaway_service_database=settings.takeaway_service_database,
         takeaway_feature_enabled=settings.takeaway_feature_enabled,
         takeaway_database_name=takeaway_database_name,
     )
+    if settings.retail_service_database == "retail":
+        if RetailSessionLocal is None:
+            raise RuntimeError("Retail service cutover requires RETAIL_DATABASE_URL")
+        await validate_retail_schema_readiness(RetailSessionLocal)
     permission_catalog_factories = [AsyncSessionLocal]
     if platform_database_name != legacy_database_name:
         permission_catalog_factories.append(PlatformSessionLocal)

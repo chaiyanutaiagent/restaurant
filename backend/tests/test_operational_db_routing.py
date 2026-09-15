@@ -5,7 +5,11 @@ import uuid
 from fastapi import HTTPException
 
 from app.database import AsyncSessionLocal
-from app.dependencies import TokenData, operational_session_factory_for
+from app.dependencies import (
+    TokenData,
+    legacy_model_session_factory_for,
+    operational_session_factory_for,
+)
 
 
 def context(target_database: str | None) -> TokenData:
@@ -27,8 +31,15 @@ class OperationalDatabaseRoutingTests(unittest.TestCase):
         ):
             self.assertIs(operational_session_factory_for(context("restaurant")), sentinel)
 
-    def test_retail_and_unselected_company_context_remain_legacy_compatible(self) -> None:
-        self.assertIs(operational_session_factory_for(context("retail_pos")), AsyncSessionLocal)
+    def test_retail_context_uses_server_owned_factory(self) -> None:
+        sentinel = object()
+        with patch(
+            "app.dependencies.active_retail_service_session_factory",
+            return_value=sentinel,
+        ):
+            self.assertIs(operational_session_factory_for(context("retail_pos")), sentinel)
+
+    def test_unselected_company_context_remains_legacy_compatible(self) -> None:
         self.assertIs(operational_session_factory_for(context(None)), AsyncSessionLocal)
 
     def test_takeaway_context_uses_server_owned_factory_when_enabled(self) -> None:
@@ -47,6 +58,11 @@ class OperationalDatabaseRoutingTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as raised:
                 operational_session_factory_for(context("takeaway"))
         self.assertEqual(raised.exception.status_code, 503)
+
+    def test_generic_restaurant_retail_models_are_not_routed_to_takeaway(self) -> None:
+        with self.assertRaises(HTTPException) as raised:
+            legacy_model_session_factory_for(context("takeaway"))
+        self.assertEqual(raised.exception.status_code, 403)
 
     def test_unknown_operational_context_is_rejected(self) -> None:
         with self.assertRaises(HTTPException) as raised:

@@ -97,6 +97,29 @@ def validate_takeaway_runtime_config(
         raise ValueError("Staging and production Takeaway databases cannot use localhost")
 
 
+def validate_retail_runtime_config(
+    *,
+    environment: str,
+    service_database: str,
+    database_url: str | None,
+    identity_database: str,
+    reference_projector_enabled: bool,
+) -> None:
+    """Fail closed until the dedicated Retail boundary is explicitly prepared."""
+    if service_database == "legacy":
+        return
+    if service_database != "retail":
+        raise ValueError("RETAIL_SERVICE_DATABASE must be legacy or retail")
+    if not database_url:
+        raise ValueError("Retail cutover requires an explicit RETAIL_DATABASE_URL")
+    if identity_database != "platform_core":
+        raise ValueError("Retail cutover requires IDENTITY_DATABASE=platform_core")
+    if not reference_projector_enabled:
+        raise ValueError("Retail cutover requires REFERENCE_PROJECTOR_ENABLED=true")
+    if environment in {"staging", "production"} and "localhost" in database_url:
+        raise ValueError("Staging and production Retail databases cannot use localhost")
+
+
 def validate_shared_reporting_runtime_config(
     *,
     enabled: bool,
@@ -121,9 +144,11 @@ class Settings(BaseSettings):
     database_url: str
     platform_database_url: str | None = None
     restaurant_database_url: str | None = None
+    retail_database_url: str | None = None
     takeaway_database_url: str | None = None
     identity_database: Literal["legacy", "platform_core"] = "legacy"
     restaurant_service_database: Literal["legacy", "restaurant"] = "legacy"
+    retail_service_database: Literal["legacy", "retail"] = "legacy"
     takeaway_service_database: Literal["disabled", "takeaway"] = "disabled"
     takeaway_feature_enabled: bool = False
     reference_projector_enabled: bool = False
@@ -223,6 +248,13 @@ class Settings(BaseSettings):
             identity_database=self.identity_database,
             reference_projector_enabled=self.reference_projector_enabled,
         )
+        validate_retail_runtime_config(
+            environment=self.environment,
+            service_database=self.retail_service_database,
+            database_url=self.retail_database_url,
+            identity_database=self.identity_database,
+            reference_projector_enabled=self.reference_projector_enabled,
+        )
         validate_shared_reporting_runtime_config(
             enabled=self.shared_reporting_projector_enabled,
             identity_database=self.identity_database,
@@ -259,6 +291,16 @@ class Settings(BaseSettings):
     @property
     def restaurant_database_url_sync(self) -> str:
         return self.restaurant_database_url_effective.replace(
+            "postgresql+asyncpg://",
+            "postgresql+psycopg2://",
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def retail_database_url_sync(self) -> str | None:
+        if self.retail_database_url is None:
+            return None
+        return self.retail_database_url.replace(
             "postgresql+asyncpg://",
             "postgresql+psycopg2://",
         )

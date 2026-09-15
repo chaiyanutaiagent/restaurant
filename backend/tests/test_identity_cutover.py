@@ -11,6 +11,7 @@ from app.database import (
     RestaurantSessionLocal,
     identity_session_factory_for,
     restaurant_service_session_factory_for,
+    retail_service_session_factory_for,
     validate_runtime_database_names,
 )
 from app.models.user import User
@@ -41,6 +42,11 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaisesRegex(ValueError, "Unsupported Restaurant service database"):
             restaurant_service_session_factory_for("client_selected_database")
+
+    def test_retail_service_session_factory_is_server_owned(self) -> None:
+        self.assertIs(retail_service_session_factory_for("legacy"), AsyncSessionLocal)
+        with self.assertRaisesRegex(ValueError, "Unsupported Retail service database"):
+            retail_service_session_factory_for("client_selected_database")
 
     def test_restaurant_cutover_requires_platform_identity(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "IDENTITY_DATABASE=platform_core"):
@@ -115,6 +121,37 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
             platform_database_name="platform",
             restaurant_database_name="restaurant",
             takeaway_database_name="takeaway",
+        )
+
+    def test_retail_cutover_requires_platform_projection_and_distinct_database(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "IDENTITY_DATABASE=platform_core"):
+            validate_runtime_database_names(
+                identity_database="legacy",
+                retail_service_database="retail",
+                reference_projector_enabled=True,
+                legacy_database_name="legacy",
+                platform_database_name="platform",
+                restaurant_database_name="restaurant",
+                retail_database_name="retail",
+            )
+        with self.assertRaisesRegex(RuntimeError, "distinct legacy"):
+            validate_runtime_database_names(
+                identity_database="platform_core",
+                retail_service_database="retail",
+                reference_projector_enabled=True,
+                legacy_database_name="legacy",
+                platform_database_name="platform",
+                restaurant_database_name="restaurant",
+                retail_database_name="restaurant",
+            )
+        validate_runtime_database_names(
+            identity_database="platform_core",
+            retail_service_database="retail",
+            reference_projector_enabled=True,
+            legacy_database_name="legacy",
+            platform_database_name="platform",
+            restaurant_database_name="restaurant",
+            retail_database_name="retail",
         )
 
     def test_auth_metadata_exposes_server_owned_identity_source(self) -> None:

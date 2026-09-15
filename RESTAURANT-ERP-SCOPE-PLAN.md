@@ -1012,3 +1012,16 @@ WP6 ผ่าน local implementation และ automated gate แล้ว โ�
 Company Admin `/company-distribution` และ reconciliation แยก Module/Brand/Branch ทำงานครบ
 `COMPANY_DISTRIBUTION_WRITES_ENABLED=false` และ `COMPANY_KITCHEN_WRITES_ENABLED=false` ยังปิด,
 ไม่มี UAT/Production migration/deployment หลักฐานอยู่ที่ `docs/scopes/WP6-PHASE-GATE-02.md`
+
+WP7 ใช้ Scope ID `WP7-RETAIL-SAAS-ALIGNMENT-01` เพื่อจัด Retail POS เดิมให้ใช้ Company Workspace,
+signed staff/device context และ server-owned operational routing พร้อมสร้าง Retail Database boundary,
+migration, health, backup/restore แยกแบบ standby ค่า runtime ยังเป็น Legacy และ schema contract version
+1 ตั้งใจบล็อก cutover จนกว่า WP8 จะทำ selective data copy, continuous reference projection, parity,
+scanner/printer/offline UAT และ owner sign-off รายละเอียดอยู่ที่
+`docs/architecture/retail-pos-boundary.md` และไม่มี UAT/Production deployment/activation ใน WP7
+
+WP7 ผ่าน local automated gate แล้ว: backend `312` tests, Retail migration downgrade/re-upgrade,
+four-boundary backup/isolated restore, frontend type/build และ Platform browser `18/18` ผ่าน ค่า Retail
+runtime ยังเป็น Legacy และ early-cutover ไป schema version 1 ถูกบล็อก หลักฐานอยู่ที่
+`docs/scopes/WP7-PHASE-GATE-02.md` งานถัดไปคือ WP8 selective Retail data migration/canary แต่ physical
+scanner/printer/offline UAT และ UAT/Production activation ยังคงพัก

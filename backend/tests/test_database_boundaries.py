@@ -55,6 +55,7 @@ class DatabaseBoundaryTests(unittest.TestCase):
         self.assertEqual(settings.identity_database, "legacy")
         self.assertEqual(settings.restaurant_service_database, "legacy")
         self.assertEqual(settings.retail_service_database, "legacy")
+        self.assertFalse(settings.retail_reference_projector_enabled)
         self.assertFalse(settings.reference_projector_enabled)
         self.assertEqual(settings.takeaway_service_database, "disabled")
         self.assertFalse(settings.takeaway_feature_enabled)
@@ -116,6 +117,7 @@ class DatabaseBoundaryTests(unittest.TestCase):
                 database_url=None,
                 identity_database="platform_core",
                 reference_projector_enabled=True,
+                retail_reference_projector_enabled=True,
             )
         with self.assertRaisesRegex(ValueError, "IDENTITY_DATABASE"):
             validate_retail_runtime_config(
@@ -124,6 +126,16 @@ class DatabaseBoundaryTests(unittest.TestCase):
                 database_url="postgresql+asyncpg://db/retail",
                 identity_database="legacy",
                 reference_projector_enabled=True,
+                retail_reference_projector_enabled=True,
+            )
+        with self.assertRaisesRegex(ValueError, "RETAIL_REFERENCE_PROJECTOR_ENABLED"):
+            validate_retail_runtime_config(
+                environment="development",
+                service_database="retail",
+                database_url="postgresql+asyncpg://db/retail",
+                identity_database="platform_core",
+                reference_projector_enabled=True,
+                retail_reference_projector_enabled=False,
             )
         validate_retail_runtime_config(
             environment="development",
@@ -131,6 +143,7 @@ class DatabaseBoundaryTests(unittest.TestCase):
             database_url="postgresql+asyncpg://db/retail",
             identity_database="platform_core",
             reference_projector_enabled=True,
+            retail_reference_projector_enabled=True,
         )
 
     def test_shared_reporting_projector_requires_platform_identity_projection(self) -> None:

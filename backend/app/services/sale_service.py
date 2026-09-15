@@ -93,9 +93,15 @@ def sale_discount_percentage(data: CreateSaleRequest) -> Decimal:
 
 
 class SaleService:
-    def __init__(self, db: AsyncSession):
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        legacy_side_effects_enabled: bool = True,
+    ):
         self.db = db
         self.stock_service = StockService(db)
+        self.legacy_side_effects_enabled = legacy_side_effects_enabled
 
     async def open_shift(
         self,
@@ -614,35 +620,36 @@ class SaleService:
                 },
             )
         )
-        try:
-            await trigger_event(
-                self.db,
-                company_id,
-                "sale.created",
-                {
-                    "order_number": order_values["order_number"],
-                    "total_amount": str(total_amount),
-                    "branch_id": str(order_values["branch_id"]),
-                    "items_count": len(item_rows),
-                },
-            )
-        except Exception:
-            pass
-        try:
-            notif_svc = NotificationService(self.db)
-            await notif_svc.notify_event(
-                company_id,
-                "sale.created",
-                context={
-                    "order_number": order_values["order_number"],
-                    "total_amount": f"{total_amount:,.2f}",
-                    "branch_name": str(order_values["branch_id"]),
-                },
-                reference_type="SaleOrder",
-                reference_id=str(order_id),
-            )
-        except Exception:
-            pass
+        if self.legacy_side_effects_enabled:
+            try:
+                await trigger_event(
+                    self.db,
+                    company_id,
+                    "sale.created",
+                    {
+                        "order_number": order_values["order_number"],
+                        "total_amount": str(total_amount),
+                        "branch_id": str(order_values["branch_id"]),
+                        "items_count": len(item_rows),
+                    },
+                )
+            except Exception:
+                pass
+            try:
+                notif_svc = NotificationService(self.db)
+                await notif_svc.notify_event(
+                    company_id,
+                    "sale.created",
+                    context={
+                        "order_number": order_values["order_number"],
+                        "total_amount": f"{total_amount:,.2f}",
+                        "branch_name": str(order_values["branch_id"]),
+                    },
+                    reference_type="SaleOrder",
+                    reference_id=str(order_id),
+                )
+            except Exception:
+                pass
         await ensure_sale_completed_handoff(
             self.db,
             company_id=company_id,
@@ -656,7 +663,7 @@ class SaleService:
         )
         await self.db.commit()
         order = await self.get_sale(order_id, company_id)
-        if data.customer_id:
+        if data.customer_id and self.legacy_side_effects_enabled:
             try:
                 crm_svc = CRMService(self.db)
                 await crm_svc.earn_points(
@@ -681,6 +688,8 @@ class SaleService:
         company_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> None:
+        if not self.legacy_side_effects_enabled:
+            return
         try:
             accounting_svc = AccountingService(self.db)
             await accounting_svc.post_sale(order, company_id, user_id)
@@ -790,11 +799,12 @@ class SaleService:
                 },
             )
         )
-        try:
-            crm_svc = CRMService(self.db)
-            await crm_svc.void_earn(company_id, user_id, str(order.id))
-        except Exception as e:
-            logger.error(f"Points void failed: {e}")
+        if self.legacy_side_effects_enabled:
+            try:
+                crm_svc = CRMService(self.db)
+                await crm_svc.void_earn(company_id, user_id, str(order.id))
+            except Exception as e:
+                logger.error(f"Points void failed: {e}")
         brand_context = await self._get_store_brand_context(order)
         await ensure_sale_state_changed_handoff(
             self.db,
@@ -841,7 +851,11 @@ class SaleService:
             audit_action="pos.sale.refund",
             approval_evidence=approval_evidence,
         )
-        if q2(Decimal(order.refund_amount or 0)) >= q2(Decimal(order.total_amount or 0)):
+        if (
+            self.legacy_side_effects_enabled
+            and q2(Decimal(order.refund_amount or 0))
+            >= q2(Decimal(order.total_amount or 0))
+        ):
             try:
                 crm_svc = CRMService(self.db)
                 await crm_svc.void_earn(company_id, user_id, str(order.id))

@@ -1025,3 +1025,17 @@ four-boundary backup/isolated restore, frontend type/build และ Platform br
 runtime ยังเป็น Legacy และ early-cutover ไป schema version 1 ถูกบล็อก หลักฐานอยู่ที่
 `docs/scopes/WP7-PHASE-GATE-02.md` งานถัดไปคือ WP8 selective Retail data migration/canary แต่ physical
 scanner/printer/offline UAT และ UAT/Production activation ยังคงพัก
+
+WP8 ใช้ Scope ID `WP8-RETAIL-SELECTIVE-MIGRATION-01` และผ่าน local implementation gate แล้ว โดยเพิ่ม
+Retail schema contract v2, Platform reference projection ที่ไม่ copy password credential, selective
+Company/Brand/Branch migration พร้อม FK ordering/count/digest/replay, Retail shared reporting source และ
+isolated sale/refund/void/stock/net-report canary กับ read-only rollback route ค่า runtime จริงยังเป็น
+Legacy ไม่มีข้อมูลจริงถูกย้าย และไม่มี UAT/Production deployment/activation รายละเอียดและหลักฐานอยู่ที่
+`docs/scopes/WP8-RETAIL-SELECTIVE-MIGRATION-01.md` กับ `docs/scopes/WP8-PHASE-GATE-02.md`
+
+WP8 automated gate: backend full regression `328` tests, focused contracts `40` tests, Retail v2
+downgrade/re-upgrade, reference/operational replay parity, isolated canary/rollback และ frontend
+type-check/production PWA build (`4,206` modules) ผ่าน
+
+physical Retail scanner/printer/cash drawer/offline UAT, real-data freeze/backup/reconciliation และ owner
+sign-off ยังคงพักและเป็นเงื่อนไขบังคับก่อนเปลี่ยน `RETAIL_SERVICE_DATABASE=retail` ในระบบจริง

@@ -199,6 +199,7 @@ def validate_runtime_database_names(
     restaurant_database_name: str,
     retail_service_database: str = "legacy",
     retail_database_name: str | None = None,
+    retail_reference_projector_enabled: bool = False,
     takeaway_service_database: str = "disabled",
     takeaway_feature_enabled: bool = False,
     takeaway_database_name: str | None = None,
@@ -222,6 +223,10 @@ def validate_runtime_database_names(
         if not reference_projector_enabled:
             raise RuntimeError(
                 "Retail service cutover requires REFERENCE_PROJECTOR_ENABLED=true"
+            )
+        if not retail_reference_projector_enabled:
+            raise RuntimeError(
+                "Retail service cutover requires RETAIL_REFERENCE_PROJECTOR_ENABLED=true"
             )
         if retail_database_name is None:
             raise RuntimeError("Retail service cutover requires a physical Retail database")
@@ -275,9 +280,14 @@ RETAIL_RUNTIME_REQUIRED_TABLES = {
     "categories",
     "products",
     "product_variants",
+    "product_images",
+    "price_lists",
+    "price_list_items",
     "stock_locations",
     "stock_balances",
     "stock_movements",
+    "stock_count_sessions",
+    "stock_count_items",
     "cashier_shifts",
     "sale_orders",
     "sale_order_items",
@@ -286,6 +296,8 @@ RETAIL_RUNTIME_REQUIRED_TABLES = {
     "branch_settings",
     "approval_grant_usages",
     "operational_outbox_events",
+    "retail_reference_projection_receipts",
+    "retail_migration_runs",
 }
 
 

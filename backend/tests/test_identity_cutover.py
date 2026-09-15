@@ -133,6 +133,7 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
                 platform_database_name="platform",
                 restaurant_database_name="restaurant",
                 retail_database_name="retail",
+                retail_reference_projector_enabled=True,
             )
         with self.assertRaisesRegex(RuntimeError, "distinct legacy"):
             validate_runtime_database_names(
@@ -143,6 +144,7 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
                 platform_database_name="platform",
                 restaurant_database_name="restaurant",
                 retail_database_name="restaurant",
+                retail_reference_projector_enabled=True,
             )
         validate_runtime_database_names(
             identity_database="platform_core",
@@ -152,6 +154,7 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
             platform_database_name="platform",
             restaurant_database_name="restaurant",
             retail_database_name="retail",
+            retail_reference_projector_enabled=True,
         )
 
     def test_auth_metadata_exposes_server_owned_identity_source(self) -> None:

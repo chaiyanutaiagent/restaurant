@@ -12,9 +12,11 @@ from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
     RestaurantSessionLocal,
+    RetailSessionLocal,
     TakeawaySessionLocal,
     engine,
     restaurant_engine,
+    retail_engine,
 )
 from app.services.shared_reporting_service import process_reporting_source_batch
 
@@ -48,6 +50,13 @@ def configured_reporting_sources() -> list[ReportingSource]:
     sources = [ReportingSource("legacy_pos", "legacy", AsyncSessionLocal)]
     if restaurant_engine is not engine:
         sources.append(ReportingSource("restaurant_pos", "legacy", RestaurantSessionLocal))
+    if (
+        settings.retail_service_database == "retail"
+        and RetailSessionLocal is not None
+        and retail_engine is not None
+        and retail_engine is not engine
+    ):
+        sources.append(ReportingSource("retail_pos", "legacy", RetailSessionLocal))
     if settings.takeaway_feature_enabled and TakeawaySessionLocal is not None:
         sources.append(ReportingSource("takeaway_pos", "takeaway", TakeawaySessionLocal))
     return sources

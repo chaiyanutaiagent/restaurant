@@ -32,6 +32,7 @@ from app.schemas.platform import (
     PlatformRuntimeRead,
 )
 from app.services.reference_projector_worker import reference_projector_state
+from app.services.retail_reference_projector import retail_projector_state
 from app.services.takeaway_reference_projector import takeaway_projector_state
 
 
@@ -104,6 +105,14 @@ async def collect_runtime_state() -> PlatformRuntimeRead:
             if settings.reference_projector_enabled and reference_projector_state.running
             else "error"
             if settings.reference_projector_enabled
+            else "disabled"
+        ),
+        "retail_reference_projector": (
+            "ok"
+            if settings.retail_reference_projector_enabled
+            and retail_projector_state.running
+            else "error"
+            if settings.retail_reference_projector_enabled
             else "disabled"
         ),
         "takeaway_reference_projector": (

@@ -55,6 +55,24 @@ def payment_total_expr():
     )
 
 
+def net_order_total_expr():
+    """Return sale value after refunds while keeping refunded orders auditable."""
+    remaining = func.coalesce(SaleOrder.total_amount, 0) - func.coalesce(
+        SaleOrder.refund_amount,
+        0,
+    )
+    return case((remaining > 0, remaining), else_=0)
+
+
+def net_order_total(order: SaleOrder) -> Decimal:
+    return q2(
+        max(
+            Decimal("0"),
+            Decimal(order.total_amount or 0) - Decimal(order.refund_amount or 0),
+        )
+    )
+
+
 class ReportService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -77,7 +95,7 @@ class ReportService:
             await self.db.execute(
                 select(
                     func.count(SaleOrder.id),
-                    func.coalesce(func.sum(SaleOrder.total_amount), 0),
+                    func.coalesce(func.sum(net_order_total_expr()), 0),
                     func.coalesce(func.sum(SaleOrder.vat_amount), 0),
                     func.coalesce(func.sum(SaleOrder.discount_amount), 0),
                 ).where(*filters)
@@ -143,7 +161,7 @@ class ReportService:
             select(
                 bkk_day_expr().label("day"),
                 func.count(SaleOrder.id),
-                func.coalesce(func.sum(SaleOrder.total_amount), 0),
+                func.coalesce(func.sum(net_order_total_expr()), 0),
                 func.coalesce(func.sum(SaleOrder.vat_amount), 0),
                 func.coalesce(func.sum(SaleOrder.discount_amount), 0),
             )
@@ -284,7 +302,7 @@ class ReportService:
             select(
                 hour_expr.label("hour"),
                 func.count(SaleOrder.id),
-                func.coalesce(func.sum(SaleOrder.total_amount), 0),
+                func.coalesce(func.sum(net_order_total_expr()), 0),
             )
             .where(*filters)
             .group_by(hour_expr)
@@ -340,7 +358,7 @@ class ReportService:
 
         target_date = shift.opened_at.astimezone(BKK).date()
         total_orders = len(sales)
-        total_amount = q2(sum(Decimal(order.total_amount or 0) for order in sales))
+        total_amount = q2(sum((net_order_total(order) for order in sales), Decimal("0")))
         total_vat = q2(sum(Decimal(order.vat_amount or 0) for order in sales))
         total_discount = q2(sum(Decimal(order.discount_amount or 0) for order in sales))
         daily_summary = DailySalesSummary(

@@ -104,8 +104,11 @@ def validate_retail_runtime_config(
     database_url: str | None,
     identity_database: str,
     reference_projector_enabled: bool,
+    retail_reference_projector_enabled: bool,
 ) -> None:
     """Fail closed until the dedicated Retail boundary is explicitly prepared."""
+    if retail_reference_projector_enabled and not database_url:
+        raise ValueError("Retail reference projector requires RETAIL_DATABASE_URL")
     if service_database == "legacy":
         return
     if service_database != "retail":
@@ -116,6 +119,10 @@ def validate_retail_runtime_config(
         raise ValueError("Retail cutover requires IDENTITY_DATABASE=platform_core")
     if not reference_projector_enabled:
         raise ValueError("Retail cutover requires REFERENCE_PROJECTOR_ENABLED=true")
+    if not retail_reference_projector_enabled:
+        raise ValueError(
+            "Retail cutover requires RETAIL_REFERENCE_PROJECTOR_ENABLED=true"
+        )
     if environment in {"staging", "production"} and "localhost" in database_url:
         raise ValueError("Staging and production Retail databases cannot use localhost")
 
@@ -149,6 +156,12 @@ class Settings(BaseSettings):
     identity_database: Literal["legacy", "platform_core"] = "legacy"
     restaurant_service_database: Literal["legacy", "restaurant"] = "legacy"
     retail_service_database: Literal["legacy", "retail"] = "legacy"
+    retail_reference_projector_enabled: bool = False
+    retail_reference_projector_poll_seconds: float = Field(
+        default=5.0,
+        ge=0.5,
+        le=300.0,
+    )
     takeaway_service_database: Literal["disabled", "takeaway"] = "disabled"
     takeaway_feature_enabled: bool = False
     reference_projector_enabled: bool = False
@@ -254,6 +267,7 @@ class Settings(BaseSettings):
             database_url=self.retail_database_url,
             identity_database=self.identity_database,
             reference_projector_enabled=self.reference_projector_enabled,
+            retail_reference_projector_enabled=self.retail_reference_projector_enabled,
         )
         validate_shared_reporting_runtime_config(
             enabled=self.shared_reporting_projector_enabled,

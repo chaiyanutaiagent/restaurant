@@ -1,6 +1,6 @@
 # Retail POS Database Boundary
 
-สถานะ: WP7 local foundation / Retail operational runtime ยังเป็น Legacy
+สถานะ: WP8 local cutover-ready / Retail operational runtime จริงยังเป็น Legacy
 
 ## Ownership หลัง target cutover
 
@@ -19,33 +19,38 @@ Retail POS เดิมใช้ generic tables บน Legacy และ route `/
 กับ `/reports` บางส่วน เดิมมี Company/Branch scope และ `pos.*` permissions อยู่แล้ว แต่ product/report
 routers บางส่วนเปิด connection ตรงไป Legacy ทำให้ cutover เป็นรายโมดูลไม่ได้
 
-WP7 เปลี่ยน routers เหล่านี้ให้ใช้ server-owned operational factory เส้นเดียวกัน ค่า default ยังคง
-`RETAIL_SERVICE_DATABASE=legacy` จึงไม่เปลี่ยนข้อมูลหรือพฤติกรรมผู้ใช้เดิม
+WP7 เปลี่ยน routers เหล่านี้ให้ใช้ server-owned operational factory เส้นเดียวกัน และ WP8 เพิ่ม schema
+contract v2, Platform reference projection, selective copy/reconciliation, shared reporting source และ
+local canary/rollback แล้ว ค่า runtime จริงยังคง `RETAIL_SERVICE_DATABASE=legacy` จึงยังไม่เปลี่ยน
+ข้อมูลหรือพฤติกรรมผู้ใช้เดิมใน UAT/Production
 
 ## Runtime modes
 
 | ค่า | พฤติกรรม |
 | --- | --- |
 | `RETAIL_SERVICE_DATABASE=legacy` | Retail POS เดิมทำงานต่อบน Legacy; เป็นค่า default และ rollback |
-| `RETAIL_SERVICE_DATABASE=retail` | อนุญาตเฉพาะเมื่อใช้ Platform identity/projector, URL ชัดเจน, database คนละชื่อ, manifest table ครบ และ contract version ≥ 2 |
+| `RETAIL_SERVICE_DATABASE=retail` | อนุญาตเฉพาะเมื่อใช้ Platform identity/projectors, URL ชัดเจน, database คนละชื่อ, manifest table ครบ, contract version ≥ 2 และ reference parity exact |
 
-ฐานที่สร้างใน WP7 มี `database_boundary_metadata = retail:1` เท่านั้น จึงเป็น standby และตั้งใจให้
-startup ปฏิเสธ cutover แม้ operator ใส่ URL แล้ว ขั้นนี้ป้องกัน traffic เข้าฐานว่างหรือ snapshot ที่ยัง
-ไม่มี reference projection ต่อเนื่อง
+WP8 ยก local Retail schema เป็น `database_boundary_metadata = retail:2` และ startup ยังคง fail closed
+หาก reference projection ไม่ครบหรือ digest ไม่ตรง การมี schema v2 เพียงอย่างเดียวไม่ถือว่าอนุญาตให้
+เปิด UAT/Production
 
-## Operational manifest สำหรับ WP8
+## Operational manifest ใน WP8
 
 อย่างน้อยต้องมีและผ่าน parity ก่อนยก contract เป็น version 2:
 
 - references: `companies`, `brands`, `branches`, `brand_branches`, `users`
-- catalog: `units`, `categories`, `products`, `product_variants`
+- catalog: `units`, `categories`, `products`, `product_variants`, `product_images`
+- pricing: `price_lists`, `price_list_items`
 - stock: `stock_locations`, `stock_balances`, `stock_movements`
+- stock count: `stock_count_sessions`, `stock_count_items`
 - sale: `cashier_shifts`, `sale_orders`, `sale_order_items`, `payments`
 - controls/integration: `branch_settings`, `approval_grant_usages`, `audit_logs`, `operational_outbox_events`
+- ledgers: `retail_reference_projection_receipts`, `retail_migration_runs`
 
-WP8 ต้องจำแนกตารางเสริม เช่น CRM, price list, image, accounting, e-tax, purchase, transfer และ
-offline queue ว่าเป็น Retail-owned, shared ERP หรือ event projection ก่อน copy ห้าม clone ทั้ง Legacy
-แล้วเปิดใช้ทันที เพราะอาจพา Restaurant/Company อื่นเข้าฐาน Retail
+CRM, loyalty, notification, accounting, e-tax, purchase, transfer, HR, Restaurant และ Takeaway tables
+ไม่อยู่ใน Retail v2 รายการ shared ERP ใช้ outbox/projection เท่านั้น ห้าม clone ทั้ง Legacy แล้วเปิดใช้
+เพราะอาจพา Restaurant หรือ Company อื่นเข้าฐาน Retail
 
 ## Device
 
@@ -53,12 +58,14 @@ Retail รองรับ `counter` เท่านั้นใน WP7 อุป
 signed Company/Brand/Branch/`retail_pos` context และ Company entitlement ส่วน Kitchen/Pickup เป็น
 capability ของ Restaurant/Takeaway จึงถูกปฏิเสธ
 
-## WP8 cutover sequence
+## Cutover sequence หลัง WP8 local gate
 
-1. ทำ table/FK inventory และกำหนด Retail tenant/Brand/Branch source set
-2. สร้าง Retail schema version 2 โดยไม่มี cross-database foreign key
-3. ทำ Platform reference projection สำหรับ Retail แบบ idempotent และมี consumer receipt แยก
-4. snapshot เฉพาะ Retail, copy, reconcile counts/amount/stock และทดสอบ replay
-5. ทดสอบ Product → Scan → Shift → Sale → Payment → Receipt → Refund/Void → Stock → Report
-6. backup แล้วทำ local canary; physical scanner/printer/offline UAT
-7. owner sign-off ก่อน UAT/Production switch; rollback คือ `RETAIL_SERVICE_DATABASE=legacy`
+1. ระบุ Retail Company/Brand/Branch จริงและ freeze write window
+2. backup Legacy/Platform/Retail แล้ว project Platform references ให้ parity exact
+3. selective copy, replay และ reconcile count/digest/amount/stock
+4. ทดสอบ Product → Scan → Shift → Sale → Payment → Receipt → Refund/Void → Stock → Report
+5. ทำ physical scanner/printer/cash drawer/offline UAT
+6. owner sign-off ก่อน UAT/Production switch; rollback คือ `RETAIL_SERVICE_DATABASE=legacy`
+
+รายละเอียด table ownership, tooling และ local evidence อยู่ที่
+`docs/scopes/WP8-RETAIL-SELECTIVE-MIGRATION-01.md`

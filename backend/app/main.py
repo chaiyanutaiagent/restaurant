@@ -45,6 +45,10 @@ from app.utils.seed_permissions import seed_default_permissions
 from app.services.reference_projector_worker import (
     run_reference_projector,
 )
+from app.services.retail_reference_projector import (
+    run_retail_reference_projector,
+    validate_retail_reference_readiness,
+)
 from app.services.platform_operations_service import collect_runtime_state
 from app.services.takeaway_reference_projector import run_takeaway_reference_projector
 from app.services.shared_reporting_worker import run_shared_reporting_projector
@@ -77,6 +81,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         restaurant_database_name=restaurant_database_name,
         retail_service_database=settings.retail_service_database,
         retail_database_name=retail_database_name,
+        retail_reference_projector_enabled=settings.retail_reference_projector_enabled,
         takeaway_service_database=settings.takeaway_service_database,
         takeaway_feature_enabled=settings.takeaway_feature_enabled,
         takeaway_database_name=takeaway_database_name,
@@ -85,6 +90,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if RetailSessionLocal is None:
             raise RuntimeError("Retail service cutover requires RETAIL_DATABASE_URL")
         await validate_retail_schema_readiness(RetailSessionLocal)
+        await validate_retail_reference_readiness(
+            retail_session_factory=RetailSessionLocal,
+        )
     permission_catalog_factories = [AsyncSessionLocal]
     if platform_database_name != legacy_database_name:
         permission_catalog_factories.append(PlatformSessionLocal)
@@ -125,6 +133,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             name="takeaway-reference-projector",
         )
 
+    retail_projector_stop: asyncio.Event | None = None
+    retail_projector_task: asyncio.Task[None] | None = None
+    if settings.retail_reference_projector_enabled:
+        retail_projector_stop = asyncio.Event()
+        retail_projector_task = asyncio.create_task(
+            run_retail_reference_projector(
+                retail_projector_stop,
+                poll_seconds=settings.retail_reference_projector_poll_seconds,
+            ),
+            name="retail-reference-projector",
+        )
+
     reporting_projector_stop: asyncio.Event | None = None
     reporting_projector_task: asyncio.Task[None] | None = None
     if settings.shared_reporting_projector_enabled:
@@ -157,6 +177,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             except TimeoutError:  # pragma: no cover - shutdown timeout path
                 takeaway_projector_task.cancel()
                 await asyncio.gather(takeaway_projector_task, return_exceptions=True)
+        if retail_projector_stop is not None:
+            retail_projector_stop.set()
+        if retail_projector_task is not None:
+            try:
+                await asyncio.wait_for(retail_projector_task, timeout=5)
+            except TimeoutError:  # pragma: no cover - shutdown timeout path
+                retail_projector_task.cancel()
+                await asyncio.gather(retail_projector_task, return_exceptions=True)
         if reporting_projector_stop is not None:
             reporting_projector_stop.set()
         if reporting_projector_task is not None:

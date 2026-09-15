@@ -110,6 +110,14 @@ def _require_matching_counter_device(
         )
 
 
+def _sale_service(db: AsyncSession, current: TokenData) -> SaleService:
+    retail_cutover = (
+        current.target_database == "retail_pos"
+        and settings.retail_service_database == "retail"
+    )
+    return SaleService(db, legacy_side_effects_enabled=not retail_cutover)
+
+
 @router.post("/shifts/open", status_code=status.HTTP_201_CREATED)
 async def open_shift(
     payload: OpenShiftRequest,
@@ -121,7 +129,7 @@ async def open_shift(
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
     _require_matching_counter_device(current, counter_device)
-    shift = await SaleService(db).open_shift(
+    shift = await _sale_service(db, current).open_shift(
         current.company_id,
         current.branch_id,
         current.user_id,
@@ -143,7 +151,7 @@ async def get_current_shift(
     if current.branch_id is None:
         return ok(None)
     _require_matching_counter_device(current, counter_device)
-    shift = await SaleService(db).get_open_shift(current.company_id, current.user_id, current.branch_id)
+    shift = await _sale_service(db, current).get_open_shift(current.company_id, current.user_id, current.branch_id)
     return ok(ShiftRead.model_validate(shift).model_dump() if shift else None)
 
 
@@ -157,7 +165,7 @@ async def close_shift(
     counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
     _require_matching_counter_device(current, counter_device)
-    shift = await SaleService(db).close_shift(
+    shift = await _sale_service(db, current).close_shift(
         shift_id,
         current.company_id,
         current.user_id,
@@ -178,7 +186,7 @@ async def list_shifts(
     current: TokenData = Depends(require_permission("pos.sale.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    shifts, total = await SaleService(db).list_shifts(current.company_id, branch_id, page, limit)
+    shifts, total = await _sale_service(db, current).list_shifts(current.company_id, branch_id, page, limit)
     return ok([ShiftRead.model_validate(item).model_dump() for item in shifts], meta={"total": total, "page": page, "limit": limit})
 
 
@@ -191,7 +199,7 @@ async def create_sale(
 ) -> dict[str, Any]:
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
-    service = SaleService(db)
+    service = _sale_service(db, current)
     existing = await service.get_existing_sale_by_client_order_id(current.company_id, current.branch_id, payload.client_order_id)
     if existing is not None:
         response.status_code = status.HTTP_200_OK
@@ -222,7 +230,7 @@ async def sync_sales(
 ) -> dict[str, Any]:
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
-    service = SaleService(db)
+    service = _sale_service(db, current)
     orders = []
     for sale_payload in payload.orders:
         existing = await service.get_existing_sale_by_client_order_id(
@@ -264,7 +272,7 @@ async def list_sales(
     current: TokenData = Depends(require_permission("pos.sale.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    rows, total = await SaleService(db).list_sales(
+    rows, total = await _sale_service(db, current).list_sales(
         current.company_id,
         shift_id=shift_id,
         branch_id=branch_id,
@@ -281,7 +289,7 @@ async def get_sale(
     current: TokenData = Depends(require_permission("pos.sale.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    order = await SaleService(db).get_sale(order_id, current.company_id)
+    order = await _sale_service(db, current).get_sale(order_id, current.company_id)
     return ok(SaleOrderRead.model_validate(order).model_dump())
 
 
@@ -294,7 +302,7 @@ async def void_sale(
     ),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    service = SaleService(db)
+    service = _sale_service(db, current)
     existing = await service.get_sale(order_id, current.company_id)
     _require_current_order_branch(current, existing.branch_id)
     approval_evidence = await ApprovalService(db).authorize_operation(
@@ -325,7 +333,7 @@ async def refund_sale(
     ),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    service = SaleService(db)
+    service = _sale_service(db, current)
     existing = await service.get_sale(order_id, current.company_id)
     _require_current_order_branch(current, existing.branch_id)
     approval_evidence = await ApprovalService(db).authorize_operation(
@@ -356,7 +364,7 @@ async def partial_refund_sale(
     ),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    service = SaleService(db)
+    service = _sale_service(db, current)
     existing = await service.get_sale(order_id, current.company_id)
     _require_current_order_branch(current, existing.branch_id)
     approval_evidence = await ApprovalService(db).authorize_operation(

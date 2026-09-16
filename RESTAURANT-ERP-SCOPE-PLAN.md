@@ -1076,3 +1076,9 @@ reconcile พบสถานะ warning ที่ mark `ignored` ถูกเป
 `restaurant-pos-backend:wp9-2f9831b`; หลังแก้ blocker/warning/pending เป็นศูนย์ ปิดงวดและทดสอบ lock
 HTTP `409` ผ่าน ก่อนเปิดงวดกลับเป็น `open` สำหรับการทดสอบต่อ Production ยังคงใช้ image `4c1c2ba`
 และไม่ถูกเปลี่ยนแปลง งานที่ยังพักคือ physical UAT และการรับรองชุดข้อมูลโดยผู้ทำบัญชีจริง
+
+Role UAT ต่อจากนั้นพบ User Admin/Invitation ยังชี้ legacy database ขณะที่ Role/Auth ใช้ Identity database
+จึงแก้ด้วย commit `bb94925` และ `0cd0eb2`, deploy backend image `restaurant-pos-backend:wp9-0cd0eb2`,
+provision workspace `Foodchainservice Restaurant UAT` สำหรับ `BKK-01` และทดสอบล็อกอิน Accountant,
+Purchaser, Branch Manager, Cashier รวมถึง Invitation OTP ครบ เส้นทางที่อนุญาตได้ HTTP `200` และเส้นทาง
+นอกสิทธิ์ได้ HTTP `403`; ปิดใช้งานบัญชีทดสอบทั้ง `5` บัญชีหลังจบ และ Production ไม่ถูกเปลี่ยนแปลง

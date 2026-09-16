@@ -128,11 +128,12 @@ Migration เป็น additive และ downgrade ลบเฉพาะตา�
 - Feature commit: `a08122a9a786b030b1103e34dba2c1d6022b6fb0`
 - UAT audit snapshot fix: `74f3e928427c8a7ecf48f236c332b8e58cf2c276`
 - UAT ignored-warning persistence fix: `2f9831b`
+- UAT Identity user administration fix: `bb94925`; invitation routing fix: `0cd0eb2`
 - UAT URL: `https://uat-pos.foodchainservice.com`
 - Release directory: `/home/behappyaiagent/restaurant-uat-releases/a08122a9a786b030b1103e34dba2c1d6022b6fb0`
 - Rollback backup: `/home/behappyaiagent/restaurant-uat-deploy-backups/a08122a`
 - Migration: `p14dist0016 → p15taxset0017 → p16taxops0018`
-- Images: `restaurant-pos-backend:wp9-2f9831b`, `restaurant-pos-frontend:wp9-a08122a`,
+- Images: `restaurant-pos-backend:wp9-0cd0eb2`, `restaurant-pos-frontend:wp9-a08122a`,
   `restaurant-pos-nginx:wp9-a08122a`
 - Internal/public live และ ready health: HTTP `200`
 - UAT auto-login, `GET /api/v1/tax-settings` และ
@@ -160,6 +161,12 @@ Migration เป็น additive และ downgrade ลบเฉพาะตา�
 - Live role preset check ผ่านครบ `5` preset โดยไม่มี permission สูญหาย; Company Owner มีสิทธิ์สร้าง/แก้
   ผู้ใช้และ role รวมถึงสิทธิ์จัดซื้อ บัญชี และบริหารภาษี ส่วน role เฉพาะ Accountant/Purchasing
   ใช้ Custom Role ตาม permission ที่ต้องการ
+- ระหว่างทดสอบบัญชีพนักงานจริงพบว่า User Admin และ Invitation routes ยังอ้าง legacy database ขณะที่
+  Role/Auth ใช้ Identity database จึงแก้ routing และเพิ่ม regression รวมเป็น `44` tests ผ่าน จากนั้น provision
+  workspace `Foodchainservice Restaurant UAT` ให้สาขา `BKK-01` ผ่าน Company Workspace API
+- สร้างและล็อกอินบัญชีจำลอง Accountant, Purchaser, Branch Manager และ Cashier สำเร็จ ตรวจทั้งเส้นทาง
+  ที่ต้องได้ HTTP `200` และเส้นทางนอกสิทธิ์ที่ต้องได้ HTTP `403`; ทดสอบ Invitation OTP เพิ่มอีก `1` บัญชี
+  สำเร็จ และปิดใช้งานบัญชีทดสอบทั้ง `5` บัญชีหลังจบ
 
 ## 12. งานถัดไป
 

@@ -14,8 +14,10 @@ import {
   Link2,
   LogOut,
   Package,
+  Percent,
   Ruler,
   FileText,
+  FileCheck2,
   Factory,
   UtensilsCrossed,
   Warehouse,
@@ -96,8 +98,10 @@ const purchaseItems: NavItem[] = [
 
 const accountingItems: NavItem[] = [
   { label: "บัญชี", to: "/accounting", icon: BookOpen, permission: "accounting.report.view" },
+  { label: "ศูนย์ภาษี", to: "/tax-center", icon: FileCheck2, permissions: ["accounting.tax.view", "accounting.report.view", "system.company.edit"] },
   { label: "เจ้าหนี้", to: "/payable", icon: CreditCard, permission: "accounting.payment.view" },
-  { label: "ใบกำกับภาษี", to: "/etax", icon: FileText, permission: "accounting.invoice.view" }
+  { label: "ใบกำกับภาษี", to: "/etax", icon: FileText, permission: "accounting.invoice.view" },
+  { label: "ตั้งค่าภาษี", to: "/settings/tax", icon: Percent, permission: "system.company.edit" }
 ];
 
 const hrItems: NavItem[] = [
@@ -521,7 +525,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">บัญชี</p>
           {accountingItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}

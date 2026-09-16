@@ -14,6 +14,7 @@ export interface Supplier {
   name_en: string | null;
   tax_id: string | null;
   branch_code: string | null;
+  tax_entity_type: "individual" | "juristic" | "unknown";
   address: string | null;
   phone: string | null;
   email: string | null;

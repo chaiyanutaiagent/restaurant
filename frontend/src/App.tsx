@@ -12,6 +12,7 @@ import PlatformShell from "@/components/layout/PlatformShell";
 import { Toaster } from "@/components/ui/toaster";
 import { initAutoSync } from "@/lib/syncService";
 import AccountingPage from "@/pages/accounting/AccountingPage";
+import TaxCenterPage from "@/pages/accounting/TaxCenterPage";
 import LoginPage from "@/pages/auth/LoginPage";
 import AcceptInvitationPage from "@/pages/auth/AcceptInvitationPage";
 import SignupPage from "@/pages/auth/SignupPage";
@@ -40,6 +41,7 @@ import HRPage from "@/pages/hr/HRPage";
 import IntegrationsPage from "@/pages/integrations/IntegrationsPage";
 import ShipmentsPage from "@/pages/logistics/ShipmentsPage";
 import SettingsPage from "@/pages/settings/SettingsPage";
+import TaxSettingsPage from "@/pages/settings/TaxSettingsPage";
 import ReportsPage from "@/pages/reports/ReportsPage";
 import ShiftHistoryPage from "@/pages/reports/ShiftHistoryPage";
 import RolesPage from "@/pages/roles/RolesPage";
@@ -319,6 +321,9 @@ export default function App(): JSX.Element {
               <Route element={<ProtectedRoute permission="accounting.report.view" />}>
                 <Route path="/accounting" element={<AccountingPage />} />
               </Route>
+              <Route element={<ProtectedRoute permissions={["accounting.tax.view", "accounting.report.view", "system.company.edit"]} />}>
+                <Route path="/tax-center" element={<TaxCenterPage />} />
+              </Route>
               <Route element={<ProtectedRoute permission="accounting.payment.view" />}>
                 <Route path="/payable" element={<PayablePage />} />
               </Route>
@@ -333,6 +338,7 @@ export default function App(): JSX.Element {
                 <Route path="/reports/company" element={<CompanyReportsPage />} />
                 <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/settings/tax" element={<TaxSettingsPage />} />
               </Route>
               <Route element={<ProtectedRoute permissions={["company.kitchen.view", "company.kitchen.manage", "system.company.edit"]} />}>
                 <Route path="/company-kitchen" element={<CompanyKitchenPage />} />

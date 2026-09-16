@@ -15,6 +15,7 @@ class SupplierBase(BaseSchema):
     name_en: str | None = None
     tax_id: str | None = None
     branch_code: str | None = None
+    tax_entity_type: str = Field(default="unknown", pattern=r"^(individual|juristic|unknown)$")
     address: str | None = None
     address_en: str | None = None
     phone: str | None = None
@@ -41,6 +42,7 @@ class SupplierUpdate(BaseSchema):
     name_en: str | None = None
     tax_id: str | None = None
     branch_code: str | None = None
+    tax_entity_type: str | None = Field(default=None, pattern=r"^(individual|juristic|unknown)$")
     address: str | None = None
     phone: str | None = None
     email: str | None = None

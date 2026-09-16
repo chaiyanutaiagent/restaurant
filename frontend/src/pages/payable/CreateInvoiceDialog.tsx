@@ -21,6 +21,10 @@ type FormState = {
   supplier_id: string;
   po_id: string;
   supplier_ref: string;
+  tax_invoice_number: string;
+  tax_invoice_date: string;
+  input_vat_claimable: boolean;
+  nonclaimable_reason: string;
   invoice_date: string;
   subtotal: string;
   vat_amount: string;
@@ -32,6 +36,10 @@ const EMPTY_FORM: FormState = {
   supplier_id: "",
   po_id: "",
   supplier_ref: "",
+  tax_invoice_number: "",
+  tax_invoice_date: new Date().toISOString().slice(0, 10),
+  input_vat_claimable: true,
+  nonclaimable_reason: "",
   invoice_date: new Date().toISOString().slice(0, 10),
   subtotal: "0.00",
   vat_amount: "0.00",
@@ -136,12 +144,20 @@ export default function CreateInvoiceDialog({ open, onOpenChange, onSuccess }: P
       toast({ title: "กรอกข้อมูลไม่ครบ", description: "กรุณาเลือกซัพพลายเออร์และวันที่ใบแจ้งหนี้", variant: "destructive" });
       return;
     }
+    if (!form.input_vat_claimable && !form.nonclaimable_reason.trim()) {
+      toast({ title: "กรอกข้อมูลไม่ครบ", description: "กรุณาระบุเหตุผลที่ไม่ใช้สิทธิ์ภาษีซื้อ", variant: "destructive" });
+      return;
+    }
     try {
       const response = await payableApi.createInvoice({
         supplier_id: form.supplier_id,
         branch_id: branchId,
         po_id: form.po_id || null,
         supplier_ref: form.supplier_ref || null,
+        tax_invoice_number: form.tax_invoice_number || null,
+        tax_invoice_date: form.tax_invoice_date || null,
+        input_vat_claimable: form.input_vat_claimable,
+        nonclaimable_reason: form.input_vat_claimable ? null : form.nonclaimable_reason || null,
         invoice_date: form.invoice_date,
         subtotal: Number(form.subtotal || 0),
         vat_amount: Number(form.vat_amount || 0),
@@ -196,6 +212,14 @@ export default function CreateInvoiceDialog({ open, onOpenChange, onSuccess }: P
             <Input type="date" value={form.invoice_date} onChange={(event) => updateField("invoice_date", event.target.value)} />
           </div>
           <div className="space-y-2">
+            <Label>เลขใบกำกับภาษี</Label>
+            <Input value={form.tax_invoice_number} onChange={(event) => updateField("tax_invoice_number", event.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>วันที่ใบกำกับภาษี</Label>
+            <Input type="date" value={form.tax_invoice_date} onChange={(event) => updateField("tax_invoice_date", event.target.value)} />
+          </div>
+          <div className="space-y-2">
             <Label>วันครบกำหนด</Label>
             <Input value={dueDate} readOnly />
           </div>
@@ -219,6 +243,11 @@ export default function CreateInvoiceDialog({ open, onOpenChange, onSuccess }: P
             <Label>ยอดสุทธิ</Label>
             <Input value={round2(netAmount)} readOnly />
           </div>
+          <label className="flex items-center gap-2 rounded-md border p-3 text-sm">
+            <input type="checkbox" checked={form.input_vat_claimable} onChange={(event) => updateField("input_vat_claimable", event.target.checked)} />
+            ใช้สิทธิ์ภาษีซื้อใน ภ.พ.30
+          </label>
+          {!form.input_vat_claimable ? <div className="space-y-2"><Label>เหตุผลที่ไม่ใช้สิทธิ์*</Label><Input value={form.nonclaimable_reason} onChange={(event) => updateField("nonclaimable_reason", event.target.value)} /></div> : null}
         </div>
 
         <div className="space-y-2">

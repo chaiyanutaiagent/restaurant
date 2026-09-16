@@ -94,6 +94,8 @@ COMPANY_OWNER_PERMISSION_CODES = (
     "inventory.transfer.create",
     "inventory.transfer.approve",
     "accounting.report.view",
+    "accounting.tax.view",
+    "accounting.tax.manage",
     "accounting.invoice.view",
     "accounting.invoice.create",
     "accounting.payment.view",

@@ -5,13 +5,14 @@ from decimal import Decimal, ROUND_HALF_UP
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.audit import AuditLog
 from app.models.company import Company
 from app.models.etax import TaxDocument, TaxDocumentItem
+from app.models.tax_settings import BranchTaxProfile, CompanyTaxProfile
 from app.models.pos import SaleOrder
 from app.schemas.etax import CancelDocumentRequest, IssueCreditNoteRequest, IssueTaxInvoiceRequest
 from app.services.payable_service import PayableService
@@ -61,6 +62,22 @@ class ETaxService:
                 detail="buyer_tax_id required for full tax invoice",
             )
 
+        company_tax = await self.db.scalar(
+            select(CompanyTaxProfile).where(CompanyTaxProfile.company_id == company_id)
+        )
+        sale_date = sale.created_at.date()
+        branch_tax = await self.db.scalar(
+            select(BranchTaxProfile).where(
+                BranchTaxProfile.company_id == company_id,
+                BranchTaxProfile.branch_id == branch_id,
+                BranchTaxProfile.effective_from <= sale_date,
+                or_(
+                    BranchTaxProfile.effective_to.is_(None),
+                    BranchTaxProfile.effective_to >= sale_date,
+                ),
+            )
+        )
+
         document = TaxDocument(
             company_id=company_id,
             branch_id=branch_id,
@@ -69,10 +86,14 @@ class ETaxService:
             status="issued",
             reference_type="SaleOrder",
             reference_id=str(sale.id),
-            seller_tax_id=company.tax_id or "-",
-            seller_name=company.name,
-            seller_branch_code="00000",
-            seller_address=company.address,
+            seller_tax_id=(company_tax.tax_id if company_tax else None) or company.tax_id or "-",
+            seller_name=(branch_tax.legal_name if branch_tax else None)
+            or (company_tax.legal_name if company_tax else None)
+            or company.name,
+            seller_branch_code=(branch_tax.tax_branch_code if branch_tax else None) or "00000",
+            seller_address=(branch_tax.registered_address if branch_tax else None)
+            or (company_tax.registered_address if company_tax else None)
+            or company.address,
             buyer_tax_id=data.buyer_tax_id or sale.customer_tax_id,
             buyer_name=data.buyer_name or sale.customer_name,
             buyer_branch_code=data.buyer_branch_code,
@@ -82,7 +103,7 @@ class ETaxService:
             vat_rate=q2(sale.vat_rate),
             vat_amount=q2(sale.vat_amount),
             total_amount=q2(sale.total_amount),
-            issue_date=sale.created_at.date(),
+            issue_date=sale_date,
             issue_datetime=datetime.now(timezone.utc),
             created_by=user_id,
         )

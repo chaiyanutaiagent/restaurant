@@ -8,6 +8,10 @@ export interface SupplierInvoice {
   supplier_name: string;
   po_id: string | null;
   supplier_ref: string | null;
+  tax_invoice_number: string | null;
+  tax_invoice_date: string | null;
+  input_vat_claimable: boolean;
+  nonclaimable_reason: string | null;
   status: InvoiceStatus;
   invoice_date: string;
   due_date: string;

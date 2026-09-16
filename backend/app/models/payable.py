@@ -5,7 +5,7 @@ from decimal import Decimal
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, CheckConstraint, Date, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 class SupplierInvoice(SoftDeleteMixin, Base):
     __tablename__ = "supplier_invoices"
     __table_args__ = (
+        CheckConstraint(
+            "input_vat_claimable OR nonclaimable_reason IS NOT NULL",
+            name="claimable_reason",
+        ),
         Index("ix_supplier_invoices_company_invoice_number", "company_id", "invoice_number"),
         Index("ix_supplier_invoices_supplier_id", "supplier_id"),
         Index("ix_supplier_invoices_status", "status"),
@@ -34,6 +38,10 @@ class SupplierInvoice(SoftDeleteMixin, Base):
     po_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("purchase_orders.id"), nullable=True, index=True)
     invoice_number: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
     supplier_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tax_invoice_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tax_invoice_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    input_vat_claimable: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    nonclaimable_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'unpaid'"))
     invoice_date: Mapped[date] = mapped_column(Date, nullable=False)
     due_date: Mapped[date] = mapped_column(Date, nullable=False)

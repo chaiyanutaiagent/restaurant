@@ -69,6 +69,8 @@ from app.models.saas_privacy_support import (
     SaasSupportTicket,
 )
 from app.models.etax import TaxDocument, TaxDocumentItem
+from app.models.tax_settings import BranchTaxProfile, CompanyTaxProfile, TaxRateRule
+from app.models.tax_operations import TaxExportBatch, TaxLedgerEntry, TaxPeriod, TaxReconciliationIssue
 from app.models.payable import SupplierInvoice, APPayment, APPaymentAllocation, WHTCertificate
 from app.models.hr import (
     Department,
@@ -219,6 +221,13 @@ __all__ = [
     "AccountBalance",
     "TaxDocument",
     "TaxDocumentItem",
+    "CompanyTaxProfile",
+    "BranchTaxProfile",
+    "TaxRateRule",
+    "TaxLedgerEntry",
+    "TaxPeriod",
+    "TaxReconciliationIssue",
+    "TaxExportBatch",
     "SupplierInvoice",
     "APPayment",
     "APPaymentAllocation",

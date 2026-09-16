@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 import uuid
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from app.schemas import BaseSchema
 
@@ -14,11 +14,21 @@ class SupplierInvoiceCreate(BaseSchema):
     branch_id: uuid.UUID
     po_id: uuid.UUID | None = None
     supplier_ref: str | None = None
+    tax_invoice_number: str | None = Field(default=None, max_length=100)
+    tax_invoice_date: date | None = None
+    input_vat_claimable: bool = True
+    nonclaimable_reason: str | None = Field(default=None, max_length=500)
     invoice_date: date
     subtotal: Decimal
     vat_amount: Decimal = Decimal("0")
     wht_amount: Decimal = Decimal("0")
     note: str | None = None
+
+    @model_validator(mode="after")
+    def validate_input_tax_evidence(self) -> "SupplierInvoiceCreate":
+        if not self.input_vat_claimable and not (self.nonclaimable_reason or "").strip():
+            raise ValueError("กรุณาระบุเหตุผลที่ไม่ใช้สิทธิ์ภาษีซื้อ")
+        return self
 
 
 class SupplierInvoiceRead(BaseSchema):
@@ -30,6 +40,10 @@ class SupplierInvoiceRead(BaseSchema):
     invoice_date: date
     due_date: date
     supplier_ref: str | None = None
+    tax_invoice_number: str | None = None
+    tax_invoice_date: date | None = None
+    input_vat_claimable: bool
+    nonclaimable_reason: str | None = None
     subtotal: Decimal
     vat_amount: Decimal
     wht_amount: Decimal
@@ -52,6 +66,10 @@ class SupplierInvoiceListItem(BaseSchema):
     status: str
     invoice_date: date
     due_date: date
+    tax_invoice_number: str | None = None
+    tax_invoice_date: date | None = None
+    input_vat_claimable: bool
+    nonclaimable_reason: str | None = None
     total_amount: Decimal
     paid_amount: Decimal
     remaining_amount: Decimal
@@ -138,4 +156,3 @@ class VatReturnReport(BaseSchema):
     output_doc_count: int
     input_invoice_count: int
     filing_due_date: str
-

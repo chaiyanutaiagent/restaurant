@@ -283,6 +283,18 @@ PERMISSIONS: list[dict[str, str]] = [
         "description": "View accounting and finance reports.",
     },
     {
+        "code": "accounting.tax.view",
+        "name": "View Tax Center",
+        "module": "accounting",
+        "description": "View tax ledgers, reconciliation, periods, and export history.",
+    },
+    {
+        "code": "accounting.tax.manage",
+        "name": "Manage Tax Center",
+        "module": "accounting",
+        "description": "Sync, reconcile, close periods, and generate tax exports.",
+    },
+    {
         "code": "accounting.invoice.view",
         "name": "View Invoices",
         "module": "accounting",

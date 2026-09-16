@@ -1039,3 +1039,24 @@ type-check/production PWA build (`4,206` modules) ผ่าน
 
 physical Retail scanner/printer/cash drawer/offline UAT, real-data freeze/backup/reconciliation และ owner
 sign-off ยังคงพักและเป็นเงื่อนไขบังคับก่อนเปลี่ยน `RETAIL_SERVICE_DATABASE=retail` ในระบบจริง
+
+WP9-A ใช้ Scope ID `WP9-TAX-CONFIGURATION-01` และผ่าน local implementation gate แล้ว โดยเพิ่ม
+Tax Profile กลางระดับ Company/Branch, รหัสสาขาภาษีตาม ภ.พ.20, รูปแบบการยื่น ภ.พ.30,
+อัตรา Standard/0%/Exempt ตามช่วงเวลา, audit ก่อน–หลัง และหน้า Company Admin `/settings/tax`
+ข้อมูลชุดนี้อยู่ใน Shared ERP และใช้ร่วมกันโดย Restaurant, Retail, Takeaway, Purchasing/AP และ e-Tax
+โดยไม่ทำสำเนาข้าม operational database
+
+e-Tax อ่านข้อมูลผู้ขายและรหัสสาขาจาก Tax Profile ตามวันที่ขายพร้อม fallback ไปข้อมูลเดิมเพื่อรักษา
+legacy flow ส่วนการสร้าง Sales VAT Ledger จากยอดขายทุก POS, Output VAT reconciliation และรายงาน
+ภาษีซื้อแบบครบวงจรเป็นงาน WP9-B/WP9-C ต่อไป ยังไม่มีการยื่นภาษีจริงหรือ deploy UAT/Production
+หลักฐานอยู่ที่ `docs/scopes/WP9-TAX-CONFIGURATION-01.md`
+
+WP9-B ถึง WP9-H ใช้ Scope ID `WP9-TAX-OPERATIONS-02` และผ่าน local implementation gate แล้ว โดยเพิ่ม
+Tax Ledger กลางสำหรับภาษีขาย/ซื้อ, หลักฐานใบกำกับภาษีซื้อ, การจำแนก ภ.ง.ด.3/53, e-Tax reconciliation,
+วงจร Review/Close/Reopen พร้อมล็อกงวด, versioned export ที่มี SHA-256 และ readiness gate ก่อนปิดงวด
+หน้า Company Admin อยู่ที่ `/tax-center` และเพิ่มสิทธิ์ `accounting.tax.view/manage`
+
+Shared ERP เป็น system of record ของ Tax Operations ส่วน Retail/Takeaway ที่แยกฐานข้อมูลต้องส่ง normalized
+tax event ผ่าน idempotent contract ห้าม query ข้าม operational database ระบบยังไม่ส่งแบบให้กรมสรรพากร,
+ไม่ deploy/migrate UAT/Production และ physical UAT กับผู้ทำบัญชียังคงพัก รายละเอียดอยู่ที่
+`docs/scopes/WP9-TAX-OPERATIONS-02.md`

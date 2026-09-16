@@ -32,6 +32,8 @@ from app.routers import platform as platform_router
 from app.routers import api_mgmt, approvals, company_distribution, company_kitchen, device_workspaces, devices, incoming_webhook, public_api, storefront
 from app.routers import crm as crm_router
 from app.routers import etax as etax_router
+from app.routers import tax_settings as tax_settings_router
+from app.routers import tax_operations as tax_operations_router
 from app.routers import hr as hr_router
 from app.routers import logistics as logistics_router
 from app.routers import payment_gateway as payment_gw_router
@@ -239,6 +241,8 @@ app.include_router(purchase.router)
 app.include_router(transfer.router)
 app.include_router(accounting_router.router)
 app.include_router(etax_router.router)
+app.include_router(tax_settings_router.router)
+app.include_router(tax_operations_router.router)
 app.include_router(payable_router.router)
 app.include_router(hr_router.router)
 app.include_router(crm_router.router)

@@ -39,7 +39,7 @@ verify_checksum() {
 wait_for_postgres() {
   tries=0
   until docker compose -f "$COMPOSE_FILE" exec -T postgres \
-    sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; do
+    sh -c '[ "$(cat /proc/1/comm)" = "postgres" ] && pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; do
     tries=$((tries + 1))
     if [ "$tries" -ge 30 ]; then
       fail "postgres service did not become ready"

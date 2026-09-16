@@ -38,6 +38,8 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
             ("POST", "/api/v1/system/users/{user_id}/change-password"),
             ("POST", "/api/v1/system/users/{user_id}/branches"),
             ("DELETE", "/api/v1/system/users/{user_id}/branches/{branch_id}"),
+            ("POST", "/api/v1/system/invitations"),
+            ("POST", "/api/v1/system/invitations/accept"),
         )
 
         for method, path in user_routes:

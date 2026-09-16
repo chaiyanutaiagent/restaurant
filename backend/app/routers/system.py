@@ -846,7 +846,7 @@ async def resend_user_access_invitation(
 async def create_invitation(
     payload: InviteUserRequest,
     current: TokenData = Depends(require_permission("system.user.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
     invitation, plain_otp = await service.create_invitation(current.company_id, current.user_id, payload)
@@ -863,7 +863,7 @@ async def create_invitation(
 async def accept_invitation(
     payload: AcceptInvitationRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
     x_company_id: str | None = Header(default=None, alias="X-Company-ID"),
 ) -> dict[str, Any]:
     if not x_company_id:

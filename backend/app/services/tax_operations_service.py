@@ -350,12 +350,7 @@ class TaxOperationsService:
                 row = TaxReconciliationIssue(company_id=company_id, branch_id=branch_id, period_year=year, period_month=month, fingerprint=fingerprint, **item)
                 self.db.add(row)
             else:
-                for key, value in item.items():
-                    setattr(row, key, value)
-                if row.status != "ignored":
-                    row.status = "open"
-                    row.resolved_at = None
-                    row.resolved_by = None
+                self._refresh_detected_issue(row, item)
         for row in existing:
             if row.fingerprint not in detected and row.status == "open":
                 row.status = "resolved"
@@ -516,6 +511,19 @@ class TaxOperationsService:
     def _detect(self, result: dict[str, dict[str, object]], code: str, severity: str, source_type: str | None, source_id: str | None, message: str, expected: str | None = None, actual: str | None = None, *, salt: str = "") -> None:
         fingerprint = hashlib.sha256(f"{salt}|{code}|{source_type}|{source_id}".encode()).hexdigest()
         result[fingerprint] = {"issue_code": code, "severity": severity, "status": "open", "source_document_type": source_type, "source_document_id": source_id, "message": message, "expected_value": expected, "actual_value": actual}
+
+    @staticmethod
+    def _refresh_detected_issue(row: TaxReconciliationIssue, item: dict[str, object]) -> None:
+        ignored = row.status == "ignored"
+        for key, value in item.items():
+            if ignored and key == "status":
+                continue
+            setattr(row, key, value)
+        if not ignored:
+            row.status = "open"
+            row.resolved_at = None
+            row.resolved_by = None
+            row.resolution_note = None
 
     async def _render_export(self, company_id: uuid.UUID, data: TaxExportCreate, ledger: list[TaxLedgerEntry]) -> tuple[str, int, Decimal, Decimal, str]:
         if data.export_type in {"vat_sales", "vat_purchases"}:

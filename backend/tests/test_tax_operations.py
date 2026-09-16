@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,7 +16,7 @@ from app.main import app
 from app.schemas.payable import SupplierInvoiceCreate
 from app.schemas.tax_operations import TaxLedgerIngest
 from app.services.role_preset_service import COMPANY_OWNER_PERMISSION_CODES
-from app.services.tax_operations_service import month_bounds, payload_hash
+from app.services.tax_operations_service import TaxOperationsService, month_bounds, payload_hash
 
 
 class TaxOperationsValidationTests(unittest.TestCase):
@@ -70,6 +71,56 @@ class TaxOperationsValidationTests(unittest.TestCase):
     def test_company_owner_has_tax_operations_permissions(self) -> None:
         self.assertIn("accounting.tax.view", COMPANY_OWNER_PERMISSION_CODES)
         self.assertIn("accounting.tax.manage", COMPANY_OWNER_PERMISSION_CODES)
+
+    def test_reconcile_keeps_ignored_warning_ignored(self) -> None:
+        resolved_at = object()
+        resolved_by = uuid.uuid4()
+        row = SimpleNamespace(
+            status="ignored",
+            message="old",
+            resolved_at=resolved_at,
+            resolved_by=resolved_by,
+            resolution_note="accepted for UAT",
+        )
+
+        TaxOperationsService._refresh_detected_issue(
+            row,
+            {
+                "issue_code": "ETAX_MISSING",
+                "severity": "warning",
+                "status": "open",
+                "message": "updated",
+            },
+        )
+
+        self.assertEqual(row.status, "ignored")
+        self.assertEqual(row.message, "updated")
+        self.assertIs(row.resolved_at, resolved_at)
+        self.assertEqual(row.resolved_by, resolved_by)
+        self.assertEqual(row.resolution_note, "accepted for UAT")
+
+    def test_reconcile_reopens_non_ignored_issue(self) -> None:
+        row = SimpleNamespace(
+            status="resolved",
+            resolved_at=object(),
+            resolved_by=uuid.uuid4(),
+            resolution_note="previously fixed",
+        )
+
+        TaxOperationsService._refresh_detected_issue(
+            row,
+            {
+                "issue_code": "ETAX_MISSING",
+                "severity": "warning",
+                "status": "open",
+                "message": "detected again",
+            },
+        )
+
+        self.assertEqual(row.status, "open")
+        self.assertIsNone(row.resolved_at)
+        self.assertIsNone(row.resolved_by)
+        self.assertIsNone(row.resolution_note)
 
 
 class TaxOperationsApiTests(unittest.TestCase):

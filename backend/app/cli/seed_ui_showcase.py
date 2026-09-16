@@ -435,19 +435,25 @@ async def seed_platform_showcase(company_id: uuid.UUID, user_id: uuid.UUID) -> d
             count(summary, "privacy_requests")
 
         branches = (await db.scalars(select(Branch).where(Branch.company_id == company_id))).all()
-        for index, device_type in enumerate(("pos", "kds", "customer_display", "manager_tablet"), start=1):
+        device_rows = (
+            ("counter-main", "counter", "เครื่องขายหน้าร้าน", None),
+            ("kitchen-main", "kitchen", "จอครัว", "ครัวร้อน"),
+            ("pickup-revoked", "pickup", "จอเรียกรับสินค้า", None),
+            ("counter-pairing", "counter", "เครื่องขายสำรอง", None),
+        )
+        for index, (device_key, device_type, device_name, station_key) in enumerate(device_rows, start=1):
             branch = branches[(index - 1) % len(branches)]
             await put(
                 db,
                 DeviceRegistration,
                 "platform-device",
-                device_type,
+                device_key,
                 company_id=company_id,
                 branch_id=branch.id,
                 device_code=f"UI-DEVICE-{index:02d}",
-                name={"pos": "เครื่องขายหน้าร้าน", "kds": "จอครัว", "customer_display": "จอลูกค้า", "manager_tablet": "แท็บเล็ตผู้จัดการ"}[device_type],
+                name=device_name,
                 device_type=device_type,
-                station_key="kitchen-main" if device_type == "kds" else None,
+                station_key=station_key,
                 created_by=user_id,
                 paired_at=now - timedelta(days=index) if index < 4 else None,
                 last_seen_at=now - timedelta(minutes=index * 7) if index < 3 else None,

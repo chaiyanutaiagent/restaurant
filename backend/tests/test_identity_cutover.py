@@ -9,11 +9,14 @@ from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
     RestaurantSessionLocal,
+    get_db,
+    get_identity_db,
     identity_session_factory_for,
     restaurant_service_session_factory_for,
     retail_service_session_factory_for,
     validate_runtime_database_names,
 )
+from app.routers.system import router as system_router
 from app.models.user import User
 from app.services.auth_service import AuthService
 from app.services.platform_reference_projection import ProjectionBatchResult
@@ -25,6 +28,28 @@ from app.routers.auth import ok
 
 
 class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
+    def test_user_admin_routes_use_identity_database(self) -> None:
+        user_routes = (
+            ("GET", "/api/v1/system/users"),
+            ("POST", "/api/v1/system/users"),
+            ("GET", "/api/v1/system/users/{user_id}"),
+            ("PATCH", "/api/v1/system/users/{user_id}"),
+            ("POST", "/api/v1/system/users/{user_id}/deactivate"),
+            ("POST", "/api/v1/system/users/{user_id}/change-password"),
+            ("POST", "/api/v1/system/users/{user_id}/branches"),
+            ("DELETE", "/api/v1/system/users/{user_id}/branches/{branch_id}"),
+        )
+
+        for method, path in user_routes:
+            route = next(
+                item
+                for item in system_router.routes
+                if getattr(item, "path", None) == path and method in getattr(item, "methods", set())
+            )
+            dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
+            self.assertIn(get_identity_db, dependency_calls, f"{method} {path}")
+            self.assertNotIn(get_db, dependency_calls, f"{method} {path}")
+
     def test_identity_session_factory_is_server_owned(self) -> None:
         self.assertIs(identity_session_factory_for("legacy"), AsyncSessionLocal)
         self.assertIs(identity_session_factory_for("platform_core"), PlatformSessionLocal)

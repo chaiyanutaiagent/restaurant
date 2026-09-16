@@ -206,7 +206,7 @@ async def update_central_production_entitlement(
 @router.get("/users")
 async def get_users(
     current: TokenData = Depends(require_permission("system.user.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
     branch_id: uuid.UUID | None = Query(default=None),
     is_active: bool | None = Query(default=None),
     search: str | None = Query(default=None),
@@ -236,7 +236,7 @@ async def get_users(
 async def create_user(
     payload: UserCreateFull,
     current: TokenData = Depends(require_permission("system.user.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     await TenantControlPolicy(db).require_capacity(current.company_id, "users")
     service = AdminService(db)
@@ -249,7 +249,7 @@ async def create_user(
 async def get_user_detail(
     user_id: uuid.UUID,
     current: TokenData = Depends(require_permission("system.user.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
     detail = await service.get_user_detail(user_id, current.company_id)
@@ -267,7 +267,7 @@ async def update_user(
     user_id: uuid.UUID,
     payload: UserUpdateFull,
     current: TokenData = Depends(require_permission("system.user.edit")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
     if "*" not in current.permissions and "company" not in current.scope_types:
@@ -283,7 +283,7 @@ async def update_user(
 async def deactivate_user(
     user_id: uuid.UUID,
     current: TokenData = Depends(require_permission("system.user.delete")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
     await service.deactivate_user(user_id, current.company_id, current.user_id)
@@ -296,7 +296,7 @@ async def change_user_password(
     user_id: uuid.UUID,
     payload: ChangePasswordRequest,
     current: TokenData = Depends(require_permission("system.user.edit")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
     await service.change_user_password(user_id, current.company_id, current.user_id, payload)
@@ -308,7 +308,7 @@ async def assign_user_branch(
     user_id: uuid.UUID,
     payload: AssignBranchRequest,
     current: TokenData = Depends(require_permission("system.user.edit")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
     await service.assign_branch(user_id, current.company_id, payload)
@@ -321,7 +321,7 @@ async def remove_user_branch(
     user_id: uuid.UUID,
     branch_id: uuid.UUID,
     current: TokenData = Depends(require_permission("system.user.edit")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> Response:
     service = AdminService(db)
     await service.remove_branch(user_id, current.company_id, RemoveBranchRequest(branch_id=branch_id))

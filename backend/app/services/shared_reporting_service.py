@@ -386,6 +386,10 @@ async def process_reporting_source_batch(
         state = CompanyReportingSourceState(source_stream=source_stream, status="idle")
         platform_db.add(state)
         await platform_db.flush()
+        # Persist the cursor before normalizing source documents. Otherwise a
+        # rollback for the first malformed event removes this bootstrap row,
+        # so the worker cannot record the failure and blocks all later streams.
+        await platform_db.commit()
     model = OperationalOutboxEvent if source_kind == "legacy" else TakeawayOperationalOutbox
     allowed = LEGACY_EVENT_TYPES if source_kind == "legacy" else TAKEAWAY_EVENT_TYPES
     rows = list(

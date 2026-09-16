@@ -5,12 +5,16 @@ from decimal import Decimal
 from types import SimpleNamespace
 import unittest
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 
 from app.dependencies import TokenData
-from app.models.platform import CompanyReportingEventReceipt, CompanyReportingFact
+from app.models.platform import (
+    CompanyReportingEventReceipt,
+    CompanyReportingFact,
+    CompanyReportingSourceState,
+)
 from app.services.shared_reporting_service import (
     ReportingProjection,
     ReportingProjectionError,
@@ -18,6 +22,7 @@ from app.services.shared_reporting_service import (
     apply_reporting_projection,
     normalize_legacy_event,
     normalize_takeaway_event,
+    process_reporting_source_batch,
     q2,
     require_shared_reporting,
 )
@@ -207,6 +212,47 @@ class SharedReportingProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.gross_sales, Decimal("85.00"))
         self.assertEqual(result.refund_amount, Decimal("80.00"))
         self.assertEqual(result.net_sales, Decimal("0.00"))
+
+    async def test_first_bad_event_keeps_source_state_and_records_failure(self) -> None:
+        row = SimpleNamespace(
+            id=self.event.event_id,
+            company_id=self.event.company_id,
+            brand_id=self.event.brand_id,
+            branch_id=self.event.branch_id,
+            event_type=self.event.event_type,
+            aggregate_type=self.event.aggregate_type,
+            aggregate_id=self.event.aggregate_id,
+            payload=self.event.payload,
+            created_at=self.event.created_at,
+        )
+        persisted_state = CompanyReportingSourceState(
+            source_stream="legacy_pos",
+            status="idle",
+            failure_attempts=0,
+        )
+        source_db = AsyncMock()
+        source_db.scalars.return_value = [row]
+        platform_db = AsyncMock()
+        platform_db.add = MagicMock()
+        platform_db.scalar.side_effect = [None, persisted_state]
+
+        with patch(
+            "app.services.shared_reporting_service.normalize_legacy_event",
+            AsyncMock(side_effect=ReportingProjectionError("source_document_missing")),
+        ):
+            result = await process_reporting_source_batch(
+                source_db,
+                platform_db,
+                source_stream="legacy_pos",
+                source_kind="legacy",
+            )
+
+        self.assertEqual(result.failed, 1)
+        self.assertEqual(persisted_state.status, "failed")
+        self.assertEqual(persisted_state.last_error_code, "source_document_missing")
+        self.assertEqual(persisted_state.failure_attempts, 1)
+        self.assertGreaterEqual(platform_db.commit.await_count, 2)
+        platform_db.rollback.assert_awaited_once()
 
 
 if __name__ == "__main__":

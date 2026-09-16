@@ -2,7 +2,8 @@
 
 วันที่อนุมัติและเริ่มทำ: 2026-09-15
 
-สถานะ: **completed_local — schema/copy/replay/canary/rollback ผ่านในฐานชั่วคราว; runtime จริงยัง Legacy**
+สถานะ: **uat_dark_launch — deploy commit `df12dcc` และสร้าง Retail v2 จริงใน UAT แล้ว;
+Retail routing ยังอยู่ Legacy เพราะ UAT ไม่มี Retail Brand/ข้อมูล Retail ให้ย้าย; Production ยังไม่เปิด**
 
 Baseline rollback: WP7 commit `bc4a93eb773dca924bddee0bac2146ef5156c8ee`
 
@@ -64,8 +65,11 @@ CRM/loyalty, notification, accounting/e-tax, purchase/transfer, HR/payroll แ�
 - [x] Retail writes อยู่ Retail DB; Legacy source stock และ sale history ไม่เปลี่ยน
 - [x] Retail outbox ส่ง shared ERP facts แยก `module_key=retail_pos` และยอดสุทธิ reconcile
 - [x] read-only rollback route ด้วย `RETAIL_SERVICE_DATABASE=legacy`
+- [x] UAT deploy commit `df12dcc`, แยกฐาน Platform/Restaurant/Retail/Takeaway และเปิด Platform identity
+- [x] UAT backup ก่อน/หลัง cutover, migration heads, reference parity, public health และ auto-login ผ่าน
 - [ ] physical scanner/printer/cash drawer/offline UAT (พักตามคำสั่ง owner)
-- [ ] UAT/Production activation และ owner sign-off
+- [ ] ย้าย Retail tenant จริง, เปลี่ยน `RETAIL_SERVICE_DATABASE=retail` และ owner sign-off
+- [ ] Production activation
 
 ## Security decisions
 
@@ -86,3 +90,4 @@ CRM/loyalty, notification, accounting/e-tax, purchase/transfer, HR/payroll แ�
 5. revert WP8 source กลับ baseline WP7 ได้โดย Legacy ยังคงเป็น system of record
 
 หลักฐานตรวจรับอยู่ที่ `docs/scopes/WP8-PHASE-GATE-02.md`
+และหลักฐาน UAT จริงอยู่ที่ `docs/scopes/WP8-UAT-DARK-LAUNCH-03.md`

@@ -6,7 +6,11 @@ import type { TokenResponse } from "@/types/auth";
 import type { User } from "@/types/user";
 
 type JwtPayload = {
+  brand_id?: string | null;
   branch_id?: string | null;
+  business_type?: string | null;
+  target_database?: string | null;
+  scope_types?: string[];
   station_key?: string | null;
   permissions?: string[];
 };
@@ -17,7 +21,11 @@ type AuthState = {
   user: User | null;
   companyId: string | null;
   businessSlug: string | null;
+  brandId: string | null;
   branchId: string | null;
+  businessType: string | null;
+  targetDatabase: string | null;
+  scopeTypes: string[];
   stationKey: string | null;
   permissions: string[];
   setSession: (tokens: TokenResponse, companyId: string) => void;
@@ -50,7 +58,11 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
   user: null,
   companyId: null,
   businessSlug: null,
+  brandId: null,
   branchId: null,
+  businessType: null,
+  targetDatabase: null,
+  scopeTypes: [],
   stationKey: null,
   permissions: [],
   setSession: (tokens, companyId) => {
@@ -61,7 +73,11 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
       state.user = tokens.user;
       state.companyId = companyId;
       state.businessSlug = tokens.business_slug ?? null;
+      state.brandId = payload?.brand_id ?? null;
       state.branchId = payload?.branch_id ?? null;
+      state.businessType = payload?.business_type ?? null;
+      state.targetDatabase = payload?.target_database ?? null;
+      state.scopeTypes = payload?.scope_types ?? [];
       state.stationKey = payload?.station_key ?? null;
       state.permissions = payload?.permissions ?? [];
     });
@@ -78,7 +94,11 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
       state.user = null;
       state.companyId = null;
       state.businessSlug = null;
+      state.brandId = null;
       state.branchId = null;
+      state.businessType = null;
+      state.targetDatabase = null;
+      state.scopeTypes = [];
       state.stationKey = null;
       state.permissions = [];
     });

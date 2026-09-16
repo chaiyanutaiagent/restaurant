@@ -2,15 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Factory, PackageCheck, ShoppingBag, Warehouse } from "lucide-react";
 import { Link } from "react-router-dom";
 import { takeawayApi } from "@/lib/takeawayApi";
+import { useAuthStore } from "@/stores/auth.store";
 
 const cards = [
-  { to: "/takeaway/counter", title: "ขายและชำระก่อนผลิต", detail: "รับเงิน ออกเลขคิว ส่งครัว และออกใบเสร็จในรายการเดียว", icon: ShoppingBag, color: "bg-emerald-500" },
-  { to: "/takeaway/kitchen", title: "ครัวและจุดรับสินค้า", detail: "เรียงคิวจากชำระแล้วจนถึงพร้อมรับและรับสินค้า", icon: PackageCheck, color: "bg-amber-400" },
-  { to: "/takeaway/production", title: "ผลิตหลายแบรนด์", detail: "สูตรและล็อตผลิตแยกแบรนด์ แต่ตัดวัตถุดิบกองกลางร่วมกัน", icon: Factory, color: "bg-violet-500" },
-  { to: "/takeaway/stock", title: "สต๊อกส่วนกลาง", detail: "ยอดเดียวต่อสินค้าและตำแหน่ง พร้อมประวัติรับ จ่าย โอน และของเสีย", icon: Warehouse, color: "bg-sky-500" },
+  { to: "/takeaway/store/orders", permission: "takeaway.sale.create", title: "ขายและชำระก่อนผลิต", detail: "รับเงิน ออกเลขคิว ส่งครัว และออกใบเสร็จในรายการเดียว", icon: ShoppingBag, color: "bg-emerald-500" },
+  { to: "/takeaway/store/kitchen", permission: "takeaway.kitchen.manage", title: "ครัวและจุดรับสินค้า", detail: "เรียงคิวจากชำระแล้วจนถึงพร้อมรับและรับสินค้า", icon: PackageCheck, color: "bg-amber-400" },
+  { to: "/takeaway/central/production", permission: "takeaway.production.manage", title: "ผลิตหลายแบรนด์", detail: "สูตรและล็อตผลิตแยกแบรนด์ แต่ตัดวัตถุดิบกองกลางร่วมกัน", icon: Factory, color: "bg-violet-500" },
+  { to: "/takeaway/central/stock", permission: "takeaway.stock.manage", title: "สต๊อกส่วนกลาง", detail: "ยอดเดียวต่อสินค้าและตำแหน่ง พร้อมประวัติรับ จ่าย โอน และของเสีย", icon: Warehouse, color: "bg-sky-500" },
 ];
 
 export default function TakeawayDashboardPage(): JSX.Element {
+  const hasPermission = useAuthStore((state) => state.hasPermission);
   const statusQuery = useQuery({ queryKey: ["takeaway", "status"], queryFn: async () => (await takeawayApi.status()).data.data });
   const context = statusQuery.data;
   return (
@@ -29,7 +31,7 @@ export default function TakeawayDashboardPage(): JSX.Element {
         </div>
       </section>
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {cards.map((card) => (
+        {cards.filter((card) => hasPermission(card.permission)).map((card) => (
           <Link key={card.to} to={card.to} className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <div className={`inline-flex rounded-xl p-3 text-white ${card.color}`}><card.icon className="h-6 w-6" /></div>
             <h2 className="mt-4 font-black">{card.title}</h2>

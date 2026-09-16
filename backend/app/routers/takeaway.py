@@ -18,6 +18,7 @@ from app.dependencies import (
     get_takeaway_operational_db,
     require_business_type,
     require_company_feature,
+    require_any_permission,
     require_permission,
 )
 from app.schemas.takeaway import (
@@ -478,7 +479,9 @@ async def list_central_orders(
     brand_id: uuid.UUID | None = None,
     branch_id: uuid.UUID | None = None,
     limit: int = Query(default=200, ge=1, le=500),
-    current: TokenData = Depends(require_permission("takeaway.central_order.create")),
+    current: TokenData = Depends(
+        require_any_permission("takeaway.central_order.create", "takeaway.central_order.manage")
+    ),
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
     return ok(

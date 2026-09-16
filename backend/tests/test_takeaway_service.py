@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import inspect
 import unittest
 import uuid
 
 from fastapi import HTTPException
+from fastapi.params import Depends
 from pydantic import ValidationError
 
 from app.dependencies import TokenData
 from app.models.takeaway import TakeawayOrder, TakeawayStockBalance
+from app.routers import takeaway
 from app.schemas.takeaway import (
     TakeawayPaymentCreate,
     TakeawayProductionBatchCreate,
@@ -19,7 +22,7 @@ from app.schemas.takeaway import (
 from app.services.takeaway_service import assert_takeaway_scope, money
 
 
-def token(*, business_type: str = "takeaway") -> TokenData:
+def token(*, business_type: str = "takeaway", permissions: list[str] | None = None) -> TokenData:
     return TokenData(
         user_id=uuid.uuid4(),
         company_id=uuid.uuid4(),
@@ -27,7 +30,7 @@ def token(*, business_type: str = "takeaway") -> TokenData:
         branch_id=uuid.uuid4(),
         business_type=business_type,
         target_database=business_type,
-        permissions=["*"],
+        permissions=["*"] if permissions is None else permissions,
     )
 
 
@@ -101,6 +104,35 @@ class TakeawayServicePolicyTests(unittest.TestCase):
                 offline_device_id=uuid.uuid4(),
             )
 
+
+class TakeawayRouterPermissionTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def permission_dependency(endpoint: object):
+        default = inspect.signature(endpoint).parameters["current"].default
+        if not isinstance(default, Depends):
+            raise AssertionError("current is not a FastAPI dependency")
+        return default.dependency
+
+    async def test_central_order_list_accepts_store_or_central_role(self) -> None:
+        checker = self.permission_dependency(takeaway.list_central_orders)
+        store = token(permissions=["takeaway.central_order.create"])
+        central = token(permissions=["takeaway.central_order.manage"])
+
+        self.assertIs(await checker(store), store)
+        self.assertIs(await checker(central), central)
+
+        with self.assertRaises(HTTPException) as denied:
+            await checker(token(permissions=["takeaway.catalog.view"]))
+        self.assertEqual(denied.exception.status_code, 403)
+
+    async def test_central_order_creation_remains_store_permission_only(self) -> None:
+        checker = self.permission_dependency(takeaway.create_central_order)
+        store = token(permissions=["takeaway.central_order.create"])
+        self.assertIs(await checker(store), store)
+
+        with self.assertRaises(HTTPException) as denied:
+            await checker(token(permissions=["takeaway.central_order.manage"]))
+        self.assertEqual(denied.exception.status_code, 403)
 
 if __name__ == "__main__":
     unittest.main()

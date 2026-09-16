@@ -1105,3 +1105,10 @@ recipe/replenishment, production/receive discrepancy, credit top-up, operational
 Bluetooth/update และ real-data migration/cutover จึงแบ่งงานต่อเป็น WP17–WP26 โดย Production ยังคง blocked
 รายละเอียดอยู่ที่ `docs/scopes/WP16-CHAMBO-FULL-MIGRATION-GAP-MATRIX-01.md`; งานถัดไปคือ WP17
 Takeaway Information Architecture และ Role Workspaces
+
+WP17 ผ่าน local automated gate แล้ว โดยแยก Takeaway เป็น Store, Central และ Admin workspace ตาม
+permission กับ scope จาก signed token, เพิ่ม canonical route พร้อม redirect จากลิงก์เดิม, แยกหน้ากะขาย,
+แก้ Kitchen-only landing ที่เคยชน 403 และแยกสิทธิ์อ่าน Central Order ให้ Store/Central ใช้ร่วมกันโดยไม่
+เปิดสิทธิ์สร้างหรือเปลี่ยนสถานะข้ามบทบาท Backend `365` tests, frontend type-check/build และ browser role
+tests `3/3` ผ่าน ไม่มี migration และยังไม่ deploy UAT/Production รายละเอียดอยู่ที่
+`docs/scopes/WP17-TAKEAWAY-IA-ROLE-WORKSPACES-01.md`; งานถัดไปคือ WP18 Store Operation Parity

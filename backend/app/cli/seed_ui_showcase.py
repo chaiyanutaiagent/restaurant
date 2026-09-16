@@ -1932,7 +1932,11 @@ async def seed_shared_kitchen_and_distribution_showcase(
     statuses = ("submitted", "partially_allocated", "fulfilled")
     distribution_demands: list[CompanyDistributionDemand] = []
     for index, module in enumerate(modules, start=1):
-        brand = next((row for row in brands if row.business_type == module.removesuffix("_pos")), brands[index - 1])
+        business_type = module.removesuffix("_pos")
+        brand = next(
+            (row for row in brands if row.business_type in {business_type, f"{business_type}_pos"}),
+            brands[index - 1],
+        )
         linked_branch = next((row for row in branches if row.id == brand.central_branch_id), branches[index - 1])
         product = raw_products[(index - 1) % len(raw_products)]
         distribution_demand, _ = await put(
@@ -2061,7 +2065,8 @@ async def seed_legacy_showcase(
 def reference_for_business(
     references: dict[str, list[dict[str, Any]]], business_type: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    brand = next((row for row in references["brands"] if row["business_type"] == business_type), None)
+    accepted_types = {business_type, f"{business_type}_pos"}
+    brand = next((row for row in references["brands"] if row["business_type"] in accepted_types), None)
     if brand is None:
         raise RuntimeError(f"{business_type} Brand was not found")
     link = next((row for row in references["links"] if row["brand_id"] == brand["id"] and row["is_active"]), None)

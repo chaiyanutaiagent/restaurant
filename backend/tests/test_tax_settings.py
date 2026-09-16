@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -145,6 +146,39 @@ class TaxSettingsSeedTests(unittest.IsolatedAsyncioTestCase):
         rows = db.add_all.call_args.args[0]
         self.assertEqual([row.code for row in rows], ["VAT_ZERO", "VAT_EXEMPT"])
         self.assertEqual([row.code for row in rows if row.is_default], ["VAT_EXEMPT"])
+
+
+class TaxSettingsAuditSnapshotTests(unittest.TestCase):
+    def test_company_snapshot_does_not_read_expired_timestamp(self) -> None:
+        class Profile(SimpleNamespace):
+            @property
+            def updated_at(self):
+                raise AssertionError("audit snapshot must not refresh an expired timestamp")
+
+        company = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Test Company",
+            tax_id=None,
+            vat_registered=False,
+            address=None,
+        )
+        profile = Profile(
+            id=uuid.uuid4(),
+            legal_name="UAT Company",
+            tax_id="0999999999999",
+            vat_registered=True,
+            vat_registration_date=date(2026, 1, 1),
+            registered_address="Bangkok",
+            default_price_vat_type="included",
+            default_vat_rate=Decimal("7.00"),
+            vat_filing_mode="separate",
+            consolidated_filing_approved=False,
+        )
+
+        snapshot = TaxSettingsService._company_snapshot(company, profile)
+
+        self.assertEqual(snapshot["legal_name"], "UAT Company")
+        self.assertNotIn("updated_at", snapshot)
 
 
 class TaxSettingsApiTests(unittest.TestCase):

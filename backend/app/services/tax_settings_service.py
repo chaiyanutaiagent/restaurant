@@ -473,13 +473,52 @@ class TaxSettingsService:
 
     @staticmethod
     def _company_snapshot(company: Company, profile: CompanyTaxProfile | None) -> dict[str, Any]:
-        row = TaxSettingsService._company_read(company, profile)
-        return _json_value(row.model_dump(mode="python"))
+        # A flush can expire server-managed timestamps. Audit snapshots must not
+        # trigger implicit database I/O through a synchronous attribute access in
+        # an AsyncSession, so snapshot only fields already loaded or assigned.
+        return _json_value(
+            {
+                "id": profile.id if profile else None,
+                "configured": profile is not None,
+                "company_id": company.id,
+                "legal_name": (profile.legal_name if profile else None) or company.name,
+                "tax_id": (profile.tax_id if profile else None) or company.tax_id,
+                "vat_registered": profile.vat_registered if profile else company.vat_registered,
+                "vat_registration_date": profile.vat_registration_date if profile else None,
+                "registered_address": (profile.registered_address if profile else None)
+                or company.address,
+                "default_price_vat_type": (
+                    profile.default_price_vat_type if profile else "included"
+                ),
+                "default_vat_rate": profile.default_vat_rate if profile else Decimal("7.00"),
+                "vat_filing_mode": profile.vat_filing_mode if profile else "separate",
+                "consolidated_filing_approved": (
+                    profile.consolidated_filing_approved if profile else False
+                ),
+            }
+        )
 
     @staticmethod
     def _branch_snapshot(branch: Branch, profile: BranchTaxProfile | None) -> dict[str, Any]:
-        row = TaxSettingsService._branch_read(branch, profile)
-        return _json_value(row.model_dump(mode="python"))
+        return _json_value(
+            {
+                "id": profile.id if profile else None,
+                "configured": profile is not None,
+                "company_id": branch.company_id,
+                "branch_id": branch.id,
+                "branch_code": branch.code,
+                "branch_name": branch.name,
+                "tax_branch_code": profile.tax_branch_code if profile else None,
+                "is_head_office": profile.is_head_office if profile else False,
+                "legal_name": profile.legal_name if profile else None,
+                "registered_address": (profile.registered_address if profile else None)
+                or branch.address,
+                "vat_registration_date": profile.vat_registration_date if profile else None,
+                "filing_enabled": profile.filing_enabled if profile else True,
+                "effective_from": profile.effective_from if profile else None,
+                "effective_to": profile.effective_to if profile else None,
+            }
+        )
 
     @staticmethod
     def _rate_snapshot(rule: TaxRateRule) -> dict[str, Any]:

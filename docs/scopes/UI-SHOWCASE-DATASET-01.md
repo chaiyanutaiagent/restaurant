@@ -40,3 +40,16 @@ python -m app.cli.seed_ui_showcase \
 ```
 
 ก่อนรันบน UAT ต้องสำรองฐานข้อมูลทั้ง Platform, Legacy, Restaurant, Retail และ Takeaway หลังรันให้ตรวจจำนวนข้อมูลและเปิดหน้า UI หลักทุกหมวด ส่วนการลบชุดข้อมูลให้ restore จาก backup ก่อน seed ซึ่งเป็นวิธี rollback ที่คงความสัมพันธ์ของข้อมูลได้แน่นอนที่สุด
+
+## UAT execution evidence
+
+- วันที่รัน: 2026-09-16
+- UAT URL: `https://uat-pos.foodchainservice.com`
+- Backend image: `restaurant-pos-backend:ui-showcase-a81d0d9`
+- Pre-seed rollback backup: `/home/behappyaiagent/restaurant-uat-backups/ui-showcase-pre-20260916T102915Z`
+- สร้าง dump ครบ 5 ฐาน: Legacy, Platform Core, Restaurant, Retail และ Takeaway พร้อม SHA-256
+- รันคำสั่ง seed สำเร็จ 2 รอบติดต่อกันเพื่อยืนยัน idempotency
+- ตรวจ HTTPS `/health`, `/pos` และ `/admin` ได้ HTTP 200
+- Production backend คงเดิมที่ `restaurant-pos-backend:4c1c2ba` และมีสถานะ healthy
+
+จำนวนหลักที่ตรวจจากฐานข้อมูลหลังรัน: Platform invoice 3, support ticket 3, device 4; Legacy sale 7, PO 5, customer 8, employee 6, shipment 5, production order 3 และ distribution demand 3; Retail product 16 และ sale 7; Takeaway catalog 16, order 7, central order 3 และ production batch 3

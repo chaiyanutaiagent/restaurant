@@ -152,6 +152,7 @@ def source_event(row: OperationalOutboxEvent | TakeawayOperationalOutbox, stream
 async def normalize_legacy_event(
     db: AsyncSession,
     event: SourceReportingEvent,
+    reference_db: AsyncSession | None = None,
 ) -> ReportingProjection:
     if event.event_type not in LEGACY_EVENT_TYPES or event.aggregate_type != "SaleOrder":
         raise ReportingProjectionError("unsupported_legacy_event")
@@ -184,6 +185,31 @@ async def normalize_legacy_event(
             .order_by(Brand.created_at, Brand.id)
             .limit(1)
         )
+    # During the Platform-identity transition, Legacy remains the operational
+    # source while Brand/Branch ownership is already authoritative in Platform.
+    # Resolve that reference in a separate read transaction rather than copying
+    # or joining operational data across database boundaries.
+    if brand is None and reference_db is not None:
+        if event.brand_id is not None:
+            brand = await reference_db.scalar(
+                select(Brand).where(
+                    Brand.id == event.brand_id,
+                    Brand.company_id == event.company_id,
+                )
+            )
+        if brand is None:
+            brand = await reference_db.scalar(
+                select(Brand)
+                .join(BrandBranch, BrandBranch.brand_id == Brand.id)
+                .where(
+                    Brand.company_id == event.company_id,
+                    BrandBranch.company_id == event.company_id,
+                    BrandBranch.branch_id == order.branch_id,
+                    BrandBranch.is_active.is_(True),
+                )
+                .order_by(Brand.created_at, Brand.id)
+                .limit(1)
+            )
     if brand is None or brand.business_type not in {"restaurant", "retail_pos"}:
         raise ReportingProjectionError("workspace_dimension_missing")
     if order.status not in {"completed", "partially_refunded", "refunded", "voided"}:
@@ -415,7 +441,7 @@ async def process_reporting_source_batch(
         event = source_event(row, source_stream)
         try:
             projection = (
-                await normalize_legacy_event(source_db, event)
+                await normalize_legacy_event(source_db, event, platform_db)
                 if source_kind == "legacy"
                 else await normalize_takeaway_event(source_db, event)
             )

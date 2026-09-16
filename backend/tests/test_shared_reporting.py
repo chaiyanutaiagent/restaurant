@@ -180,6 +180,35 @@ class SharedReportingProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.refund_amount, Decimal("20.00"))
         self.assertEqual(result.net_sales, Decimal("80.00"))
 
+    async def test_legacy_source_falls_back_to_platform_workspace_dimension(self) -> None:
+        order = SimpleNamespace(
+            id=self.event.aggregate_id,
+            company_id=self.company_id,
+            branch_id=self.branch_id,
+            status="completed",
+            total_amount=Decimal("107"),
+            discount_amount=Decimal("0"),
+            refund_amount=Decimal("0"),
+            vat_amount=Decimal("7"),
+            created_at=datetime(2026, 9, 14, 10, tzinfo=timezone.utc),
+            order_number="SO-PLATFORM-REF",
+        )
+        platform_brand = SimpleNamespace(
+            id=self.brand_id,
+            company_id=self.company_id,
+            business_type="restaurant",
+        )
+        source_db = AsyncMock()
+        source_db.scalar.side_effect = [order, None, None]
+        platform_db = AsyncMock()
+        platform_db.scalar.return_value = platform_brand
+
+        result = await normalize_legacy_event(source_db, self.event, platform_db)
+
+        self.assertEqual(result.brand_id, self.brand_id)
+        self.assertEqual(result.module_key, "restaurant_pos")
+        platform_db.scalar.assert_awaited_once()
+
     async def test_takeaway_source_derives_refund_snapshot(self) -> None:
         takeaway_event = SourceReportingEvent(
             source_stream="takeaway_pos",

@@ -1,6 +1,6 @@
 # WP9-TAX-OPERATIONS-02 — Shared ERP Tax Operations (B–H)
 
-สถานะ: **Local implementation complete / ยังไม่ deploy UAT หรือ Production**
+สถานะ: **UAT deployed / ยังไม่ deploy Production / รอ physical UAT และ accountant review**
 วันที่: 16 กันยายน 2026
 Owner approval: Approved — ผู้ใช้สั่ง “ทำต่อ B-H”
 
@@ -94,14 +94,15 @@ Migration เป็น additive และ downgrade ลบเฉพาะตา�
 - [x] Focused backend tests ผ่าน
 - [x] Frontend type-check ผ่าน
 - [ ] Physical UAT / real accountant review — พักไว้ตามคำสั่ง owner
-- [ ] Deploy UAT/Production — ยังไม่ได้รับคำสั่ง
+- [x] Deploy UAT พร้อม backup, migration และ API smoke
+- [ ] Deploy Production — ต้องผ่าน physical UAT และ owner sign-off ก่อน
 
 ## 8. Non-goals / Legal Boundary
 
 - ไม่ยื่น ภ.พ.30, ภ.ง.ด.3 หรือ ภ.ง.ด.53 ให้กรมสรรพากรอัตโนมัติ
 - ไม่ใช้ digital certificate/signature และไม่เชื่อม e-Tax Service Provider
 - ไฟล์เป็น working package ให้ผู้ทำบัญชีตรวจและนำไปใช้ต่อ ไม่รับรองว่าเป็นรูปแบบ upload ของผู้ให้บริการรายใด
-- ไม่ migrate ข้อมูลจริงและไม่เปิด feature บน UAT/Production ใน WP นี้
+- ไม่ย้ายข้อมูลจริงข้าม database boundary และยังไม่เปิด feature บน Production
 
 ## 9. Rollback
 
@@ -121,7 +122,21 @@ Migration เป็น additive และ downgrade ลบเฉพาะตา�
 - Frontend production PWA build: ผ่าน (`4,210` modules)
 - `git diff --check`: ผ่าน
 
-## 11. งานถัดไป
+## 11. UAT Deployment Evidence
 
-Physical UAT กับเจ้าของระบบและผู้ทำบัญชี โดยใช้ข้อมูลจำลองก่อน แล้วจึงทำ deployment plan แยกพร้อม
-backup, rehearsal, rollback และ owner sign-off ห้ามเปิด production จากเอกสารนี้โดยอัตโนมัติ
+- Commit: `a08122a9a786b030b1103e34dba2c1d6022b6fb0`
+- UAT URL: `https://uat-pos.foodchainservice.com`
+- Release directory: `/home/behappyaiagent/restaurant-uat-releases/a08122a9a786b030b1103e34dba2c1d6022b6fb0`
+- Rollback backup: `/home/behappyaiagent/restaurant-uat-deploy-backups/a08122a`
+- Migration: `p14dist0016 → p15taxset0017 → p16taxops0018`
+- Images: `restaurant-pos-backend:wp9-a08122a`, `restaurant-pos-frontend:wp9-a08122a`,
+  `restaurant-pos-nginx:wp9-a08122a`
+- Internal/public live และ ready health: HTTP `200`
+- UAT auto-login, `GET /api/v1/tax-settings` และ
+  `GET /api/v1/tax-operations/dashboard?year=2026&month=9`: HTTP `200`
+- Cloudflare Tunnel precheck ผ่าน และ Production ไม่ถูกเปลี่ยนแปลง
+
+## 12. งานถัดไป
+
+Physical UAT กับเจ้าของระบบและผู้ทำบัญชี โดยใช้ข้อมูลจำลองก่อน แล้วจึงทำ Production deployment plan
+แยกพร้อม backup, rehearsal, rollback และ owner sign-off ห้ามเปิด Production จากเอกสารนี้โดยอัตโนมัติ

@@ -1,6 +1,6 @@
 # WP9-TAX-CONFIGURATION-01 — Shared ERP Tax Configuration
 
-สถานะ: **Local implementation complete / ยังไม่ deploy UAT หรือ Production**
+สถานะ: **UAT deployed / ยังไม่ deploy Production / รอ physical UAT**
 วันที่: 16 กันยายน 2026
 Owner approval: Approved — ผู้ใช้สั่ง “ทำ 1 ได้เลย” สำหรับงานลำดับ 1 (WP9-A)
 
@@ -53,7 +53,7 @@ e-Tax ใช้รหัสสาขา `00000` แบบตายตัว จ�
 - การคำนวณ Output VAT ใหม่จากยอดขายทุกช่องทาง (งาน WP9-B)
 - ภาษีซื้อจาก Goods Receipt / Supplier Invoice reconciliation ใหม่ (งาน WP9-C)
 - ภาษีหัก ณ ที่จ่ายเพิ่มเติมนอก AP ที่มีอยู่
-- การ migrate หรือเปิดใช้งานบน UAT/Production
+- การเปิดใช้งานบน Production
 
 ## 5. Data Model และ Migration
 
@@ -100,7 +100,20 @@ Migration เป็น additive และ `downgrade` ลบเฉพาะส�
 - Frontend production PWA build: ผ่าน (`4,208` modules)
 - `git diff --check`: ผ่าน
 
-## 9. Rollback
+## 9. UAT Deployment Evidence
+
+- Commit: `a08122a9a786b030b1103e34dba2c1d6022b6fb0`
+- UAT URL: `https://uat-pos.foodchainservice.com`
+- Backend image: `restaurant-pos-backend:wp9-a08122a`
+- Frontend image: `restaurant-pos-frontend:wp9-a08122a`
+- Nginx image: `restaurant-pos-nginx:wp9-a08122a`
+- Migration: `p16taxops0018 (head)` ซึ่งรวม `p15taxset0017`
+- Backup: `/home/behappyaiagent/restaurant-uat-deploy-backups/a08122a`
+- Internal/public live และ ready health: HTTP `200`
+- UAT auto-login และ `GET /api/v1/tax-settings`: HTTP `200`
+- Production ไม่ถูกเปลี่ยนแปลง
+
+## 10. Rollback
 
 ก่อน deploy ให้ backup ฐานข้อมูลตาม runbook ปัจจุบัน หากต้องถอยกลับ:
 
@@ -109,7 +122,7 @@ Migration เป็น additive และ `downgrade` ลบเฉพาะส�
 3. downgrade migration จาก `p15taxset0017` ไป `p14dist0016`
 4. e-Tax จะ fallback ไป `companies.tax_id`, `companies.name`, `companies.address` และรหัส `00000`
 
-## 10. งานถัดไป
+## 11. งานถัดไป
 
 `WP9-B — Sales VAT Ledger and Output VAT Reconciliation`
 

@@ -1047,9 +1047,8 @@ Tax Profile กลางระดับ Company/Branch, รหัสสาขา
 โดยไม่ทำสำเนาข้าม operational database
 
 e-Tax อ่านข้อมูลผู้ขายและรหัสสาขาจาก Tax Profile ตามวันที่ขายพร้อม fallback ไปข้อมูลเดิมเพื่อรักษา
-legacy flow ส่วนการสร้าง Sales VAT Ledger จากยอดขายทุก POS, Output VAT reconciliation และรายงาน
-ภาษีซื้อแบบครบวงจรเป็นงาน WP9-B/WP9-C ต่อไป ยังไม่มีการยื่นภาษีจริงหรือ deploy UAT/Production
-หลักฐานอยู่ที่ `docs/scopes/WP9-TAX-CONFIGURATION-01.md`
+legacy flow ส่วน Sales VAT Ledger, Output VAT reconciliation และภาษีซื้อครบวงจรทำต่อใน WP9-B/WP9-C
+แล้ว ระบบยังไม่มีการยื่นภาษีจริง หลักฐานอยู่ที่ `docs/scopes/WP9-TAX-CONFIGURATION-01.md`
 
 WP9-B ถึง WP9-H ใช้ Scope ID `WP9-TAX-OPERATIONS-02` และผ่าน local implementation gate แล้ว โดยเพิ่ม
 Tax Ledger กลางสำหรับภาษีขาย/ซื้อ, หลักฐานใบกำกับภาษีซื้อ, การจำแนก ภ.ง.ด.3/53, e-Tax reconciliation,
@@ -1057,6 +1056,10 @@ Tax Ledger กลางสำหรับภาษีขาย/ซื้อ, ห
 หน้า Company Admin อยู่ที่ `/tax-center` และเพิ่มสิทธิ์ `accounting.tax.view/manage`
 
 Shared ERP เป็น system of record ของ Tax Operations ส่วน Retail/Takeaway ที่แยกฐานข้อมูลต้องส่ง normalized
-tax event ผ่าน idempotent contract ห้าม query ข้าม operational database ระบบยังไม่ส่งแบบให้กรมสรรพากร,
-ไม่ deploy/migrate UAT/Production และ physical UAT กับผู้ทำบัญชียังคงพัก รายละเอียดอยู่ที่
-`docs/scopes/WP9-TAX-OPERATIONS-02.md`
+tax event ผ่าน idempotent contract ห้าม query ข้าม operational database ระบบยังไม่ส่งแบบให้กรมสรรพากร
+
+วันที่ 16 กันยายน 2026 deploy WP9-A ถึง WP9-H ขึ้น UAT ที่ `https://uat-pos.foodchainservice.com`
+ด้วย commit `a08122a`, migration ถึง `p16taxops0018`, image ชุด `wp9-a08122a` และ backup ที่
+`/home/behappyaiagent/restaurant-uat-deploy-backups/a08122a`; internal/public health, auto-login,
+Tax Settings และ Tax Center dashboard smoke ผ่าน ส่วน Production ไม่ถูกเปลี่ยนแปลง และ physical UAT
+กับผู้ทำบัญชียังคงพัก รายละเอียดอยู่ที่ `docs/scopes/WP9-TAX-OPERATIONS-02.md`

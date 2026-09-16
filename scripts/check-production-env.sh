@@ -49,6 +49,22 @@ POSTGRES_PASSWORD
 POSTGRES_HOST
 POSTGRES_PORT
 DATABASE_URL
+PLATFORM_POSTGRES_DB
+RESTAURANT_POSTGRES_DB
+RETAIL_POSTGRES_DB
+TAKEAWAY_POSTGRES_DB
+PLATFORM_DATABASE_URL
+RESTAURANT_DATABASE_URL
+RETAIL_DATABASE_URL
+TAKEAWAY_DATABASE_URL
+IDENTITY_DATABASE
+RESTAURANT_SERVICE_DATABASE
+RETAIL_SERVICE_DATABASE
+RETAIL_REFERENCE_PROJECTOR_ENABLED
+TAKEAWAY_SERVICE_DATABASE
+TAKEAWAY_FEATURE_ENABLED
+REFERENCE_PROJECTOR_ENABLED
+SHARED_REPORTING_PROJECTOR_ENABLED
 REDIS_URL
 SECRET_KEY
 DEFAULT_ADMIN_PASSWORD
@@ -78,6 +94,69 @@ SAAS_SMTP_START_TLS
 for key in $REQUIRED_VARS; do
   check_required "$key"
 done
+
+database_names="$(value_of POSTGRES_DB) $(value_of PLATFORM_POSTGRES_DB) $(value_of RESTAURANT_POSTGRES_DB) $(value_of RETAIL_POSTGRES_DB) $(value_of TAKEAWAY_POSTGRES_DB)"
+unique_database_count="$(printf '%s\n' $database_names | sort -u | wc -l | tr -d '[:space:]')"
+if [ "$unique_database_count" != "5" ]; then
+  fail "POSTGRES_DB and all four operational boundary database names must be distinct"
+fi
+for database_name in $database_names; do
+  if ! printf '%s' "$database_name" | grep -Eq '^[A-Za-z0-9_]+$'; then
+    fail "database names may contain only letters, numbers and underscores"
+  fi
+done
+
+check_boolean() {
+  key="$1"
+  value="$(value_of "$key" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    true|false) ;;
+    *) fail "$key must be true or false" ;;
+  esac
+}
+
+for key in RETAIL_REFERENCE_PROJECTOR_ENABLED TAKEAWAY_FEATURE_ENABLED REFERENCE_PROJECTOR_ENABLED SHARED_REPORTING_PROJECTOR_ENABLED; do
+  check_boolean "$key"
+done
+
+IDENTITY_DATABASE_VALUE="$(value_of IDENTITY_DATABASE)"
+case "$IDENTITY_DATABASE_VALUE" in
+  legacy|platform_core) ;;
+  *) fail "IDENTITY_DATABASE must be legacy or platform_core" ;;
+esac
+
+RESTAURANT_SERVICE_DATABASE_VALUE="$(value_of RESTAURANT_SERVICE_DATABASE)"
+case "$RESTAURANT_SERVICE_DATABASE_VALUE" in
+  legacy|restaurant) ;;
+  *) fail "RESTAURANT_SERVICE_DATABASE must be legacy or restaurant" ;;
+esac
+
+RETAIL_SERVICE_DATABASE_VALUE="$(value_of RETAIL_SERVICE_DATABASE)"
+case "$RETAIL_SERVICE_DATABASE_VALUE" in
+  legacy|retail) ;;
+  *) fail "RETAIL_SERVICE_DATABASE must be legacy or retail" ;;
+esac
+
+TAKEAWAY_SERVICE_DATABASE_VALUE="$(value_of TAKEAWAY_SERVICE_DATABASE)"
+case "$TAKEAWAY_SERVICE_DATABASE_VALUE" in
+  disabled|takeaway) ;;
+  *) fail "TAKEAWAY_SERVICE_DATABASE must be disabled or takeaway" ;;
+esac
+
+REFERENCE_PROJECTOR_ENABLED_VALUE="$(value_of REFERENCE_PROJECTOR_ENABLED | tr '[:upper:]' '[:lower:]')"
+RETAIL_REFERENCE_PROJECTOR_ENABLED_VALUE="$(value_of RETAIL_REFERENCE_PROJECTOR_ENABLED | tr '[:upper:]' '[:lower:]')"
+TAKEAWAY_FEATURE_ENABLED_VALUE="$(value_of TAKEAWAY_FEATURE_ENABLED | tr '[:upper:]' '[:lower:]')"
+SHARED_REPORTING_PROJECTOR_ENABLED_VALUE="$(value_of SHARED_REPORTING_PROJECTOR_ENABLED | tr '[:upper:]' '[:lower:]')"
+
+if [ "$RETAIL_SERVICE_DATABASE_VALUE" = "retail" ] && { [ "$IDENTITY_DATABASE_VALUE" != "platform_core" ] || [ "$REFERENCE_PROJECTOR_ENABLED_VALUE" != "true" ] || [ "$RETAIL_REFERENCE_PROJECTOR_ENABLED_VALUE" != "true" ]; }; then
+  fail "Retail activation requires Platform identity and both reference projectors"
+fi
+if [ "$TAKEAWAY_FEATURE_ENABLED_VALUE" = "true" ] && { [ "$TAKEAWAY_SERVICE_DATABASE_VALUE" != "takeaway" ] || [ "$IDENTITY_DATABASE_VALUE" != "platform_core" ] || [ "$REFERENCE_PROJECTOR_ENABLED_VALUE" != "true" ]; }; then
+  fail "Takeaway activation requires its dedicated database, Platform identity and reference projector"
+fi
+if [ "$SHARED_REPORTING_PROJECTOR_ENABLED_VALUE" = "true" ] && { [ "$IDENTITY_DATABASE_VALUE" != "platform_core" ] || [ "$REFERENCE_PROJECTOR_ENABLED_VALUE" != "true" ]; }; then
+  fail "Shared reporting activation requires Platform identity and reference projector"
+fi
 
 DEBUG_VALUE="$(value_of DEBUG | tr '[:upper:]' '[:lower:]')"
 if [ "$DEBUG_VALUE" = "true" ]; then

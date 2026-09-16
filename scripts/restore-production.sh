@@ -14,6 +14,28 @@ fail() {
   exit 1
 }
 
+manifest_value() {
+  key="$1"
+  sed -n "s/^${key}=//p" "$BACKUP_DIR/manifest.txt" | head -n 1
+}
+
+checksum_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+verify_checksum() {
+  key="$1"
+  file="$2"
+  expected="$(manifest_value "$key")"
+  [ -n "$expected" ] || fail "checksum missing from manifest: $key"
+  [ "$(checksum_file "$BACKUP_DIR/$file")" = "$expected" ] \
+    || fail "checksum mismatch: $file"
+}
+
 wait_for_postgres() {
   tries=0
   until docker compose -f "$COMPOSE_FILE" exec -T postgres \
@@ -72,11 +94,17 @@ if [ ! -x scripts/check-production-env.sh ]; then
   fail "scripts/check-production-env.sh is missing or not executable"
 fi
 
-for file in postgres.dump uploads.tar.gz redis.tar.gz manifest.txt; do
+for file in postgres.dump platform-core.dump restaurant.dump retail.dump takeaway.dump uploads.tar.gz redis.tar.gz manifest.txt; do
   if [ ! -f "$BACKUP_DIR/$file" ]; then
     fail "required backup file missing: $BACKUP_DIR/$file"
   fi
 done
+
+verify_checksum postgres_sha256 postgres.dump
+verify_checksum platform_sha256 platform-core.dump
+verify_checksum restaurant_sha256 restaurant.dump
+verify_checksum retail_sha256 retail.dump
+verify_checksum takeaway_sha256 takeaway.dump
 
 printf 'Validating production environment: %s\n' "$ENV_FILE"
 scripts/check-production-env.sh "$ENV_FILE"
@@ -106,12 +134,44 @@ docker compose -f "$COMPOSE_FILE" up -d postgres redis >/dev/null
 wait_for_postgres
 wait_for_redis
 
-printf 'Restoring PostgreSQL backup...\n'
-docker compose -f "$COMPOSE_FILE" exec -T postgres \
-  sh -c 'dropdb --if-exists -U "$POSTGRES_USER" "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
-docker compose -f "$COMPOSE_FILE" exec -T postgres \
-  sh -c 'pg_restore --clean --if-exists --no-owner --role="$POSTGRES_USER" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
-  < "$BACKUP_DIR/postgres.dump"
+legacy_database="$(docker compose -f "$COMPOSE_FILE" exec -T postgres sh -c 'printf %s "$POSTGRES_DB"')"
+platform_database="$(docker compose -f "$COMPOSE_FILE" exec -T postgres sh -c 'printf %s "$PLATFORM_POSTGRES_DB"')"
+restaurant_database="$(docker compose -f "$COMPOSE_FILE" exec -T postgres sh -c 'printf %s "$RESTAURANT_POSTGRES_DB"')"
+retail_database="$(docker compose -f "$COMPOSE_FILE" exec -T postgres sh -c 'printf %s "$RETAIL_POSTGRES_DB"')"
+takeaway_database="$(docker compose -f "$COMPOSE_FILE" exec -T postgres sh -c 'printf %s "$TAKEAWAY_POSTGRES_DB"')"
+
+unique_database_count="$(printf '%s\n' "$legacy_database" "$platform_database" "$restaurant_database" "$retail_database" "$takeaway_database" | sort -u | wc -l | tr -d '[:space:]')"
+[ "$unique_database_count" = "5" ] || fail "restore requires five distinct database names"
+
+restore_database() {
+  database_name="$1"
+  dump_file="$2"
+  docker compose -f "$COMPOSE_FILE" exec -T postgres \
+    sh -c 'dropdb --if-exists --force -U "$POSTGRES_USER" "$1" && createdb -U "$POSTGRES_USER" "$1"' sh "$database_name"
+  docker compose -f "$COMPOSE_FILE" exec -T postgres \
+    sh -c 'pg_restore --no-owner --role="$POSTGRES_USER" -U "$POSTGRES_USER" -d "$1"' sh "$database_name" \
+    < "$BACKUP_DIR/$dump_file"
+}
+
+printf 'Restoring Legacy and all four boundary databases...\n'
+restore_database "$legacy_database" postgres.dump
+restore_database "$platform_database" platform-core.dump
+restore_database "$restaurant_database" restaurant.dump
+restore_database "$retail_database" retail.dump
+restore_database "$takeaway_database" takeaway.dump
+
+verify_boundary() {
+  database_name="$1"
+  expected="$2"
+  actual="$(docker compose -f "$COMPOSE_FILE" exec -T postgres \
+    sh -c 'psql -U "$POSTGRES_USER" -d "$1" -tAc "SELECT boundary_name FROM database_boundary_metadata"' sh "$database_name" | tr -d '[:space:]')"
+  [ "$actual" = "$expected" ] || fail "$database_name boundary mismatch: $actual"
+}
+
+verify_boundary "$platform_database" platform_core
+verify_boundary "$restaurant_database" restaurant
+verify_boundary "$retail_database" retail
+verify_boundary "$takeaway_database" takeaway
 
 printf 'Restoring uploads backup...\n'
 docker run --rm -i --volume "$UPLOADS_VOLUME:/data" redis:7-alpine \

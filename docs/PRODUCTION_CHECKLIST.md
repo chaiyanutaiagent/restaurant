@@ -39,9 +39,10 @@ the source project's server, DNS, database, credentials, or validation status.
 ## PostgreSQL
 
 - [ ] `POSTGRES_PASSWORD` is strong and unique.
-- [ ] `DATABASE_URL` matches the production PostgreSQL service.
+- [ ] `DATABASE_URL`, `PLATFORM_DATABASE_URL`, `RESTAURANT_DATABASE_URL`,
+      `RETAIL_DATABASE_URL`, and `TAKEAWAY_DATABASE_URL` point to five distinct databases.
 - [ ] `postgres_data` volume persists across container restart.
-- [ ] Alembic migrations run successfully.
+- [ ] Legacy and all four boundary Alembic migrations run successfully.
 - [ ] PostgreSQL is included in backup and restore drills.
 
 ## Redis
@@ -54,7 +55,9 @@ the source project's server, DNS, database, credentials, or validation status.
 ## Backup
 
 - [ ] `infra/scripts/backup.sh` runs successfully.
-- [ ] Backup directory contains `postgres.dump`, `uploads.tar.gz`, `redis.tar.gz`, and `manifest.txt`.
+- [ ] Backup directory contains `postgres.dump`, `platform-core.dump`, `restaurant.dump`,
+      `retail.dump`, `takeaway.dump`, `uploads.tar.gz`, `redis.tar.gz`, and `manifest.txt`.
+- [ ] SHA-256 values for every PostgreSQL dump match the backup manifest.
 - [ ] Backups are stored outside the application working tree or copied to durable storage.
 - [ ] Backup retention policy is defined.
 - [ ] Backup failure alerts or manual checks are assigned.
@@ -71,7 +74,18 @@ the source project's server, DNS, database, credentials, or validation status.
 
 - [ ] Restore drill completed with an isolated `COMPOSE_PROJECT_NAME`.
 - [ ] Restored PostgreSQL data verified.
+- [ ] Restored Platform, Restaurant, Retail, and Takeaway boundary metadata verified.
 - [ ] Restored uploads archive extraction verified.
 - [ ] Restored Redis archive extraction verified.
 - [ ] Application readiness passes in production after permission repair and stack verification.
 - [ ] Restore runbook owner is assigned.
+
+## Multi-business activation gates
+
+- [ ] `IDENTITY_DATABASE=platform_core` and `REFERENCE_PROJECTOR_ENABLED=true` before any dedicated operational cutover.
+- [ ] Takeaway stays `disabled` until its migrations, projection parity, tenant entitlement,
+      Chambo reconciliation, rollback, and owner sign-off pass.
+- [ ] Retail stays `legacy` until selective migration parity, canary, rollback, and owner sign-off pass.
+- [ ] Shared reporting remains a read model and is never used as the accounting source of truth.
+- [ ] Physical scanner, printer, cash drawer, iPad/touch, and offline recovery UAT is signed off.
+- [ ] Production flags are changed only inside an approved change window with named rollback owner.

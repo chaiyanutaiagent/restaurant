@@ -1069,3 +1069,10 @@ Functional UAT รอบข้อมูลจำลองพบ async audit snap
 บริษัทและ 2 สาขา, seed อัตราภาษี 3 แบบ, รับ ledger จำลองจาก Restaurant/Retail/Takeaway/Purchasing,
 reconcile, review, close, lock, reopen และสร้างไฟล์ ภ.พ.30 พร้อม SHA-256 ได้ครบ สถานะงวดสุดท้ายกลับเป็น
 `open`, blocker/pending เป็นศูนย์ และ Production ยังคงใช้ image เดิม
+
+UAT รอบสองเพิ่ม Sale Order/e-Tax จริงใน UAT, เจ้าหนี้นิติบุคคลและบุคคลธรรมดา, ภาษีซื้อ, การชำระเงิน,
+หนังสือรับรองหัก ณ ที่จ่าย ภ.ง.ด.3/53, PDF/XML และ export ทั้ง `7` ประเภทพร้อมตรวจ SHA-256 ระหว่าง
+reconcile พบสถานะ warning ที่ mark `ignored` ถูกเปิดกลับและแก้ด้วย commit `2f9831b` / backend image
+`restaurant-pos-backend:wp9-2f9831b`; หลังแก้ blocker/warning/pending เป็นศูนย์ ปิดงวดและทดสอบ lock
+HTTP `409` ผ่าน ก่อนเปิดงวดกลับเป็น `open` สำหรับการทดสอบต่อ Production ยังคงใช้ image `4c1c2ba`
+และไม่ถูกเปลี่ยนแปลง งานที่ยังพักคือ physical UAT และการรับรองชุดข้อมูลโดยผู้ทำบัญชีจริง

@@ -127,11 +127,12 @@ Migration เป็น additive และ downgrade ลบเฉพาะตา�
 
 - Feature commit: `a08122a9a786b030b1103e34dba2c1d6022b6fb0`
 - UAT audit snapshot fix: `74f3e928427c8a7ecf48f236c332b8e58cf2c276`
+- UAT ignored-warning persistence fix: `2f9831b`
 - UAT URL: `https://uat-pos.foodchainservice.com`
 - Release directory: `/home/behappyaiagent/restaurant-uat-releases/a08122a9a786b030b1103e34dba2c1d6022b6fb0`
 - Rollback backup: `/home/behappyaiagent/restaurant-uat-deploy-backups/a08122a`
 - Migration: `p14dist0016 → p15taxset0017 → p16taxops0018`
-- Images: `restaurant-pos-backend:wp9-74f3e92`, `restaurant-pos-frontend:wp9-a08122a`,
+- Images: `restaurant-pos-backend:wp9-2f9831b`, `restaurant-pos-frontend:wp9-a08122a`,
   `restaurant-pos-nginx:wp9-a08122a`
 - Internal/public live และ ready health: HTTP `200`
 - UAT auto-login, `GET /api/v1/tax-settings` และ
@@ -145,6 +146,20 @@ Migration เป็น additive และ downgrade ลบเฉพาะตา�
 - สร้าง `pp30_summary_2026_09.csv` และตรวจ SHA-256 ตรงกัน
 - Backup ก่อนข้อมูลจำลอง:
   `/home/behappyaiagent/restaurant-uat-deploy-backups/a08122a/before-simulated-tax-data-20260916.dump`
+- Backup ก่อน UAT รอบสอง:
+  `/home/behappyaiagent/restaurant-uat-deploy-backups/a08122a/before-tax-uat-round2-20260916.dump`
+- UAT รอบสองสร้าง Sale Order จริงและ e-Tax invoice จริงใน UAT, ตรวจ XML/PDF HTTP `200`,
+  ตั้ง Supplier Invoice และชำระเจ้าหนี้ `2` ราย (บุคคลธรรมดา/นิติบุคคล), สร้างหนังสือรับรอง
+  หัก ณ ที่จ่าย ภ.ง.ด.3/53 อย่างละ `1` รายการ และตรวจ PDF ใบรับรอง/ใบสำคัญจ่าย HTTP `200`
+- หลังเพิ่มข้อมูลรอบสองมี ledger `7` รายการ: ภาษีขายฐาน `1,864.49`, ภาษีขาย `130.51`,
+  ภาษีซื้อฐาน `2,200.00`, ภาษีซื้อ `154.00`, ภาษีสุทธิ `-23.49` และหัก ณ ที่จ่าย `54.00`
+- แก้ regression ที่ reconciliation เปิด warning ซึ่งถูก mark `ignored` กลับมาใหม่; focused tax/settings/role
+  tests ผ่าน `29` รายการ และหลัง deploy กระทบยอดได้ blocker `0`, warning `0`, pending `0`
+- ทดสอบ Review → Close, ปฏิเสธการเขียนงวดปิด HTTP `409`, export ครบ `7` ประเภทและตรวจ
+  SHA-256 ตรงกันทุกไฟล์ จากนั้น Reopen และปล่อยสถานะสุดท้ายเป็น `open`
+- Live role preset check ผ่านครบ `5` preset โดยไม่มี permission สูญหาย; Company Owner มีสิทธิ์สร้าง/แก้
+  ผู้ใช้และ role รวมถึงสิทธิ์จัดซื้อ บัญชี และบริหารภาษี ส่วน role เฉพาะ Accountant/Purchasing
+  ใช้ Custom Role ตาม permission ที่ต้องการ
 
 ## 12. งานถัดไป
 

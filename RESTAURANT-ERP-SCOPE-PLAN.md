@@ -1063,3 +1063,9 @@ tax event ผ่าน idempotent contract ห้าม query ข้าม opera
 `/home/behappyaiagent/restaurant-uat-deploy-backups/a08122a`; internal/public health, auto-login,
 Tax Settings และ Tax Center dashboard smoke ผ่าน ส่วน Production ไม่ถูกเปลี่ยนแปลง และ physical UAT
 กับผู้ทำบัญชียังคงพัก รายละเอียดอยู่ที่ `docs/scopes/WP9-TAX-OPERATIONS-02.md`
+
+Functional UAT รอบข้อมูลจำลองพบ async audit snapshot error ตอนบันทึก Tax Profile และแก้ด้วย commit
+`74f3e92` / backend image `restaurant-pos-backend:wp9-74f3e92` พร้อม regression test หลังแก้สามารถตั้งค่า
+บริษัทและ 2 สาขา, seed อัตราภาษี 3 แบบ, รับ ledger จำลองจาก Restaurant/Retail/Takeaway/Purchasing,
+reconcile, review, close, lock, reopen และสร้างไฟล์ ภ.พ.30 พร้อม SHA-256 ได้ครบ สถานะงวดสุดท้ายกลับเป็น
+`open`, blocker/pending เป็นศูนย์ และ Production ยังคงใช้ image เดิม

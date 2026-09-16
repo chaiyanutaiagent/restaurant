@@ -89,7 +89,8 @@ Migration เป็น additive และ `downgrade` ลบเฉพาะส�
 - [x] e-Tax ใช้ Tax Profile โดยยัง fallback ไปข้อมูลเดิมเพื่อไม่ทำลาย legacy flow
 - [x] Frontend type-check และ production build ผ่าน
 - [x] Migration จากฐานข้อมูลว่างถึง head ผ่านในฐานข้อมูลทดสอบชั่วคราว
-- [ ] UAT บนข้อมูลบริษัท/สาขาจริง — พักไว้ตามคำสั่งก่อนหน้า
+- [x] UAT ด้วยข้อมูลบริษัท/สาขาจำลอง
+- [ ] UAT บนข้อมูลจดทะเบียนจริง — รอข้อมูลและ owner sign-off
 
 ## 8. Verification Evidence
 
@@ -102,15 +103,18 @@ Migration เป็น additive และ `downgrade` ลบเฉพาะส�
 
 ## 9. UAT Deployment Evidence
 
-- Commit: `a08122a9a786b030b1103e34dba2c1d6022b6fb0`
+- Feature commit: `a08122a9a786b030b1103e34dba2c1d6022b6fb0`
+- UAT audit snapshot fix: `74f3e928427c8a7ecf48f236c332b8e58cf2c276`
 - UAT URL: `https://uat-pos.foodchainservice.com`
-- Backend image: `restaurant-pos-backend:wp9-a08122a`
+- Backend image: `restaurant-pos-backend:wp9-74f3e92`
 - Frontend image: `restaurant-pos-frontend:wp9-a08122a`
 - Nginx image: `restaurant-pos-nginx:wp9-a08122a`
 - Migration: `p16taxops0018 (head)` ซึ่งรวม `p15taxset0017`
 - Backup: `/home/behappyaiagent/restaurant-uat-deploy-backups/a08122a`
 - Internal/public live และ ready health: HTTP `200`
 - UAT auto-login และ `GET /api/v1/tax-settings`: HTTP `200`
+- บันทึกบริษัทจำลอง, สำนักงานใหญ่, สาขา และ seed อัตรา Standard/0%/Exempt สำเร็จ
+- Regression test ของ audit snapshot ผ่าน และ backend ไม่มี error หลังทดสอบ
 - Production ไม่ถูกเปลี่ยนแปลง
 
 ## 10. Rollback

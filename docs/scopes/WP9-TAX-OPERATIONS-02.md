@@ -95,6 +95,7 @@ Migration เป็น additive และ downgrade ลบเฉพาะตา�
 - [x] Frontend type-check ผ่าน
 - [ ] Physical UAT / real accountant review — พักไว้ตามคำสั่ง owner
 - [x] Deploy UAT พร้อม backup, migration และ API smoke
+- [x] Functional UAT ด้วยข้อมูลจำลองครบ sync/reconcile/review/close/lock/reopen/export
 - [ ] Deploy Production — ต้องผ่าน physical UAT และ owner sign-off ก่อน
 
 ## 8. Non-goals / Legal Boundary
@@ -124,17 +125,26 @@ Migration เป็น additive และ downgrade ลบเฉพาะตา�
 
 ## 11. UAT Deployment Evidence
 
-- Commit: `a08122a9a786b030b1103e34dba2c1d6022b6fb0`
+- Feature commit: `a08122a9a786b030b1103e34dba2c1d6022b6fb0`
+- UAT audit snapshot fix: `74f3e928427c8a7ecf48f236c332b8e58cf2c276`
 - UAT URL: `https://uat-pos.foodchainservice.com`
 - Release directory: `/home/behappyaiagent/restaurant-uat-releases/a08122a9a786b030b1103e34dba2c1d6022b6fb0`
 - Rollback backup: `/home/behappyaiagent/restaurant-uat-deploy-backups/a08122a`
 - Migration: `p14dist0016 → p15taxset0017 → p16taxops0018`
-- Images: `restaurant-pos-backend:wp9-a08122a`, `restaurant-pos-frontend:wp9-a08122a`,
+- Images: `restaurant-pos-backend:wp9-74f3e92`, `restaurant-pos-frontend:wp9-a08122a`,
   `restaurant-pos-nginx:wp9-a08122a`
 - Internal/public live และ ready health: HTTP `200`
 - UAT auto-login, `GET /api/v1/tax-settings` และ
   `GET /api/v1/tax-operations/dashboard?year=2026&month=9`: HTTP `200`
 - Cloudflare Tunnel precheck ผ่าน และ Production ไม่ถูกเปลี่ยนแปลง
+- Functional UAT ใช้ข้อมูลที่ระบุชัดว่าเป็นข้อมูลจำลอง: Restaurant/Retail/Takeaway output VAT และ
+  Purchasing input VAT รวม 4 ledger rows; ฐานภาษีขาย `1,800.00`, ภาษีขาย `126.00`, ฐานภาษีซื้อ
+  `400.00`, ภาษีซื้อ `28.00`, ภาษีสุทธิ `98.00`
+- Reconcile เหลือ warning e-Tax จำลอง `3` รายการ, blocker `0`, pending `0`; ทดสอบปิดงวด,
+  ปฏิเสธ ingestion ขณะปิดงวดด้วย HTTP `409`, เปิดงวดใหม่ และปล่อยสถานะสุดท้ายเป็น `open`
+- สร้าง `pp30_summary_2026_09.csv` และตรวจ SHA-256 ตรงกัน
+- Backup ก่อนข้อมูลจำลอง:
+  `/home/behappyaiagent/restaurant-uat-deploy-backups/a08122a/before-simulated-tax-data-20260916.dump`
 
 ## 12. งานถัดไป
 

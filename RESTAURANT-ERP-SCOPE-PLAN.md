@@ -1097,3 +1097,11 @@ Restaurant, Retail และ Takeaway แล้วซ้อมกู้คืน
 customer QR/KDS/payment/receipt, Retail scanner/printer/cash drawer/offline, ผู้ทำบัญชี, operator handoff,
 security acceptance และ owner go/no-go ยังคงเป็น gate บังคับก่อน Production รายละเอียดและหลักฐานอยู่ที่
 `docs/scopes/WP10-WP15-MULTIBUSINESS-UAT-ACTIVATION-01.md`
+
+WP16 ตรวจ Chambo ปัจจุบันจาก `/Users/user/Projects/erp-pos-run` แบบ read-only แล้ว พบว่าฐาน Takeaway
+แยก, paid-first sale, QR/KDS/Pickup, stock/transfer/credit ขั้นต้น, ERP outbox และ synthetic import มีแล้ว
+แต่ยังต้องปิด gap ด้านหน้าปฏิบัติงาน Store/Central, offline queue ของ Takeaway, receipt/device,
+recipe/replenishment, production/receive discrepancy, credit top-up, operational reports, Android
+Bluetooth/update และ real-data migration/cutover จึงแบ่งงานต่อเป็น WP17–WP26 โดย Production ยังคง blocked
+รายละเอียดอยู่ที่ `docs/scopes/WP16-CHAMBO-FULL-MIGRATION-GAP-MATRIX-01.md`; งานถัดไปคือ WP17
+Takeaway Information Architecture และ Role Workspaces

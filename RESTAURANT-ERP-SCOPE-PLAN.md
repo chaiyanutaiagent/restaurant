@@ -1082,3 +1082,18 @@ Role UAT ต่อจากนั้นพบ User Admin/Invitation ยังช
 provision workspace `Foodchainservice Restaurant UAT` สำหรับ `BKK-01` และทดสอบล็อกอิน Accountant,
 Purchaser, Branch Manager, Cashier รวมถึง Invitation OTP ครบ เส้นทางที่อนุญาตได้ HTTP `200` และเส้นทาง
 นอกสิทธิ์ได้ HTTP `403`; ปิดใช้งานบัญชีทดสอบทั้ง `5` บัญชีหลังจบ และ Production ไม่ถูกเปลี่ยนแปลง
+
+WP10 ถึง WP15 เปิดใช้งาน Multi-business UAT วันที่ 16 กันยายน 2026 โดยเปิด Takeaway บนฐานข้อมูลเฉพาะ,
+ซ้อม import Chambo แบบ idempotent, เชื่อม Takeaway กับ Shared ERP, ย้าย Retail UAT ไปฐานข้อมูลเฉพาะหลัง
+selective migration/parity, และยืนยันรายงานรวม Restaurant/Retail/Takeaway ระบบ Restaurant ยังใช้ Legacy
+runtime ระหว่าง transition และ Production ไม่ถูกเปลี่ยนแปลง
+
+UAT มีธุรกรรมยืนยันอย่างละหนึ่งรายการ: Restaurant `69.00`, Retail `107.00` และ Takeaway `73.83`
+พร้อม source state สุขภาพดีทุกระบบ งาน WP15 เพิ่ม migration/backup/restore ครบ Legacy, Platform,
+Restaurant, Retail และ Takeaway แล้วซ้อมกู้คืนใน Compose project แยกสำเร็จ ตรวจ boundary และข้อมูลธุรกิจครบ
+ก่อนลบเฉพาะสภาพแวดล้อมซ้อม โดยเก็บ pre/post activation backup ไว้
+
+สถานะปัจจุบันคือ **UAT available for testing; Production blocked** การทดสอบจริงบน iPad/Safari,
+customer QR/KDS/payment/receipt, Retail scanner/printer/cash drawer/offline, ผู้ทำบัญชี, operator handoff,
+security acceptance และ owner go/no-go ยังคงเป็น gate บังคับก่อน Production รายละเอียดและหลักฐานอยู่ที่
+`docs/scopes/WP10-WP15-MULTIBUSINESS-UAT-ACTIVATION-01.md`

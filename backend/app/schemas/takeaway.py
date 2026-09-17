@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from typing import Literal
+from urllib.parse import urlsplit
 import uuid
 
 from pydantic import Field, field_validator, model_validator
@@ -14,6 +15,22 @@ def _text(value: str) -> str:
     normalized = value.strip()
     if not normalized:
         raise ValueError("value is required")
+    return normalized
+
+
+def _safe_evidence_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if normalized.startswith("/uploads/"):
+        if ".." in normalized or "\\" in normalized or not normalized.startswith("/uploads/evidence/"):
+            raise ValueError("unsafe internal evidence path")
+        return normalized
+    parsed = urlsplit(normalized)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("evidence URL must be HTTPS or an approved internal upload")
+    if parsed.hostname.lower() in {"localhost", "127.0.0.1", "::1"}:
+        raise ValueError("local evidence URL is not allowed")
     return normalized
 
 
@@ -363,6 +380,8 @@ class TakeawayCreditTopupCreate(BaseSchema):
     payment_reference: str | None = Field(default=None, max_length=200)
     evidence_url: str | None = Field(default=None, max_length=500)
     idempotency_key: str = Field(min_length=8, max_length=180)
+
+    _validate_evidence_url = field_validator("evidence_url")(_safe_evidence_url)
 
 
 class TakeawayCreditTopupReview(BaseSchema):

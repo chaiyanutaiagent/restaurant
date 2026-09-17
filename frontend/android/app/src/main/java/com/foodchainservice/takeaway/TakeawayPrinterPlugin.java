@@ -32,6 +32,7 @@ import java.util.UUID;
 )
 public class TakeawayPrinterPlugin extends Plugin {
     private static final UUID SERIAL_PORT_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    private static final int MAX_PRINT_BYTES = 1024 * 1024;
 
     private boolean needsRuntimePermission() {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
@@ -100,6 +101,21 @@ public class TakeawayPrinterPlugin extends Plugin {
             call.reject("ต้องระบุเครื่องพิมพ์และข้อมูลพิมพ์");
             return;
         }
+        if (!address.matches("(?i)^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$")) {
+            call.reject("รูปแบบ Bluetooth address ไม่ถูกต้อง");
+            return;
+        }
+        byte[] printBytes;
+        try {
+            printBytes = Base64.decode(data, Base64.DEFAULT);
+        } catch (IllegalArgumentException error) {
+            call.reject("ข้อมูลพิมพ์ไม่ใช่ Base64 ที่ถูกต้อง", error);
+            return;
+        }
+        if (printBytes.length == 0 || printBytes.length > MAX_PRINT_BYTES) {
+            call.reject("ข้อมูลพิมพ์มีขนาดไม่ถูกต้อง");
+            return;
+        }
         new Thread(() -> {
             BluetoothSocket socket = null;
             try {
@@ -113,7 +129,7 @@ public class TakeawayPrinterPlugin extends Plugin {
                 adapter.cancelDiscovery();
                 socket.connect();
                 OutputStream output = socket.getOutputStream();
-                output.write(Base64.decode(data, Base64.DEFAULT));
+                output.write(printBytes);
                 output.flush();
                 call.resolve();
             } catch (Exception error) {

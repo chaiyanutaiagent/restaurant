@@ -15,6 +15,7 @@ import {
   syncTakeawayPendingSales,
 } from "@/lib/takeawayOffline";
 import QRCode from "qrcode";
+import { printTakeawayReceipt } from "@/lib/takeawayPrinter";
 
 type CartLine = { row: TakeawayCatalogRow; quantity: number };
 
@@ -66,7 +67,7 @@ export default function TakeawayCounterPage(): JSX.Element {
     enabled: Boolean(context?.branch_id),
   });
   const openShift = shifts.find((row) => row.status === "open");
-  const printReceipt = useReactToPrint({
+  const browserPrintReceipt = useReactToPrint({
     contentRef: receiptRef,
     onAfterPrint: () => {
       if (!lastReceipt) return;
@@ -75,6 +76,28 @@ export default function TakeawayCounterPage(): JSX.Element {
         .catch(() => toast({ title: "พิมพ์แล้ว แต่บันทึกประวัติไม่สำเร็จ", variant: "destructive" }));
     },
   });
+  const printReceipt = async (
+    receipt: TakeawayReceipt,
+    copyType: "customer" | "merchant",
+    clientSaleId: string | null = lastClientSaleId,
+  ): Promise<void> => {
+    setLastReceipt(receipt);
+    setReceiptCopyType(copyType);
+    try {
+      if (await printTakeawayReceipt(receipt, copyType)) {
+        setLastReceipt(await markTakeawayReceiptPrinted(clientSaleId, receipt.order_id, copyType));
+        toast({ title: "พิมพ์ใบเสร็จผ่าน Bluetooth แล้ว" });
+        return;
+      }
+    } catch (error) {
+      toast({
+        title: "เครื่องพิมพ์ Bluetooth ไม่พร้อม",
+        description: error instanceof Error ? error.message : "กำลังเปิดหน้าต่างพิมพ์แทน",
+        variant: "destructive",
+      });
+    }
+    window.setTimeout(() => browserPrintReceipt(), 0);
+  };
   useEffect(() => {
     const synchronize = (): void => {
       void syncTakeawayPendingSales()
@@ -163,7 +186,7 @@ export default function TakeawayCounterPage(): JSX.Element {
       setLastReceipt(receipt);
       setLastClientSaleId(null);
       setReceiptCopyType("customer");
-      window.setTimeout(() => printReceipt(), 0);
+      void printReceipt(receipt, "customer", null);
     },
     onError: () => toast({ title: "เรียกใบเสร็จไม่สำเร็จ", variant: "destructive" }),
   });
@@ -205,7 +228,7 @@ export default function TakeawayCounterPage(): JSX.Element {
       <aside className="flex min-h-[620px] flex-col overflow-hidden rounded-3xl bg-slate-950 text-white shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-800 p-5"><div><h2 className="flex items-center gap-2 text-lg font-black"><ShoppingCart className="h-5 w-5" /> ตะกร้า</h2><p className="text-xs text-slate-400">{cart.length} รายการ</p></div>{lastQueue ? <span className="rounded-xl bg-emerald-500 px-3 py-2 font-black text-slate-950">คิวล่าสุด {lastQueue}</span> : null}</div>
         {pickupQr && lastQueue ? <div className="border-b border-slate-800 bg-white p-4 text-center text-slate-950"><img className="mx-auto h-36 w-36" src={pickupQr} alt={`QR ติดตามคิว ${lastQueue}`} /><p className="mt-2 font-black">สแกนติดตามคิว {lastQueue}</p><p className="text-xs text-slate-500">ลูกค้าเปิดดูสถานะได้โดยไม่ต้องเข้าสู่ระบบ</p></div> : null}
-        {lastReceipt ? <div className="grid grid-cols-2 gap-2 border-b border-slate-800 p-4"><button onClick={() => { setReceiptCopyType("customer"); window.setTimeout(() => printReceipt(), 0); }} className="rounded-xl bg-white px-3 py-3 text-sm font-black text-slate-950"><Printer className="mr-2 inline h-4 w-4" />ใบลูกค้า</button><button onClick={() => { setReceiptCopyType("merchant"); window.setTimeout(() => printReceipt(), 0); }} className="rounded-xl border border-slate-600 px-3 py-3 text-sm font-black"><Printer className="mr-2 inline h-4 w-4" />สำเนาร้าน</button></div> : null}
+        {lastReceipt ? <div className="grid grid-cols-2 gap-2 border-b border-slate-800 p-4"><button onClick={() => void printReceipt(lastReceipt, "customer")} className="rounded-xl bg-white px-3 py-3 text-sm font-black text-slate-950"><Printer className="mr-2 inline h-4 w-4" />ใบลูกค้า</button><button onClick={() => void printReceipt(lastReceipt, "merchant")} className="rounded-xl border border-slate-600 px-3 py-3 text-sm font-black"><Printer className="mr-2 inline h-4 w-4" />สำเนาร้าน</button></div> : null}
         <div className="flex-1 space-y-3 overflow-y-auto p-4">{cart.map((line) => <div key={line.row.item.id} className="rounded-2xl bg-slate-900 p-4"><div className="flex justify-between gap-3"><div><p className="font-bold">{line.row.item.name}</p><p className="text-sm text-emerald-400">{money(Number(line.row.effective_price) * line.quantity)}</p></div><div className="flex items-center gap-2"><button className="rounded-lg bg-slate-800 p-2" onClick={() => adjust(line.row, -1)}><Minus className="h-4 w-4" /></button><span className="w-5 text-center font-bold">{line.quantity}</span><button className="rounded-lg bg-emerald-500 p-2 text-slate-950" onClick={() => adjust(line.row, 1)}><Plus className="h-4 w-4" /></button></div></div></div>)}{cart.length === 0 ? <div className="grid h-full place-items-center text-center text-slate-500"><div><ShoppingCart className="mx-auto h-12 w-12" /><p className="mt-3">เลือกสินค้าเพื่อเริ่มขาย</p></div></div> : null}</div>
         <div className="space-y-2 border-t border-slate-800 p-5"><div className="flex justify-between text-sm text-slate-400"><span>สินค้า</span><span>{money(subtotal)}</span></div><div className="flex justify-between text-sm text-slate-400"><span>ภาษี</span><span>{money(tax)}</span></div><div className="flex justify-between text-2xl font-black"><span>สุทธิ</span><span>{money(total)}</span></div><button disabled={!openShift || cart.length === 0 || saleMutation.isPending} onClick={() => saleMutation.mutate()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-4 text-lg font-black text-slate-950 disabled:opacity-40"><ReceiptText className="h-5 w-5" />{saleMutation.isPending ? "กำลังรับชำระ" : "รับเงินสดและส่งครัว"}</button></div>
       </aside>

@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">Restaurant POS UAT</string>
     <string name="title_activity_main">Restaurant POS UAT</string>
-    <string name="package_name">com.chaiyanutaiagent.restaurant.uat</string>
-    <string name="custom_url_scheme">com.chaiyanutaiagent.restaurant.uat</string>
+    <string name="package_name">com.foodchainservice.takeaway.uat</string>
+    <string name="custom_url_scheme">com.foodchainservice.takeaway.uat</string>
 </resources>

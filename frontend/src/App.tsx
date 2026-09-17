@@ -102,6 +102,7 @@ import CompanyDistributionPage from "@/pages/distribution/CompanyDistributionPag
 import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
 import TakeawayCounterPage from "@/pages/takeaway/TakeawayCounterPage";
 import TakeawayCentralRecipesPage from "@/pages/takeaway/TakeawayCentralRecipesPage";
+import TakeawayDeviceSettingsPage from "@/pages/takeaway/TakeawayDeviceSettingsPage";
 import TakeawayLegacyRedirect from "@/pages/takeaway/TakeawayLegacyRedirect";
 import TakeawayOperationsPage from "@/pages/takeaway/TakeawayOperationsPage";
 import TakeawayPlannedCapabilityPage from "@/pages/takeaway/TakeawayPlannedCapabilityPage";
@@ -175,7 +176,7 @@ export default function App(): JSX.Element {
             <Route path="/pickup" element={<PickupDisplayPage />} />
           </Route>
           <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
-          <Route path="/" element={Capacitor.isNativePlatform() ? <Navigate to="/restaurant" replace /> : <ModuleSelectorPage />} />
+          <Route path="/" element={Capacitor.isNativePlatform() ? <Navigate to="/takeaway" replace /> : <ModuleSelectorPage />} />
           <Route path="/store" element={<StorefrontPage />} />
           <Route path="/:businessSlug" element={<StorefrontPage />} />
           <Route path="/takeaway/pickup-status/:token" element={<TakeawayPickupStatusPage />} />
@@ -213,6 +214,9 @@ export default function App(): JSX.Element {
                 </Route>
                 <Route element={<ProtectedRoute permission="system.user.view" />}>
                   <Route path="/takeaway/store/staff" element={<Navigate to="/users" replace />} />
+                </Route>
+                <Route element={<ProtectedRoute permission="takeaway.sale.create" />}>
+                  <Route path="/takeaway/store/device" element={<TakeawayDeviceSettingsPage />} />
                 </Route>
               </Route>
 

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://foodchainservice.com/contracts/takeaway-release-manifest-v1.schema.json",
+  "title": "Foodchainservice Takeaway signed Android release",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["channel", "package_id", "version_name", "version_code", "minimum_supported_version_code", "rollback_version_code", "apk_url", "apk_sha256", "published_at", "signature"],
+  "properties": {
+    "channel": { "enum": ["uat", "production"] },
+    "package_id": { "const": "com.foodchainservice.takeaway" },
+    "version_name": { "type": "string", "minLength": 1 },
+    "version_code": { "type": "integer", "minimum": 1 },
+    "minimum_supported_version_code": { "type": "integer", "minimum": 1 },
+    "rollback_version_code": { "type": ["integer", "null"], "minimum": 1 },
+    "apk_url": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "apk_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "published_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "minLength": 40 }
+  }
+}

@@ -10,6 +10,8 @@
     "build:android:uat": "CI_DISABLE_PWA=true vite build --mode android-uat && CAPACITOR_UAT=true cap sync android",
     "android:apk": "npm run build:android && cd android && ./gradlew assembleDebug",
     "android:apk:uat": "npm run build:android:uat && cd android && ./gradlew assembleDebug",
+    "android:test": "cd android && ./gradlew testDebugUnitTest lintDebug",
+    "android:apk:release": "npm run build:android && cd android && ./gradlew assembleRelease",
     "android:add": "cap add android",
     "android:sync": "cap sync android",
     "android:open": "cap open android",

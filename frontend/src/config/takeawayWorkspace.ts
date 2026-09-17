@@ -47,6 +47,7 @@ export const TAKEAWAY_NAVIGATION: TakeawayNavigationGroup[] = [
       { key: "store-transfers", label: "รับโอนสินค้า", to: "/takeaway/store/transfers", permissions: ["takeaway.transfer.manage"], description: "รายการส่งจากส่วนกลางและยอดรับจริง" },
       { key: "store-reports", label: "รายงานร้าน", to: "/takeaway/store/reports", permissions: ["takeaway.report.view"], description: "ยอดขายและการทำงานของสาขา" },
       { key: "store-staff", label: "พนักงาน", to: "/takeaway/store/staff", permissions: ["system.user.view"], description: "ผู้ใช้และบทบาทของสาขา" },
+      { key: "store-device", label: "เครื่องพิมพ์/แอป", to: "/takeaway/store/device", permissions: ["takeaway.sale.create"], description: "เลือกเครื่องพิมพ์และตรวจอัปเดตแอป" },
     ],
   },
   {

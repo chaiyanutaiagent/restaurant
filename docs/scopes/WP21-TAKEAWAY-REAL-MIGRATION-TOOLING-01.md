@@ -6,6 +6,9 @@
 
 ## ผลลัพธ์
 
+- ตัวสร้าง snapshot อ่าน Chambo ผ่าน PostgreSQL transaction แบบ `READ ONLY` และ
+  `REPEATABLE READ`, ปฏิเสธทันทีเมื่อมีกะ/ออเดอร์/การผลิต/โอน/เติมเครดิต/ตรวจนับที่ยังเปิด,
+  ไม่ส่งออก credential หรือข้อมูลลูกค้า และสร้างไฟล์ normalized ตาม contract โดยไม่แก้ต้นทาง
 - Exporter รับเฉพาะ normalized snapshot ที่ยืนยัน `read_only=true` และ `environment=approved_snapshot`
 - Exporter ปฏิเสธการเขียนทับ bundle เดิม, canonicalize record, คำนวณ SHA-256/count/byte size และทำ artifact เป็น read-only
 - Manifest ลงลายเซ็น Ed25519; importer เชื่อเฉพาะ `key_id` ที่ตั้งใน server secret environment
@@ -25,10 +28,12 @@
 ## การใช้งานเครื่องมือ
 
 1. ผู้ดูแลข้อมูลสร้าง consistent source snapshot แบบ read-only ภายนอก runtime
-2. ใช้ `python -m app.cli.export_chambo_takeaway` สร้าง bundle ใหม่พร้อม Ed25519 seal
-3. ใช้ `python -m app.cli.validate_takeaway_import --public-key ... --key-id ...` ตรวจ offline
-4. ส่ง payload เข้า Preview และเก็บ digest เพื่อ owner review
-5. Execute ได้เฉพาะเมื่อ backup/rollback/approval reference ครบ และ server เชื่อ public key นั้น
+2. ใช้ `python -m app.cli.snapshot_chambo_takeaway` พร้อม `CHAMBO_SOURCE_DATABASE_URL`
+   และ mapping template ที่อนุมัติ เพื่อสร้าง normalized snapshot; URL ต้องส่งผ่าน environment เท่านั้น
+3. ใช้ `python -m app.cli.export_chambo_takeaway` สร้าง bundle ใหม่พร้อม Ed25519 seal
+4. ใช้ `python -m app.cli.validate_takeaway_import --public-key ... --key-id ...` ตรวจ offline
+5. ส่ง payloadเข้า Preview และเก็บ digest เพื่อ owner review
+6. Execute ได้เฉพาะเมื่อ backup/rollback/approval referenceครบ และ serverเชื่อ public keyนั้น
 
 ## Gate ที่ยังไม่ผ่าน
 

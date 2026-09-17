@@ -117,7 +117,12 @@ class TakeawayBranchCatalogItem(UUIDMixin, TimestampMixin, Base):
 class TakeawayStockLocation(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "takeaway_stock_locations"
     __table_args__ = (
-        UniqueConstraint("company_id", "code", name="uq_takeaway_stock_location_code"),
+        UniqueConstraint(
+            "company_id",
+            "branch_id",
+            "code",
+            name="uq_takeaway_stock_location_code",
+        ),
         CheckConstraint(
             "location_type IN ('central_raw', 'central_ready', 'store', 'transit', 'waste')",
             name="ck_takeaway_stock_location_type",

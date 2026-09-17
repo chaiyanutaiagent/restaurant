@@ -21,7 +21,7 @@ from app.database import (
     session_factory_for,
 )
 from app.models.integration import OperationalOutboxEvent
-from app.models.takeaway import TakeawayOrder, TakeawayStockBalance
+from app.models.takeaway import TakeawayOrder, TakeawayStockBalance, TakeawayStockLocation
 
 
 class DatabaseBoundaryTests(unittest.TestCase):
@@ -78,6 +78,14 @@ class DatabaseBoundaryTests(unittest.TestCase):
     def test_takeaway_models_have_no_cross_database_foreign_keys(self) -> None:
         self.assertEqual(list(TakeawayOrder.__table__.foreign_keys), [])
         self.assertEqual(list(TakeawayStockBalance.__table__.foreign_keys), [])
+
+    def test_takeaway_stock_location_code_is_scoped_to_branch(self) -> None:
+        constraints = {
+            tuple(column.name for column in constraint.columns)
+            for constraint in TakeawayStockLocation.__table__.constraints
+            if constraint.__class__.__name__ == "UniqueConstraint"
+        }
+        self.assertIn(("company_id", "branch_id", "code"), constraints)
 
     def test_takeaway_boundary_is_explicit_and_dark_by_default(self) -> None:
         self.assertEqual(settings.takeaway_service_database, "disabled")

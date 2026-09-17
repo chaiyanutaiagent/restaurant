@@ -108,6 +108,18 @@ export type TakeawaySalesSummary = {
   discount_amount: string;
 };
 
+export type TakeawayOperationalSummary = TakeawaySalesSummary & {
+  central_orders: number;
+  central_discrepancies: number;
+  production_batches: number;
+  production_completed: number;
+  transfers: number;
+  transfer_discrepancies: number;
+  credit_balance: string;
+  credit_limit: string;
+  erp_events_pending: number;
+};
+
 export type TakeawayPickupStatus = {
   order_number: string;
   queue_number: number;
@@ -179,6 +191,20 @@ export const takeawayApi = {
     api.post<ApiResponse<TakeawayRecord>>(`/takeaway/kitchen/tickets/${id}/${nextStatus}`),
   markPickedUp: (id: string) =>
     api.post<ApiResponse<TakeawayRecord>>(`/takeaway/orders/${id}/picked-up`),
+  recipes: (params?: Record<string, unknown>) =>
+    api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/recipes", { params }),
+  createRecipe: (payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>("/takeaway/recipes", payload),
+  replenishmentPolicies: (params?: Record<string, unknown>) =>
+    api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/replenishment/policies", { params }),
+  setReplenishmentPolicy: (payload: Record<string, unknown>) =>
+    api.put<ApiResponse<TakeawayRecord>>("/takeaway/replenishment/policies", payload),
+  replenishmentSuggestions: (brandId: string, branchId: string, lookbackDays = 7) =>
+    api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/replenishment/suggestions", {
+      params: { brand_id: brandId, branch_id: branchId, lookback_days: lookbackDays },
+    }),
+  generateReplenishmentOrder: (payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>("/takeaway/replenishment/generate-order", payload),
   centralOrders: (params?: Record<string, unknown>) =>
     api.get<ApiResponse<TakeawayCentralOrder[]>>("/takeaway/central/orders", { params }),
   createCentralRound: (payload: Record<string, unknown>) =>
@@ -189,14 +215,24 @@ export const takeawayApi = {
     api.post<ApiResponse<TakeawayRecord>>("/takeaway/store/central-orders", payload),
   receiveStoreCentralOrder: (id: string) =>
     api.post<ApiResponse<TakeawayRecord>>(`/takeaway/store/central-orders/${id}/receive`),
+  receiveStoreCentralOrderQuantities: (id: string, payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>(`/takeaway/store/central-orders/${id}/receive-quantities`, payload),
   updateCentralOrder: (id: string, status: string) =>
     api.post<ApiResponse<TakeawayRecord>>(`/takeaway/central/orders/${id}/status`, { status }),
+  updateCentralOrderItem: (id: string, payload: Record<string, unknown>) =>
+    api.put<ApiResponse<TakeawayRecord>>(`/takeaway/central/order-items/${id}`, payload),
+  fulfilCentralOrder: (id: string, stage: "packed" | "shipped", payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>(`/takeaway/central/orders/${id}/${stage}`, payload),
+  resolveCentralDiscrepancy: (id: string, payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>(`/takeaway/central/orders/${id}/resolve-discrepancy`, payload),
   productionBatches: (params?: Record<string, unknown>) =>
     api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/production/batches", { params }),
   createProduction: (payload: Record<string, unknown>) =>
     api.post<ApiResponse<TakeawayRecord>>("/takeaway/production/batches", payload),
   completeProduction: (id: string, payload: Record<string, unknown>) =>
     api.post<ApiResponse<TakeawayRecord>>(`/takeaway/production/batches/${id}/complete`, payload),
+  updateProductionStatus: (id: string, payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>(`/takeaway/production/batches/${id}/status`, payload),
   stock: (locationId?: string) =>
     api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/stock", { params: { location_id: locationId || undefined } }),
   stockLocations: () => api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/stock/locations"),
@@ -212,14 +248,34 @@ export const takeawayApi = {
     api.post<ApiResponse<TakeawayRecord>>("/takeaway/transfers", payload),
   updateTransfer: (id: string, payload: Record<string, unknown>) =>
     api.post<ApiResponse<TakeawayRecord>>(`/takeaway/transfers/${id}/status`, payload),
+  fulfilTransfer: (id: string, stage: "ship" | "receive", payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>(`/takeaway/transfers/${id}/${stage}`, payload),
+  resolveTransferDiscrepancy: (id: string, payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>(`/takeaway/transfers/${id}/resolve-discrepancy`, payload),
   credits: (params?: Record<string, unknown>) =>
     api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/credit/accounts", { params }),
   setCredit: (payload: Record<string, unknown>) =>
     api.put<ApiResponse<TakeawayRecord>>("/takeaway/credit/accounts", payload),
   addCreditEntry: (id: string, payload: Record<string, unknown>) =>
     api.post<ApiResponse<TakeawayRecord>>(`/takeaway/credit/accounts/${id}/entries`, payload),
+  creditEntries: (id: string) =>
+    api.get<ApiResponse<TakeawayRecord[]>>(`/takeaway/credit/accounts/${id}/entries`),
+  creditTopups: (params?: Record<string, unknown>) =>
+    api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/credit/topups", { params }),
+  createCreditTopup: (id: string, payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>(`/takeaway/credit/accounts/${id}/topups`, payload),
+  reviewCreditTopup: (id: string, payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>(`/takeaway/credit/topups/${id}/review`, payload),
+  creditPaymentConfig: (brandId: string) =>
+    api.get<ApiResponse<TakeawayRecord | null>>("/takeaway/credit/payment-config", { params: { brand_id: brandId } }),
+  setCreditPaymentConfig: (payload: Record<string, unknown>) =>
+    api.put<ApiResponse<TakeawayRecord>>("/takeaway/credit/payment-config", payload),
   salesSummary: (dateFrom: string, dateTo: string) =>
     api.get<ApiResponse<TakeawaySalesSummary>>("/takeaway/reports/sales-summary", {
+      params: { date_from: dateFrom, date_to: dateTo },
+    }),
+  operationalSummary: (dateFrom: string, dateTo: string) =>
+    api.get<ApiResponse<TakeawayOperationalSummary>>("/takeaway/reports/operational-summary", {
       params: { date_from: dateFrom, date_to: dateTo },
     }),
   dryRunImport: (payload: Record<string, unknown>) =>

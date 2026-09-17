@@ -26,16 +26,26 @@ from app.schemas.takeaway import (
     TakeawayCatalogItemCreate,
     TakeawayCategoryCreate,
     TakeawayCentralOrderCreate,
+    TakeawayCentralOrderDiscrepancyResolution,
+    TakeawayCentralOrderFulfilment,
+    TakeawayCentralOrderItemUpdate,
     TakeawayCentralOrderStatusUpdate,
     TakeawayCentralRoundCreate,
     TakeawayCreditEntryCreate,
     TakeawayCreditLimitUpdate,
+    TakeawayCreditPaymentConfigUpsert,
+    TakeawayCreditTopupCreate,
+    TakeawayCreditTopupReview,
     TakeawayErpEventAcknowledge,
     TakeawayImportDryRun,
     TakeawayOrderPaymentCapture,
     TakeawayOrderingLinkCreate,
     TakeawayProductionBatchCreate,
     TakeawayProductionComplete,
+    TakeawayProductionStatusUpdate,
+    TakeawayRecipeCreate,
+    TakeawayReplenishmentGenerate,
+    TakeawayReplenishmentPolicyUpsert,
     TakeawayRefundCreate,
     TakeawayReceiptPrintCreate,
     TakeawaySaleCreate,
@@ -45,6 +55,8 @@ from app.schemas.takeaway import (
     TakeawayStoreCentralOrderCreate,
     TakeawayStockMovementCreate,
     TakeawayTransferCreate,
+    TakeawayTransferDiscrepancyResolution,
+    TakeawayTransferFulfilment,
     TakeawayTransferStatusUpdate,
 )
 from app.services.takeaway_service import TakeawayService
@@ -490,6 +502,82 @@ async def mark_picked_up(
     return ok(await TakeawayService(db, current).mark_picked_up(order_id))
 
 
+@router.get("/recipes")
+async def list_recipes(
+    brand_id: uuid.UUID | None = None,
+    active_only: bool = True,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_recipes(
+            brand_id=brand_id,
+            active_only=active_only,
+        )
+    )
+
+
+@router.post("/recipes", status_code=status.HTTP_201_CREATED)
+async def create_recipe(
+    payload: TakeawayRecipeCreate,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_recipe(payload))
+
+
+@router.get("/replenishment/policies")
+async def list_replenishment_policies(
+    brand_id: uuid.UUID | None = None,
+    branch_id: uuid.UUID | None = None,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_replenishment_policies(
+            brand_id=brand_id,
+            branch_id=branch_id,
+        )
+    )
+
+
+@router.put("/replenishment/policies")
+async def upsert_replenishment_policy(
+    payload: TakeawayReplenishmentPolicyUpsert,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).upsert_replenishment_policy(payload))
+
+
+@router.get("/replenishment/suggestions")
+async def replenishment_suggestions(
+    brand_id: uuid.UUID,
+    branch_id: uuid.UUID,
+    lookback_days: int = Query(default=7, ge=1, le=90),
+    current: TokenData = Depends(
+        require_any_permission("takeaway.central_order.create", "takeaway.production.manage")
+    ),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).replenishment_suggestions(
+            brand_id=brand_id,
+            branch_id=branch_id,
+            lookback_days=lookback_days,
+        )
+    )
+
+
+@router.post("/replenishment/generate-order", status_code=status.HTTP_201_CREATED)
+async def generate_replenishment_order(
+    payload: TakeawayReplenishmentGenerate,
+    current: TokenData = Depends(require_permission("takeaway.central_order.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).generate_replenishment_order(payload))
+
+
 @router.post("/central/rounds", status_code=status.HTTP_201_CREATED)
 async def create_central_round(
     payload: TakeawayCentralRoundCreate,
@@ -532,6 +620,18 @@ async def receive_store_central_order(
     return ok(await TakeawayService(db, current).receive_store_central_order(order_id))
 
 
+@router.post("/store/central-orders/{order_id}/receive-quantities")
+async def receive_store_central_order_quantities(
+    order_id: uuid.UUID,
+    payload: TakeawayCentralOrderFulfilment,
+    current: TokenData = Depends(require_permission("takeaway.central_order.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).receive_central_order_quantities(order_id, payload)
+    )
+
+
 @router.get("/central/orders")
 async def list_central_orders(
     brand_id: uuid.UUID | None = None,
@@ -558,6 +658,48 @@ async def update_central_order_status(
 ) -> dict[str, Any]:
     return ok(
         await TakeawayService(db, current).update_central_order_status(order_id, payload.status)
+    )
+
+
+@router.put("/central/order-items/{item_id}")
+async def resolve_central_order_item(
+    item_id: uuid.UUID,
+    payload: TakeawayCentralOrderItemUpdate,
+    current: TokenData = Depends(require_permission("takeaway.central_order.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).resolve_central_order_item(item_id, payload))
+
+
+@router.post("/central/orders/{order_id}/packed")
+async def pack_central_order(
+    order_id: uuid.UUID,
+    payload: TakeawayCentralOrderFulfilment,
+    current: TokenData = Depends(require_permission("takeaway.central_order.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).fulfil_central_order(order_id, "packed", payload))
+
+
+@router.post("/central/orders/{order_id}/shipped")
+async def ship_central_order(
+    order_id: uuid.UUID,
+    payload: TakeawayCentralOrderFulfilment,
+    current: TokenData = Depends(require_permission("takeaway.central_order.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).fulfil_central_order(order_id, "shipped", payload))
+
+
+@router.post("/central/orders/{order_id}/resolve-discrepancy")
+async def resolve_central_order_discrepancy(
+    order_id: uuid.UUID,
+    payload: TakeawayCentralOrderDiscrepancyResolution,
+    current: TokenData = Depends(require_permission("takeaway.central_order.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).resolve_central_order_discrepancy(order_id, payload)
     )
 
 
@@ -594,6 +736,16 @@ async def complete_production_batch(
     return ok(
         await TakeawayService(db, current).complete_production_batch(batch_id, payload)
     )
+
+
+@router.post("/production/batches/{batch_id}/status")
+async def update_production_status(
+    batch_id: uuid.UUID,
+    payload: TakeawayProductionStatusUpdate,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).update_production_status(batch_id, payload))
 
 
 @router.get("/stock")
@@ -666,6 +818,36 @@ async def update_transfer(
     return ok(await TakeawayService(db, current).update_transfer(transfer_id, payload))
 
 
+@router.post("/transfers/{transfer_id}/ship")
+async def ship_transfer(
+    transfer_id: uuid.UUID,
+    payload: TakeawayTransferFulfilment,
+    current: TokenData = Depends(require_permission("takeaway.transfer.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).fulfil_transfer(transfer_id, "shipped", payload))
+
+
+@router.post("/transfers/{transfer_id}/receive")
+async def receive_transfer(
+    transfer_id: uuid.UUID,
+    payload: TakeawayTransferFulfilment,
+    current: TokenData = Depends(require_permission("takeaway.transfer.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).fulfil_transfer(transfer_id, "received", payload))
+
+
+@router.post("/transfers/{transfer_id}/resolve-discrepancy")
+async def resolve_transfer_discrepancy(
+    transfer_id: uuid.UUID,
+    payload: TakeawayTransferDiscrepancyResolution,
+    current: TokenData = Depends(require_permission("takeaway.transfer.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).resolve_transfer_discrepancy(transfer_id, payload))
+
+
 @router.put("/credit/accounts")
 async def set_credit_limit(
     payload: TakeawayCreditLimitUpdate,
@@ -699,6 +881,71 @@ async def create_credit_entry(
     return ok(await TakeawayService(db, current).create_credit_entry(account_id, payload))
 
 
+@router.get("/credit/accounts/{account_id}/entries")
+async def list_credit_entries(
+    account_id: uuid.UUID,
+    limit: int = Query(default=200, ge=1, le=500),
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).list_credit_entries(account_id, limit=limit))
+
+
+@router.post("/credit/accounts/{account_id}/topups", status_code=status.HTTP_201_CREATED)
+async def create_credit_topup(
+    account_id: uuid.UUID,
+    payload: TakeawayCreditTopupCreate,
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_credit_topup(account_id, payload))
+
+
+@router.get("/credit/topups")
+async def list_credit_topups(
+    brand_id: uuid.UUID | None = None,
+    branch_id: uuid.UUID | None = None,
+    request_status: str | None = Query(default=None, alias="status", pattern="^(pending|approved|rejected)$"),
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_credit_topups(
+            brand_id=brand_id,
+            branch_id=branch_id,
+            request_status=request_status,
+        )
+    )
+
+
+@router.post("/credit/topups/{request_id}/review")
+async def review_credit_topup(
+    request_id: uuid.UUID,
+    payload: TakeawayCreditTopupReview,
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).review_credit_topup(request_id, payload))
+
+
+@router.put("/credit/payment-config")
+async def upsert_credit_payment_config(
+    payload: TakeawayCreditPaymentConfigUpsert,
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).upsert_credit_payment_config(payload))
+
+
+@router.get("/credit/payment-config")
+async def get_credit_payment_config(
+    brand_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).get_credit_payment_config(brand_id))
+
+
 @router.get("/reports/sales-summary")
 async def sales_summary(
     date_from: date,
@@ -710,6 +957,25 @@ async def sales_summary(
 ) -> dict[str, Any]:
     return ok(
         await TakeawayService(db, current).sales_summary(
+            date_from=date_from,
+            date_to=date_to,
+            brand_id=brand_id,
+            branch_id=branch_id,
+        )
+    )
+
+
+@router.get("/reports/operational-summary")
+async def operational_summary(
+    date_from: date,
+    date_to: date,
+    brand_id: uuid.UUID | None = None,
+    branch_id: uuid.UUID | None = None,
+    current: TokenData = Depends(require_permission("takeaway.report.view")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).operational_summary(
             date_from=date_from,
             date_to=date_to,
             brand_id=brand_id,

@@ -101,6 +101,7 @@ import CompanyKitchenPage from "@/pages/kitchen/CompanyKitchenPage";
 import CompanyDistributionPage from "@/pages/distribution/CompanyDistributionPage";
 import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
 import TakeawayCounterPage from "@/pages/takeaway/TakeawayCounterPage";
+import TakeawayCentralRecipesPage from "@/pages/takeaway/TakeawayCentralRecipesPage";
 import TakeawayLegacyRedirect from "@/pages/takeaway/TakeawayLegacyRedirect";
 import TakeawayOperationsPage from "@/pages/takeaway/TakeawayOperationsPage";
 import TakeawayPlannedCapabilityPage from "@/pages/takeaway/TakeawayPlannedCapabilityPage";
@@ -221,7 +222,7 @@ export default function App(): JSX.Element {
                 </Route>
                 <Route element={<ProtectedRoute permission="takeaway.production.manage" />}>
                   <Route path="/takeaway/central/production" element={<TakeawayOperationsPage section="production" workspace="central" />} />
-                  <Route path="/takeaway/central/recipes" element={<TakeawayPlannedCapabilityPage capability="recipes" />} />
+                  <Route path="/takeaway/central/recipes" element={<TakeawayCentralRecipesPage />} />
                 </Route>
                 <Route element={<ProtectedRoute permission="takeaway.stock.manage" />}>
                   <Route path="/takeaway/central/stock" element={<TakeawayOperationsPage section="stock" workspace="central" />} />

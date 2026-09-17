@@ -164,7 +164,82 @@ class TakeawayStoreCentralOrderCreate(BaseSchema):
 
 
 class TakeawayCentralOrderStatusUpdate(BaseSchema):
-    status: Literal["approved", "rejected", "in_production", "packed", "shipped", "received"]
+    status: Literal["approved", "rejected", "in_production", "packed", "shipped", "cancelled"]
+
+
+class TakeawayCentralOrderItemUpdate(BaseSchema):
+    catalog_item_id: uuid.UUID | None = None
+    approved_qty: Decimal = Field(ge=0, decimal_places=4)
+    resolution_note: str | None = Field(default=None, max_length=500)
+
+
+class TakeawayCentralOrderFulfilmentLine(BaseSchema):
+    item_id: uuid.UUID
+    quantity: Decimal = Field(ge=0, decimal_places=4)
+
+
+class TakeawayCentralOrderFulfilment(BaseSchema):
+    lines: list[TakeawayCentralOrderFulfilmentLine] = Field(min_length=1, max_length=200)
+    idempotency_key: str = Field(min_length=8, max_length=180)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class TakeawayCentralOrderDiscrepancyResolution(BaseSchema):
+    resolution: Literal["accept_short", "adjust", "return"]
+    note: str = Field(min_length=1, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=180)
+
+
+class TakeawayRecipeIngredientCreate(BaseSchema):
+    item_id: uuid.UUID
+    sku: str = Field(min_length=1, max_length=100)
+    quantity: Decimal = Field(gt=0, decimal_places=4)
+    unit: str = Field(min_length=1, max_length=40)
+    sort_order: int = Field(default=0, ge=0)
+
+
+class TakeawayRecipeCreate(BaseSchema):
+    brand_id: uuid.UUID
+    branch_id: uuid.UUID | None = None
+    output_item_id: uuid.UUID
+    recipe_type: Literal["sale", "production"] = "production"
+    effective_from: date | None = None
+    effective_to: date | None = None
+    name: str = Field(min_length=1, max_length=255)
+    yield_qty: Decimal = Field(gt=0, decimal_places=4)
+    yield_unit: str = Field(min_length=1, max_length=40)
+    loss_percent: Decimal = Field(default=Decimal("0"), ge=0, lt=100, decimal_places=4)
+    ingredients: list[TakeawayRecipeIngredientCreate] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_recipe(self) -> "TakeawayRecipeCreate":
+        if self.effective_from and self.effective_to and self.effective_to < self.effective_from:
+            raise ValueError("effective_to must be on or after effective_from")
+        if any(line.item_id == self.output_item_id for line in self.ingredients):
+            raise ValueError("recipe cannot consume its own output")
+        if len({line.item_id for line in self.ingredients}) != len(self.ingredients):
+            raise ValueError("recipe ingredient items must be unique")
+        return self
+
+
+class TakeawayReplenishmentPolicyUpsert(BaseSchema):
+    brand_id: uuid.UUID
+    branch_id: uuid.UUID
+    item_id: uuid.UUID
+    is_enabled: bool = True
+    safety_stock_percent: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=4)
+    safety_stock_qty: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=4)
+    pack_size: Decimal = Field(default=Decimal("1"), gt=0, decimal_places=4)
+    lead_time_days: int = Field(default=1, ge=0, le=365)
+    forecast_method: Literal["auto", "fixed"] = "auto"
+    minimum_order_qty: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=4)
+
+
+class TakeawayReplenishmentGenerate(BaseSchema):
+    business_date: date
+    round_no: int = Field(default=1, ge=1, le=99)
+    lookback_days: int = Field(default=7, ge=1, le=90)
+    idempotency_key: str = Field(min_length=8, max_length=180)
 
 
 class TakeawayProductionLineCreate(BaseSchema):
@@ -193,11 +268,18 @@ class TakeawayProductionBatchCreate(BaseSchema):
 class TakeawayProductionCompleteLine(BaseSchema):
     line_id: uuid.UUID
     actual_qty: Decimal = Field(gt=0, decimal_places=4)
+    waste_qty: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=4)
 
 
 class TakeawayProductionComplete(BaseSchema):
     lines: list[TakeawayProductionCompleteLine] = Field(min_length=2, max_length=200)
     idempotency_key: str = Field(min_length=8, max_length=160)
+
+
+class TakeawayProductionStatusUpdate(BaseSchema):
+    status: Literal["in_progress", "cancelled"]
+    idempotency_key: str = Field(min_length=8, max_length=180)
+    note: str | None = Field(default=None, max_length=500)
 
 
 class TakeawayStockMovementCreate(BaseSchema):
@@ -244,6 +326,23 @@ class TakeawayTransferStatusUpdate(BaseSchema):
     idempotency_key: str = Field(min_length=8, max_length=180)
 
 
+class TakeawayTransferQuantityLine(BaseSchema):
+    item_id: uuid.UUID
+    quantity: Decimal = Field(ge=0, decimal_places=4)
+
+
+class TakeawayTransferFulfilment(BaseSchema):
+    lines: list[TakeawayTransferQuantityLine] = Field(min_length=1, max_length=200)
+    idempotency_key: str = Field(min_length=8, max_length=180)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class TakeawayTransferDiscrepancyResolution(BaseSchema):
+    resolution: Literal["accept_short", "adjust", "return"]
+    note: str = Field(min_length=1, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=180)
+
+
 class TakeawayCreditLimitUpdate(BaseSchema):
     brand_id: uuid.UUID
     branch_id: uuid.UUID
@@ -256,6 +355,30 @@ class TakeawayCreditEntryCreate(BaseSchema):
     reference_type: str = Field(min_length=1, max_length=40)
     reference_id: uuid.UUID
     idempotency_key: str = Field(min_length=8, max_length=180)
+
+
+class TakeawayCreditTopupCreate(BaseSchema):
+    amount: Decimal = Field(gt=0, decimal_places=2)
+    payment_method: Literal["promptpay", "bank_transfer", "cash", "other"]
+    payment_reference: str | None = Field(default=None, max_length=200)
+    evidence_url: str | None = Field(default=None, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=180)
+
+
+class TakeawayCreditTopupReview(BaseSchema):
+    status: Literal["approved", "rejected"]
+    note: str | None = Field(default=None, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=180)
+
+
+class TakeawayCreditPaymentConfigUpsert(BaseSchema):
+    brand_id: uuid.UUID
+    promptpay_label: str | None = Field(default=None, max_length=200)
+    promptpay_payload: str | None = Field(default=None, max_length=2000)
+    bank_name: str | None = Field(default=None, max_length=120)
+    bank_account_name: str | None = Field(default=None, max_length=200)
+    bank_account_number: str | None = Field(default=None, max_length=80)
+    is_active: bool = True
 
 
 class TakeawayImportDryRun(BaseSchema):

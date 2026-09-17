@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import hashlib
+import json
 from typing import Any
 import uuid
 
@@ -36,6 +37,7 @@ from app.schemas.takeaway import (
     TakeawayCreditPaymentConfigUpsert,
     TakeawayCreditTopupCreate,
     TakeawayCreditTopupReview,
+    TakeawayCutoverExecute,
     TakeawayErpEventAcknowledge,
     TakeawayImportDryRun,
     TakeawayOrderPaymentCapture,
@@ -68,6 +70,7 @@ from app.models.takeaway import (
 )
 from app.services.takeaway_import_service import (
     TakeawayImportService,
+    build_takeaway_cutover_preview,
     validate_takeaway_import_package,
 )
 from app.utils.public_rate_limit import check_public_rate_limit
@@ -1011,6 +1014,69 @@ async def apply_synthetic_import(
         records=payload.records,
     )
     return ok(batch, {"idempotent_replay": replayed, "synthetic_only": True})
+
+
+def _trusted_takeaway_import_keys() -> dict[str, str]:
+    try:
+        value = json.loads(settings.takeaway_import_trusted_keys_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Takeaway import trust configuration is invalid",
+        ) from exc
+    if not isinstance(value, dict) or not all(
+        isinstance(key, str) and isinstance(pem, str) for key, pem in value.items()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Takeaway import trust configuration is invalid",
+        )
+    return value
+
+
+@router.post("/cutover/preview")
+async def preview_cutover(
+    payload: TakeawayImportDryRun,
+    current: TokenData = Depends(require_permission("takeaway.import.dry_run")),
+) -> dict[str, Any]:
+    return ok(
+        build_takeaway_cutover_preview(
+            manifest=payload.manifest,
+            mapping=payload.mapping,
+            records=payload.records,
+            expected_company_id=current.company_id,
+            expected_brand_id=current.brand_id,
+            trusted_public_keys=_trusted_takeaway_import_keys(),
+        )
+    )
+
+
+@router.post("/cutover/execute", status_code=status.HTTP_201_CREATED)
+async def execute_cutover(
+    payload: TakeawayCutoverExecute,
+    current: TokenData = Depends(require_permission("takeaway.import.apply")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    run, replayed = await TakeawayImportService(db, current).execute_approved_cutover(
+        manifest=payload.manifest,
+        mapping=payload.mapping,
+        records=payload.records,
+        trusted_public_keys=_trusted_takeaway_import_keys(),
+        preview_digest=payload.preview_digest,
+        execution_key=payload.execution_key,
+        approval_reference=payload.approval_reference,
+        backup_reference=payload.backup_reference,
+        rollback_reference=payload.rollback_reference,
+    )
+    return ok(run, {"idempotent_replay": replayed})
+
+
+@router.get("/cutover/runs")
+async def list_cutover_runs(
+    current: TokenData = Depends(require_permission("takeaway.import.dry_run")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayImportService(db, current).list_cutover_runs())
 
 
 @router.get("/integrations/erp/events")

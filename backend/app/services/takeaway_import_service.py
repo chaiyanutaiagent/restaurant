@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
+import base64
+import binascii
 import hashlib
 import json
 import re
 from typing import Any
 import uuid
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +25,7 @@ from app.models.takeaway import (
     TakeawayCategory,
     TakeawayCreditAccount,
     TakeawayCreditEntry,
+    TakeawayCutoverRun,
     TakeawayHistoricalArchive,
     TakeawayImportBatch,
     TakeawayImportRecord,
@@ -133,6 +139,131 @@ def canonical_record_hash(record_type: str, source_id: str, data: dict[str, obje
     return digest_json(
         {"record_type": record_type, "source_id": source_id, "data": data}
     )
+
+
+def verify_takeaway_manifest_seal(
+    manifest: dict[str, object],
+    trusted_public_keys: dict[str, str],
+) -> tuple[bool, str]:
+    seal = manifest.get("seal")
+    if not isinstance(seal, dict):
+        return False, "manifest_seal_required"
+    if seal.get("algorithm") != "Ed25519":
+        return False, "manifest_seal_algorithm"
+    key_id = seal.get("key_id")
+    signature = seal.get("signature")
+    if not isinstance(key_id, str) or key_id not in trusted_public_keys:
+        return False, "manifest_seal_key_untrusted"
+    if not isinstance(signature, str):
+        return False, "manifest_seal_signature_required"
+    payload = dict(manifest)
+    payload.pop("seal", None)
+    try:
+        public_key = serialization.load_pem_public_key(
+            trusted_public_keys[key_id].encode("utf-8")
+        )
+        if not isinstance(public_key, Ed25519PublicKey):
+            return False, "manifest_seal_key_type"
+        public_key.verify(
+            base64.b64decode(signature, validate=True),
+            canonical_json(payload).encode("utf-8"),
+        )
+    except (ValueError, TypeError, binascii.Error, InvalidSignature):
+        return False, "manifest_seal_invalid"
+    return True, "verified"
+
+
+def takeaway_import_control_totals(
+    records: list[dict[str, object]],
+) -> dict[str, str]:
+    totals: dict[str, Decimal] = {
+        "opening_stock_on_hand": Decimal("0"),
+        "opening_stock_reserved": Decimal("0"),
+        "opening_stock_value": Decimal("0"),
+        "opening_credit_balance": Decimal("0"),
+        "historical_sales_total": Decimal("0"),
+    }
+    for record in records:
+        record_type = record.get("record_type")
+        data = record.get("data")
+        if not isinstance(data, dict):
+            continue
+        try:
+            if record_type == "opening_stock":
+                quantity = Decimal(str(data.get("qty_on_hand", "0")))
+                totals["opening_stock_on_hand"] += quantity
+                totals["opening_stock_reserved"] += Decimal(
+                    str(data.get("qty_reserved", "0"))
+                )
+                totals["opening_stock_value"] += quantity * Decimal(
+                    str(data.get("cost_per_unit", "0"))
+                )
+            elif record_type == "opening_credit":
+                totals["opening_credit_balance"] += Decimal(
+                    str(data.get("balance", "0"))
+                )
+            elif record_type == "historical_sale":
+                totals["historical_sales_total"] += Decimal(
+                    str(data.get("total_amount", data.get("total", "0")))
+                )
+        except InvalidOperation:
+            continue
+    return {key: format(value, "f") for key, value in totals.items()}
+
+
+def build_takeaway_cutover_preview(
+    *,
+    manifest: dict[str, object],
+    mapping: dict[str, object],
+    records: list[dict[str, object]],
+    expected_company_id: uuid.UUID,
+    expected_brand_id: uuid.UUID | None,
+    trusted_public_keys: dict[str, str],
+) -> dict[str, object]:
+    report = validate_takeaway_import_package(
+        manifest=manifest,
+        mapping=mapping,
+        records=records,
+        expected_company_id=expected_company_id,
+        expected_brand_id=expected_brand_id,
+    )
+    blockers = list(report.findings)
+    source = manifest.get("source")
+    if not isinstance(source, dict) or source.get("environment") != "approved_snapshot":
+        blockers.append({"code": "approved_snapshot_required", "path": "manifest.source.environment"})
+    seal_verified, seal_status = verify_takeaway_manifest_seal(
+        manifest, trusted_public_keys
+    )
+    if not seal_verified:
+        blockers.append({"code": seal_status, "path": "manifest.seal"})
+    controls = manifest.get("cutover_controls")
+    if not isinstance(controls, dict):
+        blockers.append({"code": "cutover_controls_required", "path": "manifest.cutover_controls"})
+        controls = {}
+    open_operations = controls.get("open_operations")
+    if not isinstance(open_operations, dict):
+        blockers.append({"code": "open_operations_required", "path": "manifest.cutover_controls.open_operations"})
+        open_operations = {}
+    for operation, count in sorted(open_operations.items()):
+        if isinstance(count, bool) or not isinstance(count, int) or count != 0:
+            blockers.append({"code": "open_operation_blocker", "path": f"manifest.cutover_controls.open_operations.{operation}", "count": count})
+    if controls.get("target_side_effects_disabled") is not True:
+        blockers.append({"code": "target_side_effects_must_be_disabled", "path": "manifest.cutover_controls.target_side_effects_disabled"})
+    preview_core: dict[str, object] = {
+        "manifest_digest": report.manifest_digest,
+        "mapping_digest": report.mapping_digest,
+        "total_records": report.total_records,
+        "section_counts": report.section_counts,
+        "control_totals": takeaway_import_control_totals(records),
+        "seal_status": seal_status,
+        "source_snapshot": source.get("snapshot_id") if isinstance(source, dict) else None,
+        "blockers": blockers,
+    }
+    return {
+        **preview_core,
+        "ready": not blockers,
+        "preview_digest": digest_json(preview_core),
+    }
 
 
 def _uuid(value: object, path: str, findings: list[dict[str, object]]) -> uuid.UUID | None:
@@ -382,6 +513,23 @@ class TakeawayImportService:
         mapping: dict[str, object],
         records: list[dict[str, object]],
     ) -> tuple[TakeawayImportBatch, bool]:
+        return await self._apply_package(
+            manifest=manifest,
+            mapping=mapping,
+            records=records,
+            mode="synthetic_apply",
+            allowed_source_environments={"synthetic"},
+        )
+
+    async def _apply_package(
+        self,
+        *,
+        manifest: dict[str, object],
+        mapping: dict[str, object],
+        records: list[dict[str, object]],
+        mode: str,
+        allowed_source_environments: set[str],
+    ) -> tuple[TakeawayImportBatch, bool]:
         brand_mapping = mapping.get("brand") if isinstance(mapping.get("brand"), dict) else {}
         target_brand_raw = brand_mapping.get("target_id")
         target_brand = uuid.UUID(str(target_brand_raw)) if target_brand_raw else None
@@ -395,10 +543,10 @@ class TakeawayImportService:
         if report.status != "ok":
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=report.as_dict())
         source = manifest.get("source")
-        if not isinstance(source, dict) or source.get("environment") != "synthetic":
+        if not isinstance(source, dict) or source.get("environment") not in allowed_source_environments:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Only synthetic Takeaway imports are allowed while the contract is draft",
+                detail="Takeaway import source environment is not allowed for this operation",
             )
         if target_brand is None:
             raise HTTPException(status_code=422, detail="Target Takeaway Brand is required")
@@ -422,7 +570,7 @@ class TakeawayImportService:
             source_system="erp-pos-run",
             source_snapshot=str(source.get("snapshot_id")),
             manifest_digest=report.manifest_digest,
-            mode="synthetic_apply",
+            mode=mode,
             status="applying",
             total_records=report.total_records,
             accepted_records=report.accepted_records,
@@ -718,6 +866,105 @@ class TakeawayImportService:
         await self.db.commit()
         await self.db.refresh(batch)
         return batch, False
+
+    async def execute_approved_cutover(
+        self,
+        *,
+        manifest: dict[str, object],
+        mapping: dict[str, object],
+        records: list[dict[str, object]],
+        trusted_public_keys: dict[str, str],
+        preview_digest: str,
+        execution_key: str,
+        approval_reference: str,
+        backup_reference: str,
+        rollback_reference: str,
+    ) -> tuple[TakeawayCutoverRun, bool]:
+        existing = await self.db.scalar(
+            select(TakeawayCutoverRun).where(
+                TakeawayCutoverRun.company_id == self.current.company_id,
+                TakeawayCutoverRun.execution_key == execution_key,
+            )
+        )
+        if existing is not None:
+            return existing, True
+        preview = build_takeaway_cutover_preview(
+            manifest=manifest,
+            mapping=mapping,
+            records=records,
+            expected_company_id=self.current.company_id,
+            expected_brand_id=self.current.brand_id,
+            trusted_public_keys=trusted_public_keys,
+        )
+        if not preview["ready"]:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"message": "Takeaway cutover preview has blockers", "preview": preview},
+            )
+        if preview["preview_digest"] != preview_digest:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cutover preview changed; run preview and approve again",
+            )
+        batch, replayed = await self._apply_package(
+            manifest=manifest,
+            mapping=mapping,
+            records=records,
+            mode="approved_cutover",
+            allowed_source_environments={"approved_snapshot"},
+        )
+        brand_mapping = mapping.get("brand")
+        source = manifest.get("source")
+        if not isinstance(brand_mapping, dict) or not isinstance(source, dict):
+            raise HTTPException(status_code=422, detail="Approved cutover scope is incomplete")
+        brand_id = uuid.UUID(str(brand_mapping["target_id"]))
+        imported_count = len(records)
+        reconciliation = {
+            "status": "matched" if batch.accepted_records == imported_count and batch.rejected_records == 0 else "mismatch",
+            "source_record_count": imported_count,
+            "target_import_record_count": batch.accepted_records,
+            "rejected_record_count": batch.rejected_records,
+            "control_totals": takeaway_import_control_totals(records),
+            "historical_side_effects": 0,
+            "batch_replayed": replayed,
+        }
+        run = TakeawayCutoverRun(
+            company_id=self.current.company_id,
+            brand_id=brand_id,
+            batch_id=batch.id,
+            execution_key=execution_key,
+            export_id=uuid.UUID(str(manifest["export_id"])),
+            source_snapshot=str(source["snapshot_id"]),
+            manifest_digest=str(preview["manifest_digest"]),
+            mapping_digest=str(preview["mapping_digest"]),
+            preview_digest=preview_digest,
+            status="completed",
+            approved_by=self.current.user_id,
+            approval_reference=approval_reference,
+            backup_reference=backup_reference,
+            rollback_reference=rollback_reference,
+            report=preview,
+            reconciliation=reconciliation,
+            executed_at=datetime.now(timezone.utc),
+        )
+        self.db.add(run)
+        await self.db.commit()
+        await self.db.refresh(run)
+        return run, False
+
+    async def list_cutover_runs(self) -> list[TakeawayCutoverRun]:
+        query = select(TakeawayCutoverRun).where(
+            TakeawayCutoverRun.company_id == self.current.company_id,
+        )
+        if self.current.brand_id is not None:
+            query = query.where(TakeawayCutoverRun.brand_id == self.current.brand_id)
+        return list(
+            (
+                await self.db.scalars(
+                    query.order_by(TakeawayCutoverRun.created_at.desc()).limit(100)
+                )
+            ).all()
+        )
 
 
 def _date(value: object) -> date | None:

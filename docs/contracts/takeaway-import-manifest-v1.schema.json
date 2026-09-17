@@ -67,7 +67,7 @@
           "maxLength": 128
         },
         "environment": {
-          "enum": ["synthetic", "local", "staging", "production_snapshot"]
+          "enum": ["synthetic", "local", "staging", "production_snapshot", "approved_snapshot"]
         },
         "snapshot_id": {
           "type": "string",
@@ -232,6 +232,28 @@
           "minLength": 1,
           "maxLength": 100
         }
+      }
+    },
+    "cutover_controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["open_operations", "target_side_effects_disabled"],
+      "properties": {
+        "open_operations": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        },
+        "target_side_effects_disabled": {"const": true}
+      }
+    },
+    "seal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "key_id", "signature"],
+      "properties": {
+        "algorithm": {"const": "Ed25519"},
+        "key_id": {"type": "string", "minLength": 1, "maxLength": 100},
+        "signature": {"type": "string", "minLength": 80, "maxLength": 120}
       }
     }
   },

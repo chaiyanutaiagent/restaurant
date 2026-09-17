@@ -666,3 +666,35 @@ class TakeawayHistoricalArchive(UUIDMixin, Base):
     source_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     archived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+
+class TakeawayCutoverRun(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "takeaway_cutover_runs"
+    __table_args__ = (
+        UniqueConstraint("company_id", "execution_key", name="uq_takeaway_cutover_execution_key"),
+        Index("ix_takeaway_cutover_scope", "company_id", "brand_id", "created_at"),
+        CheckConstraint(
+            "status IN ('completed', 'failed', 'rollback_requested', 'rolled_back')",
+            name="ck_takeaway_cutover_status",
+        ),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    execution_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    export_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_snapshot: Mapped[str] = mapped_column(String(200), nullable=False)
+    manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    mapping_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    preview_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    approved_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    approval_reference: Mapped[str] = mapped_column(String(300), nullable=False)
+    backup_reference: Mapped[str] = mapped_column(String(500), nullable=False)
+    rollback_reference: Mapped[str] = mapped_column(String(500), nullable=False)
+    report: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    reconciliation: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    rollback_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

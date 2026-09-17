@@ -282,6 +282,12 @@ export const takeawayApi = {
     api.post<ApiResponse<TakeawayRecord>>("/takeaway/imports/dry-run", payload),
   applySyntheticImport: (payload: Record<string, unknown>) =>
     api.post<ApiResponse<TakeawayRecord>>("/takeaway/imports/synthetic-apply", payload),
+  previewCutover: (payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>("/takeaway/cutover/preview", payload),
+  executeCutover: (payload: Record<string, unknown>) =>
+    api.post<ApiResponse<TakeawayRecord>>("/takeaway/cutover/execute", payload),
+  cutoverRuns: () =>
+    api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/cutover/runs"),
   erpEvents: (status = "pending") =>
     api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/integrations/erp/events", { params: { status } }),
   acknowledgeErpEvent: (id: string, payload: { idempotency_key: string; erp_reference: string }) =>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -8,11 +9,17 @@ import tempfile
 import unittest
 import uuid
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from app.services.takeaway_import_service import (
     CONTRACT,
     MAPPING_CONTRACT,
     SCHEMA_VERSION,
     canonical_record_hash,
+    canonical_json,
+    build_takeaway_cutover_preview,
+    verify_takeaway_manifest_seal,
     validate_takeaway_import_package,
 )
 from app.cli.validate_takeaway_import import validate_bundle
@@ -185,6 +192,66 @@ class TakeawayImportValidationTests(unittest.TestCase):
             report = validate_bundle(bundle)
             self.assertEqual(report["status"], "rejected")
             self.assertIn("unsafe_file_path", {row["code"] for row in report["bundle_findings"]})
+
+    def sealed_approved_manifest(self) -> tuple[dict[str, object], dict[str, str]]:
+        manifest = copy.deepcopy(self.manifest)
+        assert isinstance(manifest["source"], dict)
+        manifest["source"]["environment"] = "approved_snapshot"
+        manifest["cutover_controls"] = {
+            "open_operations": {
+                "shifts": 0,
+                "orders": 0,
+                "production": 0,
+                "transfers": 0,
+                "topups": 0,
+            },
+            "target_side_effects_disabled": True,
+        }
+        key = Ed25519PrivateKey.generate()
+        signature = key.sign(canonical_json(manifest).encode("utf-8"))
+        manifest["seal"] = {
+            "algorithm": "Ed25519",
+            "key_id": "wp21-test",
+            "signature": base64.b64encode(signature).decode("ascii"),
+        }
+        public_pem = key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+        return manifest, {"wp21-test": public_pem}
+
+    def test_approved_snapshot_seal_and_preview_pass(self) -> None:
+        manifest, keys = self.sealed_approved_manifest()
+        verified, reason = verify_takeaway_manifest_seal(manifest, keys)
+        self.assertTrue(verified, reason)
+        preview = build_takeaway_cutover_preview(
+            manifest=manifest,
+            mapping=self.mapping,
+            records=self.records,
+            expected_company_id=self.company_id,
+            expected_brand_id=self.brand_id,
+            trusted_public_keys=keys,
+        )
+        self.assertTrue(preview["ready"], preview["blockers"])
+        self.assertRegex(str(preview["preview_digest"]), r"^[a-f0-9]{64}$")
+
+    def test_cutover_preview_rejects_tamper_and_open_operations(self) -> None:
+        manifest, keys = self.sealed_approved_manifest()
+        assert isinstance(manifest["cutover_controls"], dict)
+        assert isinstance(manifest["cutover_controls"]["open_operations"], dict)
+        manifest["cutover_controls"]["open_operations"]["orders"] = 1
+        preview = build_takeaway_cutover_preview(
+            manifest=manifest,
+            mapping=self.mapping,
+            records=self.records,
+            expected_company_id=self.company_id,
+            expected_brand_id=self.brand_id,
+            trusted_public_keys=keys,
+        )
+        codes = {row["code"] for row in preview["blockers"]}
+        self.assertFalse(preview["ready"])
+        self.assertIn("manifest_seal_invalid", codes)
+        self.assertIn("open_operation_blocker", codes)
 
 
 if __name__ == "__main__":

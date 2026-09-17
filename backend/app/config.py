@@ -164,6 +164,7 @@ class Settings(BaseSettings):
     )
     takeaway_service_database: Literal["disabled", "takeaway"] = "disabled"
     takeaway_feature_enabled: bool = False
+    takeaway_import_trusted_keys_json: str = "{}"
     reference_projector_enabled: bool = False
     reference_projector_poll_seconds: float = Field(default=1.0, ge=0.1, le=60.0)
     reference_projector_batch_size: int = Field(default=100, ge=1, le=1000)

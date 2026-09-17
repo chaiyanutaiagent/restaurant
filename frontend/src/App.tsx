@@ -101,11 +101,11 @@ import CompanyKitchenPage from "@/pages/kitchen/CompanyKitchenPage";
 import CompanyDistributionPage from "@/pages/distribution/CompanyDistributionPage";
 import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
 import TakeawayCounterPage from "@/pages/takeaway/TakeawayCounterPage";
+import TakeawayCutoverPage from "@/pages/takeaway/TakeawayCutoverPage";
 import TakeawayCentralRecipesPage from "@/pages/takeaway/TakeawayCentralRecipesPage";
 import TakeawayDeviceSettingsPage from "@/pages/takeaway/TakeawayDeviceSettingsPage";
 import TakeawayLegacyRedirect from "@/pages/takeaway/TakeawayLegacyRedirect";
 import TakeawayOperationsPage from "@/pages/takeaway/TakeawayOperationsPage";
-import TakeawayPlannedCapabilityPage from "@/pages/takeaway/TakeawayPlannedCapabilityPage";
 import TakeawayPickupStatusPage from "@/pages/takeaway/TakeawayPickupStatusPage";
 import TakeawayPublicOrderPage from "@/pages/takeaway/TakeawayPublicOrderPage";
 import TakeawayShiftPage from "@/pages/takeaway/TakeawayShiftPage";
@@ -250,7 +250,7 @@ export default function App(): JSX.Element {
                   <Route path="/takeaway/admin/import" element={<TakeawayOperationsPage section="import" workspace="admin" />} />
                 </Route>
                 <Route element={<ProtectedRoute permission="takeaway.import.apply" />}>
-                  <Route path="/takeaway/admin/cutover" element={<TakeawayPlannedCapabilityPage capability="cutover" />} />
+                  <Route path="/takeaway/admin/cutover" element={<TakeawayCutoverPage />} />
                 </Route>
                 <Route element={<ProtectedRoute permission="takeaway.erp.export" />}>
                   <Route path="/takeaway/admin/erp" element={<TakeawayOperationsPage section="erp" workspace="admin" />} />

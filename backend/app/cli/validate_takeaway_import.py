@@ -6,7 +6,10 @@ import json
 from pathlib import Path
 import sys
 
-from app.services.takeaway_import_service import validate_takeaway_import_package
+from app.services.takeaway_import_service import (
+    validate_takeaway_import_package,
+    verify_takeaway_manifest_seal,
+)
 
 
 def digest_file(path: Path) -> str:
@@ -34,13 +37,21 @@ def load_json(path: Path) -> dict[str, object]:
     return value
 
 
-def validate_bundle(bundle: Path) -> dict[str, object]:
+def validate_bundle(
+    bundle: Path, trusted_public_keys: dict[str, str] | None = None
+) -> dict[str, object]:
     bundle = bundle.resolve()
     manifest_path = bundle / "manifest.json"
     mapping_path = bundle / "mapping.json"
     manifest = load_json(manifest_path)
     mapping = load_json(mapping_path)
     findings: list[dict[str, object]] = []
+    if trusted_public_keys is not None:
+        verified, seal_status = verify_takeaway_manifest_seal(
+            manifest, trusted_public_keys
+        )
+        if not verified:
+            findings.append({"code": seal_status, "path": "manifest.seal"})
 
     mapping_spec = manifest.get("mapping")
     if isinstance(mapping_spec, dict):
@@ -128,9 +139,16 @@ def validate_bundle(bundle: Path) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate a sealed Takeaway import bundle")
     parser.add_argument("bundle", type=Path)
+    parser.add_argument("--public-key", type=Path)
+    parser.add_argument("--key-id")
     args = parser.parse_args()
     try:
-        report = validate_bundle(args.bundle)
+        trusted_keys = None
+        if args.public_key or args.key_id:
+            if not args.public_key or not args.key_id:
+                raise ValueError("--public-key and --key-id must be provided together")
+            trusted_keys = {args.key_id: args.public_key.read_text(encoding="utf-8")}
+        report = validate_bundle(args.bundle, trusted_keys)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(json.dumps({"status": "rejected", "error": type(exc).__name__}, sort_keys=True))
         return 1

@@ -387,6 +387,18 @@ class TakeawayImportDryRun(BaseSchema):
     records: list[dict[str, object]] = Field(max_length=10000)
 
 
+class TakeawayCutoverExecute(BaseSchema):
+    manifest: dict[str, object]
+    mapping: dict[str, object]
+    records: list[dict[str, object]] = Field(max_length=10000)
+    preview_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    execution_key: str = Field(min_length=8, max_length=180)
+    approval_reference: str = Field(min_length=3, max_length=300)
+    backup_reference: str = Field(min_length=3, max_length=500)
+    rollback_reference: str = Field(min_length=3, max_length=500)
+    confirmation: Literal["EXECUTE_APPROVED_TAKEAWAY_CUTOVER"]
+
+
 class TakeawayErpEventAcknowledge(BaseSchema):
     idempotency_key: str = Field(min_length=8, max_length=180)
     erp_reference: str = Field(min_length=1, max_length=180)

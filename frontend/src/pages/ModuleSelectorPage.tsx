@@ -193,7 +193,7 @@ export default function ModuleSelectorPage(): JSX.Element {
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
-      <div className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 lg:py-16">
+      <div className="mx-auto w-full max-w-[1800px] px-5 py-8 md:px-8 lg:py-12 xl:px-10">
         <header className="max-w-3xl">
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-blue-600">
             {PLATFORM_BRAND.productName}

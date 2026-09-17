@@ -11,8 +11,8 @@ export default function PlatformShell(): JSX.Element {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 bg-slate-950/95">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
+      <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 backdrop-blur">
+        <div className="mx-auto flex max-w-[1800px] items-center justify-between px-4 py-3 md:px-6 xl:px-8">
           <div className="flex items-center gap-3">
             <div className="rounded-xl bg-emerald-400 p-2.5 text-slate-950">
               <ShieldCheck className="h-6 w-6" />
@@ -31,7 +31,7 @@ export default function PlatformShell(): JSX.Element {
             </div>
             <button
               type="button"
-              className="rounded-lg border border-slate-700 p-2 text-slate-300 hover:bg-slate-800"
+              className="grid h-11 w-11 place-items-center rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800"
               aria-label="ออกจาก Platform"
               onClick={async () => {
                 try {
@@ -47,12 +47,12 @@ export default function PlatformShell(): JSX.Element {
           </div>
         </div>
       </header>
-      <div className="mx-auto grid max-w-7xl gap-6 px-5 py-6 md:grid-cols-[220px_minmax(0,1fr)]">
-        <nav className="flex gap-2 md:flex-col">
+      <div className="mx-auto grid max-w-[1800px] gap-4 px-3 py-4 md:grid-cols-[240px_minmax(0,1fr)] md:gap-6 md:px-5 md:py-6 xl:px-8">
+        <nav className="app-horizontal-scroll flex gap-2 overflow-x-auto md:sticky md:top-24 md:h-fit md:flex-col md:overflow-visible">
           <NavLink
             to="/platform/dashboard"
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+              `flex min-h-12 min-w-fit items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${
                 isActive ? "bg-emerald-400 text-slate-950" : "text-slate-300 hover:bg-slate-900"
               }`
             }
@@ -62,7 +62,7 @@ export default function PlatformShell(): JSX.Element {
           <NavLink
             to="/platform/companies"
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+              `flex min-h-12 min-w-fit items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${
                 isActive ? "bg-emerald-400 text-slate-950" : "text-slate-300 hover:bg-slate-900"
               }`
             }
@@ -72,7 +72,7 @@ export default function PlatformShell(): JSX.Element {
           <NavLink
             to="/platform/billing"
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+              `flex min-h-12 min-w-fit items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${
                 isActive ? "bg-emerald-400 text-slate-950" : "text-slate-300 hover:bg-slate-900"
               }`
             }
@@ -82,7 +82,7 @@ export default function PlatformShell(): JSX.Element {
           <NavLink
             to="/platform/support"
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+              `flex min-h-12 min-w-fit items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${
                 isActive ? "bg-emerald-400 text-slate-950" : "text-slate-300 hover:bg-slate-900"
               }`
             }
@@ -92,7 +92,7 @@ export default function PlatformShell(): JSX.Element {
           <NavLink
             to="/platform/audit"
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+              `flex min-h-12 min-w-fit items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${
                 isActive ? "bg-emerald-400 text-slate-950" : "text-slate-300 hover:bg-slate-900"
               }`
             }
@@ -102,7 +102,7 @@ export default function PlatformShell(): JSX.Element {
           <NavLink
             to="/platform/operations"
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+              `flex min-h-12 min-w-fit items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${
                 isActive ? "bg-emerald-400 text-slate-950" : "text-slate-300 hover:bg-slate-900"
               }`
             }
@@ -112,7 +112,7 @@ export default function PlatformShell(): JSX.Element {
           <NavLink
             to="/platform/security"
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+              `flex min-h-12 min-w-fit items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${
                 isActive ? "bg-emerald-400 text-slate-950" : "text-slate-300 hover:bg-slate-900"
               }`
             }

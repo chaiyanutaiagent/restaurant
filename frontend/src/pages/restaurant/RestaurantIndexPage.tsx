@@ -142,18 +142,18 @@ export default function RestaurantIndexPage(): JSX.Element {
           ) : null
         }
       />
-      <div className="p-6">
+      <div>
         {cards.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
             ยังไม่มีเมนู F&B สำหรับสิทธิ์ของผู้ใช้นี้
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {cards.map((card) => (
             <Link
               key={card.to}
               to={card.to}
-              className="flex items-start gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              className="flex min-h-40 items-start gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-orange-300 hover:shadow-md md:p-6"
             >
               <div className={`rounded-xl p-3 text-white ${card.color}`}>
                 {card.icon}

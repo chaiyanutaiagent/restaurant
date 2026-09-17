@@ -85,30 +85,28 @@ export default function TopBar({ title, onMenuClick, workspace = "admin" }: TopB
   }, [branchId, defaultBranch, handleSwitchBranch]);
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-3 shadow-sm lg:h-16 lg:px-6">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
+    <header className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-3 shadow-sm backdrop-blur md:px-5 xl:px-7">
+      <div className="flex min-w-0 items-center gap-3">
+        <Button variant="ghost" size="icon" className="shrink-0 xl:hidden" onClick={onMenuClick}>
           <Menu className="h-5 w-5" />
         </Button>
-        <div>
-          <p className={cn("text-lg font-bold", workspace === "restaurant" ? "text-orange-600" : "text-blue-600")}>
+        <div className="min-w-0">
+          <p className={cn("truncate text-base font-black md:text-lg", workspace === "restaurant" ? "text-orange-600" : "text-blue-600")}>
             {workspace === "restaurant" ? "Restaurant" : PLATFORM_BRAND.productName}
           </p>
-          <p className="hidden text-sm text-gray-500 lg:block">
-            {workspace === "restaurant" ? "F&B Workspace" : title}
+          <p className="truncate text-xs text-slate-500 md:text-sm">
+            {title}
           </p>
         </div>
       </div>
 
-      <div className="hidden text-lg font-semibold text-gray-900 xl:block">{title}</div>
-
-      <div className="flex items-center gap-2 md:gap-3">
+      <div className="flex shrink-0 items-center gap-1.5 md:gap-3">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="max-w-[200px] justify-between gap-2">
+            <Button variant="outline" className="max-w-[11rem] justify-between gap-2 md:max-w-[15rem]">
               <span className="flex items-center gap-2 truncate">
                 <Building2 className="h-4 w-4 text-blue-600" />
-                <span className="truncate">{currentBranch?.branch_name ?? "เลือกสาขา"}</span>
+                <span className="hidden truncate sm:inline">{currentBranch?.branch_name ?? "เลือกสาขา"}</span>
               </span>
               <ChevronDown className="h-4 w-4 text-gray-400" />
             </Button>
@@ -137,7 +135,7 @@ export default function TopBar({ title, onMenuClick, workspace = "admin" }: TopB
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="gap-2 px-2">
+            <Button variant="ghost" className="gap-2 px-1.5 md:px-2">
               <Avatar className="h-9 w-9">
                 <AvatarFallback>
                   {user?.username.slice(0, 2).toUpperCase() ?? "AD"}

@@ -1764,8 +1764,8 @@ export default function POSPage(): JSX.Element {
   }
 
   return (
-    <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] lg:h-screen">
-      <div className="flex min-w-0 flex-1 flex-col lg:overflow-hidden">
+    <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] md:h-screen">
+      <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
         {/* Tablet v2: compact identity and health header */}
         <div className="border-b border-slate-200/80 bg-white/90 px-4 py-2.5 backdrop-blur">
           <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
@@ -1836,8 +1836,8 @@ export default function POSPage(): JSX.Element {
           onNavigate={openWorkspace}
         />
 
-        <div className="flex min-h-0 flex-1 flex-col lg:flex-row lg:overflow-hidden">
-          <div className="flex min-w-0 flex-1 flex-col p-3 md:p-4 lg:overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row md:overflow-hidden">
+          <div className="flex min-w-0 flex-1 flex-col p-3 md:overflow-hidden md:p-4">
             <div className="rounded-[28px] border border-white/80 bg-white/85 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
                 <div className="relative flex-1">
@@ -2075,7 +2075,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Normal Mode */}
             {cardDensity === "normal" && (
-              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-2 gap-3 overflow-x-hidden overflow-y-auto md:grid-cols-3 xl:grid-cols-4">
+              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-2 gap-3 overflow-x-hidden overflow-y-auto xl:grid-cols-3 2xl:grid-cols-4">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const stockLabel = stock <= 0 ? "หมด" : stock <= 5 ? "ใกล้หมด" : `${stock}`;
@@ -2107,7 +2107,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Compact Mode (มากขึ้นต่อแถว) */}
             {cardDensity === "compact" && (
-              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-3 gap-2 overflow-x-hidden overflow-y-auto md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-3 gap-2 overflow-x-hidden overflow-y-auto lg:grid-cols-4 2xl:grid-cols-5">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const outOfStock = stock <= 0;
@@ -2142,7 +2142,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product List — List Mode */}
             {cardDensity === "list" && (
-              <div className="mt-3 flex-1 space-y-1.5 overflow-x-hidden lg:overflow-y-auto">
+              <div className="mt-3 flex-1 space-y-1.5 overflow-x-hidden md:overflow-y-auto">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const outOfStock = stock <= 0;
@@ -2179,7 +2179,7 @@ export default function POSPage(): JSX.Element {
             </div>
           </div>
 
-          <aside data-testid="pos-cart-panel" className="flex w-full flex-col overflow-y-auto border-t border-slate-200/80 bg-white/92 backdrop-blur lg:h-full lg:w-[25rem] lg:max-h-none lg:border-l lg:border-t-0 xl:w-[28rem]">
+          <aside data-testid="pos-cart-panel" className="flex w-full flex-col overflow-y-auto border-t border-slate-200/80 bg-white/92 backdrop-blur md:h-full md:w-[22rem] md:max-h-none md:border-l md:border-t-0 lg:w-[25rem] xl:w-[28rem]">
             <div data-testid="pos-cart-header" className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold text-slate-900">{isTakeawayMode ? "ตะกร้ารับกลับ" : "ตะกร้า"}</h2>

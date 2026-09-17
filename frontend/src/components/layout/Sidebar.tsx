@@ -205,22 +205,22 @@ export default function Sidebar({
   return (
     <aside
       className={cn(
-        "fixed inset-y-0 left-0 z-40 flex w-72 flex-col bg-gray-900 text-gray-100 transition-transform duration-200 lg:static lg:translate-x-0",
+        "fixed inset-y-0 left-0 z-50 flex w-[18rem] flex-col border-r border-slate-800 bg-slate-950 text-slate-100 shadow-2xl transition-transform duration-200 xl:static xl:translate-x-0 xl:shadow-none",
         isSidebarOpen ? "translate-x-0" : "-translate-x-full"
       )}
     >
-      <div className="flex items-center justify-between border-b border-gray-800 px-5 py-4">
+      <div className="flex min-h-16 items-center justify-between border-b border-slate-800 px-5 py-3.5">
         <div>
           <p className="text-lg font-semibold text-white">{brandTitle}</p>
           <p className="text-xs text-gray-400">{brandSubtitle}</p>
         </div>
-        <Button variant="ghost" size="icon" className="text-gray-300 lg:hidden" onClick={onClose}>
+        <Button variant="ghost" size="icon" className="text-slate-300 xl:hidden" onClick={onClose}>
           <X className="h-5 w-5" />
         </Button>
       </div>
 
-      <div className="border-b border-gray-800 px-4 py-4">
-        <div className="flex items-center gap-3 rounded-lg bg-gray-800/60 px-3 py-3">
+      <div className="border-b border-slate-800 px-4 py-3">
+        <div className="flex items-center gap-3 rounded-xl bg-slate-900 px-3 py-3 ring-1 ring-slate-800">
           <Avatar className="h-10 w-10">
             <AvatarFallback>
               {user?.username.slice(0, 2).toUpperCase() ?? "AD"}
@@ -235,7 +235,7 @@ export default function Sidebar({
         </div>
       </div>
 
-      <nav className="flex-1 space-y-6 overflow-y-auto px-4 py-5">
+      <nav className="app-horizontal-scroll flex-1 space-y-5 overflow-y-auto px-3 py-4 [&_a]:min-h-11 [&_a]:rounded-xl [&_button]:min-h-11 [&_button]:rounded-xl">
         {workspace === "restaurant" ? (
           <>
             <div className="space-y-3">

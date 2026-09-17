@@ -204,7 +204,7 @@ export default function TakeawayCounterPage(): JSX.Element {
     return <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-900">กรุณาเลือกสาขาของแบรนด์ Takeaway ก่อนเปิดหน้าขาย</div>;
   }
   return (
-    <div className="grid min-h-[calc(100vh-7rem)] gap-4 xl:grid-cols-[1fr_420px]">
+    <div className="grid min-h-[calc(100vh-10rem)] items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] xl:min-h-[calc(100vh-3.5rem)]">
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4 shadow-sm">
           <div><h1 className="text-xl font-black">ขายหน้าร้าน</h1><p className="text-sm text-slate-500">ชำระก่อนผลิต · ขายต่อได้เมื่อเน็ตหลุด · ส่งซ้ำไม่เกิดบิลซ้ำ</p></div>
@@ -225,7 +225,7 @@ export default function TakeawayCounterPage(): JSX.Element {
         </div>
         {(recentOrdersQuery.data ?? []).length ? <div className="rounded-2xl border bg-white p-4 shadow-sm"><h2 className="font-black">บิลล่าสุด</h2><div className="mt-3 flex gap-2 overflow-x-auto">{(recentOrdersQuery.data ?? []).slice(0, 8).map((order) => <button key={order.id} disabled={reprintMutation.isPending} onClick={() => reprintMutation.mutate(order.id)} className="min-w-fit rounded-xl border px-3 py-2 text-left text-sm"><span className="font-black">คิว {String(order.queue_number ?? "-")}</span><span className="ml-2 text-slate-500">{money(Number(order.total_amount))}</span><Printer className="ml-2 inline h-4 w-4" /></button>)}</div></div> : null}
       </section>
-      <aside className="flex min-h-[620px] flex-col overflow-hidden rounded-3xl bg-slate-950 text-white shadow-xl">
+      <aside className="flex min-h-[620px] flex-col overflow-hidden rounded-3xl bg-slate-950 text-white shadow-xl lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)] lg:min-h-0">
         <div className="flex items-center justify-between border-b border-slate-800 p-5"><div><h2 className="flex items-center gap-2 text-lg font-black"><ShoppingCart className="h-5 w-5" /> ตะกร้า</h2><p className="text-xs text-slate-400">{cart.length} รายการ</p></div>{lastQueue ? <span className="rounded-xl bg-emerald-500 px-3 py-2 font-black text-slate-950">คิวล่าสุด {lastQueue}</span> : null}</div>
         {pickupQr && lastQueue ? <div className="border-b border-slate-800 bg-white p-4 text-center text-slate-950"><img className="mx-auto h-36 w-36" src={pickupQr} alt={`QR ติดตามคิว ${lastQueue}`} /><p className="mt-2 font-black">สแกนติดตามคิว {lastQueue}</p><p className="text-xs text-slate-500">ลูกค้าเปิดดูสถานะได้โดยไม่ต้องเข้าสู่ระบบ</p></div> : null}
         {lastReceipt ? <div className="grid grid-cols-2 gap-2 border-b border-slate-800 p-4"><button onClick={() => void printReceipt(lastReceipt, "customer")} className="rounded-xl bg-white px-3 py-3 text-sm font-black text-slate-950"><Printer className="mr-2 inline h-4 w-4" />ใบลูกค้า</button><button onClick={() => void printReceipt(lastReceipt, "merchant")} className="rounded-xl border border-slate-600 px-3 py-3 text-sm font-black"><Printer className="mr-2 inline h-4 w-4" />สำเนาร้าน</button></div> : null}

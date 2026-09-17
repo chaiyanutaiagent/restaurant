@@ -629,7 +629,7 @@ export default function RecipesPage(): JSX.Element {
             </div>
 
             {/* Cost Summary */}
-            <div className="mt-6 grid grid-cols-3 gap-4">
+            <div className="mt-6 grid gap-3 md:grid-cols-3 md:gap-4">
               <div className="rounded-2xl bg-slate-50 p-4 text-center">
                 <p className="text-xs uppercase tracking-wider text-slate-500">ต้นทุนรวม</p>
                 <p className="mt-1 text-2xl font-bold text-slate-900">฿{Number(selected.cost_per_yield).toFixed(2)}</p>
@@ -653,8 +653,8 @@ export default function RecipesPage(): JSX.Element {
             {/* Ingredients Table */}
             <div className="mt-6">
               <h3 className="mb-3 font-semibold text-slate-800">วัตถุดิบ</h3>
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <table className="w-full text-sm">
+              <div className="app-horizontal-scroll overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full min-w-[680px] text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
                     <tr>
                       <th className="px-4 py-3 text-left">วัตถุดิบ</th>
@@ -781,7 +781,7 @@ export default function RecipesPage(): JSX.Element {
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div>
                   <Label>ราคาขาย</Label>
                   <Input type="number" className="mt-1" value={formSellingPrice} onChange={(e) => setFormSellingPrice(e.target.value)} min="0" step="0.01" />
@@ -955,7 +955,7 @@ export default function RecipesPage(): JSX.Element {
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-4 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+              <div className="grid gap-4 rounded-2xl border border-orange-200 bg-orange-50 p-4 md:grid-cols-2 xl:grid-cols-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-orange-700">Preview ต้นทุนรวม</p>
                   <p className="mt-1 text-2xl font-bold text-slate-950">฿{preview.totalCost.toFixed(2)}</p>

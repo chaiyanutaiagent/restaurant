@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Building2, Grid2X2, LayoutDashboard, Store, UtensilsCrossed } from "lucide-react";
 import { useCallback, useEffect, useMemo } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { authApi } from "@/lib/api";
@@ -102,21 +103,76 @@ export default function RestaurantShell(): JSX.Element {
     enabled: Boolean(centralBrandSlug),
   });
   const centralProductionEnabled = brandFeaturesQuery.data?.central_production ?? false;
+  const currentBranch = branchesQuery.data?.find((branch) => branch.branch_id === branchId) ?? defaultBranch;
+  const activeBrandSlug = centralBrandSlug ?? storeBrandSlug;
+  const workspaceLabel = centralBrandSlug ? "ครัวกลาง" : storeBrandSlug ? "หน้าร้าน" : "Restaurant";
+
+  const contextNavigation = centralBrandSlug
+    ? CENTRAL_NAV.filter((item) => (
+      item.permissions.some((code) => hasPermission(code))
+      && (item.path !== "production" || centralProductionEnabled)
+    ))
+    : STORE_NAV.filter((item) => item.permissions.some((code) => hasPermission(code)));
+  const activeSection = centralBrandSlug ? centralSection : storeSection;
 
   return (
-    <div className="flex h-screen flex-col bg-slate-50">
-      {centralBrandSlug ? (
-        <nav className="border-b border-slate-200 bg-white px-3 py-2">
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2">
-            <span className="mr-2 text-sm font-black uppercase tracking-wide text-slate-500">{centralBrandSlug}</span>
-            {CENTRAL_NAV.filter((item) => (
-              item.permissions.some((code) => hasPermission(code))
-              && (item.path !== "production" || centralProductionEnabled)
-            )).map((item) => (
+    <div className="flex h-screen flex-col bg-[linear-gradient(180deg,#fff7ed_0%,#f8fafc_34%,#eef2f7_100%)] text-slate-950">
+      <header className="sticky top-0 z-30 shrink-0 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+        <div className="flex min-h-16 items-center gap-3 px-3 md:px-5 xl:px-7">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-orange-600 text-white shadow-sm">
+            <UtensilsCrossed className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-base font-black md:text-lg">Restaurant POS</p>
+            <p className="truncate text-xs text-slate-500">
+              {workspaceLabel}{activeBrandSlug ? ` · ${activeBrandSlug}` : ""}
+            </p>
+          </div>
+
+          <div className="ml-auto flex min-w-0 items-center gap-2">
+            {storeBrandSlug && branchesQuery.data?.length ? (
+              <label className="relative hidden items-center md:flex">
+                <Building2 className="pointer-events-none absolute left-3 h-4 w-4 text-orange-600" />
+                <select
+                  aria-label="เลือกสาขา"
+                  value={currentBranch?.branch_id ?? ""}
+                  onChange={(event) => {
+                    const branch = branchesQuery.data?.find((row) => row.branch_id === event.target.value);
+                    if (branch) void handleSwitchBranch(branch.branch_id, branch.station_key);
+                  }}
+                  className="h-11 max-w-[15rem] appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm font-semibold text-slate-700 shadow-sm"
+                >
+                  {branchesQuery.data.map((branch) => (
+                    <option key={`${branch.branch_id}:${branch.station_key ?? "branch"}`} value={branch.branch_id}>
+                      {branch.branch_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <Link className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50" to="/" title="เลือกพื้นที่ทำงาน">
+              <Grid2X2 className="h-5 w-5" />
+            </Link>
+            <Link className="flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50" to="/admin">
+              <LayoutDashboard className="h-4 w-4" />
+              <span className="hidden lg:inline">ERP กลาง</span>
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      {activeBrandSlug ? (
+        <nav aria-label={`เมนู${workspaceLabel}`} className="app-horizontal-scroll shrink-0 overflow-x-auto border-b border-slate-800 bg-slate-950 px-3 py-2 text-white md:px-5 xl:px-7">
+          <div className="app-page flex min-w-max items-center gap-1.5">
+            <span className="mr-1 flex min-h-10 items-center gap-2 rounded-xl bg-slate-800 px-3 text-xs font-black uppercase tracking-wider text-slate-300">
+              {storeBrandSlug ? <Store className="h-4 w-4" /> : <UtensilsCrossed className="h-4 w-4" />}
+              {workspaceLabel}
+            </span>
+            {contextNavigation.map((item) => (
               <Link
                 key={item.path}
-                to={`/central/${centralBrandSlug}/${item.path}`}
-                className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${centralSection === item.path ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+                to={`/${centralBrandSlug ? "central" : "store"}/${activeBrandSlug}/${item.path}`}
+                className={`flex min-h-10 items-center rounded-xl px-3 text-sm font-semibold transition ${activeSection === item.path ? "bg-orange-500 text-white shadow-sm" : "text-slate-300 hover:bg-slate-800 hover:text-white"}`}
               >
                 {item.label}
               </Link>
@@ -124,24 +180,11 @@ export default function RestaurantShell(): JSX.Element {
           </div>
         </nav>
       ) : null}
-      {storeBrandSlug ? (
-        <nav className="border-b border-slate-200 bg-white px-3 py-2">
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2">
-            <span className="mr-2 text-sm font-black uppercase tracking-wide text-slate-500">{storeBrandSlug}</span>
-            {STORE_NAV.filter((item) => item.permissions.some((code) => hasPermission(code))).map((item) => (
-              <Link
-                key={item.path}
-                to={`/store/${storeBrandSlug}/${item.path}`}
-                className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${storeSection === item.path ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </div>
-        </nav>
-      ) : null}
-      <main className="min-h-0 flex-1 overflow-auto p-3">
-        <Outlet />
+
+      <main className="min-h-0 flex-1 overflow-auto p-3 md:p-5 xl:p-7">
+        <div className="app-page">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

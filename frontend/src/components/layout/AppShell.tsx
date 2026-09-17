@@ -60,7 +60,7 @@ export default function AppShell({ workspace = "admin" }: AppShellProps): JSX.El
       >
         <PosWorkspaceHeader title={title} />
         <PosWorkspaceNav />
-        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 md:p-4">
+        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 md:p-4 xl:p-5">
           <Outlet />
         </main>
       </div>
@@ -68,20 +68,22 @@ export default function AppShell({ workspace = "admin" }: AppShellProps): JSX.El
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-[linear-gradient(180deg,#f8fafc_0%,#eef2f7_100%)]">
       <Sidebar workspace={workspace} isSidebarOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       {isSidebarOpen ? (
         <button
           aria-label="Close sidebar"
-          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
+          className="fixed inset-0 z-40 bg-slate-950/45 backdrop-blur-sm xl:hidden"
           onClick={() => setIsSidebarOpen(false)}
           type="button"
         />
       ) : null}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar workspace={workspace} onMenuClick={() => setIsSidebarOpen(true)} title={title} />
-        <main className="flex-1 overflow-auto p-3 lg:p-6">
-          <Outlet />
+        <main className="flex-1 overflow-auto p-3 md:p-5 xl:p-7 2xl:p-8">
+          <div className="app-page">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

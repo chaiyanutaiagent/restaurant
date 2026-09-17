@@ -298,7 +298,13 @@ class TakeawayPayment(UUIDMixin, TimestampMixin, Base):
 
 class TakeawayReceipt(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "takeaway_receipts"
-    __table_args__ = (UniqueConstraint("receipt_number", name="uq_takeaway_receipt_number"),)
+    __table_args__ = (
+        UniqueConstraint("receipt_number", name="uq_takeaway_receipt_number"),
+        CheckConstraint(
+            "last_printed_copy IS NULL OR last_printed_copy IN ('customer', 'merchant')",
+            name="ck_takeaway_receipt_print_copy",
+        ),
+    )
 
     order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
@@ -306,6 +312,9 @@ class TakeawayReceipt(UUIDMixin, TimestampMixin, Base):
     receipt_number: Mapped[str] = mapped_column(String(80), nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    print_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    last_printed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_printed_copy: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 class TakeawayKitchenTicket(UUIDMixin, TimestampMixin, Base):
@@ -370,6 +379,7 @@ class TakeawayCentralOrder(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "takeaway_central_orders"
     __table_args__ = (
         UniqueConstraint("branch_id", "order_number", name="uq_takeaway_central_order_number"),
+        UniqueConstraint("branch_id", "idempotency_key", name="uq_takeaway_central_order_idempotency"),
         Index("ix_takeaway_central_orders_status", "company_id", "brand_id", "status"),
     )
 
@@ -382,6 +392,7 @@ class TakeawayCentralOrder(UUIDMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'submitted'"))
     requested_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     submitted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -463,6 +474,7 @@ class TakeawayStockMovement(UUIDMixin, Base):
     quantity_delta: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("0"))
     idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
 

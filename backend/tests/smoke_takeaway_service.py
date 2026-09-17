@@ -37,6 +37,7 @@ from app.schemas.takeaway import (
     TakeawayProductionComplete,
     TakeawayProductionCompleteLine,
     TakeawayProductionLineCreate,
+    TakeawayReceiptPrintCreate,
     TakeawaySaleCreate,
     TakeawaySaleLine,
     TakeawayPublicOrderCreate,
@@ -215,6 +216,18 @@ async def run() -> None:
             replay_order, replay_token, was_replayed = await service_a.create_sale(sale_payload)
             assert not replayed and pickup_token and was_replayed and replay_token is None
             assert replay_order.id == order.id
+            receipt = await service_a.get_receipt(order.id)
+            receipt, print_replayed = await service_a.mark_receipt_printed(
+                order.id,
+                TakeawayReceiptPrintCreate(
+                    copy_type="customer",
+                    idempotency_key=f"smoke-receipt-{uuid.uuid4()}",
+                ),
+            )
+            assert not print_replayed and receipt.print_count == 1
+            summary = await service_a.shift_summary(shift.id)
+            assert summary["paid"]["order_count"] == 1
+            assert summary["expected_cash"] == "714.00"
             public_status = await public_pickup_status(pickup_token, request=public_request, db=db)
             assert public_status["data"]["queue_number"] == order.queue_number
             assert public_status["data"]["fulfillment_status"] == "queued"
@@ -301,6 +314,7 @@ async def run() -> None:
                     branch_id=branch_id,
                     round_id=round_row.id,
                     order_type="unlisted",
+                    idempotency_key=f"smoke-central-{uuid.uuid4()}",
                     items=[
                         TakeawayCentralOrderLineCreate(
                             item_name="สินค้าไม่อยู่ในแคตตาล็อก",
@@ -311,8 +325,9 @@ async def run() -> None:
                     ],
                 )
             )
-            for state in ("approved", "in_production", "packed", "shipped", "received"):
+            for state in ("approved", "in_production", "packed", "shipped"):
                 central = await service_a.update_central_order_status(central.id, state)
+            central = await service_a.receive_store_central_order(central.id)
             assert central.status == "received"
 
             await service_a.create_stock_movement(

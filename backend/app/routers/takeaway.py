@@ -37,10 +37,12 @@ from app.schemas.takeaway import (
     TakeawayProductionBatchCreate,
     TakeawayProductionComplete,
     TakeawayRefundCreate,
+    TakeawayReceiptPrintCreate,
     TakeawaySaleCreate,
     TakeawayPublicOrderCreate,
     TakeawayShiftClose,
     TakeawayShiftOpen,
+    TakeawayStoreCentralOrderCreate,
     TakeawayStockMovementCreate,
     TakeawayTransferCreate,
     TakeawayTransferStatusUpdate,
@@ -327,6 +329,15 @@ async def close_shift(
     return ok(await TakeawayService(db, current).close_shift(shift_id, payload))
 
 
+@router.get("/shifts/{shift_id}/summary")
+async def shift_summary(
+    shift_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("takeaway.shift.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).shift_summary(shift_id))
+
+
 @router.get("/shifts")
 async def list_shifts(
     limit: int = Query(default=100, ge=1, le=500),
@@ -400,6 +411,31 @@ async def list_orders(
     )
 
 
+@router.get("/orders/{order_id}/receipt")
+async def get_order_receipt(
+    order_id: uuid.UUID,
+    current: TokenData = Depends(
+        require_any_permission("takeaway.sale.create", "takeaway.sale.view")
+    ),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).get_receipt(order_id))
+
+
+@router.post("/orders/{order_id}/receipt/prints")
+async def mark_order_receipt_printed(
+    order_id: uuid.UUID,
+    payload: TakeawayReceiptPrintCreate,
+    current: TokenData = Depends(require_permission("takeaway.sale.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    receipt, replayed = await TakeawayService(db, current).mark_receipt_printed(
+        order_id,
+        payload,
+    )
+    return ok(receipt, {"idempotent_replay": replayed})
+
+
 @router.post("/orders/{order_id}/refund")
 async def refund_order(
     order_id: uuid.UUID,
@@ -430,13 +466,17 @@ async def update_kitchen_ticket(
 async def list_kitchen_tickets(
     branch_id: uuid.UUID | None = None,
     ticket_status: str | None = Query(default=None, alias="status", max_length=30),
+    station: str | None = Query(default=None, max_length=80),
     limit: int = Query(default=200, ge=1, le=500),
     current: TokenData = Depends(require_permission("takeaway.kitchen.manage")),
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
     return ok(
         await TakeawayService(db, current).list_kitchen_tickets(
-            branch_id=branch_id, ticket_status=ticket_status, limit=limit
+            branch_id=branch_id,
+            ticket_status=ticket_status,
+            station=station,
+            limit=limit,
         )
     )
 
@@ -472,6 +512,24 @@ async def create_central_order(
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
     return ok(await TakeawayService(db, current).create_central_order(payload))
+
+
+@router.post("/store/central-orders", status_code=status.HTTP_201_CREATED)
+async def create_store_central_order(
+    payload: TakeawayStoreCentralOrderCreate,
+    current: TokenData = Depends(require_permission("takeaway.central_order.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_store_central_order(payload))
+
+
+@router.post("/store/central-orders/{order_id}/receive")
+async def receive_store_central_order(
+    order_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("takeaway.central_order.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).receive_store_central_order(order_id))
 
 
 @router.get("/central/orders")
@@ -553,6 +611,21 @@ async def list_stock_locations(
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
     return ok(await TakeawayService(db, current).list_stock_locations())
+
+
+@router.get("/stock/movements")
+async def list_stock_movements(
+    location_id: uuid.UUID | None = None,
+    limit: int = Query(default=200, ge=1, le=500),
+    current: TokenData = Depends(require_permission("takeaway.stock.view")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_stock_movements(
+            location_id=location_id,
+            limit=limit,
+        )
+    )
 
 
 @router.post("/stock/movements", status_code=status.HTTP_201_CREATED)

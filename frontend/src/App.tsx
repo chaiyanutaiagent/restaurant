@@ -107,6 +107,8 @@ import TakeawayPlannedCapabilityPage from "@/pages/takeaway/TakeawayPlannedCapab
 import TakeawayPickupStatusPage from "@/pages/takeaway/TakeawayPickupStatusPage";
 import TakeawayPublicOrderPage from "@/pages/takeaway/TakeawayPublicOrderPage";
 import TakeawayShiftPage from "@/pages/takeaway/TakeawayShiftPage";
+import TakeawayStoreCentralOrdersPage from "@/pages/takeaway/TakeawayStoreCentralOrdersPage";
+import TakeawayStoreStockPage from "@/pages/takeaway/TakeawayStoreStockPage";
 import TakeawayWorkspaceIndexPage from "@/pages/takeaway/TakeawayWorkspaceIndexPage";
 import { TAKEAWAY_ENTRY_PERMISSIONS } from "@/config/takeawayWorkspace";
 import { useEffect } from "react";
@@ -197,10 +199,10 @@ export default function App(): JSX.Element {
                   <Route path="/takeaway/store/pickup" element={<TakeawayOperationsPage section="pickup" workspace="store" />} />
                 </Route>
                 <Route element={<ProtectedRoute permission="takeaway.central_order.create" />}>
-                  <Route path="/takeaway/store/central-orders" element={<TakeawayOperationsPage section="central" workspace="store" />} />
+                  <Route path="/takeaway/store/central-orders" element={<TakeawayStoreCentralOrdersPage />} />
                 </Route>
                 <Route element={<ProtectedRoute permission="takeaway.stock.view" />}>
-                  <Route path="/takeaway/store/stock" element={<TakeawayOperationsPage section="stock" workspace="store" />} />
+                  <Route path="/takeaway/store/stock" element={<TakeawayStoreStockPage />} />
                 </Route>
                 <Route element={<ProtectedRoute permission="takeaway.transfer.manage" />}>
                   <Route path="/takeaway/store/transfers" element={<TakeawayOperationsPage section="transfers" workspace="store" />} />

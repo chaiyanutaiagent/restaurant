@@ -122,3 +122,96 @@ test("brand manager gets Central and Admin routes but cannot enter Store scope",
   await expect(page).toHaveURL(/\/403$/);
   await expect(page.getByRole("heading", { name: "ไม่มีสิทธิ์เข้าถึงหน้านี้" })).toBeVisible();
 });
+
+test("counter keeps a paid-first sale in the local outbox when network drops", async ({ page }) => {
+  await installSession(page, [
+    "takeaway.catalog.view",
+    "takeaway.sale.create",
+    "takeaway.sale.view",
+    "takeaway.shift.manage",
+  ], ["branch"]);
+  await mockTakeawayApi(page);
+  await page.route("**/api/v1/takeaway/catalog/categories**", (route) => fulfill(route, [
+    { id: "55555555-5555-4555-8555-555555555555", name: "อาหาร", code: "food" },
+  ]));
+  await page.route("**/api/v1/takeaway/catalog/items**", (route) => fulfill(route, [
+    {
+      item: {
+        id: "66666666-6666-4666-8666-666666666666",
+        name: "หมูย่างทดสอบ",
+        sku: "TEST-001",
+        category_id: "55555555-5555-4555-8555-555555555555",
+        price: "100.00",
+        unit: "ชิ้น",
+        tax_rate: "7.00",
+      },
+      effective_price: "100.00",
+      is_available: true,
+    },
+  ]));
+  await page.route("**/api/v1/takeaway/shifts", (route) => fulfill(route, [
+    {
+      id: "77777777-7777-4777-8777-777777777777",
+      status: "open",
+      round_no: 1,
+      business_date: "2026-09-16",
+      opening_cash: "500.00",
+    },
+  ]));
+  await page.route("**/api/v1/takeaway/orders**", (route) => fulfill(route, []));
+
+  await page.goto("/takeaway/store/orders");
+  await expect(page.getByRole("button", { name: /หมูย่างทดสอบ/ })).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => false });
+    window.dispatchEvent(new Event("offline"));
+  });
+  await page.getByRole("button", { name: /หมูย่างทดสอบ/ }).click();
+  await page.getByRole("button", { name: "รับเงินสดและส่งครัว" }).click();
+  await expect(page.getByText("เก็บรายการไว้ในเครื่องแล้ว", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /ใบลูกค้า/ })).toBeVisible();
+  await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toBeVisible();
+});
+
+test("branch workspace exposes shift summary, store ordering, and store stock workflows", async ({ page }) => {
+  await installSession(page, [
+    "takeaway.catalog.view",
+    "takeaway.shift.manage",
+    "takeaway.central_order.create",
+    "takeaway.stock.view",
+    "takeaway.stock.manage",
+  ], ["branch"]);
+  await mockTakeawayApi(page);
+  await page.route("**/api/v1/takeaway/shifts", (route) => fulfill(route, [
+    { id: "shift-1", status: "open", round_no: 1, business_date: "2026-09-16", opening_cash: "500.00" },
+  ]));
+  await page.route("**/api/v1/takeaway/shifts/shift-1/summary", (route) => fulfill(route, {
+    shift: { id: "shift-1" },
+    paid: { order_count: 3, amount: "321.00", tax_amount: "21.00", discount_amount: "0.00" },
+    refunded: { order_count: 0, amount: "0.00", tax_amount: "0.00", discount_amount: "0.00" },
+    payment_totals: { cash: "321.00" },
+    refunded_payments: {},
+    expected_cash: "821.00",
+    counted_cash: null,
+    cash_variance: null,
+  }));
+  await page.route("**/api/v1/takeaway/catalog/items**", (route) => fulfill(route, []));
+  await page.route("**/api/v1/takeaway/central/orders**", (route) => fulfill(route, []));
+  await page.route("**/api/v1/takeaway/stock/locations", (route) => fulfill(route, []));
+  await page.route("**/api/v1/takeaway/stock/movements**", (route) => fulfill(route, []));
+  await page.route("**/api/v1/takeaway/stock**", (route) => fulfill(route, []));
+
+  await page.goto("/takeaway/store/shifts");
+  await expect(page.getByText("฿821.00")).toBeVisible();
+  await expect(page.getByText("จำนวนบิล")).toBeVisible();
+
+  await page.goto("/takeaway/store/central-orders");
+  await expect(page.getByRole("heading", { name: "สั่งสินค้าจากส่วนกลาง" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "ใบสั่งประจำ" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "ขอสินค้าเพิ่ม" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "สินค้านอกแคตตาล็อก" })).toBeVisible();
+
+  await page.goto("/takeaway/store/stock");
+  await expect(page.getByRole("heading", { name: "สต๊อกร้านประจำวัน" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "บันทึกความเคลื่อนไหว" })).toBeVisible();
+});

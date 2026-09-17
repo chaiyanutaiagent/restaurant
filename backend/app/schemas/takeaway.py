@@ -59,6 +59,11 @@ class TakeawayShiftClose(BaseSchema):
     note: str | None = Field(default=None, max_length=500)
 
 
+class TakeawayReceiptPrintCreate(BaseSchema):
+    copy_type: Literal["customer", "merchant"]
+    idempotency_key: str = Field(min_length=8, max_length=180)
+
+
 class TakeawaySaleLine(BaseSchema):
     catalog_item_id: uuid.UUID
     quantity: Decimal = Field(gt=0, decimal_places=4)
@@ -142,6 +147,17 @@ class TakeawayCentralOrderCreate(BaseSchema):
     branch_id: uuid.UUID
     round_id: uuid.UUID
     order_type: Literal["regular", "extra", "unlisted"] = "regular"
+    idempotency_key: str = Field(min_length=8, max_length=180)
+    requested_delivery_date: date | None = None
+    items: list[TakeawayCentralOrderLineCreate] = Field(min_length=1, max_length=200)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class TakeawayStoreCentralOrderCreate(BaseSchema):
+    business_date: date
+    round_no: int = Field(default=1, ge=1, le=99)
+    order_type: Literal["regular", "extra", "unlisted"] = "regular"
+    idempotency_key: str = Field(min_length=8, max_length=180)
     requested_delivery_date: date | None = None
     items: list[TakeawayCentralOrderLineCreate] = Field(min_length=1, max_length=200)
     note: str | None = Field(default=None, max_length=1000)
@@ -194,6 +210,7 @@ class TakeawayStockMovementCreate(BaseSchema):
     brand_id: uuid.UUID | None = None
     branch_id: uuid.UUID | None = None
     idempotency_key: str = Field(min_length=8, max_length=180)
+    note: str | None = Field(default=None, max_length=500)
 
     @field_validator("quantity_delta")
     @classmethod

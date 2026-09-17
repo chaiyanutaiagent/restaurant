@@ -10,14 +10,21 @@ from fastapi.params import Depends
 from pydantic import ValidationError
 
 from app.dependencies import TokenData
-from app.models.takeaway import TakeawayOrder, TakeawayStockBalance
+from app.models.takeaway import (
+    TakeawayCentralOrder,
+    TakeawayOrder,
+    TakeawayReceipt,
+    TakeawayStockBalance,
+)
 from app.routers import takeaway
 from app.schemas.takeaway import (
     TakeawayPaymentCreate,
     TakeawayProductionBatchCreate,
     TakeawayProductionLineCreate,
+    TakeawayReceiptPrintCreate,
     TakeawaySaleCreate,
     TakeawaySaleLine,
+    TakeawayStoreCentralOrderCreate,
 )
 from app.services.takeaway_service import assert_takeaway_scope, money
 
@@ -104,6 +111,37 @@ class TakeawayServicePolicyTests(unittest.TestCase):
                 offline_device_id=uuid.uuid4(),
             )
 
+    def test_store_order_and_receipt_print_contracts_are_idempotent(self) -> None:
+        store_order = TakeawayStoreCentralOrderCreate(
+            business_date="2026-09-16",
+            round_no=1,
+            order_type="regular",
+            idempotency_key="store-order-20260916-1",
+            items=[
+                {
+                    "catalog_item_id": uuid.uuid4(),
+                    "sku": "SKU-1",
+                    "item_name": "สินค้า",
+                    "quantity": Decimal("2"),
+                    "unit": "ชิ้น",
+                }
+            ],
+        )
+        self.assertEqual(store_order.order_type, "regular")
+        receipt_print = TakeawayReceiptPrintCreate(
+            copy_type="merchant",
+            idempotency_key="receipt-print-001",
+        )
+        self.assertEqual(receipt_print.copy_type, "merchant")
+
+        central_unique_columns = {
+            tuple(column.name for column in constraint.columns)
+            for constraint in TakeawayCentralOrder.__table__.constraints
+            if constraint.__class__.__name__ == "UniqueConstraint"
+        }
+        self.assertIn(("branch_id", "idempotency_key"), central_unique_columns)
+        self.assertIn("print_count", TakeawayReceipt.__table__.columns)
+
 
 class TakeawayRouterPermissionTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
@@ -127,6 +165,15 @@ class TakeawayRouterPermissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_central_order_creation_remains_store_permission_only(self) -> None:
         checker = self.permission_dependency(takeaway.create_central_order)
+        store = token(permissions=["takeaway.central_order.create"])
+        self.assertIs(await checker(store), store)
+
+        with self.assertRaises(HTTPException) as denied:
+            await checker(token(permissions=["takeaway.central_order.manage"]))
+        self.assertEqual(denied.exception.status_code, 403)
+
+    async def test_store_receive_remains_store_permission_only(self) -> None:
+        checker = self.permission_dependency(takeaway.receive_store_central_order)
         store = token(permissions=["takeaway.central_order.create"])
         self.assertIs(await checker(store), store)
 

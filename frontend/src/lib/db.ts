@@ -3,6 +3,13 @@ import type { Category, ProductListItem, Unit } from "@/types/product";
 import type { HeldSaleDraft, PendingSale, ReplacementRuleDraft, SaleOrder } from "@/types/pos";
 import type { StockBalance } from "@/types/stock";
 import type { WapMenu, WapOrder, WapPaidOrderPayload } from "@/lib/wapApi";
+import type {
+  TakeawayCatalogRow,
+  TakeawayContext,
+  TakeawayRecord,
+  TakeawayReceipt,
+  TakeawaySalePayload,
+} from "@/lib/takeawayApi";
 
 export type PendingTransaction = {
   id?: number;
@@ -65,6 +72,50 @@ export type RestaurantPendingOrder = {
   synced_at?: number;
 };
 
+export type TakeawayWorkspaceSnapshot = {
+  key: string;
+  company_id: string;
+  brand_id: string;
+  branch_id: string;
+  user_id: string;
+  context: TakeawayContext;
+  categories: TakeawayRecord[];
+  catalog: TakeawayCatalogRow[];
+  shifts: TakeawayRecord[];
+  synced_at: number;
+};
+
+export type TakeawayPendingSaleStatus = "pending" | "syncing" | "needs_review" | "synced";
+
+export type TakeawayLocalOrder = TakeawayRecord & {
+  order_number: string;
+  queue_number: number | null;
+  total_amount: string;
+  status: "offline_pending" | "paid";
+  fulfillment_status: "offline_pending" | "queued";
+  created_at: string;
+};
+
+export type TakeawayPendingSale = {
+  client_sale_id: string;
+  company_id: string;
+  brand_id: string;
+  branch_id: string;
+  user_id: string;
+  payload: TakeawaySalePayload;
+  local_order: TakeawayLocalOrder;
+  local_receipt: TakeawayReceipt;
+  server_order?: TakeawayRecord;
+  server_receipt?: TakeawayReceipt;
+  pickup_token?: string | null;
+  status: TakeawayPendingSaleStatus;
+  attempts: number;
+  last_error?: string;
+  created_at: number;
+  updated_at: number;
+  synced_at?: number;
+};
+
 export class RestaurantDatabase extends Dexie {
   pendingTransactions!: Table<PendingTransaction, number>;
   offlineProducts!: Table<OfflineProduct, string>;
@@ -80,6 +131,8 @@ export class RestaurantDatabase extends Dexie {
   replacementRules!: Table<ReplacementRuleDraft, string>;
   restaurantMenuSnapshots!: Table<RestaurantMenuSnapshot, string>;
   restaurantPendingOrders!: Table<RestaurantPendingOrder, string>;
+  takeawayWorkspaceSnapshots!: Table<TakeawayWorkspaceSnapshot, string>;
+  takeawayPendingSales!: Table<TakeawayPendingSale, string>;
 
   public constructor() {
     super("RestaurantPOSDatabase");
@@ -167,6 +220,25 @@ export class RestaurantDatabase extends Dexie {
       replacementRules: "id, branch_id, source_product_id, replacement_product_id, created_at",
       restaurantMenuSnapshots: "key, company_id, branch_id, brand_slug, user_id, synced_at",
       restaurantPendingOrders: "client_order_id, [company_id+branch_id+brand_slug], status, created_at, updated_at"
+    });
+
+    this.version(8).stores({
+      pendingTransactions: "++id, type, payload, createdAt, syncedAt",
+      offlineProducts: "id, data, updatedAt",
+      offlineSettings: "key, value",
+      products: "id, sku, barcode, category_id, is_active, synced_at",
+      categories: "id, parent_id, synced_at",
+      units: "id, code, synced_at",
+      stockBalances: "id, product_id, location_id, branch_id, synced_at",
+      lowStockAlerts: "id, product_id, branch_id, synced_at",
+      pendingSales: "client_order_id, synced, created_at",
+      completedOrders: "id, shift_id, created_at, synced_at",
+      heldBills: "id, shift_id, location_id, held_at",
+      replacementRules: "id, branch_id, source_product_id, replacement_product_id, created_at",
+      restaurantMenuSnapshots: "key, company_id, branch_id, brand_slug, user_id, synced_at",
+      restaurantPendingOrders: "client_order_id, [company_id+branch_id+brand_slug], status, created_at, updated_at",
+      takeawayWorkspaceSnapshots: "key, [company_id+brand_id+branch_id], user_id, synced_at",
+      takeawayPendingSales: "client_sale_id, [company_id+brand_id+branch_id], status, created_at, updated_at"
     });
   }
 }

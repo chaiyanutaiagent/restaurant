@@ -1112,3 +1112,11 @@ permission กับ scope จาก signed token, เพิ่ม canonical rou
 เปิดสิทธิ์สร้างหรือเปลี่ยนสถานะข้ามบทบาท Backend `365` tests, frontend type-check/build และ browser role
 tests `3/3` ผ่าน ไม่มี migration และยังไม่ deploy UAT/Production รายละเอียดอยู่ที่
 `docs/scopes/WP17-TAKEAWAY-IA-ROLE-WORKSPACES-01.md`; งานถัดไปคือ WP18 Store Operation Parity
+
+WP18 ผ่าน local automated gate แล้ว โดยเพิ่ม Takeaway offline outbox แบบ idempotent, ใบเสร็จลูกค้า/สำเนา
+ร้านและ reprint audit, สรุป/ปิดกะพร้อมเงินสดต่าง, ใบสั่งสาขาแบบ regular/extra/unlisted, การรับของครบเข้า
+Store stock, movement history/reason/warning และปรับ KDS/Pickup ให้ refresh, filter, search, full-screen และ
+แจ้งเสียงได้ Migration head ใหม่คือ `p6takeaway0005`; backend `367` tests (skipped `1`), focused Takeaway
+`10` tests, service smoke, frontend type-check/build และ browser tests `5/5` ผ่าน Migration ถูกทดลองเฉพาะ
+ฐาน Takeaway ในเครื่อง ไม่มี real Chambo import และยังไม่ deploy UAT/Production รายละเอียดอยู่ที่
+`docs/scopes/WP18-TAKEAWAY-STORE-OPERATION-PARITY-01.md`; งานถัดไปคือ WP19 Central Operation Parity

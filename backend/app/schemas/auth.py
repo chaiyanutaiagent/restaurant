@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.user import UserRead
 
@@ -13,6 +13,11 @@ class LoginRequest(BaseModel):
     branch_id: uuid.UUID | None = None
     company_id: uuid.UUID | None = None
     station_key: str | None = None
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        return value.strip().lower()
 
 
 class TokenResponse(BaseModel):

@@ -1,0 +1,46 @@
+{
+  "scope": "WP35-FOODCHAINSERVICE-RELEASE",
+  "release": {
+    "git_commit": null,
+    "artifact_sha256": null,
+    "immutable": false
+  },
+  "engineering": {
+    "wp27": {"status": "pending", "evidence_sha256": null},
+    "wp28": {"status": "pending", "evidence_sha256": null},
+    "wp29": {"status": "pending", "evidence_sha256": null},
+    "wp30": {"status": "pending", "evidence_sha256": null},
+    "wp31": {"status": "pending", "evidence_sha256": null},
+    "wp32": {"status": "pending", "evidence_sha256": null},
+    "wp33": {"status": "pending", "evidence_sha256": null},
+    "wp34": {"status": "pending", "evidence_sha256": null}
+  },
+  "external_gates": {
+    "platform_operator_mfa": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "accountant_tax_review": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "restaurant_physical_pilot": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "retail_physical_pilot": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "central_kitchen_opening_stock": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "takeaway_approved_snapshot_canary": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "residual_defect_acceptance": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null}
+  },
+  "recovery": {
+    "status": "pending",
+    "five_boundaries_restored": false,
+    "server_backup_reference": null,
+    "mac_backup_reference": null,
+    "manifest_sha256": null
+  },
+  "rollout": {
+    "platform_company_admin": {"status": "pending", "owner": null, "rollback_owner": null},
+    "shared_erp": {"status": "pending", "owner": null, "rollback_owner": null},
+    "restaurant_one_branch": {"status": "pending", "owner": null, "rollback_owner": null},
+    "retail_one_branch": {"status": "pending", "owner": null, "rollback_owner": null},
+    "central_kitchen_limited_scope": {"status": "pending", "owner": null, "rollback_owner": null},
+    "takeaway_one_branch": {"status": "pending", "owner": null, "rollback_owner": null}
+  },
+  "monitoring": {"status": "pending", "minimum_minutes": 60, "owner": null, "alert_route": null},
+  "rollback": {"status": "pending", "verified_rto_minutes": null, "owner": null, "reference": null},
+  "owner_decision": {"decision": "no_go", "owner": null, "decided_at": null},
+  "production_activation": {"status": "not_started"}
+}

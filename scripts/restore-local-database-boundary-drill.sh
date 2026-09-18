@@ -38,6 +38,14 @@ verify_checksum() {
   [ "$actual" = "$expected" ] || fail "checksum mismatch: $2"
 }
 
+ensure_postgres_running() {
+  if docker compose -f "$COMPOSE_FILE" ps --status running --services | grep -qx postgres; then
+    printf 'PostgreSQL is already running; restore drill will not recreate it.\n'
+    return
+  fi
+  docker compose -f "$COMPOSE_FILE" up -d postgres >/dev/null
+}
+
 if [ -z "$BACKUP_DIR" ]; then
   fail "backup directory argument is required"
 fi
@@ -47,6 +55,11 @@ for file in platform-core.dump restaurant.dump retail.dump takeaway.dump manifes
   fi
 done
 
+include_legacy=0
+if [ -f "$BACKUP_DIR/postgres.dump" ] && [ -n "$(manifest_value postgres_sha256)" ]; then
+  verify_checksum postgres_sha256 postgres.dump
+  include_legacy=1
+fi
 verify_checksum platform_sha256 platform-core.dump
 verify_checksum restaurant_sha256 restaurant.dump
 verify_checksum retail_sha256 retail.dump
@@ -56,12 +69,14 @@ platform_drill="restaurant_platform_core_${DRILL_SUFFIX}"
 restaurant_drill="restaurant_ops_${DRILL_SUFFIX}"
 retail_drill="retail_ops_${DRILL_SUFFIX}"
 takeaway_drill="takeaway_ops_${DRILL_SUFFIX}"
+legacy_drill="restaurant_legacy_${DRILL_SUFFIX}"
 validate_database_name "$platform_drill"
 validate_database_name "$restaurant_drill"
 validate_database_name "$retail_drill"
 validate_database_name "$takeaway_drill"
+validate_database_name "$legacy_drill"
 
-docker compose -f "$COMPOSE_FILE" up -d postgres >/dev/null
+ensure_postgres_running
 
 tries=0
 until docker compose -f "$COMPOSE_FILE" exec -T postgres \
@@ -73,7 +88,11 @@ until docker compose -f "$COMPOSE_FILE" exec -T postgres \
   sleep 2
 done
 
-for drill_database in "$platform_drill" "$restaurant_drill" "$retail_drill" "$takeaway_drill"; do
+drill_databases="$platform_drill $restaurant_drill $retail_drill $takeaway_drill"
+if [ "$include_legacy" = "1" ]; then
+  drill_databases="$legacy_drill $drill_databases"
+fi
+for drill_database in $drill_databases; do
   if docker compose -f "$COMPOSE_FILE" exec -T postgres \
     sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT 1 FROM pg_database WHERE datname = '\''$1'\''"' sh "$drill_database" | grep -q 1; then
     fail "drill database already exists: $drill_database"
@@ -82,6 +101,11 @@ for drill_database in "$platform_drill" "$restaurant_drill" "$retail_drill" "$ta
     sh -c 'createdb -U "$POSTGRES_USER" "$1"' sh "$drill_database"
 done
 
+if [ "$include_legacy" = "1" ]; then
+  docker compose -f "$COMPOSE_FILE" exec -T postgres \
+    sh -c 'pg_restore --no-owner -U "$POSTGRES_USER" -d "$1"' sh "$legacy_drill" \
+    < "$BACKUP_DIR/postgres.dump"
+fi
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
   sh -c 'pg_restore --no-owner -U "$POSTGRES_USER" -d "$1"' sh "$platform_drill" \
   < "$BACKUP_DIR/platform-core.dump"
@@ -108,16 +132,21 @@ if [ "$platform_boundary" != "platform_core" ] || [ "$restaurant_boundary" != "r
   fail "restored boundary metadata did not match expected values"
 fi
 
-printf 'Boundary restore drill passed: platform=%s restaurant=%s retail=%s takeaway=%s\n' "$platform_drill" "$restaurant_drill" "$retail_drill" "$takeaway_drill"
+legacy_result="not_included"
+if [ "$include_legacy" = "1" ]; then
+  legacy_head="$(docker compose -f "$COMPOSE_FILE" exec -T postgres \
+    sh -c 'psql -U "$POSTGRES_USER" -d "$1" -tAc "SELECT version_num FROM alembic_version"' sh "$legacy_drill" | tr -d '[:space:]')"
+  [ -n "$legacy_head" ] || fail "restored Legacy database has no migration head"
+  legacy_result="$legacy_drill"
+fi
+
+printf 'Boundary restore drill passed: legacy=%s platform=%s restaurant=%s retail=%s takeaway=%s\n' \
+  "$legacy_result" "$platform_drill" "$restaurant_drill" "$retail_drill" "$takeaway_drill"
 
 if [ "$CLEANUP" = "1" ]; then
-  docker compose -f "$COMPOSE_FILE" exec -T postgres \
-    sh -c 'dropdb -U "$POSTGRES_USER" "$1"' sh "$platform_drill"
-  docker compose -f "$COMPOSE_FILE" exec -T postgres \
-    sh -c 'dropdb -U "$POSTGRES_USER" "$1"' sh "$restaurant_drill"
-  docker compose -f "$COMPOSE_FILE" exec -T postgres \
-    sh -c 'dropdb -U "$POSTGRES_USER" "$1"' sh "$retail_drill"
-  docker compose -f "$COMPOSE_FILE" exec -T postgres \
-    sh -c 'dropdb -U "$POSTGRES_USER" "$1"' sh "$takeaway_drill"
+  for drill_database in $drill_databases; do
+    docker compose -f "$COMPOSE_FILE" exec -T postgres \
+      sh -c 'dropdb -U "$POSTGRES_USER" "$1"' sh "$drill_database"
+  done
   printf 'Restore drill databases removed.\n'
 fi

@@ -74,9 +74,10 @@ test("branch cashier sees only the Store workspace and legacy counter redirects"
   await mockTakeawayApi(page);
 
   await page.goto("/takeaway");
-  await expect(page.getByText("STORE", { exact: true })).toBeVisible();
-  await expect(page.getByText("CENTRAL", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("ADMIN", { exact: true })).toHaveCount(0);
+  const navigation = page.getByRole("navigation");
+  await expect(navigation.getByText("STORE", { exact: true })).toBeVisible();
+  await expect(navigation.getByText("CENTRAL", { exact: true })).toHaveCount(0);
+  await expect(navigation.getByText("ADMIN", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "ขายหน้าร้าน" })).toBeVisible();
   await expect(page.getByRole("link", { name: "กะขาย" })).toBeVisible();
 
@@ -113,9 +114,10 @@ test("brand manager gets Central and Admin routes but cannot enter Store scope",
 
   await page.goto("/takeaway/central-orders");
   await expect(page).toHaveURL(/\/takeaway\/central\/orders$/);
-  await expect(page.getByText("CENTRAL", { exact: true })).toBeVisible();
-  await expect(page.getByText("ADMIN", { exact: true })).toBeVisible();
-  await expect(page.getByText("STORE", { exact: true })).toHaveCount(0);
+  const navigation = page.getByRole("navigation");
+  await expect(navigation.getByText("CENTRAL", { exact: true })).toBeVisible();
+  await expect(navigation.getByText("ADMIN", { exact: true })).toBeVisible();
+  await expect(navigation.getByText("STORE", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "ออเดอร์ถึงส่วนกลาง" })).toBeVisible();
 
   await page.goto("/takeaway/store/orders");

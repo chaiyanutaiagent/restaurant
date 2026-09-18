@@ -45,6 +45,15 @@ wait_for_redis() {
   done
 }
 
+ensure_service_running() {
+  service="$1"
+  if docker compose -f "$COMPOSE_FILE" ps --status running --services | grep -qx "$service"; then
+    printf '%s is already running; backup will not recreate it.\n' "$service"
+    return
+  fi
+  docker compose -f "$COMPOSE_FILE" up -d "$service" >/dev/null
+}
+
 if [ ! -f "$COMPOSE_FILE" ]; then
   fail "compose file not found: $COMPOSE_FILE"
 fi
@@ -63,8 +72,9 @@ docker compose -f "$COMPOSE_FILE" config >/dev/null
 
 mkdir -p "$BACKUP_DIR"
 
-printf 'Starting PostgreSQL and Redis backup dependencies...\n'
-docker compose -f "$COMPOSE_FILE" up -d postgres redis >/dev/null
+printf 'Checking PostgreSQL and Redis backup dependencies...\n'
+ensure_service_running postgres
+ensure_service_running redis
 wait_for_postgres
 wait_for_redis
 

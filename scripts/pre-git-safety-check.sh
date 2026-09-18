@@ -28,6 +28,21 @@ check_absent_path() {
   fi
 }
 
+check_absent_or_ignored_path() {
+  path="$1"
+  label="$2"
+  if [ ! -e "$path" ]; then
+    pass_check "$label absent"
+    return
+  fi
+  tracked="$(git ls-files -- "$path" 2>/dev/null || true)"
+  if git check-ignore -q -- "$path" 2>/dev/null && [ -z "$tracked" ]; then
+    warn_check "$label exists locally but is ignored and untracked: $path"
+    return
+  fi
+  fail_check "$label present and not safely ignored: $path"
+}
+
 check_required_file() {
   path="$1"
   if [ -f "$path" ]; then
@@ -54,6 +69,37 @@ check_find_empty() {
   fi
 }
 
+check_find_unignored_empty() {
+  description="$1"
+  shift
+  results="$("$@" 2>/dev/null || true)"
+  unsafe_results=""
+  if [ -n "$results" ]; then
+    old_ifs="$IFS"
+    IFS='
+'
+    for result in $results; do
+      tracked="$(git ls-files -- "$result" 2>/dev/null || true)"
+      if git check-ignore -q -- "$result" 2>/dev/null && [ -z "$tracked" ]; then
+        continue
+      fi
+      if [ -n "$unsafe_results" ]; then
+        unsafe_results="$unsafe_results
+$result"
+      else
+        unsafe_results="$result"
+      fi
+    done
+    IFS="$old_ifs"
+  fi
+  if [ -n "$unsafe_results" ]; then
+    fail_check "$description found outside ignored local storage"
+    printf '%s\n' "$unsafe_results" >&2
+  else
+    pass_check "$description absent from Git-visible paths"
+  fi
+}
+
 printf '%s\n' 'Running pre-Git safety checks.'
 printf '%s\n' 'This script checks file names and paths only; it does not print env contents.'
 
@@ -65,16 +111,16 @@ fi
 
 check_absent_path ".env.production" "production env file"
 check_absent_path "nginx/conf.d/default.prod.https.conf" "generated HTTPS nginx config"
-check_absent_path "backups" "backup directory"
+check_absent_or_ignored_path "backups" "backup directory"
 check_absent_path "restore-tmp" "restore temp directory"
 check_absent_path "uploads" "local uploads directory"
-check_absent_path "backend/uploads" "backend local uploads directory"
+check_absent_or_ignored_path "backend/uploads" "backend local uploads directory"
 check_absent_path "logs" "local logs directory"
 
 check_find_empty "certificate/private key files" \
   find . -path './.git' -prune -o -type f \( -name '*.pem' -o -name '*.key' -o -name '*.crt' \) -print
 
-check_find_empty "backup/dump/sql artifacts" \
+check_find_unignored_empty "backup/dump/sql artifacts" \
   find . -path './.git' -prune -o -type f \( -name '*.dump' -o -name '*.sql' -o -name '*.backup.tar.gz' -o -name '*.bak' \) -print
 
 if [ -d releases ]; then

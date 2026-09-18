@@ -7,6 +7,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 import uuid
 from zoneinfo import ZoneInfo
 
@@ -44,11 +45,14 @@ def expect_http(
     expected: int = 200,
     token: str | None = None,
     body: object | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> object:
     payload = None if body is None else json.dumps(body).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if extra_headers:
+        headers.update(extra_headers)
     request = urllib.request.Request(
         f"{BASE_URL}{path}",
         data=payload,
@@ -92,12 +96,28 @@ async def prepare() -> dict[str, str]:
                 Branch.company_id == DEFAULT_COMPANY_ID,
                 Branch.is_active.is_(True),
                 Branch.deleted_at.is_(None),
+                ~select(BrandBranch.id)
+                .where(
+                    BrandBranch.branch_id == Branch.id,
+                    BrandBranch.is_active.is_(True),
+                )
+                .exists(),
             )
             .order_by(Branch.sort_order, Branch.created_at)
             .limit(1)
         )
-        if company is None or branch is None:
-            raise RuntimeError("Fresh UAT bootstrap Company/Branch is missing")
+        if company is None:
+            raise RuntimeError("Fresh UAT bootstrap Company is missing")
+        if branch is None:
+            marker = uuid.uuid4().hex[:8]
+            branch = Branch(
+                company_id=DEFAULT_COMPANY_ID,
+                code=f"P5-UAT-{marker}",
+                name=f"Phase 5 UAT {marker}",
+                is_active=True,
+            )
+            db.add(branch)
+            await db.flush()
 
         store_location = await db.scalar(
             select(StockLocation)
@@ -111,7 +131,15 @@ async def prepare() -> dict[str, str]:
             .limit(1)
         )
         if store_location is None:
-            raise RuntimeError("Fresh UAT bootstrap Stock Location is missing")
+            store_location = StockLocation(
+                company_id=company.id,
+                branch_id=branch.id,
+                code="STORE",
+                name="Phase 5 UAT Store",
+                is_active=True,
+            )
+            db.add(store_location)
+            await db.flush()
 
         async def ensure_location(code: str, name: str) -> StockLocation:
             row = await db.scalar(
@@ -360,16 +388,27 @@ async def verify_handoffs(context: dict[str, str], sale_order_id: str, total: De
 async def run() -> None:
     expect_http("GET", "/health")
     context = await prepare()
-    login = expect_http(
-        "POST",
-        "/api/v1/auth/login",
-        body={
-            "company_id": context["company_id"],
-            "branch_id": context["branch_id"],
-            "username": "admin",
-            "password": settings.default_admin_password,
-        },
-    )
+    if settings.uat_auth_bypass_enabled:
+        public_host = urlsplit(settings.saas_public_base_url).hostname
+        if not public_host:
+            raise RuntimeError("UAT public hostname is missing")
+        login = expect_http(
+            "POST",
+            "/api/v1/auth/uat/auto-login",
+            body={},
+            extra_headers={"Host": public_host},
+        )
+    else:
+        login = expect_http(
+            "POST",
+            "/api/v1/auth/login",
+            body={
+                "company_id": context["company_id"],
+                "branch_id": context["branch_id"],
+                "username": "admin",
+                "password": settings.default_admin_password,
+            },
+        )
     if not isinstance(login, dict) or not login.get("access_token"):
         raise RuntimeError("UAT staff login did not return an access token")
     token = str(login["access_token"])

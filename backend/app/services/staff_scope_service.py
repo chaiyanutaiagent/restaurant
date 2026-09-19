@@ -26,6 +26,7 @@ from app.schemas.staff_assignment import (
     StaffRoleAssignmentRead,
 )
 from app.services.business_context_service import load_branch_business_context
+from app.services.company_owner_policy import CompanyOwnerPolicy
 from app.services.staff_scope_policy import (
     assignment_applies_to_context,
     assignment_scope_key,
@@ -212,6 +213,8 @@ class StaffScopeService:
         )
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+
+        await CompanyOwnerPolicy(self.db).ensure_assignment_can_be_revoked(row)
 
         old_value = self._snapshot(row, reason=row.assignment_reason)
         row.revoked_by = actor_id

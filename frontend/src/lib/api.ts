@@ -21,6 +21,14 @@ import type {
 import type { SharedSalesReport, SharedSalesReportFilters } from "@/types/sharedReporting";
 import type { CompanyKitchenDashboard, CompanyKitchenReport, CompanyProductionOrder } from "@/types/sharedKitchen";
 import type { DistributionDashboard, DistributionReport, DistributionShipment } from "@/types/distribution";
+import type {
+  CompanyActionCenter,
+  CompanyContext,
+  CompanyOverview,
+  CompanyOverviewSection,
+  EffectiveAccess,
+  OperationalStatus,
+} from "@/types/companyFoundation";
 
 type RetryableConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -265,6 +273,25 @@ export const companyDistributionApi = {
     api.post<ApiResponse<DistributionShipment>>(`/company-distribution/shipments/${shipmentId}/return`, data),
   cancel: (shipmentId: string, data: Record<string, unknown>) =>
     api.post<ApiResponse<DistributionShipment>>(`/company-distribution/shipments/${shipmentId}/cancel`, data),
+};
+
+export const companyFoundationApi = {
+  context: () => api.get<ApiResponse<CompanyContext>>("/company/context"),
+  access: () => api.get<ApiResponse<EffectiveAccess>>("/company/access"),
+  actionCenter: () => api.get<ApiResponse<CompanyActionCenter>>("/company/action-center"),
+  actionWorkItem: (
+    workItemId: string,
+    action: "assign" | "acknowledge" | "dismiss",
+    reason: string,
+    ownerId?: string | null,
+  ) => api.post<ApiResponse<CompanyActionCenter["items"][number]>>(
+    `/company/action-center/${encodeURIComponent(workItemId)}/actions`,
+    { action, reason, owner_id: ownerId ?? null },
+  ),
+  overview: () => api.get<ApiResponse<CompanyOverview>>("/company/overview"),
+  moduleOverview: (moduleKey: string) =>
+    api.get<ApiResponse<CompanyOverviewSection>>(`/company/overview/${encodeURIComponent(moduleKey)}`),
+  operationalStatus: () => api.get<ApiResponse<OperationalStatus>>("/company/operational-status"),
 };
 
 export const privacySupportApi = {

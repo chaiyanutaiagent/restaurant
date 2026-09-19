@@ -173,7 +173,7 @@ export default function CompanyWorkspacesPage(): JSX.Element {
           : null;
         if (!response) throw new Error("ไม่พบ Session สำหรับเปิด Workspace");
         setSession(response.data.data, companyId);
-        await queryClient.invalidateQueries({ refetchType: "none" });
+        queryClient.removeQueries();
       }
       navigate(workspace.entry_route);
     } catch (error) {

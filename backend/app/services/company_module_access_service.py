@@ -15,9 +15,11 @@ from app.models.company import Company
 from app.models.platform import PlatformTenantProfile
 from app.models.saas_billing import SaasPlan
 from app.schemas.module_access import (
+    CompanyModuleAction,
     CompanyModuleAccessRead,
     CompanyModuleAccessUpdate,
     CompanyModuleKey,
+    CompanyProductReadiness,
 )
 
 
@@ -25,6 +27,7 @@ from app.schemas.module_access import (
 class CompanyModuleDefinition:
     key: CompanyModuleKey
     lifecycle: Literal["active", "dark_launch", "planned"]
+    readiness: CompanyProductReadiness
     legacy_keys: tuple[str, ...]
     permission_hints: tuple[str, ...]
     default_company_enabled: bool
@@ -32,10 +35,11 @@ class CompanyModuleDefinition:
 
 
 COMPANY_MODULE_CATALOG: tuple[CompanyModuleDefinition, ...] = (
-    CompanyModuleDefinition("erp", "active", (), (), True, True),
+    CompanyModuleDefinition("erp", "active", "production", (), (), True, True),
     CompanyModuleDefinition(
         "central_kitchen",
         "active",
+        "read_only",
         ("restaurant",),
         (
             "company.kitchen.view",
@@ -54,6 +58,7 @@ COMPANY_MODULE_CATALOG: tuple[CompanyModuleDefinition, ...] = (
     CompanyModuleDefinition(
         "restaurant_pos",
         "active",
+        "pilot",
         ("restaurant",),
         (
             "fb.menu.view",
@@ -72,6 +77,7 @@ COMPANY_MODULE_CATALOG: tuple[CompanyModuleDefinition, ...] = (
     CompanyModuleDefinition(
         "takeaway_pos",
         "dark_launch",
+        "dark_launch",
         ("takeaway",),
         (
             "takeaway.catalog.view",
@@ -85,12 +91,13 @@ COMPANY_MODULE_CATALOG: tuple[CompanyModuleDefinition, ...] = (
     CompanyModuleDefinition(
         "retail_pos",
         "active",
+        "pilot",
         (),
         ("pos.sale.create", "pos.sale.view", "pos.report.view"),
         False,
         False,
     ),
-    CompanyModuleDefinition("hotel_pms", "planned", (), (), False, False),
+    CompanyModuleDefinition("hotel_pms", "planned", "planned", (), (), False, False),
 )
 COMPANY_MODULES_BY_KEY = {module.key: module for module in COMPANY_MODULE_CATALOG}
 DEFAULT_LEGACY_FEATURE_FLAGS = {
@@ -140,6 +147,86 @@ def _runtime_ready(definition: CompanyModuleDefinition) -> bool:
     if definition.key == "hotel_pms":
         return False
     return True
+
+
+def canonical_runtime_environment(environment: str) -> Literal["production", "uat"]:
+    return "production" if environment == "production" else "uat"
+
+
+def module_readiness(definition: CompanyModuleDefinition) -> CompanyProductReadiness:
+    if definition.key == "retail_pos" and settings.retail_service_database == "legacy":
+        return "legacy"
+    if definition.key == "central_kitchen":
+        if settings.company_kitchen_writes_enabled and settings.company_distribution_writes_enabled:
+            return "pilot"
+        return "read_only"
+    return definition.readiness
+
+
+def module_data_source(definition: CompanyModuleDefinition) -> str:
+    if definition.key == "retail_pos":
+        return settings.retail_service_database
+    if definition.key == "takeaway_pos":
+        return settings.takeaway_service_database
+    if definition.key == "restaurant_pos":
+        return settings.restaurant_service_database
+    if definition.key == "central_kitchen":
+        return settings.restaurant_service_database
+    return settings.identity_database
+
+
+def module_allowed_actions(
+    definition: CompanyModuleDefinition,
+    *,
+    readiness: CompanyProductReadiness,
+    effective_access: bool,
+    permissions: list[str] | None,
+) -> list[CompanyModuleAction]:
+    if not effective_access or readiness in {"planned", "dark_launch"}:
+        return []
+
+    allowed: list[CompanyModuleAction] = ["view"]
+    if readiness == "read_only":
+        return ["view", "export"]
+
+    permission_set = {"*"} if permissions is None else set(permissions)
+    if "*" in permission_set:
+        return ["view", "create", "update", "approve", "refund", "export", "suspend", "execute"]
+
+    if definition.key == "restaurant_pos":
+        permission_set = {
+            code
+            for code in permission_set
+            if code.startswith(("fb.", "brand.store."))
+        }
+    elif definition.key == "takeaway_pos":
+        permission_set = {code for code in permission_set if code.startswith("takeaway.")}
+    elif definition.key == "retail_pos":
+        permission_set = {code for code in permission_set if code.startswith("pos.")}
+    elif definition.key == "central_kitchen":
+        permission_set = {
+            code
+            for code in permission_set
+            if code.startswith(("company.kitchen.", "company.distribution.", "brand.central."))
+        }
+    elif definition.key == "erp":
+        permission_set = {
+            code
+            for code in permission_set
+            if not code.startswith(("fb.", "takeaway.", "brand.store.", "brand.central."))
+        }
+
+    if any(code.endswith((".create", ".manage", ".edit")) for code in permission_set):
+        allowed.extend(["create", "update"])
+    if any(code.endswith(".approve") for code in permission_set):
+        allowed.append("approve")
+    if any("refund" in code and not code.endswith(".request") for code in permission_set):
+        allowed.append("refund")
+    if any(code.endswith((".report.view", ".export")) for code in permission_set):
+        allowed.append("export")
+    if any(code.endswith(".manage") for code in permission_set):
+        allowed.append("execute")
+    return list(dict.fromkeys(allowed))
 
 
 def _user_permitted(
@@ -255,6 +342,8 @@ class CompanyModuleAccessService:
                 permissions=permissions,
             )
             audit = audit_by_module.get(definition.key)
+            readiness = module_readiness(definition)
+            effective_access = reason == "enabled"
             updated_at = (
                 audit.created_at
                 if audit is not None
@@ -266,12 +355,32 @@ class CompanyModuleAccessService:
                 CompanyModuleAccessRead(
                     module_key=definition.key,
                     lifecycle=definition.lifecycle,
+                    readiness=readiness,
+                    environment=canonical_runtime_environment(settings.environment),
                     company_enabled=company_enabled,
                     plan_included=plan_included,
                     runtime_ready=runtime_ready,
                     user_permitted=user_permitted,
-                    effective_access=reason == "enabled",
+                    effective_access=effective_access,
                     reason_code=reason,
+                    allowed_actions=module_allowed_actions(
+                        definition,
+                        readiness=readiness,
+                        effective_access=effective_access,
+                        permissions=permissions,
+                    ),
+                    enabled_branch_ids=[],
+                    branch_scope="all" if company_enabled else "none",
+                    feature_flags={
+                        definition.key: company_enabled,
+                        "runtime_ready": runtime_ready,
+                    },
+                    data_source=module_data_source(definition),
+                    status_reason=(
+                        (audit.new_value or {}).get("reason")
+                        if audit is not None
+                        else reason
+                    ),
                     updated_at=updated_at,
                     updated_by=(audit.user_id if audit is not None else None),
                     audit_id=(audit.id if audit is not None else None),

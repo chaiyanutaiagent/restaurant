@@ -64,15 +64,17 @@ type NavItem = {
 };
 
 const mainItems: NavItem[] = [
-  { label: "Company Admin", to: "/admin", icon: LayoutDashboard },
-  { label: "พื้นที่ทำงาน", to: "/workspaces", icon: Store, permission: "system.company.edit" },
+  { label: "หน้าหลัก", to: "/company", icon: LayoutDashboard },
+  { label: "งานและการแจ้งเตือน", to: "/company/actions", icon: ClipboardCheck },
+  { label: "องค์กร", to: "/company/organization", icon: Building2, permission: "system.branch.view" },
+  { label: "พนักงานและสิทธิ์", to: "/users", icon: Users, permission: "system.user.view" },
+  { label: "การตั้งค่า", to: "/company/settings", icon: Settings, permission: "system.company.edit" },
+  { label: "แอปทั้งหมด", to: "/company/apps", icon: Store },
   { label: "ครัวกลางบริษัท", to: "/company-kitchen", icon: Factory, permissions: ["company.kitchen.view", "company.kitchen.manage", "system.company.edit"] },
   { label: "กระจายสินค้า", to: "/company-distribution", icon: ArrowLeftRight, permissions: ["company.distribution.view", "company.distribution.manage", "system.company.edit"] },
   { label: "แพ็กเกจ SaaS", to: "/billing", icon: CreditCard },
   { label: "Privacy & Support", to: "/privacy-support", icon: Shield },
-  { label: "ผู้ใช้งาน", to: "/users", icon: Users, permission: "system.user.view" },
   { label: "บทบาท", to: "/roles", icon: Shield, permission: "system.role.view" },
-  { label: "สาขา", to: "/branches", icon: Building2, permission: "system.branch.view" },
   { label: "อุปกรณ์", to: "/devices", icon: Cpu, permission: "system.device.view" }
 ];
 
@@ -313,7 +315,7 @@ export default function Sidebar({
           <>
         <div className="space-y-2">
           {mainItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -355,7 +357,7 @@ export default function Sidebar({
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">POS</p>
           {comingSoonItems
             .slice(0, 3)
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -380,7 +382,7 @@ export default function Sidebar({
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">คลังสินค้า</p>
           {comingSoonItems
             .slice(3)
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -405,7 +407,7 @@ export default function Sidebar({
               </NavLink>
             ))}
           {transferItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -453,7 +455,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">การเชื่อมต่อ</p>
           {integrationItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -477,7 +479,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">โลจิสติกส์</p>
           {logisticsItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -501,7 +503,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">จัดซื้อ</p>
           {purchaseItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -549,7 +551,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">HR</p>
           {hrItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -575,7 +577,7 @@ export default function Sidebar({
         <div className="border-t border-gray-800 pt-4">
           <div className="space-y-2">
             {settingsItems
-              .filter((item) => !item.permission || hasPermission(item.permission))
+              .filter((item) => canShowItem(item, hasPermission))
               .map((item) => (
                 <NavLink
                   key={item.to}

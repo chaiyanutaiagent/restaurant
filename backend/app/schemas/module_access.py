@@ -18,6 +18,24 @@ CompanyModuleKey = Literal[
     "hotel_pms",
 ]
 CompanyModuleLifecycle = Literal["active", "dark_launch", "planned"]
+CompanyProductReadiness = Literal[
+    "production",
+    "pilot",
+    "dark_launch",
+    "read_only",
+    "legacy",
+    "planned",
+]
+CompanyModuleAction = Literal[
+    "view",
+    "create",
+    "update",
+    "approve",
+    "refund",
+    "export",
+    "suspend",
+    "execute",
+]
 CompanyModuleReasonCode = Literal[
     "enabled",
     "company_inactive",
@@ -32,12 +50,20 @@ CompanyModuleReasonCode = Literal[
 class CompanyModuleAccessRead(BaseSchema):
     module_key: CompanyModuleKey
     lifecycle: CompanyModuleLifecycle
+    readiness: CompanyProductReadiness = "production"
+    environment: Literal["production", "uat"] = "uat"
     company_enabled: bool
     plan_included: bool
     runtime_ready: bool
     user_permitted: bool
     effective_access: bool
     reason_code: CompanyModuleReasonCode
+    allowed_actions: list[CompanyModuleAction] = Field(default_factory=list)
+    enabled_branch_ids: list[uuid.UUID] = Field(default_factory=list)
+    branch_scope: Literal["all", "selected", "none"] = "all"
+    feature_flags: dict[str, bool] = Field(default_factory=dict)
+    data_source: str = "platform"
+    status_reason: str | None = None
     updated_at: datetime
     updated_by: uuid.UUID | None = None
     audit_id: uuid.UUID | None = None

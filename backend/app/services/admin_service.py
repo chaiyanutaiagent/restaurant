@@ -23,6 +23,7 @@ from app.models.staff_assignment import StaffRoleAssignment
 from app.models.stock import StockLocation
 from app.models.user import User, UserBranch
 from app.services.business_context_service import load_branch_business_context
+from app.services.company_owner_policy import CompanyOwnerPolicy
 from app.schemas.role import PermissionRead
 from app.schemas.product import BranchProductReplacementRuleCreate, BranchProductReplacementRuleRead
 from app.schemas.user_mgmt import (
@@ -198,6 +199,8 @@ class AdminService:
         data: UserUpdateFull,
     ) -> User:
         user = await self._get_user(company_id, user_id)
+        if data.is_active is False and user.is_active:
+            await CompanyOwnerPolicy(self.db).ensure_user_can_be_deactivated(company_id, user_id)
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(user, field, value)
         self._audit(company_id, None, "system.user.update", "User", user.id)
@@ -212,6 +215,7 @@ class AdminService:
         actor_id: uuid.UUID,
     ) -> User:
         user = await self._get_user(company_id, user_id)
+        await CompanyOwnerPolicy(self.db).ensure_user_can_be_deactivated(company_id, user_id)
         user.is_active = False
         await self._revoke_refresh_tokens(user.id)
         self._audit(company_id, actor_id, "system.user.deactivate", "User", user.id)

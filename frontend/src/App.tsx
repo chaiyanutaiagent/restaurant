@@ -99,6 +99,10 @@ import CompanyWorkspacesPage from "@/pages/workspaces/CompanyWorkspacesPage";
 import CompanyReportsPage from "@/pages/reports/CompanyReportsPage";
 import CompanyKitchenPage from "@/pages/kitchen/CompanyKitchenPage";
 import CompanyDistributionPage from "@/pages/distribution/CompanyDistributionPage";
+import CompanyActionCenterPage from "@/pages/company/CompanyActionCenterPage";
+import CompanyAppsPage from "@/pages/company/CompanyAppsPage";
+import CompanyHomePage from "@/pages/company/CompanyHomePage";
+import RoleAwareLanding from "@/pages/company/RoleAwareLanding";
 import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
 import TakeawayCounterPage from "@/pages/takeaway/TakeawayCounterPage";
 import TakeawayCutoverPage from "@/pages/takeaway/TakeawayCutoverPage";
@@ -159,7 +163,7 @@ export default function App(): JSX.Element {
           </Route>
           <Route element={<BusinessAdminGuard />}>
             <Route element={<AppShell />}>
-              <Route path="/:businessSlug/admin" element={<DashboardPage />} />
+              <Route path="/:businessSlug/admin" element={<RoleAwareLanding />} />
             </Route>
           </Route>
           <Route path="/device/pair" element={<DevicePairingPage />} />
@@ -356,8 +360,11 @@ export default function App(): JSX.Element {
           </Route>
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>
-              <Route path="/admin" element={<DashboardPage />} />
+              <Route path="/admin" element={<RoleAwareLanding />} />
               <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/company" element={<CompanyHomePage />} />
+              <Route path="/company/actions" element={<CompanyActionCenterPage />} />
+              <Route path="/company/apps" element={<CompanyAppsPage />} />
               <Route path="/billing" element={<TenantBillingPage />} />
               <Route path="/privacy-support" element={<TenantPrivacySupportPage />} />
               <Route element={<ProtectedRoute permission="system.user.view" />}>
@@ -368,6 +375,7 @@ export default function App(): JSX.Element {
               </Route>
               <Route element={<ProtectedRoute permission="system.branch.view" />}>
                 <Route path="/branches" element={<BranchesPage />} />
+                <Route path="/company/organization" element={<BranchesPage />} />
               </Route>
               <Route element={<ProtectedRoute permission="system.device.view" />}>
                 <Route path="/devices" element={<DevicesPage />} />
@@ -392,6 +400,7 @@ export default function App(): JSX.Element {
                 <Route path="/reports/company" element={<CompanyReportsPage />} />
                 <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/company/settings" element={<SettingsPage />} />
                 <Route path="/settings/tax" element={<TaxSettingsPage />} />
               </Route>
               <Route element={<ProtectedRoute permissions={["company.kitchen.view", "company.kitchen.manage", "system.company.edit"]} />}>

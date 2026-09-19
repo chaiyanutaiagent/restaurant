@@ -1040,6 +1040,18 @@ type-check/production PWA build (`4,206` modules) ผ่าน
 physical Retail scanner/printer/cash drawer/offline UAT, real-data freeze/backup/reconciliation และ owner
 sign-off ยังคงพักและเป็นเงื่อนไขบังคับก่อนเปลี่ยน `RETAIL_SERVICE_DATABASE=retail` ในระบบจริง
 
+WP36–WP41 เริ่มและทำ Foundation ฝั่ง local แล้วเมื่อ 19 กันยายน 2026 ตาม CTO handoff: Canonical Company
+Context และ role-aware landing, Product Readiness/allowed-action contract, role presets กับการป้องกัน Owner
+คนสุดท้าย, Customer Company shell, Unified Action Center, Company/Module Overview API และ Device/Sync/
+Integration state contract ทั้งหมดใช้ signed tenant context, permission และ release gate เดิมที่ backend
+ไม่มี migration, ไม่เปิด Takeaway/Central Kitchen Production writes และไม่เปลี่ยน Production runtime
+
+หลักฐานแยกอยู่ที่ `docs/scopes/WP36-CANONICAL-COMPANY-CONTEXT-01.md` ถึง
+`docs/scopes/WP41-DEVICE-SYNC-INTEGRATION-CONTRACT-01.md`; UI flow หลัง WP42 ยังต้องอนุมัติและทดสอบ
+ทีละส่วน ส่วน physical UAT, accountant sign-off และ owner go/no-go ยังคงเป็น external gates ตามเดิม
+Local automated phase gate ผ่านตาม `docs/scopes/WP36-WP41-FOUNDATION-PHASE-GATE-02.md` โดย backend
+regression `399` tests ผ่าน (`1` skipped), frontend type-check/build ผ่าน และไม่มี Production change
+
 WP9-A ใช้ Scope ID `WP9-TAX-CONFIGURATION-01` และผ่าน local implementation gate แล้ว โดยเพิ่ม
 Tax Profile กลางระดับ Company/Branch, รหัสสาขาภาษีตาม ภ.พ.20, รูปแบบการยื่น ภ.พ.30,
 อัตรา Standard/0%/Exempt ตามช่วงเวลา, audit ก่อน–หลัง และหน้า Company Admin `/settings/tax`

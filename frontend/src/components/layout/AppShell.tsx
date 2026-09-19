@@ -12,6 +12,11 @@ type AppShellProps = {
 
 const titleMap: Record<string, string> = {
   "/admin": "ERP Admin",
+  "/company": "หน้าหลักบริษัท",
+  "/company/actions": "งานและการแจ้งเตือน",
+  "/company/organization": "องค์กร",
+  "/company/apps": "แอปทั้งหมด",
+  "/company/settings": "การตั้งค่าบริษัท",
   "/dashboard": "Dashboard",
   "/users": "ผู้ใช้งาน",
   "/roles": "บทบาทและสิทธิ์",

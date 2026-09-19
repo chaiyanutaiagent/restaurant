@@ -31,6 +31,7 @@ from app.models.restaurant import (
 from app.models.stock import StockBalance, StockLocation, StockMovement
 from app.utils.create_superuser import DEFAULT_COMPANY_ID
 from app.utils.seed_fnb_demo import DEMO_RAW_MATERIALS, seed_fnb_demo_menu
+from app.utils.security import decode_token
 
 
 PROJECT_PREFIX = "restaurant-p5-uat"
@@ -76,7 +77,24 @@ def expect_http(
     return decoded.get("data", decoded)
 
 
-async def prepare() -> dict[str, str]:
+def token_scope(access_token: str) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    try:
+        claims = decode_token(access_token)
+        return (
+            uuid.UUID(str(claims["company_id"])),
+            uuid.UUID(str(claims["branch_id"])),
+            uuid.UUID(str(claims["brand_id"])),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("UAT auto-login token is missing company/branch/brand scope") from exc
+
+
+async def prepare(
+    *,
+    forced_company_id: uuid.UUID | None = None,
+    forced_branch_id: uuid.UUID | None = None,
+    forced_brand_id: uuid.UUID | None = None,
+) -> dict[str, str]:
     compose_project = os.environ.get("P5_UAT_PROJECT_NAME", "")
     if not compose_project.startswith(PROJECT_PREFIX):
         raise RuntimeError("Phase 5 UAT smoke refuses to write outside an isolated UAT Compose project")
@@ -89,29 +107,40 @@ async def prepare() -> dict[str, str]:
             raise RuntimeError(
                 f"Phase 5 UAT database mismatch: {actual_database} != {settings.postgres_db}"
             )
-        company = await db.get(Company, DEFAULT_COMPANY_ID)
-        branch = await db.scalar(
-            select(Branch)
-            .where(
-                Branch.company_id == DEFAULT_COMPANY_ID,
-                Branch.is_active.is_(True),
-                Branch.deleted_at.is_(None),
-                ~select(BrandBranch.id)
+        company_id = forced_company_id or DEFAULT_COMPANY_ID
+        company = await db.get(Company, company_id)
+        if forced_branch_id is not None:
+            branch = await db.get(Branch, forced_branch_id)
+            if (
+                branch is None
+                or branch.company_id != company_id
+                or not branch.is_active
+                or branch.deleted_at is not None
+            ):
+                raise RuntimeError("UAT auto-login Branch is missing or inactive")
+        else:
+            branch = await db.scalar(
+                select(Branch)
                 .where(
-                    BrandBranch.branch_id == Branch.id,
-                    BrandBranch.is_active.is_(True),
+                    Branch.company_id == company_id,
+                    Branch.is_active.is_(True),
+                    Branch.deleted_at.is_(None),
+                    ~select(BrandBranch.id)
+                    .where(
+                        BrandBranch.branch_id == Branch.id,
+                        BrandBranch.is_active.is_(True),
+                    )
+                    .exists(),
                 )
-                .exists(),
+                .order_by(Branch.sort_order, Branch.created_at)
+                .limit(1)
             )
-            .order_by(Branch.sort_order, Branch.created_at)
-            .limit(1)
-        )
         if company is None:
             raise RuntimeError("Fresh UAT bootstrap Company is missing")
         if branch is None:
             marker = uuid.uuid4().hex[:8]
             branch = Branch(
-                company_id=DEFAULT_COMPANY_ID,
+                company_id=company_id,
                 code=f"P5-UAT-{marker}",
                 name=f"Phase 5 UAT {marker}",
                 is_active=True,
@@ -164,13 +193,19 @@ async def prepare() -> dict[str, str]:
 
         central_raw = await ensure_location("UAT-C-RAW", "UAT Central Raw")
         central_ready = await ensure_location("UAT-C-READY", "UAT Central Ready")
-        brand = await db.scalar(
-            select(Brand).where(
-                Brand.company_id == company.id,
-                Brand.slug == BRAND_SLUG,
+        brand = (
+            await db.get(Brand, forced_brand_id)
+            if forced_brand_id is not None
+            else await db.scalar(
+                select(Brand).where(
+                    Brand.company_id == company.id,
+                    Brand.slug == BRAND_SLUG,
+                )
             )
         )
         if brand is None:
+            if forced_brand_id is not None:
+                raise RuntimeError("UAT auto-login Brand is missing")
             brand = Brand(
                 company_id=company.id,
                 central_branch_id=branch.id,
@@ -184,10 +219,13 @@ async def prepare() -> dict[str, str]:
             db.add(brand)
             await db.flush()
         else:
-            brand.central_branch_id = branch.id
-            brand.central_location_id = central_raw.id
-            brand.central_ready_location_id = central_ready.id
-            brand.business_type = "restaurant"
+            if brand.company_id != company.id or brand.business_type != "restaurant" or not brand.is_active:
+                raise RuntimeError("UAT auto-login Brand is not an active Restaurant Brand")
+            if forced_brand_id is None:
+                brand.central_branch_id = branch.id
+                brand.central_location_id = central_raw.id
+                brand.central_ready_location_id = central_ready.id
+                brand.business_type = "restaurant"
             brand.is_active = True
 
         membership = await db.scalar(
@@ -387,7 +425,7 @@ async def verify_handoffs(context: dict[str, str], sale_order_id: str, total: De
 
 async def run() -> None:
     expect_http("GET", "/health")
-    context = await prepare()
+    login: object | None = None
     if settings.uat_auth_bypass_enabled:
         public_host = urlsplit(settings.saas_public_base_url).hostname
         if not public_host:
@@ -398,7 +436,16 @@ async def run() -> None:
             body={},
             extra_headers={"Host": public_host},
         )
+        if not isinstance(login, dict) or not login.get("access_token"):
+            raise RuntimeError("UAT auto-login did not return an access token")
+        forced_company_id, forced_branch_id, forced_brand_id = token_scope(str(login["access_token"]))
+        context = await prepare(
+            forced_company_id=forced_company_id,
+            forced_branch_id=forced_branch_id,
+            forced_brand_id=forced_brand_id,
+        )
     else:
+        context = await prepare()
         login = expect_http(
             "POST",
             "/api/v1/auth/login",

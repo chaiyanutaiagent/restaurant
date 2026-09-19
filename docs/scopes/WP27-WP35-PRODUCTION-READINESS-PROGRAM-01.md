@@ -1,7 +1,8 @@
 # WP27–WP35 — Foodchainservice Production Readiness Program
 
 วันที่เริ่ม: `2026-09-18`
-สถานะ: **in_progress — engineering gates เริ่มแล้ว; physical/owner evidence ห้ามสมมติ**
+อัปเดตล่าสุด: `2026-09-19`
+สถานะ: **engineering complete through WP35 — UAT candidate passed; Production blocked by physical/owner gates**
 เป้าหมาย: ทำ Platform Console, Company Admin, Shared ERP, Restaurant POS, Retail POS,
 Central Kitchen/Supply Chain และ Takeaway POS ให้พร้อมใช้งานจริงแบบ rollout ทีละขอบเขต
 
@@ -24,12 +25,12 @@ Native mobile app และ Hotel PMS อยู่นอกโปรแกรม
 | WP27 | Baseline, gap matrix, UX handoff | inventory, automated baseline, runtime evidence | owner รับทราบขอบเขต | engineering complete |
 | WP28 | Platform Console + Company Admin | auth/MFA, tenant lifecycle, module access, role/device/audit regression | operator handoff | engineering ready; MFA pending |
 | WP29 | Shared ERP + Tax + reporting | inventory-to-accounting, tax period, cross-system reconciliation | accountant review | engineering ready; accountant pending |
-| WP30 | Restaurant POS | table/QR/KDS/payment/receipt/stock/offline regression | iPad/printer/payment/operator UAT | engineering ready; physical pending |
+| WP30 | Restaurant POS | table/QR/KDS/payment/receipt/stock/offline regression | iPad/printer/payment/operator UAT | live automated UAT passed; physical pending |
 | WP31 | Retail POS | dedicated DB parity/cutover, barcode/shift/payment/stock/offline regression | scanner/printer/cash-drawer UAT | engineering ready; cutover pending |
 | WP32 | Central Kitchen + Distribution | opening-lot mapping, multi-brand stock, demand/production/distribution replay | stock owner sign-off | dark launch ready; writes off |
 | WP33 | Takeaway/Chambo | Store/Central/Admin, signed import, reconciliation, rollback/canary tooling | approved snapshot + tablet/printer/operator UAT | engineering ready; canary pending |
 | WP34 | Cross-system acceptance | security, load, five-boundary backup/restore, monitoring | defect acceptance | engineering ready; physical acceptance pending |
-| WP35 | Release and rollout | immutable release, staged flags, runbooks, rollback rehearsal | final owner go/no-go | control ready; current NO-GO |
+| WP35 | Release and rollout | immutable release, staged flags, runbooks, rollback rehearsal | final owner go/no-go | engineering complete; current NO-GO |
 
 ## Release waves
 

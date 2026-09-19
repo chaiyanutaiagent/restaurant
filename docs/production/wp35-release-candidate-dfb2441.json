@@ -1,0 +1,86 @@
+{
+  "scope": "WP35-FOODCHAINSERVICE-RELEASE",
+  "generated_at": "2026-09-19T09:20:00+07:00",
+  "release": {
+    "git_commit": "dfb2441549950a865389010c8462757501655f53",
+    "artifact_sha256": "ae45437afbda5ab8a926128dc4b1b2d4dda216e38728a057f95fec45c672ee40",
+    "immutable": true
+  },
+  "uat_candidate": {
+    "status": "passed",
+    "url": "https://uat-pos.foodchainservice.com",
+    "release_directory": "/home/behappyaiagent/restaurant-uat-releases/dfb2441549950a865389010c8462757501655f53",
+    "pre_deploy_backup_reference": "/home/behappyaiagent/restaurant-uat-deploy-backups/wp35-before/restaurant-pos-prod-20260918T090908Z",
+    "deployed_at": "2026-09-18T09:22:41Z",
+    "verified_at": "2026-09-19T09:17:23+07:00",
+    "public_http_200": ["/", "/pos", "/admin", "/health/ready"],
+    "migration_heads": {
+      "legacy": "p16taxops0018",
+      "platform": "p13platform0017",
+      "restaurant": "p6restaurant0007",
+      "retail": "p8retail0002",
+      "takeaway": "p6takeaway0008"
+    },
+    "api_flow": {
+      "status": "passed",
+      "verified_at": "2026-09-19T09:22:32+07:00",
+      "sale_order_id": "cc65a0ea-81e5-41bf-a307-c667e98f9d33",
+      "payment_count": 1,
+      "recipe_stock_movement_count": 3,
+      "journal_entry_count": 1,
+      "outbox_event_count": 1,
+      "journal_debit": "169.00",
+      "journal_credit": "169.00"
+    },
+    "browser_flow": {
+      "status": "passed",
+      "tests_passed": 1,
+      "tests_failed": 0,
+      "duration_seconds": 11.8,
+      "report_sha256": "357d4fd4a235f566e2b81ed853a67adcb0b1d337aa18a4a4a6f7100057e4dbf2"
+    }
+  },
+  "engineering": {
+    "wp27": {"status": "passed", "evidence_sha256": "24572ba7a985000ba076b666cc8099dad2d54bc5527b28f20597ea491f532e06"},
+    "wp28": {"status": "passed", "evidence_sha256": "60ef408a143331eedc1fe405de0b21ad56f3f2123a2a8e3f08fa8001a0f340a2"},
+    "wp29": {"status": "passed", "evidence_sha256": "c5e3aa90b1a4dedfc5574e5b50e773caea27cbc1b358c7fc6488a6336c6bef0a"},
+    "wp30": {"status": "passed", "evidence_sha256": "1cff1c89fcd14baece7747fc79c1316d67a4546ab0f9cf85c0a1306c298ba450"},
+    "wp31": {"status": "passed", "evidence_sha256": "a34b092f2969ac1322a849f90700754900cd610b56fde666fc0d0e259a57d22e"},
+    "wp32": {"status": "passed", "evidence_sha256": "277c3fa83ded7efe5628f1b5d3241dec1d84c8bce9b21f160c3a196708db977f"},
+    "wp33": {"status": "passed", "evidence_sha256": "6905ca884fb733c3b91c75fa532aa35ff7d09b3d6dba26f39f013bd084b91a62"},
+    "wp34": {"status": "passed", "evidence_sha256": "bc50d817fb5c5a22583cefec7d7818e07fd749b543102745f917f5cc9a237321"}
+  },
+  "external_gates": {
+    "platform_operator_mfa": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "accountant_tax_review": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "restaurant_physical_pilot": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "retail_physical_pilot": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "central_kitchen_opening_stock": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "takeaway_approved_snapshot_canary": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null},
+    "residual_defect_acceptance": {"status": "pending", "approved_by": null, "approved_at": null, "evidence_sha256": null}
+  },
+  "recovery": {
+    "status": "passed",
+    "five_boundaries_restored": true,
+    "server_backup_reference": "/home/behappyaiagent/restaurant-cutover-backups/wp34-candidate/restaurant-pos-prod-20260918T072935Z",
+    "mac_backup_reference": "/Users/user/Projects/restaurant/backups/wp34-candidate",
+    "manifest_sha256": "1dc5ab048a12b3dc3cde28364e24cd49bd62bf29f56a2118333f92626ca9bd64"
+  },
+  "rollout": {
+    "platform_company_admin": {"status": "pending", "owner": null, "rollback_owner": null},
+    "shared_erp": {"status": "pending", "owner": null, "rollback_owner": null},
+    "restaurant_one_branch": {"status": "pending", "owner": null, "rollback_owner": null},
+    "retail_one_branch": {"status": "pending", "owner": null, "rollback_owner": null},
+    "central_kitchen_limited_scope": {"status": "pending", "owner": null, "rollback_owner": null},
+    "takeaway_one_branch": {"status": "pending", "owner": null, "rollback_owner": null}
+  },
+  "monitoring": {"status": "pending", "minimum_minutes": 60, "owner": null, "alert_route": null},
+  "rollback": {
+    "status": "passed",
+    "verified_rto_minutes": null,
+    "owner": null,
+    "reference": "/home/behappyaiagent/restaurant-cutover-backups/wp34-candidate/restaurant-pos-prod-20260918T072935Z"
+  },
+  "owner_decision": {"decision": "no_go", "owner": null, "decided_at": null},
+  "production_activation": {"status": "not_started"}
+}

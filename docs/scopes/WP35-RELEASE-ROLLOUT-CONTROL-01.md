@@ -1,13 +1,14 @@
 # WP35 — Release, Rollout, Rollback and Owner Decision
 
-วันที่: `2026-09-18`
-สถานะ: **engineering_control_ready — current decision NO-GO pending external gates**
+วันที่: `2026-09-19`
+สถานะ: **engineering_complete — UAT candidate passed; current Production decision NO-GO pending external gates**
 
 ## Release rule
 
 ใช้ `scripts/check-wp35-release-readiness.py` ตรวจ evidence JSON ก่อนทุก activation. ตัวตรวจเป็น fail-closed:
 ถ้า approval, เวลา, approver หรือ SHA-256 ของหลักฐานแม้แต่รายการเดียวว่าง ผลต้องเป็น `blocked`.
-ไฟล์ตัวอย่างอยู่ที่ `docs/production/wp35-release-evidence.example.json`
+ไฟล์ตัวอย่างอยู่ที่ `docs/production/wp35-release-evidence.example.json` และ candidate record ปัจจุบันอยู่ที่
+`docs/production/wp35-release-candidate-dfb2441.json`
 
 ## Rollout waves
 
@@ -38,7 +39,13 @@ Rollback ตาม wave: ปิด flag/routing ของส่วนนั้�
 - WP27–WP34 ฝั่ง engineering มีเอกสารและ automated evidence แล้ว
 - fresh five-boundary backup อยู่ทั้ง server/Mac และ isolated restore ผ่าน
 - Production ปัจจุบัน healthy; ยังไม่เปิด Retail dedicated routing หรือ Kitchen/Distribution writes
-- release source/immutable manifest จะสร้างหลัง commit candidate และ deploy UAT จาก commit เดียวกัน
+- immutable release commit `dfb2441549950a865389010c8462757501655f53`, artifact SHA-256
+  `ae45437afbda5ab8a926128dc4b1b2d4dda216e38728a057f95fec45c672ee40`
+- UAT ใช้ candidate นี้แล้ว; public health/page checks ผ่าน, API QR-to-ERP ผ่าน และ live browser
+  mobile/tablet flow ผ่าน `1/1` ใน `11.8s`
+- pre-deploy UAT backup อยู่ที่
+  `/home/behappyaiagent/restaurant-uat-deploy-backups/wp35-before/restaurant-pos-prod-20260918T090908Z`
+- Production application/data/routing/feature flags ไม่ถูกสลับจากงาน UAT นี้
 
 ## External gates ที่ทำให้ decision ยังเป็น NO-GO
 
@@ -49,5 +56,6 @@ Rollback ตาม wave: ปิด flag/routing ของส่วนนั้�
 - Takeaway approved snapshot, physical UAT และ one-branch canary
 - residual defect acceptance และ final owner go/no-go
 
-Engineering สามารถสร้าง UAT candidate และเตรียม runbook ต่อได้ แต่ห้ามเปลี่ยนรายการข้างต้นเป็น passed
-หากไม่มีหลักฐานจากผู้รับผิดชอบจริง
+Engineering through WP35 เสร็จและ UAT candidate ผ่านแล้ว แต่ห้ามเปลี่ยนรายการข้างต้นเป็น passed
+หากไม่มีหลักฐานจากผู้รับผิดชอบจริง. ตัว validator จึงต้องตอบ `blocked` และ `production_activated=false`
+จนกว่าจะครบทุก approval.

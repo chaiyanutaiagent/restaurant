@@ -17,10 +17,13 @@ type BrowserContextRecord = {
 
 const contextPath = process.env.P5_BROWSER_CONTEXT_FILE;
 const adminPassword = process.env.P5_UAT_ADMIN_PASSWORD;
+const autoLogin = process.env.P5_UAT_AUTO_LOGIN === "true";
 const artifactDir = process.env.P5_READINESS_ARTIFACT_DIR ?? "/private/tmp/restaurant-p5-playwright";
 
-if (!contextPath || !adminPassword) {
-  throw new Error("P5_BROWSER_CONTEXT_FILE and P5_UAT_ADMIN_PASSWORD are required");
+if (!contextPath || (!autoLogin && !adminPassword)) {
+  throw new Error(
+    "P5_BROWSER_CONTEXT_FILE and either P5_UAT_AUTO_LOGIN=true or P5_UAT_ADMIN_PASSWORD are required",
+  );
 }
 
 const uat = JSON.parse(readFileSync(contextPath, "utf8")) as BrowserContextRecord;
@@ -48,6 +51,10 @@ async function assertNoHorizontalOverflow(page: Page): Promise<void> {
 
 async function loginStaff(page: Page): Promise<void> {
   await page.goto(`/login?next=${encodeURIComponent(uat.browser_paths.tables)}`);
+  if (autoLogin) {
+    await expect(page).toHaveURL(new RegExp(`${uat.browser_paths.tables.replaceAll("/", "\\/")}$`));
+    return;
+  }
   await page.locator("#company_id").fill(uat.company_id);
   await page.locator("#username").fill("admin");
   await page.locator("#password").fill(adminPassword as string);
@@ -91,12 +98,15 @@ test("mobile QR to tablet kitchen, checkout, and ERP report", async ({ browser, 
 
     await staff.goto(uat.browser_paths.kitchen);
     await expect(staff.getByRole("heading", { name: "Kitchen Display" })).toBeVisible();
-    await expect(staff.getByText("Browser UAT หวานน้อย")).toBeVisible();
+    const currentTicket = staff
+      .getByText(`โต๊ะ ${uat.browser_table_name}`, { exact: true })
+      .locator("xpath=ancestor::div[button][1]");
+    await expect(currentTicket.getByText("Browser UAT หวานน้อย")).toBeVisible();
     await assertNoHorizontalOverflow(staff);
     await staff.screenshot({ path: `${artifactDir}/03-kitchen-pending.png`, fullPage: true });
 
     for (const action of ["เริ่มทำ", "เสร็จแล้ว"]) {
-      const button = staff.getByRole("button", { name: action }).first();
+      const button = currentTicket.getByRole("button", { name: action });
       await expect(button).toBeVisible();
       await button.click();
     }

@@ -1040,17 +1040,23 @@ type-check/production PWA build (`4,206` modules) ผ่าน
 physical Retail scanner/printer/cash drawer/offline UAT, real-data freeze/backup/reconciliation และ owner
 sign-off ยังคงพักและเป็นเงื่อนไขบังคับก่อนเปลี่ยน `RETAIL_SERVICE_DATABASE=retail` ในระบบจริง
 
-WP36–WP41 เริ่มและทำ Foundation ฝั่ง local แล้วเมื่อ 19 กันยายน 2026 ตาม CTO handoff: Canonical Company
+WP36–WP41 ทำ Foundation และผ่าน UAT engineering gate แล้วเมื่อ 19 กันยายน 2026 ตาม CTO handoff: Canonical Company
 Context และ role-aware landing, Product Readiness/allowed-action contract, role presets กับการป้องกัน Owner
 คนสุดท้าย, Customer Company shell, Unified Action Center, Company/Module Overview API และ Device/Sync/
 Integration state contract ทั้งหมดใช้ signed tenant context, permission และ release gate เดิมที่ backend
 ไม่มี migration, ไม่เปิด Takeaway/Central Kitchen Production writes และไม่เปลี่ยน Production runtime
 
 หลักฐานแยกอยู่ที่ `docs/scopes/WP36-CANONICAL-COMPANY-CONTEXT-01.md` ถึง
-`docs/scopes/WP41-DEVICE-SYNC-INTEGRATION-CONTRACT-01.md`; UI flow หลัง WP42 ยังต้องอนุมัติและทดสอบ
-ทีละส่วน ส่วน physical UAT, accountant sign-off และ owner go/no-go ยังคงเป็น external gates ตามเดิม
-Local automated phase gate ผ่านตาม `docs/scopes/WP36-WP41-FOUNDATION-PHASE-GATE-02.md` โดย backend
-regression `399` tests ผ่าน (`1` skipped), frontend type-check/build ผ่าน และไม่มี Production change
+`docs/scopes/WP41-DEVICE-SYNC-INTEGRATION-CONTRACT-01.md` และรายงาน deploy/smoke อยู่ที่
+`docs/scopes/WP36-WP41-UAT-DEPLOYMENT-03.md` รุ่น `0ca50c5` ผ่าน backend regression `399` tests
+(`1` skipped), frontend type-check/build, UAT read-only smoke `31` assertions, role landing `5` แบบ,
+permission boundary `2` จุด และ rollback readiness โดยไม่เปลี่ยน Production, ไม่เปิด Central Kitchen/
+Distribution writes และไม่เปลี่ยน Retail data source
+
+Foundation Phase Gate ปิดในระดับ engineering/UAT แล้ว แต่ physical UAT, accountant sign-off และ owner
+go/no-go ยังคงเป็น external gates ตามเดิม ขอบเขต UI ถัดไปอยู่ที่
+`docs/scopes/WP42-CUSTOMER-COMPANY-SHELL-INTEGRATION-01.md` สถานะ scoped และยังต้องได้รับอนุมัติ
+implementation แยกก่อนเริ่มงาน
 
 WP9-A ใช้ Scope ID `WP9-TAX-CONFIGURATION-01` และผ่าน local implementation gate แล้ว โดยเพิ่ม
 Tax Profile กลางระดับ Company/Branch, รหัสสาขาภาษีตาม ภ.พ.20, รูปแบบการยื่น ภ.พ.30,

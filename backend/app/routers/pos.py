@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database import get_identity_db
 from app.dependencies import (
     DeviceTokenData,
     TokenData,
@@ -50,14 +51,15 @@ def _approval_payload(
 
 
 async def _authorize_sale_discount(
-    db: AsyncSession,
+    operational_db: AsyncSession,
+    approval_db: AsyncSession,
     current: TokenData,
     payload: CreateSaleRequest,
     pricing: PricingResult,
 ) -> ApprovalEvidence | None:
     assert current.branch_id is not None
     percentage = pricing.discount_percentage
-    branch_settings = await db.scalar(
+    branch_settings = await operational_db.scalar(
         select(BranchSettings).where(
             BranchSettings.company_id == current.company_id,
             BranchSettings.branch_id == current.branch_id,
@@ -78,7 +80,7 @@ async def _authorize_sale_discount(
         )
     if percentage <= cashier_limit:
         return None
-    return await ApprovalService(db).authorize_operation(
+    return await ApprovalService(approval_db).authorize_operation(
         current=current,
         action="pos.discount.override",
         request_payload=_approval_payload(payload),
@@ -92,7 +94,8 @@ async def _authorize_sale_discount(
 
 
 async def _authorize_price_override(
-    db: AsyncSession,
+    operational_db: AsyncSession,
+    approval_db: AsyncSession,
     current: TokenData,
     payload: CreateSaleRequest,
     pricing: PricingResult,
@@ -115,7 +118,7 @@ async def _authorize_price_override(
     if not pricing.requires_price_override_approval:
         return None
     assert current.branch_id is not None
-    branch_settings = await db.scalar(
+    branch_settings = await operational_db.scalar(
         select(BranchSettings).where(
             BranchSettings.company_id == current.company_id,
             BranchSettings.branch_id == current.branch_id,
@@ -132,7 +135,7 @@ async def _authorize_price_override(
             if line.request.price_override is not None
         }
     )
-    return await ApprovalService(db).authorize_operation(
+    return await ApprovalService(approval_db).authorize_operation(
         current=current,
         action="pos.price.override",
         request_payload=_approval_payload(payload),
@@ -268,6 +271,7 @@ async def create_sale(
     response: Response,
     current: TokenData = Depends(require_permission("pos.sale.create")),
     db: AsyncSession = Depends(get_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
@@ -303,8 +307,13 @@ async def create_sale(
         payload=pricing_request_for_sale(payload),
         lock_prices=True,
     )
-    approval_evidence = await _authorize_sale_discount(db, current, payload, pricing)
-    price_override_evidence = await _authorize_price_override(db, current, payload, pricing)
+    approval_evidence = await _authorize_sale_discount(db, identity_db, current, payload, pricing)
+    price_override_evidence = await _authorize_price_override(db, identity_db, current, payload, pricing)
+    # Approval usage lives in the Identity boundary. Persist it before the
+    # operational sale so a one-time grant cannot be replayed across databases.
+    # A later sale failure intentionally consumes the grant and requires a new
+    # approval; this is the fail-closed side of the cross-database boundary.
+    await identity_db.commit()
     order = await service.create_sale(
         current.company_id,
         current.branch_id,
@@ -323,6 +332,7 @@ async def sync_sales(
     payload: SyncSalesRequest,
     current: TokenData = Depends(require_permission("pos.sale.create")),
     db: AsyncSession = Depends(get_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
@@ -372,8 +382,21 @@ async def sync_sales(
                 "Offline price is stale; refresh online before checkout",
                 client_order_id=sale_payload.client_order_id,
             )
-        approval_evidence = await _authorize_sale_discount(db, current, sale_payload, pricing)
-        price_override_evidence = await _authorize_price_override(db, current, sale_payload, pricing)
+        approval_evidence = await _authorize_sale_discount(
+            db,
+            identity_db,
+            current,
+            sale_payload,
+            pricing,
+        )
+        price_override_evidence = await _authorize_price_override(
+            db,
+            identity_db,
+            current,
+            sale_payload,
+            pricing,
+        )
+        await identity_db.commit()
         orders.append(
             await service.create_sale(
                 current.company_id,

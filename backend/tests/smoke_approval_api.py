@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
-from app.database import AsyncSessionLocal, engine
+from app.database import AsyncSessionLocal, PlatformSessionLocal, engine, platform_engine
 from app.main import app
 from app.models.approval import ApprovalGrantUsage, ManagerPinCredential
 from app.models.audit import AuditLog
@@ -293,13 +293,137 @@ async def prepare() -> dict[str, str]:
             "branch_id": str(branch.id),
             "location_id": str(location.id),
             "product_id": str(product.id),
+            "brand_id": str(brand.id),
+            "manager_role_id": str(manager_role.id),
+            "cashier_role_id": str(cashier_role.id),
             "manager_id": str(manager.id),
             "manager_username": manager_username,
             "cashier_id": str(cashier.id),
             "cashier_username": cashier_username,
             "restaurant_session_id": str(restaurant_session.id),
         }
+    if settings.platform_database_url_effective != settings.database_url:
+        async with PlatformSessionLocal() as identity_db:
+            await seed_default_permissions(identity_db)
+            await ensure_default_company_seed_in_session(identity_db)
+            branch_id = uuid.UUID(result["branch_id"])
+            brand_id = uuid.UUID(result["brand_id"])
+            identity_db.add_all(
+                [
+                    Branch(
+                        id=branch_id,
+                        company_id=DEFAULT_COMPANY_ID,
+                        code=f"APPROVAL-{marker}",
+                        name=f"Approval Smoke {marker}",
+                        is_active=True,
+                    ),
+                    Brand(
+                        id=brand_id,
+                        company_id=DEFAULT_COMPANY_ID,
+                        slug=f"approval-smoke-{marker}",
+                        name=f"Approval Smoke {marker}",
+                        business_type="restaurant",
+                        is_active=True,
+                    ),
+                ]
+            )
+            identity_permissions = {
+                permission.code: permission
+                for permission in (
+                    await identity_db.scalars(
+                        select(Permission).where(Permission.code.in_(permission_codes))
+                    )
+                ).all()
+            }
+            identity_manager_role = Role(
+                id=uuid.UUID(result["manager_role_id"]),
+                company_id=DEFAULT_COMPANY_ID,
+                name=f"approval_manager_{marker}",
+                is_branch_assignable=True,
+                allowed_scope_types=["branch"],
+            )
+            identity_manager_role.permissions = [
+                identity_permissions[code]
+                for code in (
+                    "pos.sale.create",
+                    "pos.sale.void",
+                    "pos.discount.override",
+                    "pos.price.override",
+                    "pos.price.override.request",
+                    "pos.refund.create",
+                    "inventory.stock.adjust",
+                    "inventory.stock.view",
+                    "system.role.view",
+                )
+            ]
+            identity_cashier_role = Role(
+                id=uuid.UUID(result["cashier_role_id"]),
+                company_id=DEFAULT_COMPANY_ID,
+                name=f"approval_cashier_{marker}",
+                is_branch_assignable=True,
+                allowed_scope_types=["branch"],
+            )
+            identity_cashier_role.permissions = [
+                identity_permissions[code]
+                for code in (
+                    "pos.sale.view",
+                    "pos.sale.create",
+                    "pos.sale.void.request",
+                    "pos.discount.apply",
+                    "pos.price.override.request",
+                    "pos.refund.request",
+                    "pos.cashier.open_shift",
+                    "inventory.stock.view",
+                    "inventory.stock.adjust.request",
+                    "fb.order.create",
+                )
+            ]
+            identity_db.add_all([identity_manager_role, identity_cashier_role])
+            await identity_db.flush()
+            identity_manager = User(
+                id=uuid.UUID(result["manager_id"]),
+                company_id=DEFAULT_COMPANY_ID,
+                username=result["manager_username"],
+                display_name="Approval Manager",
+                hashed_password=hash_password(PASSWORD),
+                is_active=True,
+            )
+            identity_cashier = User(
+                id=uuid.UUID(result["cashier_id"]),
+                company_id=DEFAULT_COMPANY_ID,
+                username=result["cashier_username"],
+                display_name="Approval Cashier",
+                hashed_password=hash_password(PASSWORD),
+                is_active=True,
+            )
+            identity_db.add_all([identity_manager, identity_cashier])
+            await identity_db.flush()
+            identity_db.add_all(
+                [
+                    UserBranch(
+                        user_id=identity_manager.id,
+                        branch_id=branch_id,
+                        brand_id=brand_id,
+                        business_type="restaurant",
+                        target_database="restaurant",
+                        role_id=identity_manager_role.id,
+                        is_default=True,
+                    ),
+                    UserBranch(
+                        user_id=identity_cashier.id,
+                        branch_id=branch_id,
+                        brand_id=brand_id,
+                        business_type="restaurant",
+                        target_database="restaurant",
+                        role_id=identity_cashier_role.id,
+                        is_default=True,
+                    ),
+                ]
+            )
+            await identity_db.commit()
     await engine.dispose()
+    if platform_engine is not engine:
+        await platform_engine.dispose()
     return result
 
 

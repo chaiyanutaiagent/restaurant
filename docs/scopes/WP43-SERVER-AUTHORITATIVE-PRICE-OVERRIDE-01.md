@@ -1,7 +1,7 @@
 # WP43 — Server-Authoritative Price and Price Override
 
 วันที่จัดทำ: `2026-09-20`
-สถานะ: **In implementation — local engineering gate passed; pending UAT gate**
+สถานะ: **Closed for Local/UAT engineering — Production not approved**
 Dependency: **WP42 UAT gate passed**
 Target: **Restaurant/POS first; UAT only before a separate Production gate**
 
@@ -100,4 +100,5 @@ client ใช้สำหรับนำเสนอและส่ง intent �
 
 Owner อนุมัติเริ่มงานแล้ว Implementation และผล Local Engineering Gate อยู่ที่
 `docs/scopes/WP43-SERVER-AUTHORITATIVE-PRICE-OVERRIDE-02-IMPLEMENTATION.md` โดยยังคง UAT-only boundary
-จนกว่าจะมี Production approval ใหม่
+ผล UAT และคำตัดสินอยู่ที่ `docs/scopes/WP43-UAT-DEPLOYMENT-03.md` และ
+`docs/scopes/WP43-PHASE-GATE-02.md` โดยยังคง Production block จนกว่าจะมี approval ใหม่

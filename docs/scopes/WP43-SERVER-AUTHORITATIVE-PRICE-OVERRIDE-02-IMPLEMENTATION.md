@@ -1,7 +1,7 @@
 # WP43 — Server-Authoritative Price and Price Override Implementation
 
 วันที่: `2026-09-20`
-สถานะ: **Implemented locally — pending UAT deployment gate**
+สถานะ: **Implemented and passed Local/UAT engineering gate at `wp43-6b7b0c6`**
 ขอบเขต: **Restaurant/POS only; UAT only**
 
 ## 1. Authority contract

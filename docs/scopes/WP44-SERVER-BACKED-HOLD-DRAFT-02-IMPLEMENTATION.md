@@ -1,7 +1,7 @@
 # WP44 — Server-backed Hold Draft Implementation
 
 วันที่: `2026-09-20`
-สถานะ: **Implemented and passed Local engineering gate**
+สถานะ: **Implemented and passed Local/UAT engineering gate at `wp44-bfe6e4f`**
 ขอบเขต: **Restaurant/POS shared contract; Local/UAT only**
 
 ## 1. Data contract
@@ -70,6 +70,9 @@ Create และ mutation ใช้ idempotency key + canonical request hash ส
 - production frontend build ผ่าน; มีเพียง existing chunk-size advisory
 - Python compile และ `git diff --check` ผ่าน
 - ไม่มี frontend `lint` script ใน package; จึงใช้ type-check + production build เป็น frontend static gate
+
+UAT deployment, smoke, rollback drill และ visual verification บันทึกไว้ที่
+`docs/scopes/WP44-UAT-DEPLOYMENT-03.md`
 
 ## 7. Rollback design
 

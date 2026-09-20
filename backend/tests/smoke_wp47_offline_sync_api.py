@@ -31,6 +31,7 @@ BATCH_SIZE = 50
 BASE_URL = os.environ.get("WP47_UAT_INTERNAL_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 BRAND_SLUG = os.environ.get("WP47_UAT_BRAND_SLUG", "p5-uat-restaurant")
 PRODUCT_SKU = os.environ.get("WP47_UAT_PRODUCT_SKU", "FNB-DEMO-004")
+BRANCH_ID = os.environ.get("WP47_UAT_BRANCH_ID")
 USERNAME = os.environ.get("WP47_UAT_USERNAME", "admin")
 PASSWORD = os.environ.get("WP47_UAT_PASSWORD") or settings.default_admin_password
 
@@ -74,12 +75,15 @@ async def prepare() -> dict[str, str]:
         brand = await db.scalar(select(Brand).where(Brand.slug == BRAND_SLUG, Brand.is_active.is_(True)))
         if brand is None:
             raise RuntimeError(f"UAT brand not found: {BRAND_SLUG}")
-        membership = await db.scalar(select(BrandBranch).where(
+        membership_query = select(BrandBranch).where(
             BrandBranch.company_id == brand.company_id,
             BrandBranch.brand_id == brand.id,
             BrandBranch.is_active.is_(True),
             BrandBranch.store_location_id.is_not(None),
-        ))
+        )
+        if BRANCH_ID:
+            membership_query = membership_query.where(BrandBranch.branch_id == uuid.UUID(BRANCH_ID))
+        membership = await db.scalar(membership_query.order_by(BrandBranch.created_at))
         product = await db.scalar(select(Product).where(
             Product.company_id == brand.company_id,
             Product.brand_id == brand.id,

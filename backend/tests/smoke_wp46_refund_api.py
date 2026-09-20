@@ -308,7 +308,10 @@ def run() -> None:
             "provider_event_id": f"wp46-event-{uuid.uuid4()}", "payment_leg_id": leg_id,
             "sequence": 2, "state": "succeeded", "provider_refund_ref": f"uat-refund-{uuid.uuid4()}", "error_code": None,
         }
-        signature = provider_webhook_signature(event_payload, "wp46-sandbox-secret-2026")
+        sandbox_secret = settings.refund_sandbox_webhook_secret
+        if not sandbox_secret:
+            raise RuntimeError("WP46 smoke requires REFUND_SANDBOX_WEBHOOK_SECRET")
+        signature = provider_webhook_signature(event_payload, sandbox_secret)
         webhook_done = expect(client.post("/api/v1/pos/refunds/provider/sandbox/webhook", json=event_payload, headers={"X-Refund-Signature": signature}), 200)
         if webhook_done["status"] != "completed":
             raise RuntimeError("Signed provider webhook did not finalize the refund")
@@ -316,7 +319,7 @@ def run() -> None:
         if duplicate_webhook["id"] != webhook_done["id"]:
             raise RuntimeError("Duplicate provider webhook changed the operation")
         stale_event = {**event_payload, "provider_event_id": f"wp46-event-{uuid.uuid4()}", "sequence": 1, "state": "failed"}
-        stale_signature = provider_webhook_signature(stale_event, "wp46-sandbox-secret-2026")
+        stale_signature = provider_webhook_signature(stale_event, sandbox_secret)
         stale_result = expect(client.post("/api/v1/pos/refunds/provider/sandbox/webhook", json=stale_event, headers={"X-Refund-Signature": stale_signature}), 200)
         if stale_result["status"] != "completed":
             raise RuntimeError("Out-of-order webhook regressed a completed refund")

@@ -1904,7 +1904,6 @@ async def checkout_session(
     payload: SessionCheckoutRequest,
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_restaurant_service_db),
-    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     """รวมบิลโต๊ะ → สร้าง SaleOrder → ปิด session"""
     svc = DiningService(db)
@@ -1924,7 +1923,6 @@ async def checkout_session(
             session,
             current,
             payload,
-            approval_db=identity_db,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

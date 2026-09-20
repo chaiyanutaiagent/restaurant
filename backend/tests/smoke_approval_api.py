@@ -10,11 +10,20 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
-from app.database import AsyncSessionLocal, PlatformSessionLocal, engine, platform_engine
+from app.database import (
+    AsyncSessionLocal,
+    PlatformSessionLocal,
+    engine,
+    platform_engine,
+    restaurant_engine,
+    retail_engine,
+    takeaway_engine,
+)
 from app.main import app
 from app.models.approval import ApprovalGrantUsage, ManagerPinCredential
 from app.models.audit import AuditLog
 from app.models.branch import Branch
+from app.models.company import Company
 from app.models.pos import Payment
 from app.models.product import Product, Unit
 from app.models.restaurant import (
@@ -31,6 +40,8 @@ from app.models.user import User, UserBranch
 from app.utils.create_superuser import DEFAULT_COMPANY_ID, ensure_default_company_seed_in_session
 from app.utils.security import hash_password, verify_password
 from app.utils.seed_permissions import seed_default_permissions
+from app.services.platform_reference_projection import process_projection_batch, seed_snapshot_events
+from app.services.retail_reference_projector import project_retail_reference_snapshot
 
 
 PASSWORD = "ApprovalSmoke123!"
@@ -305,7 +316,17 @@ async def prepare() -> dict[str, str]:
     if settings.platform_database_url_effective != settings.database_url:
         async with PlatformSessionLocal() as identity_db:
             await seed_default_permissions(identity_db)
-            await ensure_default_company_seed_in_session(identity_db)
+            identity_company = await identity_db.get(Company, DEFAULT_COMPANY_ID)
+            if identity_company is None:
+                identity_db.add(
+                    Company(
+                        id=DEFAULT_COMPANY_ID,
+                        name="Restaurant POS UAT",
+                        business_slug=f"approval-smoke-company-{marker}",
+                        is_active=True,
+                    )
+                )
+                await identity_db.flush()
             branch_id = uuid.UUID(result["branch_id"])
             brand_id = uuid.UUID(result["brand_id"])
             identity_db.add_all(
@@ -421,9 +442,28 @@ async def prepare() -> dict[str, str]:
                 ]
             )
             await identity_db.commit()
-    await engine.dispose()
-    if platform_engine is not engine:
-        await platform_engine.dispose()
+        async with PlatformSessionLocal() as identity_db:
+            await seed_snapshot_events(identity_db)
+            await identity_db.commit()
+        while True:
+            batch = await process_projection_batch(limit=100)
+            if batch.failed:
+                raise RuntimeError("Restaurant reference projection failed during approval smoke setup")
+            if batch.claimed == 0:
+                break
+        await project_retail_reference_snapshot()
+    database_engines = {
+        id(database_engine): database_engine
+        for database_engine in (
+            engine,
+            platform_engine,
+            restaurant_engine,
+            retail_engine,
+            takeaway_engine,
+        )
+        if database_engine is not None
+    }
+    await asyncio.gather(*(database_engine.dispose() for database_engine in database_engines.values()))
     return result
 
 

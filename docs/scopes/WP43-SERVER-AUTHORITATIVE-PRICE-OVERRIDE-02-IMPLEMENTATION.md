@@ -48,8 +48,8 @@
 - Request ต้องมี requested price, reason code และ note
 - Approval ผูก Company/Branch/user/action และใช้ได้ครั้งเดียว
 - เมื่อ policy ห้าม self-approval ผู้ขอกับผู้อนุมัติต้องเป็นคนละคน
-- approval grant ถูกตรวจและ consume ใน Platform Identity DB ส่วน sale ถูก commit ใน Restaurant Operational DB
-- หาก sale ล้มเหลวหลัง consume grant ระบบจะ fail closed และต้องขอ approval ใหม่ แทนการเปิดช่องให้ replay token ข้ามฐานข้อมูล
+- Manager PIN และการออก approval token อยู่ใน Platform Identity DB ส่วน grant usage ถูก consume พร้อม sale ใน Restaurant Operational DB
+- approval token ผูก signed Company/Branch/requester/action/request hash; operational unique grant id ป้องกัน replay โดยไม่แยก transaction จาก sale
 - ทุก override บันทึก before/after, requester, approver, approval grant, reason, policy และ price snapshot
 - Database trigger ปฏิเสธ UPDATE/DELETE ที่ `price_override_audits` เพื่อให้ audit append-only
 

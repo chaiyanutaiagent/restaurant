@@ -1217,8 +1217,6 @@ class DiningService:
         session: DiningSession,
         current: TokenData,
         payload: SessionCheckoutRequest,
-        *,
-        approval_db: AsyncSession | None = None,
     ) -> SessionCheckoutResult:
         from app.services.sale_service import SaleService, pricing_request_for_sale
 
@@ -1373,8 +1371,7 @@ class DiningService:
                 exclude_unset=True,
             )
             approval_payload["session_id"] = str(session.id)
-            approval_session = approval_db or self.db
-            approval_evidence = await ApprovalService(approval_session).authorize_operation(
+            approval_evidence = await ApprovalService(self.db).authorize_operation(
                 current=current,
                 action="pos.discount.override",
                 request_payload=approval_payload,
@@ -1386,8 +1383,6 @@ class DiningService:
                 resource_type="DiningSession",
                 resource_id=str(session.id),
             )
-            if approval_session is not self.db:
-                await approval_session.commit()
 
         sale_svc = SaleService(self.db)
         sale_order = await sale_svc.create_sale(

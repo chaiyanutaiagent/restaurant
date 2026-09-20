@@ -8,6 +8,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 import uuid
 
 from sqlalchemy import func, select
@@ -33,7 +34,7 @@ BRAND_SLUG = os.environ.get("WP47_UAT_BRAND_SLUG", "p5-uat-restaurant")
 PRODUCT_SKU = os.environ.get("WP47_UAT_PRODUCT_SKU", "FNB-DEMO-004")
 BRANCH_ID = os.environ.get("WP47_UAT_BRANCH_ID")
 USERNAME = os.environ.get("WP47_UAT_USERNAME", "admin")
-PASSWORD = os.environ.get("WP47_UAT_PASSWORD") or settings.default_admin_password
+PASSWORD = os.environ.get("WP47_UAT_PASSWORD")
 
 
 def request_json(
@@ -43,6 +44,7 @@ def request_json(
     token: str | None = None,
     device_token: str | None = None,
     body: object | None = None,
+    extra_headers: dict[str, str] | None = None,
     expected: int = 200,
     timeout: float = 120,
 ) -> object:
@@ -52,6 +54,8 @@ def request_json(
         headers["Authorization"] = f"Bearer {token}"
     if device_token:
         headers["X-Device-Authorization"] = f"Bearer {device_token}"
+    if extra_headers:
+        headers.update(extra_headers)
     request = urllib.request.Request(f"{BASE_URL}{path}", data=payload, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -216,13 +220,29 @@ async def verify(prefix: str, canonical_ids: set[uuid.UUID], expected_total: Dec
 
 
 async def run_async() -> None:
-    if not PASSWORD:
-        raise RuntimeError("WP47_UAT_PASSWORD or DEFAULT_ADMIN_PASSWORD is required")
     context = await prepare()
-    login = request_json("POST", "/api/v1/auth/login", body={
-        "company_id": context["company_id"], "branch_id": context["branch_id"],
-        "username": USERNAME, "password": PASSWORD,
-    })
+    if settings.uat_auth_bypass_enabled:
+        configured_host = urlsplit(settings.saas_public_base_url).hostname
+        if not configured_host:
+            raise RuntimeError("UAT public hostname is missing")
+        auto_login = request_json(
+            "POST",
+            "/api/v1/auth/uat/auto-login",
+            extra_headers={"Host": configured_host},
+        )
+        login = request_json(
+            "POST",
+            "/api/v1/auth/switch-branch",
+            token=str(auto_login["access_token"]),
+            body={"branch_id": context["branch_id"]},
+        )
+    else:
+        if not PASSWORD:
+            raise RuntimeError("WP47_UAT_PASSWORD is required when UAT auth bypass is disabled")
+        login = request_json("POST", "/api/v1/auth/login", body={
+            "company_id": context["company_id"], "branch_id": context["branch_id"],
+            "username": USERNAME, "password": PASSWORD,
+        })
     if not isinstance(login, dict):
         raise RuntimeError("Login response is invalid")
     token = str(login["access_token"])

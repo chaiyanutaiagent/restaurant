@@ -3312,6 +3312,9 @@ export default function POSPage(): JSX.Element {
         <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>ออเดอร์ล่าสุดในกะนี้</DialogTitle>
+            <DialogDescription className="sr-only">
+              รายการขายล่าสุดสำหรับดูรายละเอียด พิมพ์ซ้ำ หรือเริ่มกระบวนการคืนสินค้าและคืนเงิน
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             {recentSales.length === 0 ? (

@@ -143,6 +143,12 @@ export default function CompanyShell(): JSX.Element {
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#f3f6fb] text-slate-950" data-testid="company-shell">
+      <a
+        href="#company-main-content"
+        className="sr-only fixed left-3 top-3 z-[70] rounded-xl bg-slate-950 px-4 py-3 font-bold text-white shadow-xl focus:not-sr-only"
+      >
+        ข้ามไปเนื้อหาหลัก
+      </a>
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex w-[16.5rem] flex-col border-r border-slate-200 bg-white shadow-2xl transition-transform duration-200 xl:static xl:translate-x-0 xl:shadow-none",
@@ -156,7 +162,7 @@ export default function CompanyShell(): JSX.Element {
             </span>
             <span>{PLATFORM_BRAND.productName}</span>
           </Link>
-          <Button className="xl:hidden" variant="ghost" size="icon" onClick={() => setSidebarOpen(false)} aria-label="ปิดเมนู">
+          <Button className="min-w-11 xl:hidden" variant="ghost" size="icon" onClick={() => setSidebarOpen(false)} aria-label="ปิดเมนู">
             <X className="h-5 w-5" />
           </Button>
         </div>
@@ -169,6 +175,7 @@ export default function CompanyShell(): JSX.Element {
               end={item.exact}
               className={({ isActive }) => cn(
                 "flex min-h-11 items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-bold transition",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
                 isActive
                   ? "bg-blue-50 text-blue-700 ring-1 ring-blue-100"
                   : "text-slate-600 hover:bg-slate-50 hover:text-slate-950",
@@ -202,7 +209,7 @@ export default function CompanyShell(): JSX.Element {
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="z-30 flex min-h-16 shrink-0 items-center gap-2 border-b border-slate-200 bg-white/95 px-3 shadow-sm backdrop-blur md:px-5">
-          <Button className="shrink-0 xl:hidden" variant="ghost" size="icon" onClick={() => setSidebarOpen(true)} aria-label="เปิดเมนู">
+          <Button className="min-w-11 shrink-0 xl:hidden" variant="ghost" size="icon" onClick={() => setSidebarOpen(true)} aria-label="เปิดเมนู">
             <Menu className="h-5 w-5" />
           </Button>
 
@@ -335,7 +342,7 @@ export default function CompanyShell(): JSX.Element {
           </div>
         ) : null}
 
-        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 lg:p-5 2xl:p-6">
+        <main id="company-main-content" tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 lg:p-5 2xl:p-6 focus:outline-none">
           <div className="mx-auto w-full max-w-[1680px]">
             <CompanyErrorBoundary resetKey={`${branchId ?? "company"}:${stationKey ?? "all"}:${location.pathname}`}><Outlet /></CompanyErrorBoundary>
           </div>

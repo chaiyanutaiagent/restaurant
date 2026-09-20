@@ -169,7 +169,11 @@ export default function CompanyAppsPage(): JSX.Element {
                 </div>
               </article>
             );
-            return canEnter ? <Link key={module.module_key} to={definition.route}>{card}</Link> : <div key={module.module_key} aria-disabled="true">{card}</div>;
+            return canEnter ? (
+              <Link key={module.module_key} to={definition.route} className="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
+                {card}
+              </Link>
+            ) : <div key={module.module_key} aria-disabled="true">{card}</div>;
           })}
         </section>
       )}

@@ -129,19 +129,19 @@ export default function CompanyHomePage(): JSX.Element {
       />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="สรุปงานและสถานะ">
-        <Link to="/company/actions" className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+        <Link to="/company/actions" className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
           <div className="flex items-center justify-between"><span className="rounded-xl bg-red-50 p-2.5 text-red-600"><ShieldAlert className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-slate-300" /></div>
           <p className="mt-4 text-sm font-semibold text-slate-500">งานเร่งด่วน</p>
           <p className="mt-1 text-3xl font-black text-slate-950">{(data.task_summary.blocker ?? 0) + (data.task_summary.error ?? 0)}</p>
           <p className="mt-1 text-xs text-slate-500">Blocker และข้อผิดพลาดที่ต้องตรวจ</p>
         </Link>
-        <Link to="/company/actions" className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+        <Link to="/company/actions" className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
           <div className="flex items-center justify-between"><span className="rounded-xl bg-amber-50 p-2.5 text-amber-700"><Bell className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-slate-300" /></div>
           <p className="mt-4 text-sm font-semibold text-slate-500">งานทั้งหมด</p>
           <p className="mt-1 text-3xl font-black text-slate-950">{taskTotal}</p>
           <p className="mt-1 text-xs text-slate-500">ยังไม่อ่าน {data.task_summary.unread ?? 0} รายการ</p>
         </Link>
-        <Link to="/company/apps" className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+        <Link to="/company/apps" className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
           <div className="flex items-center justify-between"><span className="rounded-xl bg-blue-50 p-2.5 text-blue-700"><AppWindow className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-slate-300" /></div>
           <p className="mt-4 text-sm font-semibold text-slate-500">ระบบของบริษัท</p>
           <p className="mt-1 text-3xl font-black text-slate-950">{data.sections.filter((section) => section.readiness !== "planned").length}</p>
@@ -176,7 +176,11 @@ export default function CompanyHomePage(): JSX.Element {
                   <div className="mt-3 flex items-center justify-between text-xs"><span className={`rounded-full border px-2 py-1 font-bold ${operationalStateClass[section.status]}`}>{operationalStateLabel[section.status]}</span>{!disabled ? <ArrowRight className="h-4 w-4 text-blue-600" /> : null}</div>
                 </article>
               );
-              return disabled ? <div key={section.module_key}>{card}</div> : <Link key={section.module_key} to={route}>{card}</Link>;
+              return disabled ? <div key={section.module_key}>{card}</div> : (
+                <Link key={section.module_key} to={route} className="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
+                  {card}
+                </Link>
+              );
             })}
           </div>
         </section>

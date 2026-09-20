@@ -188,6 +188,8 @@ test("desktop dashboard renders company context, readiness, stale and sync state
   await expect(page.getByText("ข้อมูลเก่า", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("รอซิงก์", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("ต้องตรวจสอบ", { exact: true }).first()).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(page.getByText("ข้ามไปเนื้อหาหลัก", { exact: true })).toBeFocused();
   await expectNoHorizontalOverflow(page);
 });
 
@@ -201,6 +203,11 @@ test("tablet launcher blocks dark launch, labels read-only and excludes planned 
   await expect(page.getByText("ดูข้อมูลเท่านั้น", { exact: true })).toBeVisible();
   await expect(page.getByText("Hotel PMS", { exact: true })).toHaveCount(0);
   await expect(page.locator('a[href="/takeaway"]')).toHaveCount(0);
+  const undersizedButtons = await page.locator("button").evaluateAll((buttons) => buttons.filter((button) => {
+    const rect = button.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && (rect.width < 44 || rect.height < 44);
+  }).length);
+  expect(undersizedButtons).toBe(0);
   await expectNoHorizontalOverflow(page);
 });
 

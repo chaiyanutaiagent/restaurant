@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChefHat, Clock, Flame, Loader2, RefreshCw, Timer } from "lucide-react";
+import { AlertTriangle, ChefHat, Clock, Flame, Loader2, RefreshCw, Timer } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { authApi } from "@/lib/api";
@@ -16,6 +16,34 @@ type Ticket = {
   queue_number: number | null; table_name: string | null;
   source_type?: "dine_in" | "quick_service";
   status: string; created_at: string; done_at: string | null;
+  row_version: number;
+};
+
+type CancellationEvent = {
+  id: string;
+  cancellation_id: string;
+  ticket_id: string;
+  product_name: string | null;
+  qty: number | null;
+  queue_number: number | null;
+  table_name: string | null;
+  station: string | null;
+  reason_code: string;
+  reason_note: string | null;
+  ticket_status_before: string;
+  status: "pending_ack" | "acknowledged";
+  row_version: number;
+  created_at: string;
+};
+
+const CANCELLATION_REASON_LABEL: Record<string, string> = {
+  customer_changed_mind: "ลูกค้าเปลี่ยนใจ",
+  wrong_item: "สั่งผิดรายการ",
+  duplicate_order: "ออเดอร์ซ้ำ",
+  out_of_stock: "วัตถุดิบหมด",
+  quality_failed: "คุณภาพไม่ผ่าน",
+  kitchen_error: "ครัวทำผิด",
+  other: "อื่น ๆ",
 };
 
 const STATUSES = ["pending", "cooking", "done"] as const;
@@ -70,17 +98,49 @@ export default function KitchenDisplayPage(): JSX.Element {
     enabled: Boolean(branchId),
   });
 
+  const cancellationsQuery = useQuery({
+    queryKey: ["kitchen-cancellation-events", branchId, station, isDeviceWorkspace],
+    queryFn: async () => {
+      if (isDeviceWorkspace) {
+        return (await deviceApi.get("/device-workspaces/kitchen/cancellations")).data.data as CancellationEvent[];
+      }
+      const params = station ? `?station=${encodeURIComponent(station)}` : "";
+      return (await authApi.get(`/restaurant/kitchen-cancellation-events${params}`)).data.data as CancellationEvent[];
+    },
+    refetchInterval: 5_000,
+    enabled: Boolean(branchId) && (!isDeviceWorkspace || bootstrapQuery.data?.device.business_type === "restaurant"),
+    retry: false,
+  });
+
   const updateMutation = useMutation({
     mutationFn: async ({ ticket, status }: { ticket: Ticket; status: string }) => {
       if (isDeviceWorkspace) {
-        await deviceApi.patch(`/device-workspaces/kitchen/tickets/${ticket.id}`, { status });
+        await deviceApi.patch(`/device-workspaces/kitchen/tickets/${ticket.id}`, { status, expected_version: ticket.row_version });
       } else {
-        await authApi.patch(`/restaurant/kitchen/${ticket.id}`, { status });
+        await authApi.patch(`/restaurant/kitchen/${ticket.id}`, { status, expected_version: ticket.row_version });
       }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["kitchen-tickets"] });
       void queryClient.invalidateQueries({ queryKey: ["pickup-queue"] });
+    },
+  });
+
+  const acknowledgeMutation = useMutation({
+    mutationFn: async (event: CancellationEvent) => {
+      const payload = {
+        expected_version: event.row_version,
+        idempotency_key: `kds-cancel-ack-${event.id}-${crypto.randomUUID()}`,
+      };
+      if (isDeviceWorkspace) {
+        await deviceApi.post(`/device-workspaces/kitchen/cancellations/${event.id}/acknowledge`, payload);
+      } else {
+        await authApi.post(`/restaurant/kitchen-cancellation-events/${event.id}/acknowledge`, payload);
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["kitchen-cancellation-events"] });
+      void queryClient.invalidateQueries({ queryKey: ["kitchen-tickets"] });
     },
   });
 
@@ -112,7 +172,8 @@ export default function KitchenDisplayPage(): JSX.Element {
     dine_in: allTickets.filter((ticket) => (ticket.source_type ?? (ticket.table_name ? "dine_in" : "quick_service")) === "dine_in").length,
     quick_service: allTickets.filter((ticket) => (ticket.source_type ?? (ticket.table_name ? "dine_in" : "quick_service")) === "quick_service").length,
   };
-  const displayError = updateMutation.error ?? ticketsQuery.error ?? bootstrapQuery.error;
+  const cancellationEvents = cancellationsQuery.data ?? [];
+  const displayError = acknowledgeMutation.error ?? updateMutation.error ?? cancellationsQuery.error ?? ticketsQuery.error ?? bootstrapQuery.error;
   const errorMessage = displayError instanceof Error ? displayError.message : null;
 
   // unique stations from tickets
@@ -205,6 +266,44 @@ export default function KitchenDisplayPage(): JSX.Element {
           <div className="mt-3 rounded-xl border border-rose-500 bg-rose-950/60 px-4 py-3 text-sm font-semibold text-rose-100">
             {errorMessage}
           </div>
+        ) : null}
+        {cancellationsQuery.isLoading ? (
+          <div role="status" className="mt-3 rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-slate-300">
+            กำลังตรวจเหตุการณ์ยกเลิกจากหน้าร้าน…
+          </div>
+        ) : null}
+        {cancellationEvents.length > 0 ? (
+          <section aria-label="รายการยกเลิกที่รอครัวรับทราบ" className="mt-3 max-h-56 overflow-y-auto rounded-2xl border-2 border-rose-400 bg-rose-950/60 p-3">
+            <div className="mb-2 flex items-center gap-2 text-rose-100">
+              <AlertTriangle className="h-5 w-5" />
+              <h2 className="font-black">ยกเลิกจากหน้าร้าน — รอรับทราบ {cancellationEvents.length}</h2>
+            </div>
+            <div className="grid gap-2 lg:grid-cols-2">
+              {cancellationEvents.map((event) => (
+                <article key={event.id} className="flex flex-wrap items-center gap-3 rounded-xl bg-white p-3 text-slate-950">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap gap-2 text-xs font-bold">
+                      {event.queue_number ? <span className="rounded-full bg-slate-900 px-2 py-1 text-white">คิว {String(event.queue_number).padStart(3, "0")}</span> : null}
+                      {event.table_name ? <span className="rounded-full bg-blue-100 px-2 py-1 text-blue-800">โต๊ะ {event.table_name}</span> : null}
+                      {event.station ? <span className="rounded-full bg-slate-100 px-2 py-1">{event.station}</span> : null}
+                    </div>
+                    <p className="mt-1 text-base font-black">ยกเลิก {event.product_name} ×{event.qty}</p>
+                    <p className="text-sm font-semibold text-rose-700">
+                      {CANCELLATION_REASON_LABEL[event.reason_code] ?? event.reason_code}{event.reason_note ? ` · ${event.reason_note}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={acknowledgeMutation.isPending || !navigator.onLine}
+                    onClick={() => acknowledgeMutation.mutate(event)}
+                    className="min-h-14 rounded-xl bg-rose-600 px-5 text-base font-black text-white hover:bg-rose-500 disabled:opacity-50"
+                  >
+                    {acknowledgeMutation.isPending ? "กำลังยืนยัน…" : "รับทราบยกเลิก"}
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
         ) : null}
       </div>
 

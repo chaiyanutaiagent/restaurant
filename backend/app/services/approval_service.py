@@ -33,7 +33,7 @@ from app.schemas.pos import (
     VoidRequest,
 )
 from app.schemas.stock import AdjustmentRequest
-from app.schemas.restaurant import SessionCheckoutRequest
+from app.schemas.restaurant import RestaurantCancellationRequest, SessionCheckoutRequest
 from app.services.auth_service import AuthService
 from app.utils.security import (
     create_approval_token,
@@ -49,6 +49,8 @@ DIRECT_PERMISSION_BY_ACTION: dict[str, str] = {
     "pos.sale.void": "pos.sale.void",
     "pos.refund.create": "pos.refund.create",
     "inventory.stock.adjust": "inventory.stock.adjust",
+    "fb.order.cancel_after_kitchen": "fb.order.cancel.approve",
+    "fb.order.cancel.reopen": "fb.order.cancel.reopen",
 }
 
 REQUEST_PERMISSION_BY_ACTION: dict[str, str] = {
@@ -57,6 +59,8 @@ REQUEST_PERMISSION_BY_ACTION: dict[str, str] = {
     "pos.sale.void": "pos.sale.void.request",
     "pos.refund.create": "pos.refund.request",
     "inventory.stock.adjust": "inventory.stock.adjust.request",
+    "fb.order.cancel_after_kitchen": "fb.order.cancel.request",
+    "fb.order.cancel.reopen": "fb.order.cancel.reopen.request",
 }
 
 
@@ -121,6 +125,23 @@ def normalize_approval_request_payload(
                 exclude_none=True,
                 exclude_unset=True,
             )
+        elif action == "fb.order.cancel_after_kitchen":
+            normalized = RestaurantCancellationRequest.model_validate(values).model_dump(
+                mode="json",
+                exclude={"approval_token"},
+                exclude_none=True,
+            )
+        elif action == "fb.order.cancel.reopen":
+            cancellation_id = values.get("cancellation_id")
+            idempotency_key = str(values.get("idempotency_key") or "").strip()
+            reason = str(values.get("reason") or "").strip()
+            if cancellation_id is None or not (8 <= len(idempotency_key) <= 100) or not (3 <= len(reason) <= 500):
+                raise ValueError("Invalid cancellation reopen approval payload")
+            normalized = {
+                "cancellation_id": str(uuid.UUID(str(cancellation_id))),
+                "idempotency_key": idempotency_key,
+                "reason": reason,
+            }
         else:
             raise ValueError("Unsupported approval action")
         if action in {"pos.sale.void", "pos.refund.create"}:

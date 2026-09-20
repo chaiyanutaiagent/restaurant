@@ -10,7 +10,7 @@ from app.models.role import Permission
 from app.schemas.role import RolePresetRead, RoleScope
 
 
-ROLE_PRESET_POLICY_VERSION = "2026-09-20.2"
+ROLE_PRESET_POLICY_VERSION = "2026-09-20.3"
 
 TAKEAWAY_OWNER_PERMISSIONS = (
     "takeaway.catalog.view",
@@ -118,6 +118,11 @@ COMPANY_OWNER_PERMISSION_CODES = (
     "hr.attendance.edit",
     "fb.menu.view",
     "fb.order.create",
+    "fb.order.cancel",
+    "fb.order.cancel.request",
+    "fb.order.cancel.approve",
+    "fb.order.cancel.reopen.request",
+    "fb.order.cancel.reopen",
     "fb.kitchen.manage",
     "fb.kitchen.ticket.manage",
     "fb.table.manage",
@@ -246,6 +251,11 @@ ROLE_PRESET_POLICIES = (
             "inventory.transfer.create",
             "fb.menu.view",
             "fb.order.create",
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.approve",
+            "fb.order.cancel.reopen.request",
+            "fb.order.cancel.reopen",
             "fb.kitchen.ticket.manage",
             "fb.table.manage",
             "fb.recipe.manage",
@@ -426,6 +436,11 @@ ROLE_PRESET_POLICIES = (
             "inventory.transfer.create",
             "fb.menu.view",
             "fb.order.create",
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.approve",
+            "fb.order.cancel.reopen.request",
+            "fb.order.cancel.reopen",
             "fb.table.manage",
             "fb.report.view",
             "brand.store.stock.view",
@@ -444,6 +459,9 @@ ROLE_PRESET_POLICIES = (
         permission_codes=(
             "fb.menu.view",
             "fb.order.create",
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.reopen.request",
             "fb.table.manage",
             "pos.sale.view",
             "pos.draft.view",
@@ -464,6 +482,11 @@ ROLE_PRESET_POLICIES = (
             "fb.menu.view",
             "fb.kitchen.manage",
             "fb.kitchen.ticket.manage",
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.approve",
+            "fb.order.cancel.reopen.request",
+            "fb.order.cancel.reopen",
             "fb.recipe.manage",
             "fb.report.view",
             "fb.settings.manage",

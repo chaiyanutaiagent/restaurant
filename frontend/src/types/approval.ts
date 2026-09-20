@@ -3,7 +3,9 @@ export type ApprovalAction =
   | "pos.price.override"
   | "pos.sale.void"
   | "pos.refund.create"
-  | "inventory.stock.adjust";
+  | "inventory.stock.adjust"
+  | "fb.order.cancel_after_kitchen"
+  | "fb.order.cancel.reopen";
 
 export interface ManagerPinStatus {
   is_set: boolean;

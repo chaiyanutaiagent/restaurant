@@ -428,6 +428,36 @@ PERMISSIONS: list[dict[str, str]] = [
         "description": "Create dining orders and manage sessions.",
     },
     {
+        "code": "fb.order.cancel",
+        "name": "Cancel Pending F&B Order",
+        "module": "fb",
+        "description": "Cancel restaurant orders or items before kitchen production starts.",
+    },
+    {
+        "code": "fb.order.cancel.request",
+        "name": "Request F&B Cancellation Approval",
+        "module": "fb",
+        "description": "Request manager approval for cancellation after kitchen production starts.",
+    },
+    {
+        "code": "fb.order.cancel.approve",
+        "name": "Approve F&B Cancellation",
+        "module": "fb",
+        "description": "Approve another staff member's restaurant cancellation request.",
+    },
+    {
+        "code": "fb.order.cancel.reopen.request",
+        "name": "Request F&B Cancellation Reopen",
+        "module": "fb",
+        "description": "Request manager approval to recreate a cancelled restaurant order.",
+    },
+    {
+        "code": "fb.order.cancel.reopen",
+        "name": "Approve F&B Cancellation Reopen",
+        "module": "fb",
+        "description": "Approve another staff member's request to recreate a cancelled restaurant order.",
+    },
+    {
         "code": "fb.kitchen.manage",
         "name": "Manage Kitchen Display",
         "module": "fb",

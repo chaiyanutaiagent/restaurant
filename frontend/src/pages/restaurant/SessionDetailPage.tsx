@@ -1,20 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AxiosError } from "axios";
-import { AlertTriangle, ChefHat, Clock, Phone, Plus, ReceiptText, Trash2, User, UtensilsCrossed } from "lucide-react";
+import { AlertTriangle, ChefHat, Clock, Phone, Plus, ReceiptText, ShieldCheck, Trash2, User, UtensilsCrossed } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import PageHeader from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
 import { useToast } from "@/components/ui/use-toast";
 import { authApi } from "@/lib/api";
 import { formatThaiCurrency } from "@/lib/cartUtils";
 
 type SessionItem = {
-  id: string; product_name: string; qty: number;
-  unit_price: number; special_request: string | null; status: string;
+  id: string; product_id: string; product_name: string; qty: number;
+  unit_price: number; special_request: string | null; status: string; row_version: number;
 };
-type SessionOrder = { id: string; order_number?: string; status: string; source: string; items: SessionItem[] };
+type SessionOrder = { id: string; order_number?: string; status: string; source: string; row_version: number; items: SessionItem[] };
 type SessionData = {
   id: string; status: string; queue_number: number | null; table_name: string | null;
   customer_name: string | null; customer_phone: string | null;
@@ -23,10 +24,44 @@ type SessionData = {
 };
 
 type MenuProduct = { id: string; name: string; selling_price: number; category_name: string | null };
-type ApiErrorBody = { detail?: string; error?: string };
+type ApiErrorDetail = { code?: string; message?: string; blockers?: string[]; current_order_version?: number; current_item_version?: number };
+type ApiErrorBody = { detail?: string | ApiErrorDetail; error?: string };
 type CancelTarget =
-  | { type: "order"; id: string; label: string }
-  | { type: "item"; id: string; label: string };
+  | { type: "order"; id: string; label: string; orderVersion: number; idempotencyKey: string }
+  | { type: "item"; id: string; label: string; orderVersion: number; itemVersion: number; idempotencyKey: string };
+
+type CancellationReasonCode = "customer_changed_mind" | "wrong_item" | "duplicate_order" | "out_of_stock" | "quality_failed" | "kitchen_error" | "other";
+type CancellationPreview = {
+  stage_before: "pending" | "cooking" | "done";
+  approval_required: boolean;
+  approval_action: "fb.order.cancel_after_kitchen" | null;
+  waste_disposition: "none" | "full";
+  waste_ready: boolean;
+  blockers: string[];
+  bill_impact: { amount_removed: string };
+  affected_items: { id: string; product_name: string; qty: number; status: string; station: string | null }[];
+  waste_lines: { product_id: string; product_name: string; quantity: string; unit: string | null }[];
+};
+type CancellationRecord = {
+  id: string;
+  target_type: "item" | "order";
+  stage_before: string;
+  reason_code: CancellationReasonCode;
+  reason_note: string | null;
+  waste_disposition: "none" | "full";
+  bill_impact: { amount_removed: string };
+  created_at: string;
+};
+
+const CANCELLATION_REASONS: { code: CancellationReasonCode; label: string }[] = [
+  { code: "customer_changed_mind", label: "ลูกค้าเปลี่ยนใจ" },
+  { code: "wrong_item", label: "สั่งผิดรายการ" },
+  { code: "duplicate_order", label: "ออเดอร์ซ้ำ" },
+  { code: "out_of_stock", label: "วัตถุดิบหมด" },
+  { code: "quality_failed", label: "คุณภาพไม่ผ่าน" },
+  { code: "kitchen_error", label: "ครัวทำผิด" },
+  { code: "other", label: "อื่น ๆ" },
+];
 
 const STATUS_BADGE: Record<string, string> = {
   pending: "bg-amber-100 text-amber-700",
@@ -52,7 +87,14 @@ const STATUS_GROUPS = ["pending", "cooking", "done", "served"] as const;
 
 function getErrorMessage(error: unknown): string {
   const axiosError = error as AxiosError<ApiErrorBody>;
-  return axiosError.response?.data?.detail ?? axiosError.response?.data?.error ?? (error instanceof Error ? error.message : "ไม่สามารถทำรายการได้");
+  const detail = axiosError.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (detail?.message) return detail.blockers?.length ? `${detail.message}: ${detail.blockers.join(", ")}` : detail.message;
+  return axiosError.response?.data?.error ?? (error instanceof Error ? error.message : "ไม่สามารถทำรายการได้");
+}
+
+function requestKey(prefix: string): string {
+  return `${prefix}-${crypto.randomUUID()}`;
 }
 
 export default function SessionDetailPage(): JSX.Element {
@@ -64,7 +106,26 @@ export default function SessionDetailPage(): JSX.Element {
   const [orderCart, setOrderCart] = useState<{ product: MenuProduct; qty: number; special_request: string }[]>([]);
   const [menuSearch, setMenuSearch] = useState("");
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
-  const [cancelReason, setCancelReason] = useState("");
+  const [cancelReasonCode, setCancelReasonCode] = useState<CancellationReasonCode>("customer_changed_mind");
+  const [cancelReasonNote, setCancelReasonNote] = useState("");
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [reopenTarget, setReopenTarget] = useState<CancellationRecord | null>(null);
+  const [reopenReason, setReopenReason] = useState("ลูกค้าขอเปิดรายการใหม่");
+  const [reopenKey, setReopenKey] = useState("");
+
+  function cancellationPayload(approvalToken?: string): Record<string, unknown> {
+    if (!cancelTarget) throw new Error("ไม่พบรายการที่ต้องการยกเลิก");
+    return {
+      target_type: cancelTarget.type,
+      target_id: cancelTarget.id,
+      expected_order_version: cancelTarget.orderVersion,
+      expected_item_version: cancelTarget.type === "item" ? cancelTarget.itemVersion : undefined,
+      reason_code: cancelReasonCode,
+      reason_note: cancelReasonNote.trim() || undefined,
+      idempotency_key: cancelTarget.idempotencyKey,
+      approval_token: approvalToken,
+    };
+  }
 
   const sessionQuery = useQuery({
     queryKey: ["session-detail", sessionId],
@@ -79,6 +140,24 @@ export default function SessionDetailPage(): JSX.Element {
     queryFn: async () =>
       (await authApi.get("/products?product_type=menu_item&is_active=true&limit=200")).data.data as MenuProduct[],
     enabled: addOrderOpen,
+  });
+
+  const cancellationPreviewQuery = useQuery({
+    queryKey: ["restaurant-cancellation-preview", cancelTarget?.id, cancelTarget?.orderVersion, cancelTarget?.type === "item" ? cancelTarget.itemVersion : null],
+    queryFn: async () => (
+      await authApi.post("/restaurant/cancellations/preview", cancellationPayload())
+    ).data.data as CancellationPreview,
+    enabled: Boolean(cancelTarget) && navigator.onLine,
+    retry: false,
+  });
+
+  const cancellationHistoryQuery = useQuery({
+    queryKey: ["restaurant-cancellations", sessionId],
+    queryFn: async () => (
+      await authApi.get(`/restaurant/cancellations?session_id=${sessionId}&limit=50`)
+    ).data.data as CancellationRecord[],
+    enabled: Boolean(sessionId),
+    retry: false,
   });
 
   const addOrderMutation = useMutation({
@@ -102,37 +181,52 @@ export default function SessionDetailPage(): JSX.Element {
   });
 
   const cancelMutation = useMutation({
-    mutationFn: async () => {
-      if (!cancelTarget) {
-        throw new Error("ไม่พบรายการที่ต้องการยกเลิก");
-      }
-      const reason = cancelReason.trim();
-      if (!reason) {
-        throw new Error("กรุณาระบุเหตุผลการยกเลิก");
-      }
-      const url = cancelTarget.type === "order"
-        ? `/restaurant/orders/${cancelTarget.id}/cancel`
-        : `/restaurant/order-items/${cancelTarget.id}/cancel`;
-      await authApi.post(url, { reason });
+    mutationFn: async (approvalToken?: string) => {
+      await authApi.post("/restaurant/cancellations", cancellationPayload(approvalToken));
     },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["session-detail"] }),
+        queryClient.invalidateQueries({ queryKey: ["restaurant-cancellations"] }),
         queryClient.invalidateQueries({ queryKey: ["kitchen-tickets"] }),
         queryClient.invalidateQueries({ queryKey: ["pickup-queue"] }),
       ]);
       toast({ title: "ยกเลิกแล้ว" });
       setCancelTarget(null);
-      setCancelReason("");
+      setCancelReasonCode("customer_changed_mind");
+      setCancelReasonNote("");
+      setApprovalOpen(false);
     },
     onError: (error) => {
       toast({ title: "ยกเลิกไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
+  const reopenMutation = useMutation({
+    mutationFn: async (approvalToken: string) => {
+      if (!reopenTarget) throw new Error("ไม่พบรายการยกเลิก");
+      await authApi.post(`/restaurant/cancellations/${reopenTarget.id}/reopen`, {
+        idempotency_key: reopenKey,
+        reason: reopenReason.trim(),
+        approval_token: approvalToken,
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["session-detail"] }),
+        queryClient.invalidateQueries({ queryKey: ["restaurant-cancellations"] }),
+        queryClient.invalidateQueries({ queryKey: ["kitchen-tickets"] }),
+      ]);
+      toast({ title: "เปิดเป็นออเดอร์ใหม่แล้ว", description: "ระบบคำนวณราคาใหม่และส่ง ticket ใหม่ไปครัว" });
+      setReopenTarget(null);
+      setReopenKey("");
+    },
+    onError: (error) => toast({ title: "เปิดรายการใหม่ไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" }),
+  });
+
   const itemStatusMutation = useMutation({
-    mutationFn: async ({ itemId, status }: { itemId: string; status: string }) => {
-      await authApi.patch(`/restaurant/order-items/${itemId}/status`, { status });
+    mutationFn: async ({ itemId, status, expectedVersion }: { itemId: string; status: string; expectedVersion: number }) => {
+      await authApi.patch(`/restaurant/order-items/${itemId}/status`, { status, expected_version: expectedVersion });
     },
     onSuccess: async () => {
       await Promise.all([
@@ -159,7 +253,13 @@ export default function SessionDetailPage(): JSX.Element {
     order.status !== "cancelled"
       ? order.items
           .filter((item) => item.status !== "cancelled")
-          .map((item) => ({ ...item, order_id: order.id, order_number: order.order_number, source: order.source }))
+          .map((item) => ({
+            ...item,
+            order_id: order.id,
+            order_number: order.order_number,
+            order_version: order.row_version,
+            source: order.source,
+          }))
       : []
   ) ?? [];
   const groupedItems = STATUS_GROUPS.reduce<Record<string, typeof itemsWithOrder>>((acc, status) => {
@@ -282,7 +382,7 @@ export default function SessionDetailPage(): JSX.Element {
                         {session?.status !== "closed" && item.status === "done" ? (
                           <button
                             type="button"
-                            onClick={() => itemStatusMutation.mutate({ itemId: item.id, status: "served" })}
+                            onClick={() => itemStatusMutation.mutate({ itemId: item.id, status: "served", expectedVersion: item.row_version })}
                             className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
                           >
                             เสิร์ฟแล้ว
@@ -291,7 +391,14 @@ export default function SessionDetailPage(): JSX.Element {
                         {session?.status !== "closed" && item.status !== "served" ? (
                           <button
                             type="button"
-                            onClick={() => setCancelTarget({ type: "item", id: item.id, label: item.product_name })}
+                            onClick={() => setCancelTarget({
+                              type: "item",
+                              id: item.id,
+                              label: item.product_name,
+                              orderVersion: item.order_version,
+                              itemVersion: item.row_version,
+                              idempotencyKey: requestKey("cancel-item"),
+                            })}
                             className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50"
                           >
                             ยกเลิก
@@ -324,7 +431,13 @@ export default function SessionDetailPage(): JSX.Element {
               {session.status !== "closed" && order.status !== "cancelled" && order.items.some((item) => item.status !== "served" && item.status !== "cancelled") ? (
                 <button
                   type="button"
-                  onClick={() => setCancelTarget({ type: "order", id: order.id, label: order.order_number ?? "ออเดอร์นี้" })}
+                  onClick={() => setCancelTarget({
+                    type: "order",
+                    id: order.id,
+                    label: order.order_number ?? "ออเดอร์นี้",
+                    orderVersion: order.row_version,
+                    idempotencyKey: requestKey("cancel-order"),
+                  })}
                   className="rounded-lg border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
                 >
                   ยกเลิกออเดอร์
@@ -354,7 +467,7 @@ export default function SessionDetailPage(): JSX.Element {
                       {session.status !== "closed" && item.status === "done" && order.status !== "cancelled" ? (
                         <button
                           type="button"
-                          onClick={() => itemStatusMutation.mutate({ itemId: item.id, status: "served" })}
+                          onClick={() => itemStatusMutation.mutate({ itemId: item.id, status: "served", expectedVersion: item.row_version })}
                           className="mr-2 rounded-lg border border-emerald-200 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
                         >
                           เสิร์ฟแล้ว
@@ -363,7 +476,14 @@ export default function SessionDetailPage(): JSX.Element {
                       {session.status !== "closed" && item.status !== "served" && item.status !== "cancelled" && order.status !== "cancelled" ? (
                         <button
                           type="button"
-                          onClick={() => setCancelTarget({ type: "item", id: item.id, label: item.product_name })}
+                          onClick={() => setCancelTarget({
+                            type: "item",
+                            id: item.id,
+                            label: item.product_name,
+                            orderVersion: order.row_version,
+                            itemVersion: item.row_version,
+                            idempotencyKey: requestKey("cancel-item"),
+                          })}
                           className="rounded-lg border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
                         >
                           ยกเลิก
@@ -383,6 +503,47 @@ export default function SessionDetailPage(): JSX.Element {
             ยังไม่มีรายการอาหาร
           </div>
         )}
+
+        {(cancellationHistoryQuery.data?.length ?? 0) > 0 ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-4" aria-labelledby="cancellation-history-title">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 id="cancellation-history-title" className="font-bold text-slate-950">ประวัติการยกเลิก</h2>
+                <p className="text-sm text-slate-500">หลักฐานเดิมและ Waste จะไม่ถูกลบเมื่อเปิดเป็นออเดอร์ใหม่</p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-bold text-slate-600">{cancellationHistoryQuery.data?.length}</span>
+            </div>
+            <div className="mt-3 grid gap-2 lg:grid-cols-2">
+              {cancellationHistoryQuery.data?.map((record) => (
+                <article key={record.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold text-slate-900">
+                      {CANCELLATION_REASONS.find((reason) => reason.code === record.reason_code)?.label ?? record.reason_code}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {STATUS_LABEL[record.stage_before] ?? record.stage_before} · ลดบิล {formatThaiCurrency(Number(record.bill_impact.amount_removed))}
+                      {record.waste_disposition === "full" ? " · บันทึก Waste แล้ว" : " · ไม่เกิด Waste"}
+                    </p>
+                  </div>
+                  {session?.status !== "closed" ? (
+                    <button
+                      type="button"
+                      disabled={!navigator.onLine}
+                      onClick={() => {
+                        setReopenTarget(record);
+                        setReopenReason("ลูกค้าขอเปิดรายการใหม่");
+                        setReopenKey(requestKey("reopen-cancellation"));
+                      }}
+                      className="min-h-12 rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-bold text-blue-800 hover:bg-blue-100 disabled:opacity-50"
+                    >
+                      เปิดเป็นออเดอร์ใหม่
+                    </button>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {/* Total */}
         {allItems.length > 0 && (
@@ -473,33 +634,159 @@ export default function SessionDetailPage(): JSX.Element {
         </div>
       )}
 
-      <Dialog open={Boolean(cancelTarget)} onOpenChange={(open) => { if (!open) { setCancelTarget(null); setCancelReason(""); } }}>
-        <DialogContent className="max-w-md">
+      <Dialog open={Boolean(cancelTarget)} onOpenChange={(open) => {
+        if (!open && !cancelMutation.isPending) {
+          setCancelTarget(null);
+          setCancelReasonCode("customer_changed_mind");
+          setCancelReasonNote("");
+        }
+      }}>
+        <DialogContent className="max-h-[92dvh] max-w-2xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>ยกเลิก{cancelTarget?.type === "order" ? "ออเดอร์" : "รายการ"}</DialogTitle>
+            <DialogTitle className="text-xl">ยกเลิก{cancelTarget?.type === "order" ? "ออเดอร์" : "รายการ"}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <div className="space-y-4 py-2">
+            <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 font-bold text-red-800">
               {cancelTarget?.label}
             </div>
+
+            {!navigator.onLine ? (
+              <div role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+                ออฟไลน์ — การยกเลิกต้องยืนยันกับ Server เพื่อป้องกันบิล สต๊อก และ KDS ไม่ตรงกัน
+              </div>
+            ) : cancellationPreviewQuery.isLoading ? (
+              <div role="status" className="rounded-2xl border border-slate-200 p-5 text-center text-slate-500">
+                กำลังตรวจสถานะครัวและผลกระทบ…
+              </div>
+            ) : cancellationPreviewQuery.isError ? (
+              <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                <p className="font-bold">ตรวจสอบรายการไม่ได้</p>
+                <p className="mt-1">{getErrorMessage(cancellationPreviewQuery.error)}</p>
+                <Button className="mt-3 h-12" variant="outline" onClick={() => void cancellationPreviewQuery.refetch()}>
+                  ลองใหม่
+                </Button>
+              </div>
+            ) : cancellationPreviewQuery.data ? (
+              <div className="grid gap-3 sm:grid-cols-3" aria-live="polite">
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <p className="text-xs font-semibold text-slate-500">สถานะครัว</p>
+                  <p className="mt-1 font-bold text-slate-950">{STATUS_LABEL[cancellationPreviewQuery.data.stage_before]}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <p className="text-xs font-semibold text-slate-500">ผลกระทบบิล</p>
+                  <p className="mt-1 font-bold text-slate-950">-{formatThaiCurrency(Number(cancellationPreviewQuery.data.bill_impact.amount_removed))}</p>
+                </div>
+                <div className={`rounded-2xl border p-4 ${cancellationPreviewQuery.data.waste_disposition === "full" ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+                  <p className="text-xs font-semibold text-slate-500">วัตถุดิบ / Waste</p>
+                  <p className="mt-1 font-bold text-slate-950">{cancellationPreviewQuery.data.waste_disposition === "full" ? "ตัด Waste เต็มตามสูตร" : "ไม่ตัด Waste"}</p>
+                </div>
+              </div>
+            ) : null}
+
+            {cancellationPreviewQuery.data?.approval_required ? (
+              <div className="flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-blue-900">
+                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
+                <div>
+                  <p className="font-bold">ต้องให้ Manager คนอื่นอนุมัติ</p>
+                  <p className="text-sm">รายการเริ่มทำแล้ว ระบบจะบันทึกผู้ขอ ผู้อนุมัติ Waste และประวัติ KDS</p>
+                </div>
+              </div>
+            ) : null}
+
+            {(cancellationPreviewQuery.data?.blockers.length ?? 0) > 0 ? (
+              <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                <p className="font-bold">ยังยกเลิกไม่ได้จนกว่าจะแก้ข้อมูล Waste/Stock</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {cancellationPreviewQuery.data?.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
+                </ul>
+              </div>
+            ) : null}
+
+            <fieldset>
+              <legend className="text-sm font-bold text-slate-800">เลือกเหตุผล</legend>
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {CANCELLATION_REASONS.map((reason) => (
+                  <button
+                    key={reason.code}
+                    type="button"
+                    onClick={() => setCancelReasonCode(reason.code)}
+                    aria-pressed={cancelReasonCode === reason.code}
+                    className={`min-h-14 rounded-xl border px-3 py-2 text-sm font-bold ${cancelReasonCode === reason.code ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+                  >
+                    {reason.label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
             <div>
-              <label className="text-sm font-medium text-slate-700">เหตุผลการยกเลิก</label>
+              <label htmlFor="cancellation-reason-note" className="text-sm font-bold text-slate-800">
+                หมายเหตุ {cancelReasonCode === "other" ? "(จำเป็น)" : "(ถ้ามี)"}
+              </label>
               <textarea
-                className="mt-1 min-h-[96px] w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                placeholder="เช่น ลูกค้าเปลี่ยนใจ, สั่งผิด, ของหมด"
-                value={cancelReason}
-                onChange={(event) => setCancelReason(event.target.value)}
+                id="cancellation-reason-note"
+                className="mt-1 min-h-[88px] w-full rounded-xl border border-slate-300 px-3 py-3 text-base"
+                placeholder="รายละเอียดเพิ่มเติม"
+                maxLength={500}
+                value={cancelReasonNote}
+                onChange={(event) => setCancelReasonNote(event.target.value)}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setCancelTarget(null); setCancelReason(""); }}>ยกเลิก</Button>
-            <Button variant="destructive" disabled={!cancelReason.trim() || cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>
-              {cancelMutation.isPending ? "กำลังยกเลิก..." : "ยืนยันยกเลิก"}
+            <Button className="h-14" variant="outline" onClick={() => setCancelTarget(null)} disabled={cancelMutation.isPending}>กลับ</Button>
+            <Button
+              className="h-14 min-w-44 text-base font-bold"
+              variant="destructive"
+              disabled={
+                !navigator.onLine
+                || cancellationPreviewQuery.isLoading
+                || cancellationPreviewQuery.isError
+                || !cancellationPreviewQuery.data?.waste_ready
+                || (cancelReasonCode === "other" && cancelReasonNote.trim().length === 0)
+                || cancelMutation.isPending
+              }
+              onClick={() => {
+                if (cancellationPreviewQuery.data?.approval_required) setApprovalOpen(true);
+                else cancelMutation.mutate(undefined);
+              }}
+            >
+              {cancelMutation.isPending ? "กำลังยืนยันกับ Server…" : cancellationPreviewQuery.data?.approval_required ? "ขออนุมัติ Manager" : "ยืนยันยกเลิก"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {cancelTarget && cancellationPreviewQuery.data?.approval_required ? (
+        <ManagerApprovalDialog
+          open={approvalOpen}
+          onOpenChange={setApprovalOpen}
+          action="fb.order.cancel_after_kitchen"
+          requestPayload={cancellationPayload()}
+          reason={cancelReasonNote.trim() || CANCELLATION_REASONS.find((reason) => reason.code === cancelReasonCode)?.label || "ยกเลิกรายการหลังครัวเริ่มทำ"}
+          description="Manager ต้องเป็นคนละคนกับผู้ขอ ระบบจะตัด Waste และส่งเหตุการณ์ยกเลิกไป KDS เมื่ออนุมัติสำเร็จ"
+          onApproved={async (approvalToken) => {
+            await cancelMutation.mutateAsync(approvalToken);
+          }}
+        />
+      ) : null}
+
+      {reopenTarget ? (
+        <ManagerApprovalDialog
+          open={Boolean(reopenTarget)}
+          onOpenChange={(open) => { if (!open && !reopenMutation.isPending) setReopenTarget(null); }}
+          action="fb.order.cancel.reopen"
+          requestPayload={{
+            cancellation_id: reopenTarget.id,
+            idempotency_key: reopenKey,
+            reason: reopenReason,
+          }}
+          reason={reopenReason}
+          description="Reopen จะสร้างออเดอร์และ KDS ticket ใหม่ด้วยราคาปัจจุบัน โดยไม่ลบประวัติหรือย้อน Waste เดิม"
+          onApproved={async (approvalToken) => {
+            await reopenMutation.mutateAsync(approvalToken);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

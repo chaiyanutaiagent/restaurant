@@ -33,6 +33,7 @@ from app.models.restaurant import (
     Brand, BrandBranch,
     BranchReplenishmentPolicy,
     DiningTable, DiningSession, DiningOrder, DiningOrderItem, KitchenTicket,
+    RestaurantCancellation,
     Recipe, RecipeIngredient, WapShiftClosure, WapShiftClosureItem,
     CentralOrder, CentralOrderItem, CentralOrderShiftClosure, CreditAccount, CreditLedger,
     CreditTopupRequest as CreditTopupRequestModel,
@@ -44,6 +45,8 @@ from app.schemas.restaurant import (
     TableCreate, TableUpdate, FBSetupRequest, FBSettingsUpdate,
     SessionOpen, PlaceOrderRequest,
     CancelRequest, TicketStatusUpdate, SessionCheckoutRequest,
+    RestaurantCancellationRequest, RestaurantCancellationReopenRequest,
+    KitchenCancellationAckRequest,
     WapPaidOrderRequest, WapOfflineSyncRequest, WapOfflineSyncItemRead,
     WapOfflineSyncRead, CentralOrderSubmitRequest, CentralOrderQtyUpdateRequest,
     CentralOrderReceiveRequest,
@@ -61,6 +64,7 @@ from app.schemas.product import ProductCreate, ProductListItem
 from app.schemas.stock import StockBalanceRead, StockMovementRead
 from app.schemas.pos import CloseShiftRequest, ShiftRead
 from app.services.dining_service import DiningService
+from app.services.restaurant_cancellation_service import RestaurantCancellationService
 from app.services.sale_service import SaleService
 from app.services.offline_sale_authorization import (
     OFFLINE_POLICY_VERSION,
@@ -1727,7 +1731,11 @@ async def get_session(
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session(session_id)
-    if not session or session.company_id != current.company_id:
+    if (
+        not session
+        or session.company_id != current.company_id
+        or session.branch_id != current.branch_id
+    ):
         raise HTTPException(status_code=404, detail="ไม่พบ session")
     return ok({"id": str(session.id), "status": session.status, "queue_number": session.queue_number})
 
@@ -1740,7 +1748,11 @@ async def get_session_detail(
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session(session_id)
-    if not session or session.company_id != current.company_id:
+    if (
+        not session
+        or session.company_id != current.company_id
+        or session.branch_id != current.branch_id
+    ):
         raise HTTPException(status_code=404, detail="ไม่พบ session")
     table = await db.get(DiningTable, session.table_id) if session.table_id else None
     active_orders = [order for order in session.orders if order.status != "cancelled"]
@@ -1764,17 +1776,20 @@ async def get_session_detail(
                 "id": str(o.id),
                 "order_number": o.order_number,
                 "status": o.status,
+                "row_version": o.row_version,
                 "source": o.source,
                 "note": o.note,
                 "created_at": o.created_at.isoformat() if o.created_at else None,
                 "items": [
                     {
                         "id": str(i.id),
+                        "product_id": str(i.product_id),
                         "product_name": i.product_name,
                         "qty": i.qty,
                         "unit_price": float(i.unit_price),
                         "special_request": i.special_request,
                         "status": i.status,
+                        "row_version": i.row_version,
                     }
                     for i in o.items
                 ],
@@ -1809,6 +1824,107 @@ async def place_order(
     return ok({"id": str(order.id), "order_number": order.order_number})
 
 
+@router.post("/cancellations/preview")
+async def preview_restaurant_cancellation(
+    payload: RestaurantCancellationRequest,
+    current: TokenData = Depends(
+        require_any_permission(
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.approve",
+        )
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    result = await RestaurantCancellationService(db).preview(
+        current=current,
+        payload=payload,
+        device=counter_device,
+    )
+    return ok(result)
+
+
+@router.post("/cancellations", status_code=status.HTTP_201_CREATED)
+async def create_restaurant_cancellation(
+    payload: RestaurantCancellationRequest,
+    current: TokenData = Depends(
+        require_any_permission(
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.approve",
+        )
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    result = await RestaurantCancellationService(db).execute(
+        current=current,
+        payload=payload,
+        device=counter_device,
+    )
+    return ok(result)
+
+
+@router.get("/cancellations")
+async def list_restaurant_cancellations(
+    session_id: uuid.UUID | None = Query(default=None),
+    order_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=250),
+    current: TokenData = Depends(
+        require_any_permission(
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.approve",
+            "fb.report.view",
+        )
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    if current.branch_id is None or current.brand_id is None:
+        raise HTTPException(status_code=409, detail="Brand and Branch context required")
+    statement = (
+        select(RestaurantCancellation)
+        .where(
+            RestaurantCancellation.company_id == current.company_id,
+            RestaurantCancellation.branch_id == current.branch_id,
+        )
+        .order_by(RestaurantCancellation.created_at.desc())
+        .limit(limit)
+    )
+    if current.brand_id is not None:
+        statement = statement.where(RestaurantCancellation.brand_id == current.brand_id)
+    if session_id is not None:
+        statement = statement.where(RestaurantCancellation.session_id == session_id)
+    if order_id is not None:
+        statement = statement.where(RestaurantCancellation.order_id == order_id)
+    rows = list((await db.scalars(statement)).all())
+    service = RestaurantCancellationService(db)
+    return ok([await service.serialize(row) for row in rows])
+
+
+@router.post("/cancellations/{cancellation_id}/reopen")
+async def reopen_restaurant_cancellation(
+    cancellation_id: uuid.UUID,
+    payload: RestaurantCancellationReopenRequest,
+    current: TokenData = Depends(
+        require_any_permission(
+            "fb.order.cancel.reopen.request",
+            "fb.order.cancel.reopen",
+        )
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    result = await RestaurantCancellationService(db).reopen(
+        cancellation_id=cancellation_id,
+        current=current,
+        payload=payload,
+        device=counter_device,
+    )
+    return ok(result)
+
+
 @router.post("/orders/{order_id}/cancel")
 async def cancel_order(
     order_id: uuid.UUID,
@@ -1816,20 +1932,14 @@ async def cancel_order(
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
-    if not payload.reason.strip():
-        raise HTTPException(status_code=400, detail="กรุณาระบุเหตุผลการยกเลิก")
-    order = await db.get(DiningOrder, order_id)
-    if not order or order.company_id != current.company_id:
-        raise HTTPException(status_code=404, detail="ไม่พบออเดอร์")
-    session = await db.get(DiningSession, order.session_id)
-    if not session or session.status == "closed":
-        raise HTTPException(status_code=400, detail="Session ปิดแล้ว")
-    svc = DiningService(db)
-    try:
-        updated = await svc.cancel_order(order, payload.reason)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ok({"id": str(updated.id), "status": updated.status})
+    del order_id, payload, current, db
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "structured_cancellation_required",
+            "message": "Use /restaurant/cancellations/preview and /restaurant/cancellations",
+        },
+    )
 
 
 @router.post("/order-items/{item_id}/cancel")
@@ -1839,23 +1949,14 @@ async def cancel_order_item(
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
-    if not payload.reason.strip():
-        raise HTTPException(status_code=400, detail="กรุณาระบุเหตุผลการยกเลิก")
-    item = await db.get(DiningOrderItem, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="ไม่พบรายการ")
-    order = await db.get(DiningOrder, item.order_id)
-    if not order or order.company_id != current.company_id:
-        raise HTTPException(status_code=404, detail="ไม่พบออเดอร์")
-    session = await db.get(DiningSession, order.session_id)
-    if not session or session.status == "closed":
-        raise HTTPException(status_code=400, detail="Session ปิดแล้ว")
-    svc = DiningService(db)
-    try:
-        updated = await svc.cancel_order_item(item, payload.reason)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ok({"id": str(updated.id), "status": updated.status})
+    del item_id, payload, current, db
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "structured_cancellation_required",
+            "message": "Use /restaurant/cancellations/preview and /restaurant/cancellations",
+        },
+    )
 
 
 @router.patch("/order-items/{item_id}/status")
@@ -1878,10 +1979,10 @@ async def update_order_item_status(
         raise HTTPException(status_code=400, detail="status ไม่ถูกต้อง")
     svc = DiningService(db)
     try:
-        updated = await svc.update_order_item_status(item, payload.status)
+        updated = await svc.update_order_item_status(item, payload.status, payload.expected_version)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ok({"id": str(updated.id), "status": updated.status})
+    return ok({"id": str(updated.id), "status": updated.status, "row_version": updated.row_version})
 
 
 @router.post("/sessions/{session_id}/bill")
@@ -2016,6 +2117,7 @@ async def list_kitchen_tickets(
         "table_name": t.table_name,
         "source_type": "dine_in" if t.table_name else "quick_service",
         "status": t.status,
+        "row_version": t.row_version,
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "done_at": t.done_at.isoformat() if t.done_at else None,
     } for t in tickets])
@@ -2046,10 +2148,59 @@ async def update_ticket(
         raise HTTPException(status_code=400, detail=f"status ต้องเป็น {valid}")
     svc = DiningService(db)
     try:
-        updated = await svc.update_ticket_status(ticket, payload.status)
+        updated = await svc.update_ticket_status(ticket, payload.status, payload.expected_version)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ok({"id": str(updated.id), "status": updated.status})
+    return ok({"id": str(updated.id), "status": updated.status, "row_version": updated.row_version})
+
+
+@router.get("/kitchen-cancellation-events")
+async def list_kitchen_cancellations(
+    station: str | None = Query(default=None),
+    include_acknowledged: bool = Query(default=False),
+    current: TokenData = Depends(
+        require_any_permission("fb.kitchen.ticket.manage", "fb.kitchen.manage")
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    if current.branch_id is None or current.brand_id is None:
+        raise HTTPException(status_code=409, detail="Brand and Branch context required")
+    if current.station_key is not None:
+        if station is not None and normalized_station_key(station) != normalized_station_key(current.station_key):
+            raise HTTPException(status_code=403, detail="Kitchen station scope mismatch")
+        station = current.station_key
+    rows = await RestaurantCancellationService(db).list_kds_events(
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        station=station,
+        include_acknowledged=include_acknowledged,
+    )
+    return ok(rows)
+
+
+@router.post("/kitchen-cancellation-events/{event_id}/acknowledge")
+async def acknowledge_kitchen_cancellation(
+    event_id: uuid.UUID,
+    payload: KitchenCancellationAckRequest,
+    current: TokenData = Depends(
+        require_any_permission("fb.kitchen.ticket.manage", "fb.kitchen.manage")
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    if current.branch_id is None or current.brand_id is None:
+        raise HTTPException(status_code=409, detail="Brand and Branch context required")
+    result = await RestaurantCancellationService(db).acknowledge_kds_event(
+        event_id=event_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        station=current.station_key,
+        actor_user_id=current.user_id,
+        device_id=None,
+        payload=payload,
+    )
+    return ok(result)
 
 
 @router.get("/pickup-queue")

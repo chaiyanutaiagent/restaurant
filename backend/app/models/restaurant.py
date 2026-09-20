@@ -299,6 +299,7 @@ class DiningOrderItem(UUIDMixin, TimestampMixin, Base):
     price_list_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     price_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
     price_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
 
     order: Mapped["DiningOrder"] = relationship("DiningOrder", back_populates="items")
     product: Mapped["Product"] = relationship("Product")  # type: ignore[name-defined]
@@ -322,8 +323,156 @@ class KitchenTicket(UUIDMixin, TimestampMixin, Base):
     table_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'pending'"))
     done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
 
     order_item: Mapped["DiningOrderItem"] = relationship("DiningOrderItem")
+
+
+class RestaurantCancellation(UUIDMixin, Base):
+    __tablename__ = "restaurant_cancellations"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "branch_id",
+            "requester_id",
+            "idempotency_key",
+            name="uq_restaurant_cancellations_idempotency",
+        ),
+        CheckConstraint("target_type IN ('item', 'order')", name="target_type"),
+        CheckConstraint("stage_before IN ('pending', 'cooking', 'done')", name="stage_before"),
+        CheckConstraint("waste_disposition IN ('none', 'full')", name="waste_disposition"),
+        CheckConstraint("waste_status IN ('not_required', 'posted')", name="waste_status"),
+        Index(
+            "ix_restaurant_cancellations_scope_created",
+            "company_id",
+            "brand_id",
+            "branch_id",
+            "created_at",
+        ),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False, index=True)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("brands.id"), nullable=False, index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=False, index=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("dining_sessions.id"), nullable=False, index=True)
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("dining_orders.id"), nullable=False, index=True)
+    order_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("dining_order_items.id"), nullable=True, index=True)
+    target_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    stage_before: Mapped[str] = mapped_column(String(20), nullable=False)
+    requester_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    approver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    origin_device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    origin_device_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    station_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reason_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    reason_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    before_state: Mapped[dict] = mapped_column(JSON, nullable=False)
+    approval_policy_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    bill_impact: Mapped[dict] = mapped_column(JSON, nullable=False)
+    waste_disposition: Mapped[str] = mapped_column(String(20), nullable=False)
+    waste_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    stock_location_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("stock_locations.id"), nullable=True)
+    approval_grant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    approval_mode: Mapped[str] = mapped_column(String(30), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    waste_lines: Mapped[list["RestaurantCancellationWaste"]] = relationship(
+        "RestaurantCancellationWaste",
+        back_populates="cancellation",
+        order_by="RestaurantCancellationWaste.created_at.asc()",
+    )
+    kds_events: Mapped[list["KitchenCancellationEvent"]] = relationship(
+        "KitchenCancellationEvent",
+        back_populates="cancellation",
+        order_by="KitchenCancellationEvent.created_at.asc()",
+    )
+
+
+class RestaurantCancellationWaste(UUIDMixin, Base):
+    __tablename__ = "restaurant_cancellation_waste"
+    __table_args__ = (
+        UniqueConstraint("cancellation_id", "product_id", name="uq_restaurant_cancel_waste_product"),
+        CheckConstraint("quantity > 0", name="quantity_positive"),
+        Index("ix_restaurant_cancel_waste_scope", "company_id", "branch_id", "created_at"),
+    )
+
+    cancellation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("restaurant_cancellations.id"), nullable=False, index=True
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=False)
+    location_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stock_locations.id"), nullable=False)
+    product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    unit: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    stock_movement_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stock_movements.id"), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    cancellation: Mapped["RestaurantCancellation"] = relationship("RestaurantCancellation", back_populates="waste_lines")
+
+
+class KitchenCancellationEvent(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "kitchen_cancellation_events"
+    __table_args__ = (
+        UniqueConstraint("cancellation_id", "ticket_id", name="uq_kitchen_cancel_event_ticket"),
+        CheckConstraint("status IN ('pending_ack', 'acknowledged')", name="status"),
+        CheckConstraint("row_version >= 1", name="row_version_positive"),
+        Index("ix_kitchen_cancel_events_queue", "company_id", "branch_id", "status", "created_at"),
+    )
+
+    cancellation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("restaurant_cancellations.id"), nullable=False, index=True
+    )
+    ticket_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("kitchen_tickets.id"), nullable=False, index=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    brand_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("brands.id"), nullable=False, index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=False)
+    station: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    reason_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    reason_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ticket_status_before: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'pending_ack'"))
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    acknowledged_device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    cancellation: Mapped["RestaurantCancellation"] = relationship("RestaurantCancellation", back_populates="kds_events")
+    ticket: Mapped["KitchenTicket"] = relationship("KitchenTicket")
+
+
+class RestaurantCancellationAudit(UUIDMixin, Base):
+    __tablename__ = "restaurant_cancellation_audits"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "branch_id",
+            "action",
+            "idempotency_key",
+            name="uq_restaurant_cancel_audits_idempotency",
+        ),
+        Index("ix_restaurant_cancel_audits_cancellation", "cancellation_id", "created_at"),
+        Index("ix_restaurant_cancel_audits_scope", "company_id", "branch_id", "created_at"),
+    )
+
+    cancellation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("restaurant_cancellations.id"), nullable=False, index=True
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=False)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    approver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    station_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    from_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    to_state: Mapped[dict] = mapped_column(JSON, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, server_default=text("'{}'::json"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
 
 class WapShiftClosure(UUIDMixin, TimestampMixin, Base):

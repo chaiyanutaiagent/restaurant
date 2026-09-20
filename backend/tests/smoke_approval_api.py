@@ -183,6 +183,13 @@ async def prepare() -> dict[str, str]:
             "inventory.stock.adjust",
             "inventory.stock.adjust.request",
             "fb.order.create",
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.approve",
+            "fb.order.cancel.reopen.request",
+            "fb.order.cancel.reopen",
+            "fb.menu.view",
+            "fb.kitchen.ticket.manage",
             "system.role.view",
             "system.device.view",
             "system.device.manage",
@@ -220,6 +227,13 @@ async def prepare() -> dict[str, str]:
             permissions["inventory.stock.adjust"],
             permissions["inventory.stock.view"],
             permissions["system.role.view"],
+            permissions["fb.order.cancel"],
+            permissions["fb.order.cancel.request"],
+            permissions["fb.order.cancel.approve"],
+            permissions["fb.order.cancel.reopen.request"],
+            permissions["fb.order.cancel.reopen"],
+            permissions["fb.menu.view"],
+            permissions["fb.kitchen.ticket.manage"],
         ]
         cashier_role = Role(
             company_id=DEFAULT_COMPANY_ID,
@@ -244,6 +258,10 @@ async def prepare() -> dict[str, str]:
             permissions["inventory.stock.view"],
             permissions["inventory.stock.adjust.request"],
             permissions["fb.order.create"],
+            permissions["fb.order.cancel"],
+            permissions["fb.order.cancel.request"],
+            permissions["fb.order.cancel.reopen.request"],
+            permissions["fb.menu.view"],
         ]
         db.add_all([manager_role, cashier_role])
         await db.flush()
@@ -404,6 +422,13 @@ async def prepare() -> dict[str, str]:
                     "inventory.stock.adjust",
                     "inventory.stock.view",
                     "system.role.view",
+                    "fb.order.cancel",
+                    "fb.order.cancel.request",
+                    "fb.order.cancel.approve",
+                    "fb.order.cancel.reopen.request",
+                    "fb.order.cancel.reopen",
+                    "fb.menu.view",
+                    "fb.kitchen.ticket.manage",
                 )
             ]
             identity_cashier_role = Role(
@@ -432,6 +457,10 @@ async def prepare() -> dict[str, str]:
                     "inventory.stock.view",
                     "inventory.stock.adjust.request",
                     "fb.order.create",
+                    "fb.order.cancel",
+                    "fb.order.cancel.request",
+                    "fb.order.cancel.reopen.request",
+                    "fb.menu.view",
                 )
             ]
             identity_db.add_all([identity_manager_role, identity_cashier_role])
@@ -604,7 +633,7 @@ def run() -> None:
         ]:
             raise RuntimeError("Phase 2 role preset order is invalid")
         if any(
-            preset["policy_version"] != "2026-09-20.1"
+            preset["policy_version"] != "2026-09-20.3"
             or not preset["is_available"]
             for preset in presets
         ):

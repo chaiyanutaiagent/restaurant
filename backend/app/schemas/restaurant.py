@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Literal
 import uuid
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from app.schemas import BaseSchema
 
@@ -344,6 +344,70 @@ class CancelRequest(BaseSchema):
     reason: str
 
 
+CancellationReasonCode = Literal[
+    "customer_changed_mind",
+    "wrong_item",
+    "duplicate_order",
+    "out_of_stock",
+    "quality_failed",
+    "kitchen_error",
+    "other",
+]
+
+
+class RestaurantCancellationRequest(BaseSchema):
+    target_type: Literal["item", "order"]
+    target_id: uuid.UUID
+    expected_order_version: int = Field(ge=1)
+    expected_item_version: int | None = Field(default=None, ge=1)
+    reason_code: CancellationReasonCode
+    reason_note: str | None = Field(default=None, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    approval_token: str | None = None
+
+    @model_validator(mode="after")
+    def validate_target_and_reason(self) -> "RestaurantCancellationRequest":
+        if self.target_type == "item" and self.expected_item_version is None:
+            raise ValueError("expected_item_version is required for item cancellation")
+        if self.reason_code == "other" and not (self.reason_note or "").strip():
+            raise ValueError("reason_note is required when reason_code is other")
+        if self.reason_note is not None:
+            self.reason_note = self.reason_note.strip() or None
+        return self
+
+    def approval_payload(self) -> dict:
+        return self.model_dump(
+            mode="json",
+            exclude={"approval_token"},
+            exclude_none=True,
+        )
+
+
+class RestaurantCancellationReopenRequest(BaseSchema):
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    reason: str = Field(min_length=3, max_length=500)
+    approval_token: str | None = None
+
+    @model_validator(mode="after")
+    def strip_reason(self) -> "RestaurantCancellationReopenRequest":
+        self.reason = self.reason.strip()
+        if len(self.reason) < 3:
+            raise ValueError("reason must contain at least 3 characters")
+        return self
+
+    def approval_payload(self, cancellation_id: uuid.UUID) -> dict:
+        return {
+            "cancellation_id": str(cancellation_id),
+            "idempotency_key": self.idempotency_key,
+            "reason": self.reason,
+        }
+
+
+class KitchenCancellationAckRequest(BaseSchema):
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
 class DiningOrderItemRead(BaseSchema):
     id: uuid.UUID
     product_id: uuid.UUID
@@ -359,6 +423,7 @@ class DiningOrderItemRead(BaseSchema):
     line_total: Decimal = Decimal("0")
     price_source: str | None = None
     price_version: str | None = None
+    row_version: int = 1
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -369,6 +434,7 @@ class DiningOrderRead(BaseSchema):
     order_number: str
     source: str
     status: str
+    row_version: int = 1
     items: list[DiningOrderItemRead] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -387,6 +453,7 @@ class KitchenTicketRead(BaseSchema):
     queue_number: int | None
     table_name: str | None
     status: str
+    row_version: int = 1
     created_at: str
     done_at: str | None = None
 
@@ -395,6 +462,7 @@ class KitchenTicketRead(BaseSchema):
 
 class TicketStatusUpdate(BaseSchema):
     status: str
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 # ── Session Checkout ──────────────────────────────────────────────────────────

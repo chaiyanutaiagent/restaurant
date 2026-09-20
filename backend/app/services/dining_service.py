@@ -305,6 +305,7 @@ class DiningService:
         source: str = "qr_self",
         settings: BranchSettings | None = None,
         create_tickets: bool = True,
+        commit: bool = True,
     ) -> DiningOrder:
         table = await self.db.get(DiningTable, session.table_id) if session.table_id else None
         request_hash = canonical_hash(payload.model_dump(mode="json", exclude={"idempotency_key"}))
@@ -422,8 +423,11 @@ class DiningService:
                 )
                 self.db.add(ticket)
 
-        await self.db.commit()
-        await self.db.refresh(order)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(order)
+        else:
+            await self.db.flush()
         return order
 
     def _queue_display(self, settings: BranchSettings | None, queue_number: int | None) -> str | None:
@@ -754,19 +758,56 @@ class DiningService:
         q = q.order_by(KitchenTicket.created_at)
         return list((await self.db.scalars(q)).all())
 
-    async def update_ticket_status(self, ticket: KitchenTicket, new_status: str) -> KitchenTicket:
+    async def update_ticket_status(
+        self,
+        ticket: KitchenTicket,
+        new_status: str,
+        expected_version: int | None = None,
+    ) -> KitchenTicket:
+        item_reference = await self.db.get(DiningOrderItem, ticket.order_item_id)
+        order = None
+        item = None
+        if item_reference:
+            order = await self.db.scalar(
+                select(DiningOrder).where(DiningOrder.id == item_reference.order_id).with_for_update()
+            )
+            item = await self.db.scalar(
+                select(DiningOrderItem)
+                .where(DiningOrderItem.id == ticket.order_item_id)
+                .with_for_update()
+            )
+        locked_ticket = await self.db.scalar(
+            select(KitchenTicket).where(KitchenTicket.id == ticket.id).with_for_update()
+        )
+        if locked_ticket is None:
+            raise ValueError("ไม่พบ ticket")
+        ticket = locked_ticket
+        if expected_version is not None and ticket.row_version != expected_version:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "stale_kitchen_ticket",
+                    "message": "Ticket changed on another device; refresh and try again",
+                    "current_version": ticket.row_version,
+                },
+            )
         self._validate_ticket_transition(ticket.status, new_status)
+        if ticket.status == new_status:
+            return ticket
         ticket.status = new_status
+        ticket.row_version += 1
         if new_status == "done":
             ticket.done_at = datetime.now(timezone.utc)
-        await self.db.commit()
-        await self.db.refresh(ticket)
 
         # sync order item status
-        item = await self.db.get(DiningOrderItem, ticket.order_item_id)
         if item:
             item.status = new_status
-            await self.db.commit()
+            item.row_version += 1
+            if order:
+                order.row_version += 1
+
+        await self.db.commit()
+        await self.db.refresh(ticket)
 
         # ส่ง Line Notify เมื่อ done — ตรวจว่าทุก ticket ใน session เสร็จหมดแล้ว
         if new_status == "done":
@@ -774,17 +815,61 @@ class DiningService:
 
         return ticket
 
-    async def update_order_item_status(self, item: DiningOrderItem, new_status: str) -> DiningOrderItem:
+    async def update_order_item_status(
+        self,
+        item: DiningOrderItem,
+        new_status: str,
+        expected_version: int | None = None,
+    ) -> DiningOrderItem:
+        item_reference = await self.db.get(DiningOrderItem, item.id)
+        if item_reference is None:
+            raise ValueError("ไม่พบรายการ")
+        order = await self.db.scalar(
+            select(DiningOrder).where(DiningOrder.id == item_reference.order_id).with_for_update()
+        )
+        locked_item = await self.db.scalar(
+            select(DiningOrderItem).where(DiningOrderItem.id == item.id).with_for_update()
+        )
+        if locked_item is None:
+            raise ValueError("ไม่พบรายการ")
+        item = locked_item
+        if expected_version is not None and item.row_version != expected_version:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "stale_order_item",
+                    "message": "Item changed on another device; refresh and try again",
+                    "current_version": item.row_version,
+                },
+            )
         ticket = await self.db.scalar(
-            select(KitchenTicket).where(KitchenTicket.order_item_id == item.id)
+            select(KitchenTicket).where(KitchenTicket.order_item_id == item.id).with_for_update()
         )
         if ticket:
-            await self.update_ticket_status(ticket, new_status)
+            self._validate_ticket_transition(ticket.status, new_status)
+            if ticket.status == new_status:
+                return item
+            ticket.status = new_status
+            ticket.row_version += 1
+            if new_status == "done":
+                ticket.done_at = datetime.now(timezone.utc)
+            item.status = new_status
+            item.row_version += 1
+            if order:
+                order.row_version += 1
+            await self.db.commit()
             await self.db.refresh(item)
+            if new_status == "done":
+                await self._notify_pickup_if_ready(ticket)
             return item
 
         self._validate_ticket_transition(item.status, new_status)
+        if item.status == new_status:
+            return item
         item.status = new_status
+        item.row_version += 1
+        if order:
+            order.row_version += 1
         await self.db.commit()
         await self.db.refresh(item)
         return item

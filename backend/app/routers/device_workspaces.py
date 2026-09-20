@@ -20,8 +20,9 @@ from app.schemas.device import (
     DeviceWorkspaceBootstrapRead,
     DeviceWorkspaceBranchRead,
 )
-from app.schemas.restaurant import TicketStatusUpdate
+from app.schemas.restaurant import KitchenCancellationAckRequest, TicketStatusUpdate
 from app.services.dining_service import DiningService
+from app.services.restaurant_cancellation_service import RestaurantCancellationService
 from app.services.staff_scope_policy import normalized_station_key
 from app.services.takeaway_service import TakeawayService
 
@@ -132,6 +133,7 @@ def _ticket_data(ticket: KitchenTicket | TakeawayKitchenTicket) -> dict[str, Any
         "table_name": ticket.table_name,
         "source_type": "dine_in" if ticket.table_name else "quick_service",
         "status": ticket.status,
+        "row_version": ticket.row_version,
         "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
         "done_at": ticket.done_at.isoformat() if ticket.done_at else None,
     }
@@ -238,7 +240,7 @@ async def update_kitchen_ticket(
         raise HTTPException(status_code=400, detail="Kitchen device may only progress to cooking or done")
     old_status = ticket.status
     try:
-        updated = await DiningService(db).update_ticket_status(ticket, payload.status)
+        updated = await DiningService(db).update_ticket_status(ticket, payload.status, payload.expected_version)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _audit_device_action(
@@ -252,7 +254,45 @@ async def update_kitchen_ticket(
         new_value={"status": updated.status},
     )
     await db.commit()
-    return ok({"id": str(updated.id), "status": updated.status})
+    return ok({"id": str(updated.id), "status": updated.status, "row_version": updated.row_version})
+
+
+@router.get("/kitchen/cancellations")
+async def list_device_kitchen_cancellations(
+    current: DeviceTokenData = Depends(require_device_type("kitchen")),
+    db: AsyncSession = Depends(get_device_operational_db),
+) -> dict[str, Any]:
+    if current.business_type != "restaurant":
+        return ok([])
+    rows = await RestaurantCancellationService(db).list_kds_events(
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        station=current.station_key,
+    )
+    return ok(rows)
+
+
+@router.post("/kitchen/cancellations/{event_id}/acknowledge")
+async def acknowledge_device_kitchen_cancellation(
+    event_id: uuid.UUID,
+    payload: KitchenCancellationAckRequest,
+    current: DeviceTokenData = Depends(require_device_type("kitchen")),
+    db: AsyncSession = Depends(get_device_operational_db),
+) -> dict[str, Any]:
+    if current.business_type != "restaurant":
+        raise HTTPException(status_code=404, detail="Cancellation event was not found")
+    result = await RestaurantCancellationService(db).acknowledge_kds_event(
+        event_id=event_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        station=current.station_key,
+        actor_user_id=None,
+        device_id=current.device_id,
+        payload=payload,
+    )
+    return ok(result)
 
 
 @router.get("/pickup/bootstrap")

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import PageHeader from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
 import { useToast } from "@/components/ui/use-toast";
 import { authApi } from "@/lib/api";
@@ -644,6 +644,9 @@ export default function SessionDetailPage(): JSX.Element {
         <DialogContent className="max-h-[92dvh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl">ยกเลิก{cancelTarget?.type === "order" ? "ออเดอร์" : "รายการ"}</DialogTitle>
+            <DialogDescription>
+              ตรวจสถานะครัว ผลกระทบบิล การอนุมัติ และ Waste ก่อนยืนยันกับ Server
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 font-bold text-red-800">

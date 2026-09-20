@@ -142,6 +142,48 @@ def validate_shared_reporting_runtime_config(
         raise ValueError("Shared reporting requires REFERENCE_PROJECTOR_ENABLED=true")
 
 
+def validate_pos_offline_mode_config(
+    *,
+    environment: str,
+    enabled: bool,
+    public_base_url: str,
+    company_allowlist: str,
+    branch_allowlist: str,
+) -> None:
+    """Keep the planned POS outbox dark until a bounded UAT explicitly enables it."""
+    if not enabled:
+        return
+    parsed_url = urlsplit(public_base_url)
+    if environment != "development":
+        raise ValueError("POS offline mode is not approved outside UAT development")
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.hostname is None
+        or not parsed_url.hostname.startswith("uat-")
+    ):
+        raise ValueError("POS offline mode requires an HTTPS hostname beginning with uat-")
+    if not company_allowlist.strip() or not branch_allowlist.strip():
+        raise ValueError("POS offline mode requires explicit Company and Branch allow-lists")
+
+
+def validate_refund_runtime_config(
+    *,
+    environment: str,
+    provider_mode: str,
+    webhook_secret: str | None,
+    non_fiscal_credit_note_enabled: bool,
+) -> None:
+    if provider_mode == "live":
+        raise ValueError("Live refund provider is not implemented or approved")
+    if provider_mode == "sandbox":
+        if environment == "production":
+            raise ValueError("Sandbox refund provider is forbidden in Production")
+        if not webhook_secret or len(webhook_secret) < 16:
+            raise ValueError("Sandbox refund provider requires a webhook secret of at least 16 characters")
+    if non_fiscal_credit_note_enabled and environment == "production":
+        raise ValueError("Synthetic non-fiscal Credit Notes are forbidden in Production")
+
+
 class Settings(BaseSettings):
     postgres_db: str
     postgres_user: str
@@ -222,6 +264,13 @@ class Settings(BaseSettings):
     uat_auth_bypass_enabled: bool = False
     uat_auth_bypass_company_id: uuid.UUID | None = None
     uat_auth_bypass_username: str | None = None
+    # WP47 design gate. This remains false until physical UAT is separately approved.
+    pos_offline_mode_enabled: bool = False
+    pos_offline_company_allowlist: str = ""
+    pos_offline_branch_allowlist: str = ""
+    refund_provider_mode: Literal["disabled", "sandbox", "live"] = "disabled"
+    refund_sandbox_webhook_secret: str | None = None
+    refund_uat_non_fiscal_credit_note_enabled: bool = False
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env", "../../.env"),
@@ -274,6 +323,19 @@ class Settings(BaseSettings):
             enabled=self.shared_reporting_projector_enabled,
             identity_database=self.identity_database,
             reference_projector_enabled=self.reference_projector_enabled,
+        )
+        validate_pos_offline_mode_config(
+            environment=self.environment,
+            enabled=self.pos_offline_mode_enabled,
+            public_base_url=self.saas_public_base_url,
+            company_allowlist=self.pos_offline_company_allowlist,
+            branch_allowlist=self.pos_offline_branch_allowlist,
+        )
+        validate_refund_runtime_config(
+            environment=self.environment,
+            provider_mode=self.refund_provider_mode,
+            webhook_secret=self.refund_sandbox_webhook_secret,
+            non_fiscal_credit_note_enabled=self.refund_uat_non_fiscal_credit_note_enabled,
         )
         if self.uat_auth_bypass_username is not None:
             self.uat_auth_bypass_username = self.uat_auth_bypass_username.strip() or None

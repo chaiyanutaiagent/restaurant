@@ -67,6 +67,7 @@ import CloseShiftDialog from "@/pages/pos/CloseShiftDialog";
 import ReceiptView from "@/pages/pos/ReceiptView";
 import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
 import PosWorkspaceNav from "@/components/pos/PosWorkspaceNav";
+import RefundWorkspaceDialog from "@/components/pos/RefundWorkspaceDialog";
 import TakeawayOrderSlip from "@/components/pos/TakeawayOrderSlip";
 import type { ApprovalAction } from "@/types/approval";
 
@@ -377,6 +378,7 @@ export default function POSPage(): JSX.Element {
   const [partialRefundOrder, setPartialRefundOrder] = useState<SaleOrder | null>(null);
   const [partialRefundReason, setPartialRefundReason] = useState("");
   const [partialRefundQtys, setPartialRefundQtys] = useState<Record<string, string>>({});
+  const [refundWorkspaceOrder, setRefundWorkspaceOrder] = useState<SaleOrder | null>(null);
   const [pendingManagerApproval, setPendingManagerApproval] = useState<PendingManagerApproval | null>(null);
   const [exchangeContext, setExchangeContext] = useState<ExchangeContextDraft | null>(null);
   const [splitPaymentEnabled, setSplitPaymentEnabled] = useState(false);
@@ -3359,7 +3361,9 @@ export default function POSPage(): JSX.Element {
                           >
                           พิมพ์ซ้ำ
                         </Button>
-                        {canVoidSale && order.status === "completed" ? (
+                        {canVoidSale && order.status === "completed" && order.payments
+                          .filter((payment) => Number(payment.amount) > 0)
+                          .every((payment) => ["authorized", "pending"].includes(payment.settlement_state || "unknown")) ? (
                           <Button variant="outline" onClick={() => { setVoidOrder(order); setVoidReason(""); }}>
                             Void บิล
                           </Button>
@@ -3367,21 +3371,9 @@ export default function POSPage(): JSX.Element {
                         {canRefundSale && refundableStatuses.includes(order.status) && refundableItemCount > 0 ? (
                           <Button
                             variant="outline"
-                          onClick={() => {
-                              const nextQtys = Object.fromEntries(
-                                order.items.map((item) => [item.id, ""])
-                              ) as Record<string, string>;
-                              setPartialRefundOrder(order);
-                              setPartialRefundReason("");
-                              setPartialRefundQtys(nextQtys);
-                            }}
+                            onClick={() => setRefundWorkspaceOrder(order)}
                           >
-                            คืนบางรายการ / แลก
-                          </Button>
-                        ) : null}
-                        {canRefundSale && refundableStatuses.includes(order.status) && remainingRefund > 0 ? (
-                          <Button variant="outline" onClick={() => { setRefundOrder(order); setRefundReason(""); }}>
-                            คืนทั้งหมด
+                            คืนสินค้า / คืนเงิน
                           </Button>
                         ) : null}
                       </div>
@@ -3770,6 +3762,16 @@ export default function POSPage(): JSX.Element {
         customer={selectedCustomer}
         settings={loyaltySettingsQuery.data ?? null}
         onRedeemed={(discountAmount) => setLoyaltyDiscount(discountAmount)}
+      />
+      <RefundWorkspaceDialog
+        open={Boolean(refundWorkspaceOrder)}
+        order={refundWorkspaceOrder}
+        shift={currentShift}
+        online={isOnline}
+        onOpenChange={(next) => { if (!next) setRefundWorkspaceOrder(null); }}
+        onCompleted={async () => {
+          await recentSalesQuery.refetch();
+        }}
       />
       {pendingManagerApproval ? (
         <ManagerApprovalDialog

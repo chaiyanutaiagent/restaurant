@@ -1,6 +1,6 @@
 import api from "./api";
 import type { ApiResponse } from "@/types/api";
-import type { HoldDraftClaimResult, PricingCalculation, SaleOrder, ServerHoldDraft } from "@/types/pos";
+import type { HoldDraftClaimResult, PricingCalculation, RefundOperation, RefundQuote, SaleOrder, ServerHoldDraft } from "@/types/pos";
 import type { StockLocation } from "@/types/stock";
 
 export const posApi = {
@@ -21,6 +21,14 @@ export const posApi = {
     api.post(`/pos/sales/${id}/refund`, { refund_reason: reason, approval_token: approvalToken }),
   partialRefundSale: (id: string, data: { refund_reason: string; items: Array<{ order_item_id: string; qty: number }>; approval_token?: string }) =>
     api.post<ApiResponse<SaleOrder>>(`/pos/sales/${id}/refund/partial`, data),
+  createRefundQuote: (data: object) => api.post<ApiResponse<RefundQuote>>("/pos/refunds/quotes", data),
+  executeRefund: (data: object) => api.post<ApiResponse<RefundOperation>>("/pos/refunds", data),
+  listRefunds: (params?: { order_id?: string }) => api.get<ApiResponse<RefundOperation[]>>("/pos/refunds", { params }),
+  getRefund: (id: string) => api.get<ApiResponse<RefundOperation>>(`/pos/refunds/${id}`),
+  confirmCashRefund: (id: string, data: object) => api.post<ApiResponse<RefundOperation>>(`/pos/refunds/${id}/cash-confirm`, data),
+  inquireRefund: (id: string, data: object) => api.post<ApiResponse<RefundOperation>>(`/pos/refunds/${id}/inquire`, data),
+  retryRefund: (id: string, data: object) => api.post<ApiResponse<RefundOperation>>(`/pos/refunds/${id}/retry`, data),
+  retryRefundTax: (id: string, data: object) => api.post<ApiResponse<RefundOperation>>(`/pos/refunds/${id}/tax-retry`, data),
   getPromptPayQR: (amount?: number, target?: string) => api.get("/pos/promptpay/qr", { params: { amount, target } }),
   listLocations: (branchId?: string) =>
     api.get("/stock/locations", { params: { branch_id: branchId } }) as Promise<{ data: { data: StockLocation[] } }>,

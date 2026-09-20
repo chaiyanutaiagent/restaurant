@@ -89,7 +89,107 @@ export interface Payment {
   amount: number;
   reference_no: string | null;
   original_payment_id?: string | null;
+  currency?: string;
+  provider_name?: string | null;
+  provider_payment_ref?: string | null;
+  settlement_state?: string;
+  refund_operation_id?: string | null;
+  provider_refund_state?: string | null;
   paid_at: string;
+}
+
+export type RefundOperationStatus =
+  | "requested"
+  | "processing"
+  | "cash_due"
+  | "succeeded"
+  | "failed"
+  | "unknown"
+  | "needs_reconciliation"
+  | "tax_pending"
+  | "completed";
+
+export interface RefundQuote {
+  id: string;
+  order_id: string;
+  shift_id: string;
+  status: string;
+  currency: string;
+  order_version: number;
+  quote_hash: string;
+  items: Array<{
+    sale_order_item_id: string;
+    product_name: string;
+    quantity: string;
+    subtotal_amount: string;
+    discount_amount: string;
+    vat_amount: string;
+    total_amount: string;
+    stock_disposition: "none" | "sellable";
+  }>;
+  payment_allocations: Array<{
+    original_payment_id: string;
+    payment_method: string;
+    leg_type: "cash" | "provider";
+    provider_name: string | null;
+    amount: string;
+    currency: string;
+  }>;
+  totals: {
+    subtotal_amount: string;
+    discount_amount: string;
+    vat_amount: string;
+    rounding_amount: string;
+    total_amount: string;
+    remaining_refundable_before: string;
+    rounding_rule: string;
+  };
+  policy: Record<string, unknown>;
+  expires_at: string;
+}
+
+export interface RefundOperation {
+  id: string;
+  order_id: string;
+  quote_id: string;
+  shift_id: string;
+  status: RefundOperationStatus;
+  reason_code: string;
+  reason_note: string | null;
+  currency: string;
+  subtotal_amount: number;
+  discount_amount: number;
+  vat_amount: number;
+  rounding_amount: number;
+  total_amount: number;
+  stock_disposition: string;
+  provider_scenario: string;
+  row_version: number;
+  failure_code: string | null;
+  failure_message: string | null;
+  finalized_at: string | null;
+  tax_completed_at: string | null;
+  items: Array<Record<string, unknown>>;
+  payment_legs: Array<{
+    id: string;
+    payment_method: string;
+    leg_type: "cash" | "provider";
+    provider_name: string | null;
+    amount: number;
+    currency: string;
+    status: string;
+    provider_refund_ref: string | null;
+    attempt_count: number;
+    last_error_code: string | null;
+  }>;
+  tax: {
+    status: string;
+    original_document_id: string | null;
+    credit_note_id: string | null;
+    retry_count: number;
+    last_error: string | null;
+  } | null;
+  created_at: string;
 }
 
 export interface PaymentDraft {

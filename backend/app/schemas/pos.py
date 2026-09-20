@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any, Literal
 import uuid
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from app.schemas import BaseSchema
 from app.schemas.pricing import PriceOverrideIntent, PricingChannel
@@ -96,6 +96,12 @@ class PaymentRead(BaseSchema):
     amount: Decimal
     reference_no: str | None = None
     original_payment_id: uuid.UUID | None = None
+    currency: str = "THB"
+    provider_name: str | None = None
+    provider_payment_ref: str | None = None
+    settlement_state: str = "unknown"
+    refund_operation_id: uuid.UUID | None = None
+    provider_refund_state: str | None = None
     paid_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -190,6 +196,120 @@ class PartialRefundRequest(BaseSchema):
     refund_reason: str
     items: list[PartialRefundItemRequest] = Field(default_factory=list)
     approval_token: str | None = None
+
+
+RefundReasonCode = Literal[
+    "customer_request",
+    "wrong_item",
+    "quality_issue",
+    "duplicate_charge",
+    "payment_error",
+    "other",
+]
+
+
+class RefundQuoteItemRequest(BaseSchema):
+    order_item_id: uuid.UUID
+    qty: Decimal = Field(gt=0)
+
+
+class RefundQuoteCreateRequest(BaseSchema):
+    order_id: uuid.UUID
+    shift_id: uuid.UUID
+    items: list[RefundQuoteItemRequest] = Field(default_factory=list, max_length=100)
+    reason_code: RefundReasonCode
+    reason_note: str | None = Field(default=None, max_length=500)
+    stock_disposition: Literal["none", "sellable"] = "none"
+    currency: str = Field(default="THB", min_length=3, max_length=3)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_other_reason(self) -> "RefundQuoteCreateRequest":
+        if self.reason_code == "other" and len((self.reason_note or "").strip()) < 3:
+            raise ValueError("reason_note is required when reason_code is other")
+        return self
+
+
+class RefundExecuteRequest(BaseSchema):
+    quote_id: uuid.UUID
+    quote_hash: str = Field(min_length=64, max_length=64)
+    order_id: uuid.UUID
+    expected_order_version: int = Field(ge=1)
+    total_amount: Decimal = Field(gt=0)
+    reason_code: RefundReasonCode
+    reason_note: str | None = Field(default=None, max_length=500)
+    stock_disposition: Literal["none", "sellable"] = "none"
+    provider_scenario: Literal[
+        "succeeded",
+        "failed",
+        "processing_then_succeeded",
+        "unknown_then_succeeded",
+        "unknown_persistent",
+    ] = "succeeded"
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    approval_token: str | None = None
+
+    @model_validator(mode="after")
+    def validate_other_reason(self) -> "RefundExecuteRequest":
+        if self.reason_code == "other" and len((self.reason_note or "").strip()) < 3:
+            raise ValueError("reason_note is required when reason_code is other")
+        return self
+
+
+class RefundOperationActionRequest(BaseSchema):
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+class RefundProviderWebhookRequest(BaseSchema):
+    provider_event_id: str = Field(min_length=8, max_length=160)
+    payment_leg_id: uuid.UUID
+    sequence: int = Field(ge=1)
+    state: Literal["processing", "succeeded", "failed", "unknown"]
+    provider_refund_ref: str | None = Field(default=None, max_length=255)
+    error_code: str | None = Field(default=None, max_length=80)
+
+
+class RefundQuoteRead(BaseSchema):
+    id: uuid.UUID
+    order_id: uuid.UUID
+    shift_id: uuid.UUID
+    status: str
+    currency: str
+    order_version: int
+    quote_hash: str
+    items: list[dict[str, Any]]
+    payment_allocations: list[dict[str, Any]]
+    totals: dict[str, Any]
+    policy: dict[str, Any]
+    expires_at: datetime
+
+
+class RefundOperationRead(BaseSchema):
+    id: uuid.UUID
+    order_id: uuid.UUID
+    quote_id: uuid.UUID
+    shift_id: uuid.UUID
+    status: str
+    reason_code: str
+    reason_note: str | None
+    currency: str
+    subtotal_amount: Decimal
+    discount_amount: Decimal
+    vat_amount: Decimal
+    rounding_amount: Decimal
+    total_amount: Decimal
+    stock_disposition: str
+    provider_scenario: str
+    row_version: int
+    failure_code: str | None
+    failure_message: str | None
+    finalized_at: datetime | None
+    tax_completed_at: datetime | None
+    items: list[dict[str, Any]]
+    payment_legs: list[dict[str, Any]]
+    tax: dict[str, Any] | None
+    created_at: datetime
 
 
 class ReceiptData(BaseSchema):

@@ -16,6 +16,7 @@ from app.models.audit import AuditLog
 from app.models.branch import Branch
 from app.models.company import Company
 from app.models.pos import CashierShift, Payment, SaleOrder, SaleOrderItem
+from app.models.refund import RefundOperation
 from app.models.pricing import PriceOverrideAudit
 from app.models.product import Product, ProductVariant
 from app.models.restaurant import BrandBranch
@@ -259,6 +260,25 @@ class SaleService:
                     "code": "hold_drafts_pending",
                     "message": "Resolve, reassign or discard Hold Drafts before closing this shift",
                     "pending_count": pending_drafts,
+                },
+            )
+
+        pending_refunds = await self.db.scalar(
+            select(func.count(RefundOperation.id)).where(
+                RefundOperation.shift_id == shift.id,
+                RefundOperation.status.in_((
+                    "requested", "processing", "cash_due", "unknown",
+                    "needs_reconciliation", "tax_pending",
+                )),
+            )
+        ) or 0
+        if pending_refunds:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "refunds_pending",
+                    "message": "Resolve pending or unknown refunds before closing this shift",
+                    "pending_count": int(pending_refunds),
                 },
             )
 
@@ -726,6 +746,8 @@ class SaleService:
                     payment_method=payment.payment_method,
                     amount=q2(Decimal(payment.amount)),
                     reference_no=payment.reference_no,
+                    currency="THB",
+                    settlement_state="settled" if payment.payment_method == "cash" else "unknown",
                     note=data.note,
                 )
             )
@@ -909,6 +931,25 @@ class SaleService:
         shift = await self.get_open_shift(company_id, user_id, order.branch_id)
         if shift is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active shift required to void sale")
+        unsafe_payment = next(
+            (
+                payment
+                for payment in order.payments
+                if Decimal(payment.amount) > 0
+                and payment.settlement_state not in {"authorized", "pending"}
+            ),
+            None,
+        )
+        if unsafe_payment is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "settled_payment_requires_refund",
+                    "message": "Settled or unknown payments cannot be voided; use the Refund workflow",
+                    "payment_id": str(unsafe_payment.id),
+                    "settlement_state": unsafe_payment.settlement_state,
+                },
+            )
 
         recipe_return_items: list[tuple[Product, Decimal]] = []
         for item in order.items:

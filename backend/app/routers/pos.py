@@ -4,11 +4,12 @@ from decimal import Decimal
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database import get_restaurant_service_db
 from app.dependencies import (
     DeviceTokenData,
     TokenData,
@@ -18,7 +19,8 @@ from app.dependencies import (
     require_permission,
 )
 from app.models.company import Company
-from app.models.pos import PosHoldDraftAudit
+from app.models.pos import PosHoldDraftAudit, SaleOrder
+from app.models.refund import RefundOperation, RefundPaymentLeg, RefundTaxLink
 from app.models.settings import BranchSettings
 from app.schemas.pos import (
     CloseShiftRequest,
@@ -29,6 +31,10 @@ from app.schemas.pos import (
     OpenShiftRequest,
     PartialRefundRequest,
     RefundRequest,
+    RefundExecuteRequest,
+    RefundOperationActionRequest,
+    RefundProviderWebhookRequest,
+    RefundQuoteCreateRequest,
     SaleOrderRead,
     ShiftRead,
     SyncSalesRequest,
@@ -38,6 +44,7 @@ from app.schemas.pricing import PricingCalculateRequest
 from app.services.approval_service import ApprovalEvidence, ApprovalService, has_permission
 from app.services.hold_draft_service import HoldDraftService, hold_error
 from app.services.pricing_service import PricingResult, PricingService, pricing_error
+from app.services.refund_service import RefundService, serialize_operation, serialize_quote
 from app.services.sale_service import SaleService, pricing_request_for_sale, sale_request_hash
 from app.utils.promptpay import generate_promptpay_payload
 
@@ -49,7 +56,7 @@ def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def _approval_payload(
-    payload: CreateSaleRequest | VoidRequest | RefundRequest | PartialRefundRequest,
+    payload: CreateSaleRequest | VoidRequest | RefundRequest | PartialRefundRequest | RefundExecuteRequest,
     *,
     order_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
@@ -735,26 +742,10 @@ async def refund_sale(
     ),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    service = _sale_service(db, current)
-    existing = await service.get_sale(order_id, current.company_id)
-    _require_current_order_branch(current, existing.branch_id)
-    approval_evidence = await ApprovalService(db).authorize_operation(
-        current=current,
-        action="pos.refund.create",
-        request_payload=_approval_payload(payload, order_id=order_id),
-        approval_token=payload.approval_token,
-        reason=payload.refund_reason,
-        resource_type="SaleOrder",
-        resource_id=str(order_id),
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={"code": "legacy_refund_disabled", "message": "Create a Server refund quote and use /refunds"},
     )
-    order = await service.refund_sale(
-        order_id,
-        current.company_id,
-        current.user_id,
-        payload.refund_reason,
-        approval_evidence=approval_evidence,
-    )
-    return ok(SaleOrderRead.model_validate(order).model_dump())
 
 
 @router.post("/sales/{order_id}/refund/partial")
@@ -766,26 +757,196 @@ async def partial_refund_sale(
     ),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    service = _sale_service(db, current)
-    existing = await service.get_sale(order_id, current.company_id)
-    _require_current_order_branch(current, existing.branch_id)
-    approval_evidence = await ApprovalService(db).authorize_operation(
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={"code": "legacy_refund_disabled", "message": "Create a Server refund quote and use /refunds"},
+    )
+
+
+@router.post("/refunds/quotes", status_code=status.HTTP_201_CREATED)
+async def create_refund_quote(
+    payload: RefundQuoteCreateRequest,
+    current: TokenData = Depends(require_any_permission("pos.refund.create", "pos.refund.request")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=409, detail="Branch context required")
+    quote = await RefundService(db).create_quote(
+        company_id=current.company_id,
+        branch_id=current.branch_id,
+        user_id=current.user_id,
+        data=payload,
+    )
+    return ok(serialize_quote(quote))
+
+
+@router.post("/refunds", status_code=status.HTTP_201_CREATED)
+async def execute_refund(
+    payload: RefundExecuteRequest,
+    current: TokenData = Depends(require_any_permission("pos.refund.create", "pos.refund.request")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=409, detail="Branch context required")
+    service = RefundService(db)
+    replay = await service.find_execute_replay(
+        company_id=current.company_id,
+        branch_id=current.branch_id,
+        user_id=current.user_id,
+        data=payload,
+    )
+    if replay is not None:
+        return ok(await serialize_operation(service, replay))
+    approval = await ApprovalService(db).authorize_operation(
         current=current,
         action="pos.refund.create",
-        request_payload=_approval_payload(payload, order_id=order_id),
+        request_payload=_approval_payload(payload),
         approval_token=payload.approval_token,
-        reason=payload.refund_reason,
-        resource_type="SaleOrder",
-        resource_id=str(order_id),
+        reason=payload.reason_note or payload.reason_code,
+        resource_type="RefundQuote",
+        resource_id=str(payload.quote_id),
+        allow_direct=False,
     )
-    order = await service.partial_refund_sale(
-        order_id,
-        current.company_id,
-        current.user_id,
-        payload,
-        approval_evidence=approval_evidence,
+    operation = await service.execute(
+        company_id=current.company_id,
+        branch_id=current.branch_id,
+        user_id=current.user_id,
+        data=payload,
+        approval=approval,
     )
-    return ok(SaleOrderRead.model_validate(order).model_dump())
+    return ok(await serialize_operation(service, operation))
+
+
+@router.get("/refunds")
+async def list_refunds(
+    order_id: uuid.UUID | None = Query(default=None),
+    current: TokenData = Depends(require_permission("pos.sale.view")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=409, detail="Branch context required")
+    service = RefundService(db)
+    rows = await service.list_operations(current.company_id, current.branch_id, order_id)
+    return ok([await serialize_operation(service, row) for row in rows])
+
+
+@router.get("/refunds/reconciliation")
+async def refund_reconciliation(
+    shift_id: uuid.UUID | None = Query(default=None),
+    current: TokenData = Depends(require_permission("pos.sale.view")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=409, detail="Branch context required")
+    filters = [RefundOperation.company_id == current.company_id, RefundOperation.branch_id == current.branch_id]
+    if shift_id:
+        filters.append(RefundOperation.shift_id == shift_id)
+    operations = list((await db.scalars(select(RefundOperation).where(*filters))).all())
+    operation_ids = [row.id for row in operations]
+    legs = list((await db.scalars(select(RefundPaymentLeg).where(RefundPaymentLeg.operation_id.in_(operation_ids)))).all()) if operation_ids else []
+    tax_links = list((await db.scalars(select(RefundTaxLink).where(RefundTaxLink.operation_id.in_(operation_ids)))).all()) if operation_ids else []
+    sale_filters = [SaleOrder.company_id == current.company_id, SaleOrder.branch_id == current.branch_id]
+    if shift_id:
+        sale_filters.append(SaleOrder.shift_id == shift_id)
+    gross_sales = await db.scalar(select(func.coalesce(func.sum(SaleOrder.total_amount), 0)).where(
+        *sale_filters, SaleOrder.status.in_(("completed", "partially_refunded", "refunded")),
+    )) or Decimal("0")
+    void_count = await db.scalar(select(func.count(SaleOrder.id)).where(*sale_filters, SaleOrder.status == "voided")) or 0
+    void_amount = await db.scalar(select(func.coalesce(func.sum(SaleOrder.total_amount), 0)).where(*sale_filters, SaleOrder.status == "voided")) or Decimal("0")
+    return ok({
+        "gross_sales": str(gross_sales),
+        "operation_count": len(operations),
+        "status_counts": {state: sum(1 for row in operations if row.status == state) for state in sorted({row.status for row in operations})},
+        "cash_refund_succeeded": str(sum((Decimal(leg.amount) for leg in legs if leg.leg_type == "cash" and leg.status == "succeeded"), Decimal("0"))),
+        "provider_refund_succeeded": str(sum((Decimal(leg.amount) for leg in legs if leg.leg_type == "provider" and leg.status == "succeeded"), Decimal("0"))),
+        "pending_or_unknown": sum(1 for row in operations if row.status in {"requested", "processing", "cash_due", "unknown", "needs_reconciliation", "tax_pending"}),
+        "credit_note_status_counts": {state: sum(1 for row in tax_links if row.status == state) for state in sorted({row.status for row in tax_links})},
+        "void_count": int(void_count),
+        "void_amount": str(void_amount),
+        "void_is_separate": True,
+    })
+
+
+@router.get("/refunds/{operation_id}")
+async def get_refund(
+    operation_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("pos.sale.view")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=409, detail="Branch context required")
+    service = RefundService(db)
+    row = await service.get_operation(operation_id, current.company_id, current.branch_id)
+    return ok(await serialize_operation(service, row))
+
+
+@router.post("/refunds/{operation_id}/cash-confirm")
+async def confirm_cash_refund(
+    operation_id: uuid.UUID,
+    payload: RefundOperationActionRequest,
+    current: TokenData = Depends(require_permission("pos.refund.create")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=409, detail="Branch context required")
+    service = RefundService(db)
+    row = await service.confirm_cash(operation_id, current.company_id, current.branch_id, current.user_id, payload)
+    return ok(await serialize_operation(service, row))
+
+
+@router.post("/refunds/{operation_id}/inquire")
+async def inquire_refund(
+    operation_id: uuid.UUID,
+    payload: RefundOperationActionRequest,
+    current: TokenData = Depends(require_any_permission("pos.refund.create", "pos.refund.request")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=409, detail="Branch context required")
+    service = RefundService(db)
+    row = await service.inquire(operation_id, current.company_id, current.branch_id, current.user_id, payload)
+    return ok(await serialize_operation(service, row))
+
+
+@router.post("/refunds/{operation_id}/retry")
+async def retry_refund(
+    operation_id: uuid.UUID,
+    payload: RefundOperationActionRequest,
+    current: TokenData = Depends(require_permission("pos.refund.create")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=409, detail="Branch context required")
+    service = RefundService(db)
+    row = await service.retry(operation_id, current.company_id, current.branch_id, current.user_id, payload)
+    return ok(await serialize_operation(service, row))
+
+
+@router.post("/refunds/{operation_id}/tax-retry")
+async def retry_refund_tax(
+    operation_id: uuid.UUID,
+    payload: RefundOperationActionRequest,
+    current: TokenData = Depends(require_any_permission("pos.refund.create", "accounting.etax.create")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=409, detail="Branch context required")
+    service = RefundService(db)
+    row = await service.retry_tax(operation_id, current.company_id, current.branch_id, current.user_id, payload)
+    return ok(await serialize_operation(service, row))
+
+
+@router.post("/refunds/provider/sandbox/webhook")
+async def sandbox_refund_webhook(
+    payload: RefundProviderWebhookRequest,
+    x_refund_signature: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    if settings.refund_provider_mode != "sandbox":
+        raise HTTPException(status_code=404, detail="Sandbox provider is disabled")
+    service = RefundService(db)
+    row = await service.apply_webhook(payload, x_refund_signature)
+    return ok(await serialize_operation(service, row))
 
 
 @router.get("/promptpay/qr")

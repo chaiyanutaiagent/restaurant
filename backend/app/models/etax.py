@@ -5,7 +5,7 @@ from decimal import Decimal
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -57,6 +57,12 @@ class TaxDocument(UUIDMixin, TimestampMixin, Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     cancel_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_refund_operation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("refund_operations.id"), nullable=True, unique=True
+    )
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    watermark: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    submission_status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'not_submitted'"))
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
 
     company: Mapped["Company"] = relationship("Company")

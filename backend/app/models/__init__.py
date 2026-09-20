@@ -47,6 +47,16 @@ from app.models.distribution import (
     CompanyDistributionShipment,
 )
 from app.models.pos import CashierShift, Payment, PosHoldDraft, PosHoldDraftAudit, SaleOrder, SaleOrderItem
+from app.models.refund import (
+    ProviderRefundAttempt,
+    ProviderRefundEvent,
+    RefundOperation,
+    RefundOperationAudit,
+    RefundOperationItem,
+    RefundPaymentLeg,
+    RefundQuote,
+    RefundTaxLink,
+)
 from app.models.purchase import (
     Supplier,
     PurchaseOrder,
@@ -213,6 +223,14 @@ __all__ = [
     "Payment",
     "PosHoldDraft",
     "PosHoldDraftAudit",
+    "RefundQuote",
+    "RefundOperation",
+    "RefundOperationItem",
+    "RefundPaymentLeg",
+    "ProviderRefundAttempt",
+    "ProviderRefundEvent",
+    "RefundTaxLink",
+    "RefundOperationAudit",
     "Supplier",
     "PurchaseOrder",
     "PurchaseOrderItem",

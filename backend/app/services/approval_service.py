@@ -30,6 +30,7 @@ from app.schemas.pos import (
     CreateSaleRequest,
     PartialRefundRequest,
     RefundRequest,
+    RefundExecuteRequest,
     VoidRequest,
 )
 from app.schemas.stock import AdjustmentRequest
@@ -111,7 +112,16 @@ def normalize_approval_request_payload(
                 exclude_unset=True,
             )
         elif action == "pos.refund.create":
-            schema = PartialRefundRequest if "items" in values else RefundRequest
+            is_quote_execution = "quote_id" in values
+            if is_quote_execution and order_id is not None:
+                values["order_id"] = order_id
+            schema = (
+                RefundExecuteRequest
+                if is_quote_execution
+                else PartialRefundRequest
+                if "items" in values
+                else RefundRequest
+            )
             normalized = schema.model_validate(values).model_dump(
                 mode="json",
                 exclude={"approval_token"},
@@ -145,6 +155,8 @@ def normalize_approval_request_payload(
         else:
             raise ValueError("Unsupported approval action")
         if action in {"pos.sale.void", "pos.refund.create"}:
+            if order_id is None:
+                order_id = normalized.get("order_id")
             if order_id is None:
                 raise ValueError("order_id is required for this approval action")
             normalized["order_id"] = str(uuid.UUID(str(order_id)))

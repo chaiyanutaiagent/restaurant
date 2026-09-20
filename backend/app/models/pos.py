@@ -335,6 +335,14 @@ class Payment(UUIDMixin, Base):
         nullable=True,
         index=True,
     )
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default=text("'THB'"))
+    provider_name: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    provider_payment_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    settlement_state: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'unknown'"))
+    refund_operation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("refund_operations.id"), nullable=True, index=True
+    )
+    provider_refund_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
     paid_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

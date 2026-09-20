@@ -1,7 +1,8 @@
 # WP42 — Customer Company Shell Integration
 
 วันที่จัดทำ: `2026-09-19`
-สถานะ: **Scoped — ready for implementation approval**
+วันที่ปิดงาน: `2026-09-20`
+สถานะ: **Closed — local + UAT engineering and visual gate passed; Production not approved**
 Dependency: **WP36–WP41 Foundation UAT gate passed**
 Target: **Desktop and tablet web; UAT first**
 
@@ -130,8 +131,19 @@ WP42 เป็นงาน shell และ read experience ไม่เปิด
 - เปลี่ยน WP36–WP41 API contract โดยไม่มี defect/scope review
 - Organization, People & Access และ Settings redesign เชิงลึกนอกส่วน navigation/link ของ shell
 
-## 9. Phase gate
+## 9. Phase gate result
 
-เริ่ม implementation ได้เมื่อ owner อนุมัติ WP42 scope นี้และทีม UX/UI ส่งมอบ flow/component states
-ที่ต้องใช้ รอบแรก deploy เฉพาะ UAT หลัง automated gate ผ่าน จากนั้นต้องส่ง smoke, visual UAT,
-permission matrix และ rollback evidence ก่อนพิจารณาปิด WP42
+WP42 implementation และ UAT gate ผ่านที่ release `wp42-2988072` โดยมีหลักฐานดังนี้:
+
+- frontend type-check, production/PWA build และ Company shell E2E ผ่าน
+- Foundation backend regression ผ่าน `13/13`
+- UAT Company Foundation smoke ผ่าน `31` assertions
+- role-based landing `5` กรณีและ permission boundary ผ่าน โดย mutation count เท่ากับ `0`
+- Desktop/Tablet ผ่าน visual UAT ใน Chromium และ Safari โดยไม่เกิด horizontal overflow
+- context switch, Product Readiness, Action Center, Dashboard และ Device/Sync state ผ่านตาม scope
+- backup, previous release/image และ rollback configuration พร้อมใช้งาน
+- Central Kitchen/Distribution write flags ยังคง `false` และ Production ไม่เปลี่ยน
+
+รายละเอียด deployment อยู่ที่ `docs/scopes/WP42-UAT-DEPLOYMENT-03.md` และคำตัดสิน gate อยู่ที่
+`docs/scopes/WP42-PHASE-GATE-02.md` การปิด WP42 ไม่อนุญาต Production deployment,
+Takeaway/Central Kitchen transaction activation, Retail data-source change หรือเอกสารภาษีจริง

@@ -329,11 +329,15 @@ class OrderItemCreate(BaseSchema):
     product_id: uuid.UUID
     qty: int = Field(default=1, ge=1, le=99)
     special_request: str | None = Field(default=None, max_length=500)
+    expected_unit_price: Decimal | None = Field(default=None, ge=0)
+    expected_price_version: str | None = Field(default=None, max_length=128)
 
 
 class PlaceOrderRequest(BaseSchema):
     items: list[OrderItemCreate] = Field(min_length=1, max_length=50)
     note: str | None = Field(default=None, max_length=1000)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=100)
+    cart_version: int = Field(default=1, ge=1)
 
 
 class CancelRequest(BaseSchema):
@@ -348,6 +352,13 @@ class DiningOrderItemRead(BaseSchema):
     unit_price: Decimal
     special_request: str | None
     status: str
+    original_price: Decimal = Decimal("0")
+    vat_type: str = "included"
+    vat_rate: Decimal = Decimal("7")
+    vat_amount: Decimal = Decimal("0")
+    line_total: Decimal = Decimal("0")
+    price_source: str | None = None
+    price_version: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

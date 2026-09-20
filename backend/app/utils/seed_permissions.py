@@ -169,6 +169,18 @@ PERMISSIONS: list[dict[str, str]] = [
         "description": "Override discount limits at POS.",
     },
     {
+        "code": "pos.price.override",
+        "name": "Override POS Price",
+        "module": "pos",
+        "description": "Approve exceptional per-sale price changes at POS.",
+    },
+    {
+        "code": "pos.price.override.request",
+        "name": "Request POS Price Override",
+        "module": "pos",
+        "description": "Request manager approval for exceptional POS price changes.",
+    },
+    {
         "code": "pos.refund.create",
         "name": "Create Refund",
         "module": "pos",

@@ -91,6 +91,11 @@ type SettingsFormState = {
   pos_allow_discount: boolean;
   pos_max_discount_pct: number;
   pos_cashier_discount_limit_pct: number;
+  pos_price_override_auto_limit_pct: number;
+  pos_price_override_auto_limit_amount: number;
+  pos_price_override_max_deviation_pct: number;
+  pos_price_override_min_margin_pct: number;
+  pos_price_override_self_approval: boolean;
   stock_adjust_approval_threshold_qty: number;
   promptpay_target: string;
   promptpay_name: string;
@@ -113,6 +118,11 @@ function settingsToForm(settings: BranchSettings | null | undefined): SettingsFo
     pos_allow_discount: settings?.pos_allow_discount ?? true,
     pos_max_discount_pct: settings?.pos_max_discount_pct ?? 100,
     pos_cashier_discount_limit_pct: settings?.pos_cashier_discount_limit_pct ?? 10,
+    pos_price_override_auto_limit_pct: settings?.pos_price_override_auto_limit_pct ?? 10,
+    pos_price_override_auto_limit_amount: settings?.pos_price_override_auto_limit_amount ?? 100,
+    pos_price_override_max_deviation_pct: settings?.pos_price_override_max_deviation_pct ?? 50,
+    pos_price_override_min_margin_pct: settings?.pos_price_override_min_margin_pct ?? 0,
+    pos_price_override_self_approval: settings?.pos_price_override_self_approval ?? false,
     stock_adjust_approval_threshold_qty: settings?.stock_adjust_approval_threshold_qty ?? 10,
     promptpay_target: settings?.promptpay_target ?? "",
     promptpay_name: settings?.promptpay_name ?? "",
@@ -578,6 +588,70 @@ export default function BranchSettingsPage(): JSX.Element {
                   } : prev)}
                 />
               </Field>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="font-medium text-slate-900">นโยบายเปลี่ยนราคาหน้าร้าน</p>
+                <p className="mt-1 text-sm text-slate-500">ทุกครั้งต้องระบุเหตุผลและถูกบันทึกใน Audit; เกินเกณฑ์อัตโนมัติต้อง Manager อนุมัติ</p>
+                <div className="mt-4 grid gap-4 md:grid-cols-4">
+                  <Field label="เกณฑ์อัตโนมัติ %">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={settings?.pos_price_override_max_deviation_pct ?? 50}
+                      value={settings?.pos_price_override_auto_limit_pct ?? 10}
+                      onChange={(event) => setSettingsForm((prev) => prev ? {
+                        ...prev,
+                        pos_price_override_auto_limit_pct: Number(event.target.value || 0)
+                      } : prev)}
+                    />
+                  </Field>
+                  <Field label="เกณฑ์อัตโนมัติ ฿ ต่อชิ้น">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={settings?.pos_price_override_auto_limit_amount ?? 100}
+                      onChange={(event) => setSettingsForm((prev) => prev ? {
+                        ...prev,
+                        pos_price_override_auto_limit_amount: Number(event.target.value || 0)
+                      } : prev)}
+                    />
+                  </Field>
+                  <Field label="เปลี่ยนได้สูงสุด %">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={settings?.pos_price_override_max_deviation_pct ?? 50}
+                      onChange={(event) => {
+                        const maximum = Number(event.target.value || 0);
+                        setSettingsForm((prev) => prev ? {
+                          ...prev,
+                          pos_price_override_max_deviation_pct: maximum,
+                          pos_price_override_auto_limit_pct: Math.min(prev.pos_price_override_auto_limit_pct, maximum)
+                        } : prev);
+                      }}
+                    />
+                  </Field>
+                  <Field label="กำไรขั้นต่ำ %">
+                    <Input
+                      type="number"
+                      min={-100}
+                      max={100}
+                      value={settings?.pos_price_override_min_margin_pct ?? 0}
+                      onChange={(event) => setSettingsForm((prev) => prev ? {
+                        ...prev,
+                        pos_price_override_min_margin_pct: Number(event.target.value || 0)
+                      } : prev)}
+                    />
+                  </Field>
+                </div>
+                <div className="mt-4">
+                  <ToggleField
+                    label="อนุญาตผู้มีสิทธิ์อนุมัติราคาของตนเอง"
+                    checked={settings?.pos_price_override_self_approval ?? false}
+                    onChange={(checked) => setSettingsForm((prev) => prev ? { ...prev, pos_price_override_self_approval: checked } : prev)}
+                  />
+                </div>
+              </div>
               <div className="flex justify-end">
                 <Button onClick={() => saveSettingsMutation.mutate(settings ?? {})} disabled={!canEdit}>
                   บันทึกตั้งค่า POS

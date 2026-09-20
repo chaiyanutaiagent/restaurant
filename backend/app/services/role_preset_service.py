@@ -10,7 +10,7 @@ from app.models.role import Permission
 from app.schemas.role import RolePresetRead, RoleScope
 
 
-ROLE_PRESET_POLICY_VERSION = "2026-09-19.3"
+ROLE_PRESET_POLICY_VERSION = "2026-09-20.1"
 
 TAKEAWAY_OWNER_PERMISSIONS = (
     "takeaway.catalog.view",
@@ -75,6 +75,8 @@ COMPANY_OWNER_PERMISSION_CODES = (
     "pos.sale.void.request",
     "pos.discount.apply",
     "pos.discount.override",
+    "pos.price.override",
+    "pos.price.override.request",
     "pos.refund.create",
     "pos.refund.request",
     "pos.cashier.open_shift",
@@ -213,6 +215,8 @@ ROLE_PRESET_POLICIES = (
             "pos.sale.void",
             "pos.discount.apply",
             "pos.discount.override",
+            "pos.price.override",
+            "pos.price.override.request",
             "pos.refund.create",
             "pos.cashier.open_shift",
             "pos.cashier.close_shift",
@@ -389,6 +393,8 @@ ROLE_PRESET_POLICIES = (
             "pos.sale.view",
             "pos.sale.void",
             "pos.discount.override",
+            "pos.price.override",
+            "pos.price.override.request",
             "pos.refund.create",
             "pos.report.view",
             "inventory.product.view",
@@ -457,6 +463,7 @@ ROLE_PRESET_POLICIES = (
             "pos.sale.create",
             "pos.sale.void.request",
             "pos.discount.apply",
+            "pos.price.override.request",
             "pos.refund.request",
             "pos.cashier.open_shift",
             "pos.cashier.close_shift",

@@ -643,6 +643,23 @@ class AdminService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cashier discount limit cannot exceed the branch maximum",
             )
+        requested_override_auto = Decimal(
+            changes.get(
+                "pos_price_override_auto_limit_pct",
+                settings.pos_price_override_auto_limit_pct,
+            )
+        )
+        requested_override_max = Decimal(
+            changes.get(
+                "pos_price_override_max_deviation_pct",
+                settings.pos_price_override_max_deviation_pct,
+            )
+        )
+        if requested_override_auto > requested_override_max:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Automatic price override limit cannot exceed the hard override limit",
+            )
         for field, value in changes.items():
             setattr(settings, field, value)
         self._audit(company_id, None, "system.branch.settings_updated", "Branch", branch_id)

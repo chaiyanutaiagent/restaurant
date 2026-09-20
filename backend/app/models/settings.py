@@ -31,6 +31,25 @@ class BranchSettings(UUIDMixin, TimestampMixin, Base):
             "stock_adjust_approval_threshold_qty >= 0",
             name="stock_adjust_approval_threshold_nonnegative",
         ),
+        CheckConstraint(
+            "pos_price_override_auto_limit_pct >= 0 "
+            "AND pos_price_override_auto_limit_pct <= pos_price_override_max_deviation_pct",
+            name="pos_price_override_auto_within_max",
+        ),
+        CheckConstraint(
+            "pos_price_override_max_deviation_pct >= 0 "
+            "AND pos_price_override_max_deviation_pct <= 100",
+            name="pos_price_override_max_range",
+        ),
+        CheckConstraint(
+            "pos_price_override_auto_limit_amount >= 0",
+            name="pos_price_override_auto_amount_nonnegative",
+        ),
+        CheckConstraint(
+            "pos_price_override_min_margin_pct >= -100 "
+            "AND pos_price_override_min_margin_pct <= 100",
+            name="pos_price_override_margin_range",
+        ),
     )
 
     company_id: Mapped[uuid.UUID] = mapped_column(
@@ -66,6 +85,21 @@ class BranchSettings(UUIDMixin, TimestampMixin, Base):
         Numeric(5, 2),
         nullable=False,
         server_default=text("10"),
+    )
+    pos_price_override_auto_limit_pct: Mapped[float] = mapped_column(
+        Numeric(5, 2), nullable=False, server_default=text("10")
+    )
+    pos_price_override_auto_limit_amount: Mapped[float] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("100")
+    )
+    pos_price_override_max_deviation_pct: Mapped[float] = mapped_column(
+        Numeric(5, 2), nullable=False, server_default=text("50")
+    )
+    pos_price_override_min_margin_pct: Mapped[float] = mapped_column(
+        Numeric(6, 2), nullable=False, server_default=text("0")
+    )
+    pos_price_override_self_approval: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
     )
     stock_adjust_approval_threshold_qty: Mapped[float] = mapped_column(
         Numeric(12, 4),

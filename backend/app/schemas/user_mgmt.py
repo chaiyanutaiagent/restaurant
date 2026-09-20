@@ -122,6 +122,11 @@ class BranchSettingsRead(BaseSchema):
     pos_allow_discount: bool
     pos_max_discount_pct: float
     pos_cashier_discount_limit_pct: float = 10
+    pos_price_override_auto_limit_pct: float = 10
+    pos_price_override_auto_limit_amount: float = 100
+    pos_price_override_max_deviation_pct: float = 50
+    pos_price_override_min_margin_pct: float = 0
+    pos_price_override_self_approval: bool = False
     stock_adjust_approval_threshold_qty: float = 10
     promptpay_target: str | None = None
     promptpay_name: str | None = None
@@ -160,6 +165,11 @@ class BranchSettingsUpdate(BaseSchema):
     pos_allow_discount: bool | None = None
     pos_max_discount_pct: float | None = Field(default=None, ge=0, le=100)
     pos_cashier_discount_limit_pct: float | None = Field(default=None, ge=0, le=100)
+    pos_price_override_auto_limit_pct: float | None = Field(default=None, ge=0, le=100)
+    pos_price_override_auto_limit_amount: float | None = Field(default=None, ge=0)
+    pos_price_override_max_deviation_pct: float | None = Field(default=None, ge=0, le=100)
+    pos_price_override_min_margin_pct: float | None = Field(default=None, ge=-100, le=100)
+    pos_price_override_self_approval: bool | None = None
     stock_adjust_approval_threshold_qty: float | None = Field(default=None, ge=0)
     pos_default_price_list_id: uuid.UUID | None = None
     promptpay_target: str | None = None

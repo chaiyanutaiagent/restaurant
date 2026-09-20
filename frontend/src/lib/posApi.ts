@@ -1,6 +1,6 @@
 import api from "./api";
 import type { ApiResponse } from "@/types/api";
-import type { SaleOrder } from "@/types/pos";
+import type { PricingCalculation, SaleOrder } from "@/types/pos";
 import type { StockLocation } from "@/types/stock";
 
 export const posApi = {
@@ -11,6 +11,7 @@ export const posApi = {
   listShifts: (params?: { branch_id?: string; page?: number; limit?: number }) =>
     api.get("/pos/shifts", { params }),
   createSale: (data: object) => api.post<ApiResponse<SaleOrder>>("/pos/sales", data),
+  calculatePricing: (data: object) => api.post<ApiResponse<PricingCalculation>>("/pos/pricing/calculate", data),
   syncSales: (orders: object[]) => api.post<ApiResponse<SaleOrder[]>>("/pos/sales/sync", { orders }),
   listSales: (params?: object) => api.get<ApiResponse<SaleOrder[]>>("/pos/sales", { params }),
   getSale: (id: string) => api.get<ApiResponse<SaleOrder>>(`/pos/sales/${id}`),

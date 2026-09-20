@@ -45,6 +45,7 @@ from app.utils.security import (
 
 DIRECT_PERMISSION_BY_ACTION: dict[str, str] = {
     "pos.discount.override": "pos.discount.override",
+    "pos.price.override": "pos.price.override",
     "pos.sale.void": "pos.sale.void",
     "pos.refund.create": "pos.refund.create",
     "inventory.stock.adjust": "inventory.stock.adjust",
@@ -52,6 +53,7 @@ DIRECT_PERMISSION_BY_ACTION: dict[str, str] = {
 
 REQUEST_PERMISSION_BY_ACTION: dict[str, str] = {
     "pos.discount.override": "pos.discount.apply",
+    "pos.price.override": "pos.price.override.request",
     "pos.sale.void": "pos.sale.void.request",
     "pos.refund.create": "pos.refund.request",
     "inventory.stock.adjust": "inventory.stock.adjust.request",
@@ -86,12 +88,12 @@ def normalize_approval_request_payload(
     values = dict(payload)
     order_id = values.pop("order_id", None)
     try:
-        if action == "pos.discount.override":
+        if action in {"pos.discount.override", "pos.price.override"}:
             session_id = values.pop("session_id", None)
             schema = SessionCheckoutRequest if session_id is not None else CreateSaleRequest
             normalized = schema.model_validate(values).model_dump(
                 mode="json",
-                exclude={"approval_token"},
+                exclude={"approval_token", "price_override_approval_token"},
                 exclude_none=True,
                 exclude_unset=True,
             )
@@ -393,9 +395,10 @@ class ApprovalService:
         reason: str,
         resource_type: str | None = None,
         resource_id: str | None = None,
+        allow_direct: bool = True,
     ) -> ApprovalEvidence:
         direct_permission = DIRECT_PERMISSION_BY_ACTION[action]
-        if has_permission(current.permissions, direct_permission):
+        if allow_direct and has_permission(current.permissions, direct_permission):
             return ApprovalEvidence(
                 action=action,
                 requester_id=current.user_id,
@@ -418,7 +421,17 @@ class ApprovalService:
                 detail="Select a branch before using approval",
             )
 
-        claims = decode_token(approval_token)
+        try:
+            claims = decode_token(approval_token)
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "expired_approval",
+                    "action": action,
+                    "message": "Approval is invalid or expired; request a new approval",
+                },
+            ) from exc
         normalized_request = normalize_approval_request_payload(action, request_payload)
         expected_hash = approval_request_hash(normalized_request)
         try:

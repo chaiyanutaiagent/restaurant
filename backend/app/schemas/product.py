@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Literal
 import uuid
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from app.schemas import BaseSchema
 
@@ -229,10 +229,29 @@ class PriceListBase(BaseSchema):
     name: str
     description: str | None = None
     currency: str = "THB"
+    brand_id: uuid.UUID | None = None
+    branch_id: uuid.UUID | None = None
+    customer_id: uuid.UUID | None = None
+    channel: str | None = None
+    priority: int = 0
+    price_kind: Literal["standard", "promotion"] = "standard"
+    promotion_code: str | None = Field(default=None, max_length=80)
     is_default: bool = False
     valid_from: date | None = None
     valid_until: date | None = None
+    valid_from_at: datetime | None = None
+    valid_until_at: datetime | None = None
     is_active: bool = True
+
+    @model_validator(mode="after")
+    def validate_effective_window(self) -> "PriceListBase":
+        if self.valid_from and self.valid_until and self.valid_from > self.valid_until:
+            raise ValueError("valid_from must not be after valid_until")
+        if self.valid_from_at and self.valid_until_at and self.valid_from_at > self.valid_until_at:
+            raise ValueError("valid_from_at must not be after valid_until_at")
+        if self.price_kind == "promotion" and not (self.promotion_code or "").strip():
+            raise ValueError("promotion_code is required for a promotion price list")
+        return self
 
 
 class PriceListCreate(PriceListBase):
@@ -243,9 +262,18 @@ class PriceListUpdate(BaseSchema):
     name: str | None = None
     description: str | None = None
     currency: str | None = None
+    brand_id: uuid.UUID | None = None
+    branch_id: uuid.UUID | None = None
+    customer_id: uuid.UUID | None = None
+    channel: str | None = None
+    priority: int | None = None
+    price_kind: Literal["standard", "promotion"] | None = None
+    promotion_code: str | None = Field(default=None, max_length=80)
     is_default: bool | None = None
     valid_from: date | None = None
     valid_until: date | None = None
+    valid_from_at: datetime | None = None
+    valid_until_at: datetime | None = None
     is_active: bool | None = None
 
 
@@ -253,6 +281,7 @@ class PriceListRead(PriceListBase):
     id: uuid.UUID
     company_id: uuid.UUID
     created_at: datetime
+    version: int = 1
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
@@ -199,6 +200,13 @@ class SaleOrder(UUIDMixin, TimestampMixin, Base):
     recipe_stock_posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     recipe_stock_reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pricing_quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    pricing_request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pricing_calculation_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pricing_calculation_version: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    pricing_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    pricing_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
 
     company: Mapped["Company"] = relationship("Company")
     branch: Mapped["Branch"] = relationship("Branch")
@@ -282,6 +290,17 @@ class SaleOrderItem(UUIDMixin, Base):
         nullable=False,
         server_default=text("0"),
     )
+    price_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    price_list_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    price_list_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    price_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    order_discount_share: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4), nullable=False, server_default=text("0")
+    )
+    line_total: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("0"))
+    price_override_applied: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    price_override_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -113,8 +113,8 @@ async def prepare() -> dict[str, str]:
             product_type="simple",
             selling_price=Decimal("100"),
             cost_price=Decimal("20"),
-            vat_type="none",
-            vat_rate=Decimal("0"),
+            vat_type="included",
+            vat_rate=Decimal("7"),
             is_active=True,
             is_for_sale=True,
             is_for_purchase=False,
@@ -140,6 +140,11 @@ async def prepare() -> dict[str, str]:
                 pos_allow_discount=True,
                 pos_max_discount_pct=Decimal("50"),
                 pos_cashier_discount_limit_pct=Decimal("10"),
+                pos_price_override_auto_limit_pct=Decimal("10"),
+                pos_price_override_auto_limit_amount=Decimal("100"),
+                pos_price_override_max_deviation_pct=Decimal("50"),
+                pos_price_override_min_margin_pct=Decimal("0"),
+                pos_price_override_self_approval=False,
                 stock_adjust_approval_threshold_qty=Decimal("1"),
             )
         )
@@ -151,6 +156,8 @@ async def prepare() -> dict[str, str]:
             "pos.sale.void.request",
             "pos.discount.apply",
             "pos.discount.override",
+            "pos.price.override",
+            "pos.price.override.request",
             "pos.refund.create",
             "pos.refund.request",
             "pos.cashier.open_shift",
@@ -181,8 +188,11 @@ async def prepare() -> dict[str, str]:
             allowed_scope_types=["branch"],
         )
         manager_role.permissions = [
+            permissions["pos.sale.create"],
             permissions["pos.sale.void"],
             permissions["pos.discount.override"],
+            permissions["pos.price.override"],
+            permissions["pos.price.override.request"],
             permissions["pos.refund.create"],
             permissions["inventory.stock.adjust"],
             permissions["inventory.stock.view"],
@@ -199,6 +209,7 @@ async def prepare() -> dict[str, str]:
             permissions["pos.sale.create"],
             permissions["pos.sale.void.request"],
             permissions["pos.discount.apply"],
+            permissions["pos.price.override.request"],
             permissions["pos.refund.request"],
             permissions["pos.cashier.open_shift"],
             permissions["inventory.stock.view"],
@@ -381,12 +392,20 @@ def run() -> None:
             "company-owner",
             "brand-manager",
             "branch-manager",
+            "accountant",
+            "purchasing",
+            "warehouse",
+            "hr",
+            "auditor",
+            "area-manager",
+            "service-staff",
+            "kitchen-manager",
             "cashier",
             "kitchen-staff",
         ]:
             raise RuntimeError("Phase 2 role preset order is invalid")
         if any(
-            preset["policy_version"] != "2026-08-01.4"
+            preset["policy_version"] != "2026-09-20.1"
             or not preset["is_available"]
             for preset in presets
         ):
@@ -402,6 +421,7 @@ def run() -> None:
         if set(preset_by_key["kitchen-staff"]["permission_codes"]) != {
             "fb.menu.view",
             "fb.kitchen.ticket.manage",
+            "takeaway.kitchen.manage",
         }:
             raise RuntimeError("Kitchen Staff escaped the station kitchen boundary")
 
@@ -532,6 +552,7 @@ def run() -> None:
             "location_id": context["location_id"],
             "payment_method": "cash",
             "paid_amount": 80,
+            "client_order_id": f"approval-sale-{uuid.uuid4()}",
             "payments": [],
             "discount_amount": 20,
         }
@@ -588,6 +609,7 @@ def run() -> None:
             "discount_type": "amount",
             "payment_method": "cash",
             "paid_amount": 80,
+            "client_order_id": f"approval-pos-{uuid.uuid4()}",
         }
         expect_detail_code(
             client.post("/api/v1/pos/sales", headers=cashier_headers, json=sale_payload),
@@ -682,6 +704,7 @@ def run() -> None:
             **sale_payload,
             "discount_amount": 0,
             "paid_amount": 100,
+            "client_order_id": f"approval-refund-{uuid.uuid4()}",
         }
         refundable_sale = expect(
             client.post(

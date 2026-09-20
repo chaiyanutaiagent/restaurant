@@ -82,7 +82,13 @@ export type WapOrder = {
 };
 
 export type WapPaidOrderPayload = {
-  items: Array<{ product_id: string; qty: number; special_request?: string | null }>;
+  items: Array<{
+    product_id: string;
+    qty: number;
+    special_request?: string | null;
+    expected_unit_price?: number;
+    expected_price_version?: string;
+  }>;
   payment_method: string;
   paid_amount: number;
   payments?: Array<{ payment_method: string; amount: number; reference_no?: string | null }>;

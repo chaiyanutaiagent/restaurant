@@ -22,7 +22,6 @@ import {
   getQueuedRestaurantOrder,
   loadRestaurantMenu,
   markRestaurantLocalSlip,
-  queueRestaurantOrder,
   retryRestaurantNeedsReview,
   syncRestaurantPendingOrders,
   type RestaurantOutboxSummary,
@@ -274,12 +273,16 @@ export default function WapOrderPage(): JSX.Element {
 
   const createOrderMutation = useMutation({
     mutationFn: async (method: "cash" | "promptpay") => {
+      if (!isOnline) {
+        throw new Error("ราคาออฟไลน์อยู่ในสถานะ Stale กรุณาเชื่อมต่อ Server ก่อนรับชำระเงิน");
+      }
       const orderItems = cart.map((item) => ({
         product_id: item.product.id,
         qty: item.qty,
         special_request: item.note.trim() || null,
+        expected_unit_price: Number(item.product.selling_price),
       }));
-      return queueRestaurantOrder(offlineBrandSlug, {
+      const response = await wapApi.createPaidOrder({
         items: orderItems,
         payment_method: method,
         paid_amount: total,
@@ -291,17 +294,15 @@ export default function WapOrderPage(): JSX.Element {
         customer_name: null,
         customer_phone: null,
         note: null,
-      }, menuQuery.data!);
+        client_order_id: `wap-${crypto.randomUUID()}`,
+        is_offline: false,
+      }, offlineBrandSlug);
+      return response.data.data;
     },
-    onSuccess: ({ order, status, error }) => {
+    onSuccess: (order) => {
       setCurrentOrder(order);
       setShowSummary(true);
       setCart([]);
-      if (status === "pending" || status === "syncing") {
-        toast({ title: "บันทึกการขายในเครื่องแล้ว", description: "ระบบจะส่งข้อมูลขึ้นเซิร์ฟเวอร์อัตโนมัติเมื่ออินเทอร์เน็ตกลับมา" });
-      } else if (status === "needs_review") {
-        toast({ title: "เก็บรายการไว้แล้ว แต่ต้องตรวจสอบ", description: error, variant: "destructive" });
-      }
       if (order.recipe_stock_warnings?.length) {
         toast({
           title: "ขายสำเร็จ แต่ stock ต้องตรวจสอบ",
@@ -405,7 +406,7 @@ export default function WapOrderPage(): JSX.Element {
     setShowSummary(false);
   }
 
-  const canSubmit = cart.length > 0 && total > 0;
+  const canSubmit = cart.length > 0 && total > 0 && isOnline;
   const customerSlipPrinted = Boolean(currentOrder?.customer_slip_printed_at);
   const isSummaryVisible = showSummary || Boolean(currentOrder);
 
@@ -525,6 +526,13 @@ export default function WapOrderPage(): JSX.Element {
               >
                 ลองส่งอีกครั้ง
               </Button>
+            </div>
+          ) : null}
+
+          {!isOnline ? (
+            <div className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900" role="alert">
+              <p className="font-bold">ราคาในเครื่องเป็นข้อมูล Stale</p>
+              <p className="text-xs">ดูเมนูได้ แต่ปิดการรับเงินและออกคิวจนกว่า Server จะตรวจราคา VAT และสิทธิ์อีกครั้ง</p>
             </div>
           ) : null}
 

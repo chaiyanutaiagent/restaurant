@@ -36,6 +36,12 @@ export interface CartItem {
   vat_rate: number;
   subtotal: number;
   vat_amount: number;
+  expected_price_version?: string | null;
+  price_override?: {
+    requested_unit_price: number;
+    reason_code?: "customer_recovery" | "price_match" | "manager_comp" | "damaged_item" | "manual_correction" | "other";
+    reason: string;
+  } | null;
 }
 
 export interface Cart {
@@ -66,6 +72,15 @@ export interface SaleOrderItem {
   subtotal: number;
   refunded_qty?: number;
   refunded_amount?: number;
+  price_source?: string | null;
+  price_list_id?: string | null;
+  price_list_version?: number | null;
+  price_version?: string | null;
+  price_snapshot?: Record<string, unknown> | null;
+  order_discount_share?: number;
+  line_total?: number;
+  price_override_applied?: boolean;
+  price_override_reason?: string | null;
 }
 
 export interface Payment {
@@ -130,6 +145,49 @@ export interface SaleOrder {
   synced_at?: string | null;
   items: SaleOrderItem[];
   payments: Payment[];
+  pricing_quote_id?: string | null;
+  pricing_request_hash?: string | null;
+  pricing_calculation_hash?: string | null;
+  pricing_calculation_version?: string | null;
+  pricing_context?: Record<string, unknown> | null;
+  pricing_snapshot?: Record<string, unknown> | null;
+  row_version?: number;
+}
+
+export interface PricingLineResult {
+  product_id: string;
+  variant_id: string | null;
+  authoritative_unit_price: number;
+  applied_unit_price: number;
+  promotion_code?: string | null;
+  promotion_discount_amount?: number;
+  price_version: string;
+  effective_at?: string;
+  rounding_rule?: string;
+  line_total: number;
+  discrepancy: boolean;
+  override_requested: boolean;
+  override_requires_approval: boolean;
+}
+
+export interface PricingCalculation {
+  quote_id: string;
+  idempotency_key: string;
+  calculation_hash: string;
+  calculation_version: string;
+  cart_version: number;
+  subtotal: number;
+  discount_amount: number;
+  promotion_discount_amount?: number;
+  discount_percentage: number;
+  vat_amount: number;
+  total_amount: number;
+  rounding_rule?: string;
+  effective_at?: string;
+  expires_at: string;
+  requires_price_override_approval: boolean;
+  has_price_discrepancy: boolean;
+  lines: PricingLineResult[];
 }
 
 export interface PendingSale {

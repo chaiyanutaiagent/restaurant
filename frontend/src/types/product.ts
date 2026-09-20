@@ -101,10 +101,20 @@ export interface PriceList {
   name: string;
   description: string | null;
   currency: string;
+  brand_id?: string | null;
+  branch_id?: string | null;
+  customer_id?: string | null;
+  channel?: string | null;
+  priority?: number;
+  version?: number;
+  price_kind?: "standard" | "promotion";
+  promotion_code?: string | null;
+  valid_from_at?: string | null;
+  valid_until_at?: string | null;
   is_default: boolean;
   is_active: boolean;
 }
 
-export type VatType = "included" | "excluded" | "exempt";
+export type VatType = "included" | "excluded" | "zero" | "exempt";
 export type ProductType = "simple" | "variant" | "service" | "bundle" | "menu_item" | "raw_material";
 export type InventoryRole = "central_raw" | "central_ready" | "store_local" | "not_stocked";

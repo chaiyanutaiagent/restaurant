@@ -19,6 +19,7 @@ from app.models.staff_assignment import StaffRoleAssignment
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.approval import ApprovalGrantUsage, ManagerPinCredential
+from app.models.pricing import PriceCalculation, PriceOverrideAudit
 from app.models.device import DeviceRegistration
 from app.models.product import (
     Unit,
@@ -180,6 +181,8 @@ __all__ = [
     "RefreshToken",
     "ManagerPinCredential",
     "ApprovalGrantUsage",
+    "PriceCalculation",
+    "PriceOverrideAudit",
     "DeviceRegistration",
     "Unit",
     "Category",

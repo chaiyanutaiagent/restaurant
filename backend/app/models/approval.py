@@ -22,6 +22,7 @@ from app.models.base import TimestampMixin, UUIDMixin
 
 APPROVAL_ACTIONS = (
     "pos.discount.override",
+    "pos.price.override",
     "pos.sale.void",
     "pos.refund.create",
     "inventory.stock.adjust",

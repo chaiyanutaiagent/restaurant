@@ -7,6 +7,7 @@ import uuid
 from pydantic import ConfigDict, Field
 
 from app.schemas import BaseSchema
+from app.schemas.pricing import PriceOverrideIntent, PricingChannel
 
 
 class OpenShiftRequest(BaseSchema):
@@ -49,6 +50,8 @@ class CartItem(BaseSchema):
     discount_type: str = "amount"
     vat_type: str
     vat_rate: Decimal = Decimal("7")
+    expected_price_version: str | None = None
+    price_override: PriceOverrideIntent | None = None
 
 
 class PaymentCreateRequest(BaseSchema):
@@ -75,6 +78,12 @@ class CreateSaleRequest(BaseSchema):
     is_offline: bool = False
     client_order_id: str | None = None
     approval_token: str | None = None
+    price_override_approval_token: str | None = None
+    pricing_quote_id: uuid.UUID | None = None
+    pricing_calculation_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    channel: PricingChannel = "pos"
+    currency: str = Field(default="THB", min_length=3, max_length=3)
+    cart_version: int = Field(default=1, ge=1)
 
 
 class PaymentRead(BaseSchema):
@@ -107,6 +116,15 @@ class SaleOrderItemRead(BaseSchema):
     subtotal: Decimal
     refunded_qty: Decimal = Decimal("0")
     refunded_amount: Decimal = Decimal("0")
+    price_source: str | None = None
+    price_list_id: uuid.UUID | None = None
+    price_list_version: int | None = None
+    price_version: str | None = None
+    price_snapshot: dict | None = None
+    order_discount_share: Decimal = Decimal("0")
+    line_total: Decimal = Decimal("0")
+    price_override_applied: bool = False
+    price_override_reason: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -136,6 +154,13 @@ class SaleOrderRead(BaseSchema):
     recipe_stock_posted_at: datetime | None = None
     recipe_stock_reversed_at: datetime | None = None
     note: str | None = None
+    pricing_quote_id: uuid.UUID | None = None
+    pricing_request_hash: str | None = None
+    pricing_calculation_hash: str | None = None
+    pricing_calculation_version: str | None = None
+    pricing_context: dict | None = None
+    pricing_snapshot: dict | None = None
+    row_version: int = 1
     created_at: datetime
     items: list[SaleOrderItemRead] = Field(default_factory=list)
     payments: list[PaymentRead] = Field(default_factory=list)

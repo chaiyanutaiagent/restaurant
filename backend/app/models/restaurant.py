@@ -255,7 +255,10 @@ class DiningSession(UUIDMixin, TimestampMixin, Base):
 
 class DiningOrder(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "dining_orders"
-    __table_args__ = (Index("ix_dining_orders_session_id", "session_id"),)
+    __table_args__ = (
+        Index("ix_dining_orders_session_id", "session_id"),
+        UniqueConstraint("company_id", "branch_id", "idempotency_key", name="uq_dining_orders_idempotency"),
+    )
 
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
     branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=False)
@@ -264,6 +267,12 @@ class DiningOrder(UUIDMixin, TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'qr_self'"))
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'pending'"))
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pricing_calculation_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pricing_calculation_version: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    pricing_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
 
     session: Mapped["DiningSession"] = relationship("DiningSession", back_populates="orders")
     items: Mapped[list["DiningOrderItem"]] = relationship("DiningOrderItem", back_populates="order", cascade="all, delete-orphan")
@@ -280,6 +289,16 @@ class DiningOrderItem(UUIDMixin, TimestampMixin, Base):
     special_request: Mapped[str | None] = mapped_column(String(500), nullable=True)
     station: Mapped[str | None] = mapped_column(String(50), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'pending'"))
+    original_price: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("0"))
+    vat_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'included'"))
+    vat_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, server_default=text("7"))
+    vat_amount: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("0"))
+    line_total: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("0"))
+    price_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    price_list_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    price_list_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    price_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     order: Mapped["DiningOrder"] = relationship("DiningOrder", back_populates="items")
     product: Mapped["Product"] = relationship("Product")  # type: ignore[name-defined]

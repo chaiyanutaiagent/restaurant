@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    CheckConstraint,
     ForeignKey,
     Index,
     Integer,
@@ -52,6 +53,7 @@ class Unit(SoftDeleteMixin, Base):
 class Category(SoftDeleteMixin, Base):
     __tablename__ = "categories"
     __table_args__ = (
+        CheckConstraint("price_kind IN ('standard', 'promotion')", name="supported_price_kind"),
         Index(
             "ix_categories_company_code_not_null_unique",
             "company_id",
@@ -309,6 +311,18 @@ class BranchProductReplacementRule(UUIDMixin, Base):
 class PriceList(SoftDeleteMixin, Base):
     __tablename__ = "price_lists"
 
+    __table_args__ = (
+        Index(
+            "ix_price_lists_resolution",
+            "company_id",
+            "branch_id",
+            "brand_id",
+            "channel",
+            "currency",
+            "is_active",
+        ),
+    )
+
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("companies.id"),
@@ -318,12 +332,28 @@ class PriceList(SoftDeleteMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default=text("'THB'"))
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("brands.id"), nullable=True, index=True
+    )
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True, index=True
+    )
+    customer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    channel: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    price_kind: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'standard'"))
+    promotion_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     valid_until: Mapped[date | None] = mapped_column(Date, nullable=True)
+    valid_from_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_until_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
     company: Mapped["Company"] = relationship("Company")
+    brand: Mapped["Brand | None"] = relationship("Brand")  # type: ignore[name-defined]
+    branch: Mapped["Branch | None"] = relationship("Branch")  # type: ignore[name-defined]
     items: Mapped[list["PriceListItem"]] = relationship("PriceListItem", back_populates="price_list")
 
 

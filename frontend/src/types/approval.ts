@@ -1,5 +1,6 @@
 export type ApprovalAction =
   | "pos.discount.override"
+  | "pos.price.override"
   | "pos.sale.void"
   | "pos.refund.create"
   | "inventory.stock.adjust";

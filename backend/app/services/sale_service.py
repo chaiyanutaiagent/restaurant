@@ -16,6 +16,7 @@ from app.models.audit import AuditLog
 from app.models.branch import Branch
 from app.models.company import Company
 from app.models.pos import CashierShift, Payment, SaleOrder, SaleOrderItem
+from app.models.pricing import PriceOverrideAudit
 from app.models.product import Product, ProductVariant
 from app.models.restaurant import BrandBranch
 from app.models.settings import BranchSettings
@@ -30,6 +31,7 @@ from app.schemas.pos import (
     SyncSalesRequest,
     VoidRequest,
 )
+from app.schemas.pricing import PricingCalculateRequest, PricingLineRequest
 from app.services.accounting_service import AccountingService
 from app.services.approval_service import ApprovalEvidence
 from app.services.crm_service import CRMService
@@ -38,6 +40,7 @@ from app.services.operational_handoff_service import (
     ensure_sale_completed_handoff,
     ensure_sale_state_changed_handoff,
 )
+from app.services.pricing_service import PricingResult, PricingService, canonical_hash, pricing_error
 from app.services.stock_service import StockService
 from app.utils.webhook_dispatcher import trigger_event
 from app.schemas.crm import EarnPointsRequest
@@ -90,6 +93,46 @@ def sale_discount_percentage(data: CreateSaleRequest) -> Decimal:
         return Decimal("0.00")
     total_discount = max(Decimal("0"), gross - after_order_discount)
     return q2(total_discount * Decimal("100") / gross)
+
+
+def pricing_request_for_sale(data: CreateSaleRequest) -> PricingCalculateRequest:
+    """Translate the untrusted checkout payload into the pricing input contract.
+
+    Client price and VAT values are supplied only as expectations. The pricing
+    engine resolves all authoritative monetary values from server-side data.
+    """
+    return PricingCalculateRequest(
+        items=[
+            PricingLineRequest(
+                product_id=item.product_id,
+                variant_id=item.variant_id,
+                qty=item.qty,
+                discount_amount=item.discount_amount,
+                discount_type=item.discount_type,
+                expected_unit_price=item.original_price,
+                expected_price_version=item.expected_price_version,
+                price_override=item.price_override,
+            )
+            for item in data.items
+        ],
+        discount_amount=data.discount_amount,
+        discount_type=data.discount_type,
+        channel=data.channel,
+        currency=data.currency,
+        customer_id=data.customer_id,
+        idempotency_key=data.client_order_id or f"non-idempotent-{uuid.uuid4()}",
+        cart_version=data.cart_version,
+    )
+
+
+def sale_request_hash(data: CreateSaleRequest) -> str:
+    return canonical_hash(
+        data.model_dump(
+            mode="json",
+            exclude={"approval_token", "price_override_approval_token"},
+            exclude_none=True,
+        )
+    )
 
 
 class SaleService:
@@ -334,11 +377,21 @@ class SaleService:
         brand_id: uuid.UUID | None = None,
         recipe_inventory_location_id: uuid.UUID | None = None,
         approval_evidence: ApprovalEvidence | None = None,
+        price_override_evidence: ApprovalEvidence | None = None,
+        pricing_result: PricingResult | None = None,
     ) -> SaleOrder:
         if not data.items:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one cart item is required")
 
-        discount_percentage = sale_discount_percentage(data)
+        pricing = pricing_result or await PricingService(self.db).calculate(
+            company_id=company_id,
+            branch_id=branch_id,
+            brand_id=brand_id,
+            payload=pricing_request_for_sale(data),
+            lock_prices=True,
+        )
+        request_hash = sale_request_hash(data)
+        discount_percentage = pricing.discount_percentage
         branch_settings = await self.db.scalar(
             select(BranchSettings).where(
                 BranchSettings.company_id == company_id,
@@ -378,6 +431,37 @@ class SaleService:
                     "cashier_limit_percentage": str(cashier_limit),
                 },
             )
+        if pricing.requires_price_override_approval and price_override_evidence is None:
+            raise pricing_error(
+                status.HTTP_403_FORBIDDEN,
+                "approval_required",
+                "Manager approval is required for this price override",
+                action="pos.price.override",
+            )
+
+        quote = None
+        if data.pricing_quote_id is not None or data.pricing_calculation_hash is not None:
+            if data.pricing_quote_id is None or data.pricing_calculation_hash is None:
+                raise pricing_error(
+                    status.HTTP_409_CONFLICT,
+                    "context_mismatch",
+                    "Both pricing quote id and calculation hash are required",
+                )
+            quote = await PricingService(self.db).validate_quote(
+                quote_id=data.pricing_quote_id,
+                calculation_hash=data.pricing_calculation_hash,
+                company_id=company_id,
+                branch_id=branch_id,
+                user_id=user_id,
+                current_result=pricing,
+            )
+        elif pricing.has_price_discrepancy:
+            raise pricing_error(
+                status.HTTP_409_CONFLICT,
+                "stale_price",
+                "Displayed price differs from the server price; recalculate before checkout",
+                calculation_hash=pricing.calculation_hash,
+            )
 
         shift = await self._get_shift_for_sale(company_id, branch_id, user_id, data.shift_id)
         location = await self._get_location(company_id, data.location_id)
@@ -388,57 +472,57 @@ class SaleService:
 
         stock_needs: dict[tuple[uuid.UUID, uuid.UUID | None], Decimal] = {}
         item_rows: list[dict[str, object]] = []
-        subtotal = Decimal("0")
-        vat_total = Decimal("0")
-        excluded_vat_total = Decimal("0")
-
-        for item in data.items:
-            if item.qty <= 0:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be positive")
-            product, variant = await self._get_product_snapshot(company_id, item.product_id, item.variant_id)
-            key = (item.product_id, item.variant_id)
-            stock_needs[key] = stock_needs.get(key, Decimal("0")) + Decimal(item.qty)
-
-            effective_price = self._apply_discount(
-                base_price=Decimal(item.original_price),
-                discount_amount=Decimal(item.discount_amount),
-                discount_type=item.discount_type,
+        for line in pricing.lines:
+            product = line.product
+            variant = line.variant
+            key = (product.id, variant.id if variant else None)
+            stock_needs[key] = stock_needs.get(key, Decimal("0")) + Decimal(line.request.qty)
+            effective_unit_price = q4(
+                line.applied_unit_price
+                - (line.line_discount_amount / Decimal(line.request.qty))
             )
-            effective_price = q4(effective_price)
-            line_subtotal = q4(effective_price * Decimal(item.qty))
-            line_vat = self._calc_vat(line_subtotal, item.vat_type, Decimal(item.vat_rate))
-            if item.vat_type == "excluded":
-                excluded_vat_total += line_vat
-            vat_total += line_vat
-            subtotal += line_subtotal
             item_rows.append(
                 {
                     "product": product,
                     "variant": variant,
-                    "qty": q4(Decimal(item.qty)),
-                    "unit_price": effective_price,
-                    "original_price": q4(Decimal(item.original_price)),
-                    "discount_amount": q4(Decimal(item.discount_amount)),
-                    "discount_type": item.discount_type,
-                    "vat_type": item.vat_type,
-                    "vat_rate": q2(Decimal(item.vat_rate)),
-                    "vat_amount": line_vat,
-                    "subtotal": line_subtotal,
+                    "qty": q4(line.request.qty),
+                    "unit_price": effective_unit_price,
+                    "original_price": line.applied_unit_price,
+                    "discount_amount": q4(line.request.discount_amount),
+                    "discount_type": line.request.discount_type,
+                    "vat_type": line.vat_type,
+                    "vat_rate": line.vat_rate,
+                    "vat_amount": line.vat_amount,
+                    "subtotal": line.line_subtotal,
+                    "line_total": line.line_total,
+                    "order_discount_share": line.order_discount_share,
+                    "price_source": line.price_source,
+                    "price_list_id": line.price_list_id,
+                    "price_list_version": line.price_list_version,
+                    "price_version": line.price_version,
+                    "price_snapshot": line.snapshot(),
+                    "price_override_applied": line.override_requested,
+                    "price_override_reason": (
+                        line.request.price_override.reason
+                        if line.request.price_override is not None
+                        else None
+                    ),
+                    "price_override_reason_code": (
+                        line.request.price_override.reason_code
+                        if line.request.price_override is not None
+                        else None
+                    ),
+                    "override_deviation_pct": line.override_deviation_pct,
+                    "override_requires_approval": line.override_requires_approval,
                 }
             )
 
         await self._ensure_stock_available(company_id, branch_id, data.location_id, stock_needs)
 
-        order_discount = q2(
-            self._apply_discount(
-                base_price=q2(subtotal),
-                discount_amount=Decimal(data.discount_amount),
-                discount_type=data.discount_type,
-            )
-        )
-        base_subtotal = q2(subtotal)
-        actual_order_discount = q2(base_subtotal - order_discount)
-        total_amount = q2(base_subtotal - actual_order_discount + q2(excluded_vat_total))
+        base_subtotal = pricing.subtotal
+        actual_order_discount = pricing.order_discount_amount
+        vat_total = pricing.vat_amount
+        total_amount = pricing.total_amount
         payment_rows = self._prepare_payments(data, total_amount)
         paid_amount = q2(sum((Decimal(item.amount) for item in payment_rows), Decimal("0")))
         if paid_amount < total_amount:
@@ -471,6 +555,13 @@ class SaleService:
             "client_order_id": data.client_order_id,
             "synced_at": datetime.now(timezone.utc) if not data.is_offline else None,
             "note": data.note,
+            "pricing_quote_id": data.pricing_quote_id,
+            "pricing_request_hash": request_hash,
+            "pricing_calculation_hash": pricing.calculation_hash,
+            "pricing_calculation_version": pricing.calculation_version,
+            "pricing_context": pricing.context(),
+            "pricing_snapshot": pricing.snapshot(),
+            "row_version": 1,
         }
         if data.client_order_id:
             inserted_id = (
@@ -485,7 +576,18 @@ class SaleService:
                 await self.db.rollback()
                 existing = await self.get_existing_sale_by_client_order_id(company_id, branch_id, data.client_order_id)
                 if existing is None:
-                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Duplicate client_order_id")
+                    raise pricing_error(
+                        status.HTTP_409_CONFLICT,
+                        "duplicate_request",
+                        "Idempotency key already exists in another checkout context",
+                    )
+                if existing.pricing_request_hash and existing.pricing_request_hash != request_hash:
+                    raise pricing_error(
+                        status.HTTP_409_CONFLICT,
+                        "duplicate_request",
+                        "Idempotency key was replayed with a different sale request",
+                        client_order_id=data.client_order_id,
+                    )
                 if brand_id is not None and recipe_inventory_location_id is not None and existing.recipe_stock_posted_at is None:
                     from app.services.store_inventory_service import StoreInventoryService
 
@@ -520,27 +622,72 @@ class SaleService:
             variant = row["variant"]
             assert isinstance(product, Product)
             assert variant is None or isinstance(variant, ProductVariant)
-            self.db.add(
-                SaleOrderItem(
-                    order_id=order_id,
-                    company_id=company_id,
-                    product_id=product.id,
-                    variant_id=variant.id if variant else None,
-                    product_name=product.name,
-                    variant_name=variant.name if variant else None,
-                    sku=variant.sku if variant else product.sku,
-                    unit_code=product.unit.code if product.unit else None,
-                    qty=row["qty"],
-                    unit_price=row["unit_price"],
-                    original_price=row["original_price"],
-                    discount_amount=row["discount_amount"],
-                    discount_type=row["discount_type"],
-                    vat_type=row["vat_type"],
-                    vat_rate=row["vat_rate"],
-                    vat_amount=row["vat_amount"],
-                    subtotal=row["subtotal"],
-                )
+            order_item = SaleOrderItem(
+                order_id=order_id,
+                company_id=company_id,
+                product_id=product.id,
+                variant_id=variant.id if variant else None,
+                product_name=product.name,
+                variant_name=variant.name if variant else None,
+                sku=variant.sku if variant else product.sku,
+                unit_code=product.unit.code if product.unit else None,
+                qty=row["qty"],
+                unit_price=row["unit_price"],
+                original_price=row["original_price"],
+                discount_amount=row["discount_amount"],
+                discount_type=row["discount_type"],
+                vat_type=row["vat_type"],
+                vat_rate=row["vat_rate"],
+                vat_amount=row["vat_amount"],
+                subtotal=row["subtotal"],
+                line_total=row["line_total"],
+                order_discount_share=row["order_discount_share"],
+                price_source=row["price_source"],
+                price_list_id=row["price_list_id"],
+                price_list_version=row["price_list_version"],
+                price_version=row["price_version"],
+                price_snapshot=row["price_snapshot"],
+                price_override_applied=row["price_override_applied"],
+                price_override_reason=row["price_override_reason"],
             )
+            self.db.add(order_item)
+            await self.db.flush()
+            if bool(row["price_override_applied"]):
+                evidence = price_override_evidence or ApprovalEvidence(
+                    action="pos.price.override",
+                    requester_id=user_id,
+                    approver_id=user_id,
+                    reason=str(row["price_override_reason"]),
+                    mode="policy_auto",
+                )
+                self.db.add(
+                    PriceOverrideAudit(
+                        company_id=company_id,
+                        brand_id=brand_id,
+                        branch_id=branch_id,
+                        order_id=order_id,
+                        order_item_id=order_item.id,
+                        product_id=product.id,
+                        requester_id=user_id,
+                        approver_id=evidence.approver_id,
+                        approval_grant_id=evidence.grant_id,
+                        original_unit_price=row["price_snapshot"]["authoritative_unit_price"],
+                        applied_unit_price=row["original_price"],
+                        deviation_pct=row["override_deviation_pct"],
+                        reason=str(row["price_override_reason"]),
+                        reason_code=str(row["price_override_reason_code"] or "other"),
+                        approval_mode=evidence.mode,
+                        policy_snapshot={
+                            "requires_approval": bool(row["override_requires_approval"]),
+                            "auto_limit_pct": str(branch_settings.pos_price_override_auto_limit_pct if branch_settings else 10),
+                            "auto_limit_amount": str(branch_settings.pos_price_override_auto_limit_amount if branch_settings else 100),
+                            "max_deviation_pct": str(branch_settings.pos_price_override_max_deviation_pct if branch_settings else 50),
+                            "minimum_margin_pct": str(branch_settings.pos_price_override_min_margin_pct if branch_settings else 0),
+                            "self_approval": bool(branch_settings.pos_price_override_self_approval if branch_settings else False),
+                        },
+                        price_snapshot=row["price_snapshot"],
+                    )
+                )
 
         for payment in payment_rows:
             self.db.add(
@@ -612,9 +759,15 @@ class SaleService:
                     "order_number": order_values["order_number"],
                     "total_amount": str(total_amount),
                     "discount_percentage": str(discount_percentage),
+                    "pricing_calculation_hash": pricing.calculation_hash,
                     "approval": (
                         approval_evidence.as_audit_value()
                         if approval_evidence is not None
+                        else None
+                    ),
+                    "price_override_approval": (
+                        price_override_evidence.as_audit_value()
+                        if price_override_evidence is not None
                         else None
                     ),
                 },
@@ -650,6 +803,8 @@ class SaleService:
                 )
             except Exception:
                 pass
+        if quote is not None:
+            PricingService.consume_quote(quote, order_id)
         await ensure_sale_completed_handoff(
             self.db,
             company_id=company_id,

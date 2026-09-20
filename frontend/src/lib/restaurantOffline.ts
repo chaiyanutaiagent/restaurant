@@ -287,6 +287,12 @@ export async function queueRestaurantOrder(
   const localCreatedAt = new Date().toISOString();
   const queuedPayload: WapPaidOrderPayload & { client_order_id: string; local_created_at: string } = {
     ...payload,
+    items: payload.items.map((item) => ({
+      ...item,
+      expected_unit_price: Number(
+        menu.products.find((product) => product.id === item.product_id)?.selling_price ?? 0
+      ),
+    })),
     shift_id: menu.shift_id ?? payload.shift_id,
     location_id: menu.location_id ?? payload.location_id,
     client_order_id: clientOrderId,

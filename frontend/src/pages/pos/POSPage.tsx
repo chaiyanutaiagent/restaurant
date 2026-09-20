@@ -59,7 +59,7 @@ import { useDeviceStore } from "@/stores/device.store";
 import type { BranchReplacementRule, BranchSettings } from "@/types/admin";
 import type { ProductListItem } from "@/types/product";
 import type { Customer, CustomerSearchResult, LoyaltySettings } from "@/types/crm";
-import type { CartItem, CashierShift, ExchangeContextDraft, HeldSaleDraft, PaymentDraft, PaymentMethod, PendingSale, ReplacementRuleDraft, SaleOrder } from "@/types/pos";
+import type { CartItem, CashierShift, ExchangeContextDraft, HeldSaleDraft, PaymentDraft, PaymentMethod, PendingSale, PricingCalculation, ReplacementRuleDraft, SaleOrder } from "@/types/pos";
 import type { StockBalance, StockLocation } from "@/types/stock";
 import CreateCustomerDialog from "@/pages/crm/CreateCustomerDialog";
 import RedeemPointsDialog from "@/pages/crm/RedeemPointsDialog";
@@ -275,6 +275,8 @@ export default function POSPage(): JSX.Element {
   const [priceEditorOpen, setPriceEditorOpen] = useState(false);
   const [priceEditProductId, setPriceEditProductId] = useState<string | null>(null);
   const [priceEditValue, setPriceEditValue] = useState("");
+  const [priceEditReason, setPriceEditReason] = useState("");
+  const [priceEditReasonCode, setPriceEditReasonCode] = useState<"customer_recovery" | "price_match" | "manager_comp" | "damaged_item" | "manual_correction" | "other">("other");
   const [voidOrder, setVoidOrder] = useState<SaleOrder | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [refundOrder, setRefundOrder] = useState<SaleOrder | null>(null);
@@ -298,6 +300,8 @@ export default function POSPage(): JSX.Element {
   const takeawayCustomerSlipRef = useRef<HTMLDivElement | null>(null);
   const takeawayKitchenSlipRef = useRef<HTMLDivElement | null>(null);
   const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const checkoutIdRef = useRef(generateClientOrderId());
+
   const scannerStreamRef = useRef<MediaStream | null>(null);
   const scannerFrameRef = useRef<number | null>(null);
   const autoPrintedOrderRef = useRef<string | null>(null);
@@ -600,6 +604,9 @@ export default function POSPage(): JSX.Element {
     [exchangeCreditApplied, exchangeCreditAvailable],
   );
   const totalDiscount = orderDiscount + loyaltyDiscount + exchangeCreditApplied;
+  useEffect(() => {
+    checkoutIdRef.current = generateClientOrderId();
+  }, [cartItems, orderDiscount, loyaltyDiscount, exchangeCreditApplied, selectedCustomer?.id]);
   const standardFinalTotal = Math.max(cart.total_amount - loyaltyDiscount - exchangeCreditApplied, 0);
   const finalTotal = isTakeawayMode ? takeawayExpectedTotal : standardFinalTotal;
   const secondaryAmount = Math.max(0, Math.min(secondaryPaymentAmount, finalTotal));
@@ -1032,7 +1039,9 @@ export default function POSPage(): JSX.Element {
 
   function openPriceEditor(item: CartItem): void {
     setPriceEditProductId(item.product_id);
-    setPriceEditValue(item.original_price.toString());
+    setPriceEditValue((item.price_override?.requested_unit_price ?? item.original_price).toString());
+    setPriceEditReason(item.price_override?.reason ?? "");
+    setPriceEditReasonCode(item.price_override?.reason_code ?? "other");
     setPriceEditorOpen(true);
   }
 
@@ -1045,15 +1054,25 @@ export default function POSPage(): JSX.Element {
       toast({ title: "กรอกราคาใหม่ไม่ถูกต้อง" });
       return;
     }
+    if (priceEditReason.trim().length < 3) {
+      toast({ title: "กรุณาระบุเหตุผลอย่างน้อย 3 ตัวอักษร" });
+      return;
+    }
     updateCartItem(priceEditProductId, (current) => ({
       ...current,
-      original_price: nextPrice,
       unit_price: nextPrice,
+      price_override: {
+        requested_unit_price: nextPrice,
+        reason_code: priceEditReasonCode,
+        reason: priceEditReason.trim(),
+      },
     }));
     setPriceEditorOpen(false);
     setPriceEditProductId(null);
     setPriceEditValue("");
-    toast({ title: "อัปเดตราคาในบิลแล้ว" });
+    setPriceEditReason("");
+    setPriceEditReasonCode("other");
+    toast({ title: "บันทึกคำขอเปลี่ยนราคาแล้ว", description: "Server จะตรวจนโยบายและสิทธิ์อีกครั้งก่อนชำระเงิน" });
   }
 
   async function executeVoidSale(approvalToken?: string): Promise<void> {
@@ -1256,6 +1275,7 @@ export default function POSPage(): JSX.Element {
     setLoyaltyDiscount(0);
     setNote("");
     setExchangeContext(null);
+    checkoutIdRef.current = generateClientOrderId();
   }
 
   async function refreshHeldBills(): Promise<void> {
@@ -1382,7 +1402,33 @@ export default function POSPage(): JSX.Element {
     toast({ title: "บันทึกออฟไลน์แล้ว", description: "รายการขายถูกคิวไว้เพื่อ sync ภายหลัง" });
   }
 
-  function buildCheckoutPayload(approvalToken?: string): Record<string, unknown> {
+  function buildPricingPayload(): Record<string, unknown> {
+    return {
+      items: cart.items.map((item) => ({
+        product_id: item.product_id,
+        variant_id: item.variant_id,
+        qty: item.qty,
+        discount_amount: item.discount_amount,
+        discount_type: item.discount_type,
+        expected_unit_price: item.original_price,
+        ...(item.expected_price_version ? { expected_price_version: item.expected_price_version } : {}),
+        ...(item.price_override ? { price_override: item.price_override } : {}),
+      })),
+      discount_amount: totalDiscount,
+      discount_type: "amount",
+      channel: "pos",
+      currency: "THB",
+      customer_id: selectedCustomer?.id ?? null,
+      idempotency_key: `${checkoutIdRef.current}:price`,
+      cart_version: 1,
+    };
+  }
+
+  function buildCheckoutPayload(
+    approvalToken?: string,
+    priceOverrideApprovalToken?: string,
+    quote?: PricingCalculation,
+  ): Record<string, unknown> {
     if (!currentShift) return {};
     return {
         shift_id: currentShift.id,
@@ -1397,6 +1443,8 @@ export default function POSPage(): JSX.Element {
           discount_type: item.discount_type,
           vat_type: item.vat_type,
           vat_rate: item.vat_rate,
+          ...(item.expected_price_version ? { expected_price_version: item.expected_price_version } : {}),
+          ...(item.price_override ? { price_override: item.price_override } : {}),
         })),
         discount_amount: totalDiscount,
         discount_type: "amount",
@@ -1409,12 +1457,68 @@ export default function POSPage(): JSX.Element {
         customer_tax_id: customerTaxId || selectedCustomer?.tax_id || null,
         customer_id: selectedCustomer?.id ?? null,
         note: exchangeNote,
-        ...(approvalToken ? { approval_token: approvalToken } : {})
+        client_order_id: checkoutIdRef.current,
+        channel: "pos",
+        currency: "THB",
+        cart_version: quote?.cart_version ?? 1,
+        ...(quote ? {
+          pricing_quote_id: quote.quote_id,
+          pricing_calculation_hash: quote.calculation_hash,
+        } : {}),
+        ...(approvalToken ? { approval_token: approvalToken } : {}),
+        ...(priceOverrideApprovalToken ? { price_override_approval_token: priceOverrideApprovalToken } : {})
     };
   }
 
-  async function executeOnlineCheckout(approvalToken?: string): Promise<void> {
-      const response = await posApi.createSale(buildCheckoutPayload(approvalToken));
+  async function executeOnlineCheckout(
+    approvalToken?: string,
+    priceOverrideApprovalToken?: string,
+    existingQuote?: PricingCalculation,
+  ): Promise<void> {
+      const quote = existingQuote ?? (await posApi.calculatePricing(buildPricingPayload())).data.data;
+      const serverTotal = Number(quote.total_amount);
+      const totalsDiffer = Math.abs(serverTotal - finalTotal) >= 0.01 || quote.has_price_discrepancy;
+      if (!existingQuote && totalsDiffer) {
+        const accepted = window.confirm(
+          `ราคาจาก Server เปลี่ยนจาก ${formatThaiCurrency(finalTotal)} เป็น ${formatThaiCurrency(serverTotal)} ต้องการตรวจสอบและใช้ราคาใหม่หรือไม่?`
+        );
+        if (!accepted) return;
+      }
+      if (currentPaidAmount < serverTotal) {
+        toast({
+          title: "ยอดรับชำระไม่พอหลังตรวจราคากับ Server",
+          description: `ยอดที่ต้องชำระ ${formatThaiCurrency(serverTotal)}`,
+          variant: "destructive",
+        });
+        return;
+      }
+      const exactPayload = buildCheckoutPayload(approvalToken, priceOverrideApprovalToken, quote);
+      if (Number(quote.discount_percentage) > cashierDiscountLimit && !canOverrideDiscount && !approvalToken) {
+        setPendingManagerApproval({
+          action: "pos.discount.override",
+          requestPayload: exactPayload,
+          reason: `ส่วนลด ${Number(quote.discount_percentage).toFixed(2)}% เกินเพดาน Cashier ${cashierDiscountLimit.toFixed(2)}%`,
+          description: "ส่วนลดรวมทั้งส่วนลดสินค้า ส่วนลดบิล แต้ม และเครดิตเกินเพดาน Cashier",
+          onApproved: (token) => executeOnlineCheckout(token, priceOverrideApprovalToken, quote),
+        });
+        return;
+      }
+      const selfApprovalAllowed = branchSettings?.pos_price_override_self_approval ?? false;
+      if (
+        quote.requires_price_override_approval
+        && !priceOverrideApprovalToken
+        && !(canApprovePriceOverride && selfApprovalAllowed)
+      ) {
+        setPendingManagerApproval({
+          action: "pos.price.override",
+          requestPayload: exactPayload,
+          reason: cart.items.map((item) => item.price_override?.reason).filter(Boolean).join("; "),
+          description: "ราคาที่ขอเปลี่ยนเกินเกณฑ์อัตโนมัติ ต้องได้รับอนุมัติจาก Manager คนอื่น",
+          onApproved: (token) => executeOnlineCheckout(approvalToken, token, quote),
+        });
+        return;
+      }
+      const response = await posApi.createSale(exactPayload);
       const order = response.data.data as SaleOrder;
       setLastOrder(order);
       setShowReceipt(true);
@@ -1520,38 +1624,22 @@ export default function POSPage(): JSX.Element {
         return;
       }
       if (!isOnline) {
-        if (effectiveDiscountPct > cashierDiscountLimit && !canOverrideDiscount) {
-          toast({
-            title: "ส่วนลดนี้ต้องอนุมัติขณะออนไลน์",
-            description: "ลดส่วนลดให้อยู่ในเพดาน Cashier หรือเชื่อมต่ออินเทอร์เน็ตก่อนบันทึก",
-            variant: "destructive"
-          });
-          return;
-        }
-        await queueOfflineSale();
-        return;
-      }
-      if (effectiveDiscountPct > cashierDiscountLimit && !canOverrideDiscount) {
-        const payload = buildCheckoutPayload();
-        setPendingManagerApproval({
-          action: "pos.discount.override",
-          requestPayload: payload,
-          reason: `ส่วนลด ${effectiveDiscountPct.toFixed(2)}% เกินเพดาน Cashier ${cashierDiscountLimit.toFixed(2)}%`,
-          description: "ส่วนลดรวมของบิลนี้เกินเพดาน Cashier และต้องได้รับอนุมัติจาก Manager",
-          onApproved: async (token) => {
-            setIsSubmitting(true);
-            try {
-              await executeOnlineCheckout(token);
-            } finally {
-              setIsSubmitting(false);
-            }
-          }
+        toast({
+          title: "ตะกร้านี้อยู่ในสถานะ Stale",
+          description: "เชื่อมต่ออินเทอร์เน็ตเพื่อตรวจราคา VAT และสิทธิ์กับ Server ก่อนชำระเงิน",
+          variant: "destructive"
         });
         return;
       }
       await executeOnlineCheckout();
     } catch (error) {
-      toast({ title: "ชำระเงินไม่สำเร็จ", description: error instanceof Error ? error.message : "ลองใหม่อีกครั้ง" });
+      toast({
+        title: "ชำระเงินไม่สำเร็จ",
+        description: loyaltyDiscount > 0
+          ? "มีการใช้แต้มแล้วแต่การขายยังไม่สำเร็จ กรุณาตรวจรายการแต้มของลูกค้าก่อนลองใหม่"
+          : (error instanceof Error ? error.message : "ลองใหม่อีกครั้ง"),
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -1588,6 +1676,8 @@ export default function POSPage(): JSX.Element {
   const staffAuditLabel = `${staffDisplayName} · ID ${staffIdentifier}`;
   const canApplyDiscount = hasPermission("pos.discount.apply") || hasPermission("pos.discount.override");
   const canOverrideDiscount = hasPermission("pos.discount.override");
+  const canApprovePriceOverride = hasPermission("pos.price.override");
+  const canRequestPriceOverride = canApprovePriceOverride || hasPermission("pos.price.override.request");
   const canVoidSale = hasPermission("pos.sale.void") || hasPermission("pos.sale.void.request");
   const canRefundSale = hasPermission("pos.refund.create") || hasPermission("pos.refund.request");
   const canManageCentralReplacementRules = hasPermission("system.branch.edit");
@@ -2359,7 +2449,7 @@ export default function POSPage(): JSX.Element {
                         {item.variant_name ? <p className="text-xs text-slate-400">{item.variant_name}</p> : null}
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-1.5">
-                        {canOverrideDiscount && !isTakeawayMode ? (
+                        {canRequestPriceOverride && !isTakeawayMode ? (
                           <button type="button" className="text-xs text-blue-500 hover:text-blue-700" onClick={() => openPriceEditor(item)}>
                             แก้
                           </button>
@@ -2596,7 +2686,7 @@ export default function POSPage(): JSX.Element {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className={`rounded-2xl border p-4 ${isOnline ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
               <div className="flex items-center gap-2 text-sm font-semibold"><Activity className="h-4 w-4" />เครือข่ายและการซิงก์</div>
-              <div className={`mt-3 text-lg font-bold ${isOnline ? "text-emerald-700" : "text-red-700"}`}>{isOnline ? "ออนไลน์" : "ออฟไลน์ — เก็บบิลรอซิงก์"}</div>
+              <div className={`mt-3 text-lg font-bold ${isOnline ? "text-emerald-700" : "text-red-700"}`}>{isOnline ? "ออนไลน์" : "ออฟไลน์ — ราคา Stale / ปิดชำระเงิน"}</div>
               <div className="mt-1 text-xs text-slate-500">ซิงก์ล่าสุด {lastSyncAt ? lastSyncAt.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "ยังไม่มีข้อมูลรอบนี้"}</div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -3113,7 +3203,26 @@ export default function POSPage(): JSX.Element {
               onChange={(event) => setPriceEditValue(event.target.value)}
               placeholder="ราคาใหม่"
             />
-            <p className="text-sm text-slate-500">ใช้สำหรับ override ราคาเฉพาะบิลนี้เท่านั้น</p>
+            <textarea
+              className="min-h-20 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              value={priceEditReason}
+              onChange={(event) => setPriceEditReason(event.target.value)}
+              placeholder="เหตุผลที่เปลี่ยนราคา (อย่างน้อย 3 ตัวอักษร)"
+              maxLength={500}
+            />
+            <select
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
+              value={priceEditReasonCode}
+              onChange={(event) => setPriceEditReasonCode(event.target.value as typeof priceEditReasonCode)}
+            >
+              <option value="customer_recovery">ดูแลลูกค้า</option>
+              <option value="price_match">เทียบราคาตลาด</option>
+              <option value="manager_comp">ผู้จัดการให้ส่วนลด</option>
+              <option value="damaged_item">สินค้ามีตำหนิ</option>
+              <option value="manual_correction">แก้ราคาที่ตั้งผิด</option>
+              <option value="other">อื่น ๆ</option>
+            </select>
+            <p className="text-sm text-slate-500">ใช้เฉพาะบิลนี้ และ Server จะบันทึกผู้ขอ ผู้อนุมัติ เหตุผล และราคาก่อน–หลัง</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPriceEditorOpen(false)}>ยกเลิก</Button>

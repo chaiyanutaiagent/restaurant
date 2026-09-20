@@ -100,6 +100,11 @@ export interface BranchSettings {
   pos_allow_discount: boolean;
   pos_max_discount_pct: number;
   pos_cashier_discount_limit_pct: number;
+  pos_price_override_auto_limit_pct: number;
+  pos_price_override_auto_limit_amount: number;
+  pos_price_override_max_deviation_pct: number;
+  pos_price_override_min_margin_pct: number;
+  pos_price_override_self_approval: boolean;
   stock_adjust_approval_threshold_qty: number;
   promptpay_target: string | null;
   promptpay_name: string | null;

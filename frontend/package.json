@@ -17,6 +17,7 @@
     "android:open": "cap open android",
     "e2e:p5": "playwright test --config=playwright.config.ts",
     "e2e:platform": "playwright test --config=playwright.platform.config.ts",
+    "e2e:company": "playwright test --config=playwright.company.config.ts",
     "e2e:kitchen": "playwright test --config=playwright.company-kitchen.config.ts",
     "e2e:distribution": "playwright test --config=playwright.company-distribution.config.ts",
     "e2e:takeaway": "playwright test --config=playwright.takeaway.config.ts",

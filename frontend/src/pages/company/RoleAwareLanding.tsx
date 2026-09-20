@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
 import { Navigate } from "react-router-dom";
+import CompanyStatePanel from "@/components/company/CompanyStatePanel";
 import { companyFoundationApi } from "@/lib/api";
+import { companyRequestState } from "@/lib/companyPresentation";
 
 export default function RoleAwareLanding(): JSX.Element {
   const access = useQuery({
@@ -11,11 +12,18 @@ export default function RoleAwareLanding(): JSX.Element {
   });
 
   if (access.isLoading) {
+    return <CompanyStatePanel kind="loading" title="กำลังเลือกพื้นที่ทำงานตามสิทธิ์" />;
+  }
+  if (access.error || !access.data) {
+    const state = companyRequestState(access.error);
     return (
-      <div className="flex min-h-48 items-center justify-center text-slate-500">
-        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> กำลังเลือกพื้นที่ทำงานตามสิทธิ์
-      </div>
+      <CompanyStatePanel
+        kind={state}
+        title={state === "permission_denied" ? "ไม่มีพื้นที่ทำงานที่ได้รับอนุญาต" : undefined}
+        description={state === "permission_denied" ? "บัญชีนี้ยังไม่มีบทบาทหรือขอบเขตบริษัทที่ Server อนุญาต" : undefined}
+        onRetry={() => void access.refetch()}
+      />
     );
   }
-  return <Navigate to={access.data?.default_route ?? "/company"} replace />;
+  return <Navigate to={access.data.default_route || "/403"} replace />;
 }

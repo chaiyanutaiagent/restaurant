@@ -33,6 +33,9 @@ export type WapMenuProduct = {
 export type WapMenu = {
   brand_slug?: string | null;
   brand_name?: string | null;
+  brand_id?: string | null;
+  company_id?: string;
+  branch_id?: string;
   branch_name: string;
   shift_id?: string | null;
   location_id?: string | null;
@@ -40,8 +43,11 @@ export type WapMenu = {
   promptpay_name?: string | null;
   promptpay_payload?: string | null;
   offline_policy_version?: number;
-  offline_authorization?: string;
-  offline_authorization_expires_at?: string;
+  offline_mode_enabled?: boolean;
+  offline_snapshot_version?: string;
+  offline_snapshot_stale_at?: string | null;
+  offline_authorization?: string | null;
+  offline_authorization_expires_at?: string | null;
   offline_device_id?: string | null;
   categories: { id: string; name: string }[];
   products: WapMenuProduct[];
@@ -104,14 +110,45 @@ export type WapPaidOrderPayload = {
   local_kitchen_slip_printed_at?: string;
   offline_policy_version?: number;
   offline_authorization?: string;
+  schema_version?: "offline-pos-v1";
+  client_operation_id?: string;
+  idempotency_key?: string;
+  request_hash?: string;
+  company_id?: string;
+  brand_id?: string | null;
+  branch_id?: string;
+  station_key?: string;
+  operation_type?: "cash_sale" | "hold_draft";
+  sequence_no?: number;
+  price_snapshot_version?: string;
+  currency?: "THB";
   is_offline?: boolean;
 };
 
 export type WapOfflineSyncResult = {
   client_order_id: string;
-  status: "synced" | "needs_review";
+  status: "synced" | "needs_review" | "rejected" | "quarantined" | "unknown";
+  sync_state?: "pending_sync" | "syncing" | "server_acknowledged" | "reconciled" | "needs_review" | "rejected" | "quarantined" | "unknown" | "purged" | null;
+  operation_id?: string | null;
   order: WapOrder | null;
+  error_code?: string | null;
   error: string | null;
+  acknowledged_at?: string | null;
+  reconciled_at?: string | null;
+};
+
+export type OfflineSyncOperation = {
+  operation_id: string;
+  client_operation_id: string;
+  status: string;
+  error_code: string | null;
+  error: string | null;
+  retry_count: number;
+  result?: WapOrder | null;
+  acknowledged_at: string | null;
+  reconciled_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 export type WapOfflineSyncResponse = {
@@ -926,6 +963,12 @@ export const wapApi = {
       { orders },
       { timeout: 8000 }
     ),
+  inquireOfflineOperation: (clientOperationId: string) =>
+    api.get<ApiResponse<OfflineSyncOperation>>(`/restaurant/offline-sync/${encodeURIComponent(clientOperationId)}`),
+  listOfflineOperations: () =>
+    api.get<ApiResponse<OfflineSyncOperation[]>>("/restaurant/offline-sync"),
+  purgeOfflineOperations: () =>
+    api.post<ApiResponse<{ purged: number; retention_days: number }>>("/restaurant/offline-sync/purge"),
   getOrder: (sessionId: string) =>
     api.get<ApiResponse<WapOrder>>(`/restaurant/wap/orders/${sessionId}`),
   markCustomerSlip: (sessionId: string) =>

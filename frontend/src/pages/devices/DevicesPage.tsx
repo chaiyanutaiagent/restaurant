@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, CircleAlert, Cpu, Loader2, QrCode, RefreshCw, RotateCcwKey, TabletSmartphone, Unplug, Wifi } from "lucide-react";
+import { Activity, CircleAlert, ClipboardCheck, Cpu, Loader2, QrCode, RefreshCw, RotateCcwKey, TabletSmartphone, Unplug, Wifi } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -141,7 +142,7 @@ export default function DevicesPage(): JSX.Element {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">Phase 3</p><h1 className="text-3xl font-bold text-gray-950">อุปกรณ์ประจำร้าน</h1><p className="mt-1 text-gray-500">ลงทะเบียน จับคู่ เปลี่ยน PIN และยกเลิก Counter, Kitchen, Pickup ตาม Branch/Station</p></div>
-        <Button type="button" variant="outline" onClick={() => void devicesQuery.refetch()}><RefreshCw className={`h-4 w-4 ${devicesQuery.isFetching ? "animate-spin" : ""}`} />รีเฟรช</Button>
+        <div className="flex flex-wrap gap-2"><Button asChild type="button" variant="outline"><Link to="/devices/uat-readiness"><ClipboardCheck className="h-4 w-4" />Physical UAT</Link></Button><Button type="button" variant="outline" onClick={() => void devicesQuery.refetch()}><RefreshCw className={`h-4 w-4 ${devicesQuery.isFetching ? "animate-spin" : ""}`} />รีเฟรช</Button></div>
       </div>
 
       {provisioning ? <ProvisioningPanel provisioning={provisioning} /> : null}

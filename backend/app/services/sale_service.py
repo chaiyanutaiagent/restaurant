@@ -585,7 +585,10 @@ class SaleService:
             "change_amount": change_amount,
             "is_offline": data.is_offline,
             "client_order_id": data.client_order_id,
-            "synced_at": datetime.now(timezone.utc) if not data.is_offline else None,
+            # Reaching this insert means the server has authoritatively repriced,
+            # checked stock and accepted the payment. Offline-originated sales are
+            # therefore reconciled at this point too.
+            "synced_at": datetime.now(timezone.utc),
             "note": data.note,
             "pricing_quote_id": data.pricing_quote_id,
             "pricing_request_hash": request_hash,

@@ -1,5 +1,7 @@
 # WP47 — UAT Offline/Sync Design Contract
 
+> Implementation amendment — 2026-09-21: UAT-only implementation and bounded activation were approved after this design gate. The default remains `false`; activation requires the HTTPS `uat-` hostname, explicit Company/Branch allow-lists, and a paired Counter. Production remains rejected by configuration validation.
+
 วันที่: `2026-09-20`
 สถานะ: **Design approved for implementation planning — feature remains disabled**
 ขอบเขต: Restaurant POS, Retail POS และ Takeaway POS บน Desktop/iPad; UAT only

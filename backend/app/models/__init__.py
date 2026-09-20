@@ -21,6 +21,13 @@ from app.models.auth import RefreshToken
 from app.models.approval import ApprovalGrantUsage, ManagerPinCredential
 from app.models.pricing import PriceCalculation, PriceOverrideAudit
 from app.models.device import DeviceRegistration
+from app.models.offline_sync import (
+    OfflinePosOperation,
+    OfflinePosOperationEvent,
+    PhysicalUATAudit,
+    PhysicalUATCheck,
+    PhysicalUATSession,
+)
 from app.models.product import (
     Unit,
     Category,
@@ -315,6 +322,11 @@ __all__ = [
     "CreditLedger",
     "ProductionBatch",
     "ProductionBatchLine",
+    "OfflinePosOperation",
+    "OfflinePosOperationEvent",
+    "PhysicalUATAudit",
+    "PhysicalUATCheck",
+    "PhysicalUATSession",
     "StockCutoverRun",
     "StockCutoverItem",
     "TakeawayBranchCatalogItem",

@@ -190,6 +190,7 @@ class WapOfflineAuthorizationTests(unittest.IsolatedAsyncioTestCase):
             station_key=None,
             paired_at=self.now - timedelta(hours=1),
             revoked_at=None,
+            credential_version=3,
         )
         await OfflineSaleAuthorizationService.validate(
             identity_db,

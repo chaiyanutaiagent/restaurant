@@ -583,13 +583,6 @@ class DiningService:
                 return await self.get_wap_order(existing_session.id, company_id)
             return existing_order
 
-        if payload.is_offline:
-            raise pricing_error(
-                status.HTTP_409_CONFLICT,
-                "stale_price",
-                "Offline prices are Stale; reconnect for server verification before checkout",
-            )
-
         payment_rows = [
             PaymentCreateRequest(
                 payment_method=item.payment_method,

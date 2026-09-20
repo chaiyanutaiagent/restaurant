@@ -53,20 +53,59 @@ export type RestaurantMenuSnapshot = {
   synced_at: number;
 };
 
-export type RestaurantPendingOrderStatus = "pending" | "syncing" | "needs_review" | "synced";
+export type RestaurantPendingOrderStatus =
+  | "pending_sync"
+  | "syncing"
+  | "server_acknowledged"
+  | "reconciled"
+  | "needs_review"
+  | "rejected"
+  | "quarantined"
+  | "unknown";
+
+export type OfflineEncryptionKey = {
+  key: string;
+  crypto_key: CryptoKey;
+  created_at: number;
+};
+
+export type EncryptedOfflineData = {
+  version: 1;
+  iv: string;
+  ciphertext: string;
+};
 
 export type RestaurantPendingOrder = {
   client_order_id: string;
   company_id: string;
+  brand_id?: string | null;
   branch_id: string;
   brand_slug: string;
   user_id: string;
-  payload: WapPaidOrderPayload;
-  local_order: WapOrder;
+  device_id?: string;
+  shift_id?: string;
+  station_key?: string;
+  schema_version?: "offline-pos-v1";
+  client_operation_id?: string;
+  idempotency_key?: string;
+  request_hash?: string;
+  sequence_no?: number;
+  operation_type?: "cash_sale";
+  price_snapshot_version?: string;
+  encrypted_data?: EncryptedOfflineData;
+  encryption_version?: 1;
+  // Legacy fields are read only so pre-WP47 queues can be quarantined safely.
+  payload?: WapPaidOrderPayload;
+  local_order?: WapOrder;
   server_order?: WapOrder;
   status: RestaurantPendingOrderStatus;
   attempts: number;
   last_error?: string;
+  last_error_code?: string;
+  next_retry_at?: number;
+  server_operation_id?: string;
+  acknowledged_at?: number;
+  reconciled_at?: number;
   created_at: number;
   updated_at: number;
   synced_at?: number;
@@ -131,6 +170,7 @@ export class RestaurantDatabase extends Dexie {
   replacementRules!: Table<ReplacementRuleDraft, string>;
   restaurantMenuSnapshots!: Table<RestaurantMenuSnapshot, string>;
   restaurantPendingOrders!: Table<RestaurantPendingOrder, string>;
+  offlineKeys!: Table<OfflineEncryptionKey, string>;
   takeawayWorkspaceSnapshots!: Table<TakeawayWorkspaceSnapshot, string>;
   takeawayPendingSales!: Table<TakeawayPendingSale, string>;
 
@@ -239,6 +279,34 @@ export class RestaurantDatabase extends Dexie {
       restaurantPendingOrders: "client_order_id, [company_id+branch_id+brand_slug], status, created_at, updated_at",
       takeawayWorkspaceSnapshots: "key, [company_id+brand_id+branch_id], user_id, synced_at",
       takeawayPendingSales: "client_sale_id, [company_id+brand_id+branch_id], status, created_at, updated_at"
+    });
+
+    this.version(9).stores({
+      pendingTransactions: "++id, type, payload, createdAt, syncedAt",
+      offlineProducts: "id, data, updatedAt",
+      offlineSettings: "key, value",
+      products: "id, sku, barcode, category_id, is_active, synced_at",
+      categories: "id, parent_id, synced_at",
+      units: "id, code, synced_at",
+      stockBalances: "id, product_id, location_id, branch_id, synced_at",
+      lowStockAlerts: "id, product_id, branch_id, synced_at",
+      pendingSales: "client_order_id, synced, created_at",
+      completedOrders: "id, shift_id, created_at, synced_at",
+      heldBills: "id, shift_id, location_id, held_at",
+      replacementRules: "id, branch_id, source_product_id, replacement_product_id, created_at",
+      restaurantMenuSnapshots: "key, company_id, branch_id, brand_slug, user_id, synced_at",
+      restaurantPendingOrders: "client_order_id, [company_id+branch_id+brand_slug], status, created_at, updated_at, next_retry_at, sequence_no",
+      offlineKeys: "key, created_at",
+      takeawayWorkspaceSnapshots: "key, [company_id+brand_id+branch_id], user_id, synced_at",
+      takeawayPendingSales: "client_sale_id, [company_id+brand_id+branch_id], status, created_at, updated_at"
+    }).upgrade(async (transaction) => {
+      await transaction.table("restaurantPendingOrders").toCollection().modify((row: RestaurantPendingOrder) => {
+        if (!row.encrypted_data) {
+          row.status = "quarantined";
+          row.last_error_code = "legacy_plaintext_outbox";
+          row.last_error = "รายการจากระบบเดิมถูกกักไว้เพื่อป้องกันข้อมูลผิดรูปแบบ กรุณาตรวจสอบกับผู้ดูแล";
+        }
+      });
     });
   }
 }

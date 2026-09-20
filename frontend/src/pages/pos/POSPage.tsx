@@ -348,7 +348,10 @@ export default function POSPage(): JSX.Element {
   const [takeawayResultOpen, setTakeawayResultOpen] = useState(false);
   const [takeawayPrintBusy, setTakeawayPrintBusy] = useState<"customer" | "kitchen" | null>(null);
   const [takeawayPendingPrint, setTakeawayPendingPrint] = useState<"customer" | "kitchen" | null>(null);
-  const [takeawayOutboxSummary, setTakeawayOutboxSummary] = useState<RestaurantOutboxSummary>({ pending: 0, syncing: 0, needsReview: 0 });
+  const [takeawayOutboxSummary, setTakeawayOutboxSummary] = useState<RestaurantOutboxSummary>({
+    pending: 0, syncing: 0, acknowledged: 0, reconciled: 0,
+    needsReview: 0, rejected: 0, quarantined: 0, unknown: 0,
+  });
   const [closeShiftOpen, setCloseShiftOpen] = useState(false);
   const [confirm, ConfirmDialog] = useConfirm();
   const [heldBillsOpen, setHeldBillsOpen] = useState(false);
@@ -1805,7 +1808,7 @@ export default function POSPage(): JSX.Element {
     setTakeawayResultOpen(true);
     resetActiveSale();
     setTakeawayOutboxSummary(await getRestaurantOutboxSummary());
-    if (result.status === "synced") {
+    if (result.status === "reconciled") {
       await syncStockBalances(branchId ?? undefined);
       await queryClient.invalidateQueries({ queryKey: ["pos", "stock-balances"] });
       toast({ title: "รับเงินและออกคิวสำเร็จ", description: `คิว ${result.order.queue_display ?? "-"} พร้อมพิมพ์สลิป` });

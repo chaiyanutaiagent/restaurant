@@ -32,6 +32,7 @@ import NotFoundPage from "@/pages/NotFoundPage";
 import PayablePage from "@/pages/payable/PayablePage";
 import POSPage from "@/pages/pos/POSPage";
 import POSAdminPage from "@/pages/pos/POSAdminPage";
+import OfflineSyncCenterPage from "@/pages/pos/OfflineSyncCenterPage";
 import POFormPage from "@/pages/purchase/POFormPage";
 import PurchaseOrdersPage from "@/pages/purchase/PurchaseOrdersPage";
 import SuppliersPage from "@/pages/purchase/SuppliersPage";
@@ -86,6 +87,7 @@ import BrandStaffRequestsPage from "@/pages/restaurant/BrandStaffRequestsPage";
 import CounterDevicePage from "@/pages/devices/CounterDevicePage";
 import DevicePairingPage from "@/pages/devices/DevicePairingPage";
 import DevicesPage from "@/pages/devices/DevicesPage";
+import PhysicalUATReadinessPage from "@/pages/devices/PhysicalUATReadinessPage";
 import PlatformLoginPage from "@/pages/platform/PlatformLoginPage";
 import PlatformDashboardPage from "@/pages/platform/PlatformDashboardPage";
 import PlatformCompaniesPage from "@/pages/platform/PlatformCompaniesPage";
@@ -173,6 +175,7 @@ export default function App(): JSX.Element {
             <Route path="/counter" element={<CounterDevicePage />} />
             <Route element={<ProtectedRoute permission="fb.order.create" />}>
               <Route path="/counter/orders" element={<WapOrderPage />} />
+              <Route path="/counter/sync" element={<OfflineSyncCenterPage />} />
             </Route>
           </Route>
           <Route element={<DeviceProtectedRoute type="kitchen" />}>
@@ -286,6 +289,7 @@ export default function App(): JSX.Element {
             <Route element={<RestaurantShell />}>
               <Route element={<ProtectedRoute permissions={["brand.store.order.create", "fb.order.create"]} />}>
                 <Route path="/store/:brandSlug/orders" element={<WapOrderPage />} />
+                <Route path="/store/:brandSlug/sync" element={<OfflineSyncCenterPage />} />
               </Route>
               <Route element={<ProtectedRoute permissions={["brand.store.shift.close", "fb.order.create"]} />}>
                 <Route path="/store/:brandSlug/close-shift" element={<WapShiftClosePage />} />
@@ -389,6 +393,7 @@ export default function App(): JSX.Element {
               </Route>
               <Route element={<ProtectedRoute permission="system.device.view" />}>
                 <Route path="/devices" element={<DevicesPage />} />
+                <Route path="/devices/uat-readiness" element={<PhysicalUATReadinessPage />} />
               </Route>
               <Route element={<ProtectedRoute permission="accounting.report.view" />}>
                 <Route path="/accounting" element={<AccountingPage />} />

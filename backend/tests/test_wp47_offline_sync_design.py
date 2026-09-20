@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.config import validate_pos_offline_mode_config
+from app.config import validate_physical_uat_evidence_config, validate_pos_offline_mode_config
 
 
 class WP47OfflineSyncDesignGateTests(unittest.TestCase):
@@ -50,6 +50,19 @@ class WP47OfflineSyncDesignGateTests(unittest.TestCase):
             company_allowlist="company-a",
             branch_allowlist="branch-a",
         )
+
+    def test_physical_evidence_is_uat_only(self) -> None:
+        validate_physical_uat_evidence_config(
+            environment="development",
+            enabled=True,
+            public_base_url="https://uat-pos.foodchainservice.com",
+        )
+        with self.assertRaisesRegex(ValueError, "not approved"):
+            validate_physical_uat_evidence_config(
+                environment="production",
+                enabled=True,
+                public_base_url="https://pos.foodchainservice.com",
+            )
 
 
 if __name__ == "__main__":

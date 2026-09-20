@@ -3,6 +3,7 @@ import axios from "axios";
 import { useLocation, useNavigate } from "react-router-dom";
 import { authApi } from "@/lib/api";
 import { db } from "@/lib/db";
+import { clearOfflineEncryptionKeyWhenSafe } from "@/lib/secureOfflineStore";
 import { useAuthStore } from "@/stores/auth.store";
 import type { LoginRequest } from "@/types/auth";
 
@@ -94,7 +95,7 @@ export function useLogout(destination = "/login"): () => void {
         db.restaurantPendingOrders.toArray(),
         db.pendingSales.toArray(),
       ]);
-      const hasPendingRestaurant = restaurantOrders.some((order) => order.status !== "synced");
+      const hasPendingRestaurant = restaurantOrders.some((order) => !["reconciled", "rejected"].includes(order.status));
       const hasPendingPos = pendingSales.some((sale) => !sale.synced);
       if (hasPendingRestaurant || hasPendingPos) {
         window.alert("ยังมีรายการขายที่ส่งไม่สำเร็จ กรุณาต่ออินเทอร์เน็ตและซิงก์ข้อมูลก่อนออกจากระบบ เพื่อรักษาชื่อพนักงานขายให้ถูกต้อง");
@@ -104,6 +105,7 @@ export function useLogout(destination = "/login"): () => void {
       if (refreshToken) {
         void authApi.logout(refreshToken);
       }
+      await clearOfflineEncryptionKeyWhenSafe();
       clearSession();
       navigate(destination, { replace: true });
     })();

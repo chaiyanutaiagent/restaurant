@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Literal
 import uuid
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from app.schemas import BaseSchema
 
@@ -528,6 +528,18 @@ class WapPaidOrderRequest(BaseSchema):
 
 class WapOfflinePaidOrderRequest(WapPaidOrderRequest):
     client_order_id: str = Field(min_length=1, max_length=100)
+    client_operation_id: str | None = Field(default=None, min_length=1, max_length=100)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=180)
+    schema_version: Literal["offline-pos-v1"] | None = None
+    request_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    company_id: uuid.UUID | None = None
+    brand_id: uuid.UUID | None = None
+    branch_id: uuid.UUID | None = None
+    station_key: str | None = Field(default=None, min_length=1, max_length=100)
+    operation_type: Literal["cash_sale", "hold_draft"] | None = None
+    sequence_no: int | None = Field(default=None, ge=1)
+    price_snapshot_version: str | None = Field(default=None, min_length=1, max_length=120)
+    currency: Literal["THB"] = "THB"
     is_offline: bool = True
 
 
@@ -572,13 +584,42 @@ class WapOrderRead(BaseSchema):
 
 class WapOfflineSyncItemRead(BaseSchema):
     client_order_id: str
-    status: Literal["synced", "needs_review"]
+    status: Literal["synced", "needs_review", "rejected", "quarantined", "unknown"]
+    sync_state: Literal[
+        "pending_sync",
+        "syncing",
+        "server_acknowledged",
+        "reconciled",
+        "needs_review",
+        "rejected",
+        "quarantined",
+        "unknown",
+        "purged",
+    ] | None = None
+    operation_id: uuid.UUID | None = None
     order: WapOrderRead | None = None
+    error_code: str | None = None
     error: str | None = None
+    acknowledged_at: datetime | None = None
+    reconciled_at: datetime | None = None
 
 
 class WapOfflineSyncRead(BaseSchema):
     results: list[WapOfflineSyncItemRead] = Field(default_factory=list)
+
+
+class WapOfflinePurgeRead(BaseSchema):
+    purged: int
+    retention_days: int
+
+
+class WapOfflineResolveRequest(BaseSchema):
+    reason: str = Field(min_length=5, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def strip_reason(cls, value: str) -> str:
+        return value.strip()
 
 
 class StoreStockAdjustmentRequest(BaseSchema):

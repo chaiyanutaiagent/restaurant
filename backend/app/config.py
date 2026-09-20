@@ -166,6 +166,26 @@ def validate_pos_offline_mode_config(
         raise ValueError("POS offline mode requires explicit Company and Branch allow-lists")
 
 
+def validate_physical_uat_evidence_config(
+    *,
+    environment: str,
+    enabled: bool,
+    public_base_url: str,
+) -> None:
+    """Physical evidence collection is an isolated UAT tool, never a Production switch."""
+    if not enabled:
+        return
+    parsed_url = urlsplit(public_base_url)
+    if environment != "development":
+        raise ValueError("Physical UAT evidence is not approved outside UAT development")
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.hostname is None
+        or not parsed_url.hostname.startswith("uat-")
+    ):
+        raise ValueError("Physical UAT evidence requires an HTTPS hostname beginning with uat-")
+
+
 def validate_refund_runtime_config(
     *,
     environment: str,
@@ -268,6 +288,9 @@ class Settings(BaseSettings):
     pos_offline_mode_enabled: bool = False
     pos_offline_company_allowlist: str = ""
     pos_offline_branch_allowlist: str = ""
+    pos_offline_retention_days: int = Field(default=7, ge=1, le=90)
+    physical_uat_evidence_enabled: bool = False
+    uat_release_commit: str = "unreleased"
     refund_provider_mode: Literal["disabled", "sandbox", "live"] = "disabled"
     refund_sandbox_webhook_secret: str | None = None
     refund_uat_non_fiscal_credit_note_enabled: bool = False
@@ -330,6 +353,11 @@ class Settings(BaseSettings):
             public_base_url=self.saas_public_base_url,
             company_allowlist=self.pos_offline_company_allowlist,
             branch_allowlist=self.pos_offline_branch_allowlist,
+        )
+        validate_physical_uat_evidence_config(
+            environment=self.environment,
+            enabled=self.physical_uat_evidence_enabled,
+            public_base_url=self.saas_public_base_url,
         )
         validate_refund_runtime_config(
             environment=self.environment,

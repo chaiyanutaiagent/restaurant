@@ -172,6 +172,30 @@ def run() -> None:
             ),
             201,
         )
+        expect_detail_code(
+            client.post(
+                "/api/v1/restaurant/wap/orders",
+                headers=cashier_headers,
+                json={
+                    "items": [
+                        {
+                            "product_id": context["product_id"],
+                            "qty": 1,
+                            "expected_unit_price": "100",
+                        }
+                    ],
+                    "payment_method": "cash",
+                    "paid_amount": "100",
+                    "payments": [{"payment_method": "cash", "amount": "100"}],
+                    "shift_id": shift["id"],
+                    "location_id": context["location_id"],
+                    "client_order_id": f"wp43-offline-{uuid.uuid4()}",
+                    "is_offline": True,
+                },
+            ),
+            409,
+            "stale_price",
+        )
 
         tamper_quote = expect(
             client.post(
@@ -322,7 +346,8 @@ def run() -> None:
     print(
         "wp43_pricing_api_smoke=ok authority=true tamper=true vat=true override=true "
         "approval=true separation_of_duties=true idempotency=true replay=true "
-        "context_mismatch=true stale=true version_conflict=true audit_immutable=true reconciliation=true"
+        "context_mismatch=true stale=true offline_fail_closed=true version_conflict=true "
+        "audit_immutable=true reconciliation=true"
     )
 
 

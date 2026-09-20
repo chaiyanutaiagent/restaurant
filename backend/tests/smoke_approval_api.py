@@ -346,6 +346,12 @@ async def prepare() -> dict[str, str]:
                         business_type="restaurant",
                         is_active=True,
                     ),
+                    BrandBranch(
+                        company_id=DEFAULT_COMPANY_ID,
+                        brand_id=brand_id,
+                        branch_id=branch_id,
+                        is_active=True,
+                    ),
                 ]
             )
             identity_permissions = {

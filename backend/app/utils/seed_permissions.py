@@ -181,6 +181,42 @@ PERMISSIONS: list[dict[str, str]] = [
         "description": "Request manager approval for exceptional POS price changes.",
     },
     {
+        "code": "pos.draft.view",
+        "name": "View POS Hold Drafts",
+        "module": "pos",
+        "description": "View server-backed Hold Drafts in the active Branch.",
+    },
+    {
+        "code": "pos.draft.create",
+        "name": "Create POS Hold Drafts",
+        "module": "pos",
+        "description": "Hold a cart on the Server without creating a sale, payment, or stock effect.",
+    },
+    {
+        "code": "pos.draft.update",
+        "name": "Update POS Hold Drafts",
+        "module": "pos",
+        "description": "Update active Hold Draft content and display information.",
+    },
+    {
+        "code": "pos.draft.resume",
+        "name": "Resume POS Hold Drafts",
+        "module": "pos",
+        "description": "Claim, revalidate, and resume a Hold Draft from an authorized Counter.",
+    },
+    {
+        "code": "pos.draft.discard",
+        "name": "Discard POS Hold Drafts",
+        "module": "pos",
+        "description": "Cancel an active Hold Draft with a recorded reason.",
+    },
+    {
+        "code": "pos.draft.reassign",
+        "name": "Reassign POS Hold Drafts",
+        "module": "pos",
+        "description": "Reassign a Branch Hold Draft to another active staff member.",
+    },
+    {
         "code": "pos.refund.create",
         "name": "Create Refund",
         "module": "pos",

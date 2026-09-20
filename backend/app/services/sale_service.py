@@ -35,6 +35,7 @@ from app.schemas.pricing import PricingCalculateRequest, PricingLineRequest
 from app.services.accounting_service import AccountingService
 from app.services.approval_service import ApprovalEvidence
 from app.services.crm_service import CRMService
+from app.services.hold_draft_service import HoldDraftService, hold_error
 from app.services.notification_service import NotificationService
 from app.services.operational_handoff_service import (
     ensure_sale_completed_handoff,
@@ -249,6 +250,17 @@ class SaleService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
         if shift.status != "open":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Shift already closed")
+
+        pending_drafts = await HoldDraftService(self.db).count_pending_for_shift(shift.id)
+        if pending_drafts:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "hold_drafts_pending",
+                    "message": "Resolve, reassign or discard Hold Drafts before closing this shift",
+                    "pending_count": pending_drafts,
+                },
+            )
 
         cash_paid = await self.db.scalar(
             select(func.coalesce(func.sum(Payment.amount), 0))
@@ -616,6 +628,23 @@ class SaleService:
             self.db.add(order)
             await self.db.flush()
             order_id = order.id
+
+        if (data.source_hold_draft_id is None) != (data.source_hold_draft_version is None):
+            raise hold_error(
+                status.HTTP_409_CONFLICT,
+                "context_mismatch",
+                "Both source_hold_draft_id and source_hold_draft_version are required",
+            )
+        if data.source_hold_draft_id is not None and data.source_hold_draft_version is not None:
+            await HoldDraftService(self.db).convert_into_sale(
+                draft_id=data.source_hold_draft_id,
+                expected_version=data.source_hold_draft_version,
+                company_id=company_id,
+                brand_id=brand_id,
+                branch_id=branch_id,
+                user_id=user_id,
+                order_id=order_id,
+            )
 
         for row in item_rows:
             product = row["product"]

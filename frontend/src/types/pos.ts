@@ -239,4 +239,67 @@ export interface HeldSaleDraft {
   note: string;
   exchange_context?: ExchangeContextDraft | null;
   held_at: number;
+  sync_state?: "local_only" | "pending_sync" | "synced" | "needs_review";
+  server_id?: string;
+  draft_no?: string;
+  status?: "active" | "claimed" | "resumed" | "expired" | "converted" | "cancelled";
+  version?: number;
+  expires_at?: string;
+  owner_user_id?: string;
+  assignee_user_id?: string | null;
+  origin_device_id?: string | null;
+  origin_device_code?: string | null;
+  claim_id?: string | null;
+  claimed_by?: string | null;
+  claim_expires_at?: string | null;
+  server_backed?: boolean;
+}
+
+export interface ServerHoldDraft {
+  id: string;
+  draft_no: string;
+  company_id: string;
+  brand_id: string | null;
+  branch_id: string;
+  location_id: string;
+  origin_shift_id: string;
+  owner_user_id: string;
+  assignee_user_id: string | null;
+  origin_device_id: string | null;
+  origin_device_code: string | null;
+  label: string;
+  source_type: "walk_in" | "takeaway" | "restaurant_table" | "restaurant_quick_service";
+  customer_id: string | null;
+  customer_display: string | null;
+  note: string | null;
+  content: {
+    items: CartItem[];
+    order_discount: string;
+    loyalty_discount_intent: string;
+    currency: string;
+    cart_version: number;
+  };
+  pricing_snapshot: Record<string, unknown>;
+  status: "active" | "claimed" | "resumed" | "expired" | "converted" | "cancelled";
+  version: number;
+  claim_id: string | null;
+  claimed_by: string | null;
+  claimed_device_id: string | null;
+  claim_expires_at: string | null;
+  expires_at: string;
+  resumed_at: string | null;
+  resumed_by: string | null;
+  cancel_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HoldDraftClaimResult {
+  draft: ServerHoldDraft;
+  resume_cart: {
+    items: CartItem[];
+    pricing: PricingCalculation & Record<string, unknown>;
+  };
+  price_changes: Array<Record<string, unknown>>;
+  requires_review: boolean;
 }

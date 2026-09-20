@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Any, Literal
 import uuid
 
 from pydantic import ConfigDict, Field
@@ -84,6 +85,8 @@ class CreateSaleRequest(BaseSchema):
     channel: PricingChannel = "pos"
     currency: str = Field(default="THB", min_length=3, max_length=3)
     cart_version: int = Field(default=1, ge=1)
+    source_hold_draft_id: uuid.UUID | None = None
+    source_hold_draft_version: int | None = Field(default=None, ge=1)
 
 
 class PaymentRead(BaseSchema):
@@ -199,3 +202,108 @@ class ReceiptData(BaseSchema):
 
 class SyncSalesRequest(BaseSchema):
     orders: list[CreateSaleRequest] = Field(default_factory=list)
+
+
+class HoldDraftItemRequest(BaseSchema):
+    product_id: uuid.UUID
+    variant_id: uuid.UUID | None = None
+    qty: Decimal = Field(gt=0)
+    discount_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    discount_type: Literal["amount", "percent"] = "amount"
+    expected_unit_price: Decimal | None = Field(default=None, ge=0)
+    expected_price_version: str | None = Field(default=None, min_length=1, max_length=128)
+    price_override: PriceOverrideIntent | None = None
+    display_name: str | None = Field(default=None, max_length=500)
+    display_variant_name: str | None = Field(default=None, max_length=255)
+    display_sku: str | None = Field(default=None, max_length=100)
+    display_unit_code: str | None = Field(default=None, max_length=20)
+
+
+class HoldDraftCreateRequest(BaseSchema):
+    shift_id: uuid.UUID
+    location_id: uuid.UUID
+    label: str = Field(min_length=1, max_length=160)
+    source_type: Literal["walk_in", "takeaway", "restaurant_table", "restaurant_quick_service"] = "walk_in"
+    table_id: uuid.UUID | None = None
+    queue_label: str | None = Field(default=None, max_length=80)
+    customer_id: uuid.UUID | None = None
+    customer_display: str | None = Field(default=None, max_length=160)
+    note: str | None = Field(default=None, max_length=1000)
+    items: list[HoldDraftItemRequest] = Field(min_length=1, max_length=100)
+    order_discount: Decimal = Field(default=Decimal("0"), ge=0)
+    loyalty_discount_intent: Decimal = Field(default=Decimal("0"), ge=0)
+    currency: str = Field(default="THB", min_length=3, max_length=3)
+    cart_version: int = Field(default=1, ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+class HoldDraftUpdateRequest(BaseSchema):
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    label: str | None = Field(default=None, min_length=1, max_length=160)
+    note: str | None = Field(default=None, max_length=1000)
+    assignee_user_id: uuid.UUID | None = None
+    reason: str | None = Field(default=None, max_length=500)
+    items: list[HoldDraftItemRequest] | None = Field(default=None, min_length=1, max_length=100)
+    order_discount: Decimal | None = Field(default=None, ge=0)
+    loyalty_discount_intent: Decimal | None = Field(default=None, ge=0)
+    cart_version: int | None = Field(default=None, ge=1)
+
+
+class HoldDraftActionRequest(BaseSchema):
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    shift_id: uuid.UUID | None = None
+    location_id: uuid.UUID | None = None
+    claim_id: uuid.UUID | None = None
+    accept_revalidation: bool = False
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class HoldDraftRead(BaseSchema):
+    id: uuid.UUID
+    draft_no: str
+    company_id: uuid.UUID
+    brand_id: uuid.UUID | None = None
+    branch_id: uuid.UUID
+    location_id: uuid.UUID
+    origin_shift_id: uuid.UUID
+    owner_user_id: uuid.UUID
+    assignee_user_id: uuid.UUID | None = None
+    origin_device_id: uuid.UUID | None = None
+    origin_device_code: str | None = None
+    parent_draft_id: uuid.UUID | None = None
+    converted_order_id: uuid.UUID | None = None
+    label: str
+    source_type: str
+    table_id: uuid.UUID | None = None
+    queue_label: str | None = None
+    customer_id: uuid.UUID | None = None
+    customer_display: str | None = None
+    note: str | None = None
+    content: dict[str, Any]
+    pricing_context: dict[str, Any]
+    pricing_snapshot: dict[str, Any]
+    last_revalidation: dict[str, Any] | None = None
+    status: Literal["active", "claimed", "resumed", "expired", "converted", "cancelled"]
+    version: int
+    claim_id: uuid.UUID | None = None
+    claimed_by: uuid.UUID | None = None
+    claimed_device_id: uuid.UUID | None = None
+    claim_expires_at: datetime | None = None
+    expires_at: datetime
+    resumed_at: datetime | None = None
+    resumed_by: uuid.UUID | None = None
+    expired_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    cancel_reason: str | None = None
+    converted_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class HoldDraftClaimRead(BaseSchema):
+    draft: HoldDraftRead
+    resume_cart: dict[str, Any]
+    price_changes: list[dict[str, Any]] = Field(default_factory=list)
+    requires_review: bool = False

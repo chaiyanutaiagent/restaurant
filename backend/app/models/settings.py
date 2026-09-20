@@ -50,6 +50,10 @@ class BranchSettings(UUIDMixin, TimestampMixin, Base):
             "AND pos_price_override_min_margin_pct <= 100",
             name="pos_price_override_margin_range",
         ),
+        CheckConstraint(
+            "pos_hold_draft_ttl_minutes >= 15 AND pos_hold_draft_ttl_minutes <= 1440",
+            name="pos_hold_draft_ttl_range",
+        ),
     )
 
     company_id: Mapped[uuid.UUID] = mapped_column(
@@ -100,6 +104,9 @@ class BranchSettings(UUIDMixin, TimestampMixin, Base):
     )
     pos_price_override_self_approval: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
+    )
+    pos_hold_draft_ttl_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("120")
     )
     stock_adjust_approval_threshold_qty: Mapped[float] = mapped_column(
         Numeric(12, 4),

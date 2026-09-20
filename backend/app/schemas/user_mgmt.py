@@ -127,6 +127,7 @@ class BranchSettingsRead(BaseSchema):
     pos_price_override_max_deviation_pct: float = 50
     pos_price_override_min_margin_pct: float = 0
     pos_price_override_self_approval: bool = False
+    pos_hold_draft_ttl_minutes: int = 120
     stock_adjust_approval_threshold_qty: float = 10
     promptpay_target: str | None = None
     promptpay_name: str | None = None
@@ -170,6 +171,7 @@ class BranchSettingsUpdate(BaseSchema):
     pos_price_override_max_deviation_pct: float | None = Field(default=None, ge=0, le=100)
     pos_price_override_min_margin_pct: float | None = Field(default=None, ge=-100, le=100)
     pos_price_override_self_approval: bool | None = None
+    pos_hold_draft_ttl_minutes: int | None = Field(default=None, ge=15, le=1440)
     stock_adjust_approval_threshold_qty: float | None = Field(default=None, ge=0)
     pos_default_price_list_id: uuid.UUID | None = None
     promptpay_target: str | None = None

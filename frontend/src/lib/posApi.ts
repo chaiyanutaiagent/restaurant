@@ -1,6 +1,6 @@
 import api from "./api";
 import type { ApiResponse } from "@/types/api";
-import type { PricingCalculation, SaleOrder } from "@/types/pos";
+import type { HoldDraftClaimResult, PricingCalculation, SaleOrder, ServerHoldDraft } from "@/types/pos";
 import type { StockLocation } from "@/types/stock";
 
 export const posApi = {
@@ -24,4 +24,13 @@ export const posApi = {
   getPromptPayQR: (amount?: number, target?: string) => api.get("/pos/promptpay/qr", { params: { amount, target } }),
   listLocations: (branchId?: string) =>
     api.get("/stock/locations", { params: { branch_id: branchId } }) as Promise<{ data: { data: StockLocation[] } }>,
+  listHoldDrafts: (params?: { status?: string; mine?: boolean; this_counter?: boolean; search?: string; include_history?: boolean }) =>
+    api.get<ApiResponse<ServerHoldDraft[]>>("/pos/drafts", { params }),
+  createHoldDraft: (data: object) => api.post<ApiResponse<ServerHoldDraft>>("/pos/drafts", data),
+  updateHoldDraft: (id: string, data: object) => api.patch<ApiResponse<ServerHoldDraft>>(`/pos/drafts/${id}`, data),
+  claimHoldDraft: (id: string, data: object) => api.post<ApiResponse<HoldDraftClaimResult>>(`/pos/drafts/${id}/claim`, data),
+  resumeHoldDraft: (id: string, data: object) => api.post<ApiResponse<ServerHoldDraft>>(`/pos/drafts/${id}/resume`, data),
+  releaseHoldDraft: (id: string, data: object) => api.post<ApiResponse<ServerHoldDraft>>(`/pos/drafts/${id}/release`, data),
+  discardHoldDraft: (id: string, data: object) => api.post<ApiResponse<ServerHoldDraft>>(`/pos/drafts/${id}/discard`, data),
+  reopenHoldDraft: (id: string, data: object) => api.post<ApiResponse<ServerHoldDraft>>(`/pos/drafts/${id}/reopen`, data),
 };

@@ -18,10 +18,25 @@ from app.dependencies import (
     require_permission,
 )
 from app.models.company import Company
+from app.models.pos import PosHoldDraftAudit
 from app.models.settings import BranchSettings
-from app.schemas.pos import CloseShiftRequest, CreateSaleRequest, OpenShiftRequest, PartialRefundRequest, RefundRequest, SaleOrderRead, ShiftRead, SyncSalesRequest, VoidRequest
+from app.schemas.pos import (
+    CloseShiftRequest,
+    CreateSaleRequest,
+    HoldDraftActionRequest,
+    HoldDraftCreateRequest,
+    HoldDraftUpdateRequest,
+    OpenShiftRequest,
+    PartialRefundRequest,
+    RefundRequest,
+    SaleOrderRead,
+    ShiftRead,
+    SyncSalesRequest,
+    VoidRequest,
+)
 from app.schemas.pricing import PricingCalculateRequest
 from app.services.approval_service import ApprovalEvidence, ApprovalService, has_permission
+from app.services.hold_draft_service import HoldDraftService, hold_error
 from app.services.pricing_service import PricingResult, PricingService, pricing_error
 from app.services.sale_service import SaleService, pricing_request_for_sale, sale_request_hash
 from app.utils.promptpay import generate_promptpay_payload
@@ -242,6 +257,266 @@ async def list_shifts(
 ) -> dict[str, Any]:
     shifts, total = await _sale_service(db, current).list_shifts(current.company_id, branch_id, page, limit)
     return ok([ShiftRead.model_validate(item).model_dump() for item in shifts], meta={"total": total, "page": page, "limit": limit})
+
+
+@router.post("/drafts", status_code=status.HTTP_201_CREATED)
+async def create_hold_draft(
+    payload: HoldDraftCreateRequest,
+    current: TokenData = Depends(require_permission("pos.draft.create")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    _require_matching_counter_device(current, counter_device)
+    draft = await HoldDraftService(db).create(
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        user_id=current.user_id,
+        device_id=counter_device.device_id if counter_device else None,
+        device_code=counter_device.device_code if counter_device else None,
+        payload=payload,
+    )
+    return ok(draft.model_dump(mode="json"))
+
+
+@router.get("/drafts")
+async def list_hold_drafts(
+    status_value: str | None = Query(default=None, alias="status"),
+    mine: bool = Query(default=False),
+    this_counter: bool = Query(default=False),
+    search: str | None = Query(default=None, max_length=160),
+    include_history: bool = Query(default=False),
+    current: TokenData = Depends(require_permission("pos.draft.view")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    _require_matching_counter_device(current, counter_device)
+    if this_counter and counter_device is None:
+        raise hold_error(
+            status.HTTP_409_CONFLICT,
+            "counter_device_required",
+            "A paired Counter device is required for the this-counter filter",
+        )
+    rows = await HoldDraftService(db).list(
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        status_value=status_value,
+        owner_user_id=current.user_id if mine else None,
+        device_id=counter_device.device_id if this_counter and counter_device else None,
+        search=search,
+        include_history=include_history,
+    )
+    return ok([row.model_dump(mode="json") for row in rows], meta={"total": len(rows)})
+
+
+@router.get("/drafts/{draft_id}")
+async def get_hold_draft(
+    draft_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("pos.draft.view")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    draft = await HoldDraftService(db).get(
+        draft_id=draft_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+    )
+    return ok(draft.model_dump(mode="json"))
+
+
+@router.patch("/drafts/{draft_id}")
+async def update_hold_draft(
+    draft_id: uuid.UUID,
+    payload: HoldDraftUpdateRequest,
+    current: TokenData = Depends(require_permission("pos.draft.update")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    _require_matching_counter_device(current, counter_device)
+    draft = await HoldDraftService(db).update(
+        draft_id=draft_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        user_id=current.user_id,
+        device_id=counter_device.device_id if counter_device else None,
+        payload=payload,
+        can_reassign=has_permission(current.permissions, "pos.draft.reassign"),
+    )
+    return ok(draft.model_dump(mode="json"))
+
+
+@router.post("/drafts/{draft_id}/claim")
+async def claim_hold_draft(
+    draft_id: uuid.UUID,
+    payload: HoldDraftActionRequest,
+    current: TokenData = Depends(require_permission("pos.draft.resume")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    _require_matching_counter_device(current, counter_device)
+    result = await HoldDraftService(db).claim(
+        draft_id=draft_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        user_id=current.user_id,
+        device_id=counter_device.device_id if counter_device else None,
+        payload=payload,
+    )
+    return ok(result.model_dump(mode="json"))
+
+
+@router.post("/drafts/{draft_id}/resume")
+async def resume_hold_draft(
+    draft_id: uuid.UUID,
+    payload: HoldDraftActionRequest,
+    current: TokenData = Depends(require_permission("pos.draft.resume")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    _require_matching_counter_device(current, counter_device)
+    draft = await HoldDraftService(db).resume(
+        draft_id=draft_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        user_id=current.user_id,
+        device_id=counter_device.device_id if counter_device else None,
+        payload=payload,
+    )
+    return ok(draft.model_dump(mode="json"))
+
+
+@router.post("/drafts/{draft_id}/release")
+async def release_hold_draft_claim(
+    draft_id: uuid.UUID,
+    payload: HoldDraftActionRequest,
+    current: TokenData = Depends(require_permission("pos.draft.resume")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    _require_matching_counter_device(current, counter_device)
+    draft = await HoldDraftService(db).release_claim(
+        draft_id=draft_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        user_id=current.user_id,
+        device_id=counter_device.device_id if counter_device else None,
+        payload=payload,
+    )
+    return ok(draft.model_dump(mode="json"))
+
+
+@router.post("/drafts/{draft_id}/discard")
+async def discard_hold_draft(
+    draft_id: uuid.UUID,
+    payload: HoldDraftActionRequest,
+    current: TokenData = Depends(require_permission("pos.draft.discard")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    _require_matching_counter_device(current, counter_device)
+    draft = await HoldDraftService(db).discard(
+        draft_id=draft_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        user_id=current.user_id,
+        device_id=counter_device.device_id if counter_device else None,
+        payload=payload,
+    )
+    return ok(draft.model_dump(mode="json"))
+
+
+@router.post("/drafts/{draft_id}/reopen", status_code=status.HTTP_201_CREATED)
+async def reopen_hold_draft(
+    draft_id: uuid.UUID,
+    payload: HoldDraftActionRequest,
+    current: TokenData = Depends(require_permission("pos.draft.create")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    _require_matching_counter_device(current, counter_device)
+    draft = await HoldDraftService(db).reopen(
+        draft_id=draft_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        user_id=current.user_id,
+        device_id=counter_device.device_id if counter_device else None,
+        device_code=counter_device.device_code if counter_device else None,
+        payload=payload,
+    )
+    return ok(draft.model_dump(mode="json"))
+
+
+@router.get("/drafts/{draft_id}/audit")
+async def list_hold_draft_audit(
+    draft_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("pos.draft.view")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    await HoldDraftService(db).get(
+        draft_id=draft_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+    )
+    rows = list(
+        (
+            await db.scalars(
+                select(PosHoldDraftAudit)
+                .where(
+                    PosHoldDraftAudit.draft_id == draft_id,
+                    PosHoldDraftAudit.company_id == current.company_id,
+                    PosHoldDraftAudit.branch_id == current.branch_id,
+                )
+                .order_by(PosHoldDraftAudit.created_at.asc())
+            )
+        ).all()
+    )
+    return ok(
+        [
+            {
+                "id": str(row.id),
+                "action": row.action,
+                "from_status": row.from_status,
+                "to_status": row.to_status,
+                "from_version": row.from_version,
+                "to_version": row.to_version,
+                "actor_user_id": str(row.actor_user_id),
+                "device_id": str(row.device_id) if row.device_id else None,
+                "shift_id": str(row.shift_id) if row.shift_id else None,
+                "reason": row.reason,
+                "metadata": row.metadata_json,
+                "created_at": row.created_at.isoformat(),
+            }
+            for row in rows
+        ]
+    )
 
 
 @router.post("/pricing/calculate")

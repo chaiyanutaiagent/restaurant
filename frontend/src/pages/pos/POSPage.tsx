@@ -59,7 +59,7 @@ import { useDeviceStore } from "@/stores/device.store";
 import type { BranchReplacementRule, BranchSettings } from "@/types/admin";
 import type { ProductListItem } from "@/types/product";
 import type { Customer, CustomerSearchResult, LoyaltySettings } from "@/types/crm";
-import type { CartItem, CashierShift, ExchangeContextDraft, HeldSaleDraft, PaymentDraft, PaymentMethod, PendingSale, PricingCalculation, ReplacementRuleDraft, SaleOrder } from "@/types/pos";
+import type { CartItem, CashierShift, ExchangeContextDraft, HeldSaleDraft, HoldDraftClaimResult, PaymentDraft, PaymentMethod, PendingSale, PricingCalculation, ReplacementRuleDraft, SaleOrder, ServerHoldDraft } from "@/types/pos";
 import type { StockBalance, StockLocation } from "@/types/stock";
 import CreateCustomerDialog from "@/pages/crm/CreateCustomerDialog";
 import RedeemPointsDialog from "@/pages/crm/RedeemPointsDialog";
@@ -165,10 +165,98 @@ function tokenizeSearchTerms(value: string): string[] {
 
 function getErrorMessage(error: unknown): string {
   if (error && typeof error === "object" && "response" in error) {
-    const response = (error as { response?: { data?: { detail?: string } } }).response;
-    if (response?.data?.detail) return response.data.detail;
+    const response = (error as { response?: { data?: { detail?: string | { message?: string; code?: string } } } }).response;
+    const detail = response?.data?.detail;
+    if (typeof detail === "string") return detail;
+    if (detail?.message) return detail.message;
   }
   return error instanceof Error ? error.message : "ทำรายการไม่สำเร็จ";
+}
+
+function normalizeHeldCartItem(item: CartItem): CartItem {
+  return {
+    ...item,
+    qty: Number(item.qty),
+    unit_price: Number(item.unit_price),
+    original_price: Number(item.original_price),
+    discount_amount: Number(item.discount_amount),
+    vat_rate: Number(item.vat_rate),
+    subtotal: Number(item.subtotal),
+    vat_amount: Number(item.vat_amount),
+    price_override: item.price_override
+      ? { ...item.price_override, requested_unit_price: Number(item.price_override.requested_unit_price) }
+      : null,
+  };
+}
+
+function normalizeServerHoldDraft(draft: ServerHoldDraft): HeldSaleDraft {
+  return {
+    id: draft.id,
+    server_id: draft.id,
+    draft_no: draft.draft_no,
+    shift_id: draft.origin_shift_id,
+    location_id: draft.location_id,
+    branch_id: draft.branch_id,
+    sales_channel: draft.source_type === "takeaway" ? "takeaway" : "walk_in",
+    label: draft.label,
+    items: (draft.content.items ?? []).map(normalizeHeldCartItem),
+    order_discount: Number(draft.content.order_discount ?? 0),
+    loyalty_discount: Number(draft.content.loyalty_discount_intent ?? 0),
+    payment_method: "cash",
+    paid_amount: 0,
+    payment_reference: null,
+    split_payment_enabled: false,
+    customer_name: draft.customer_display ?? "",
+    customer_phone: "",
+    customer_tax_id: "",
+    customer_search: "",
+    selected_customer: null,
+    note: draft.note ?? "",
+    held_at: new Date(draft.created_at).getTime(),
+    sync_state: "synced",
+    status: draft.status,
+    version: draft.version,
+    expires_at: draft.expires_at,
+    owner_user_id: draft.owner_user_id,
+    assignee_user_id: draft.assignee_user_id,
+    origin_device_id: draft.origin_device_id,
+    origin_device_code: draft.origin_device_code,
+    claim_id: draft.claim_id,
+    claimed_by: draft.claimed_by,
+    claim_expires_at: draft.claim_expires_at,
+    server_backed: true,
+  };
+}
+
+function holdDraftPayload(draft: HeldSaleDraft, idempotencyKey: string): Record<string, unknown> {
+  return {
+    shift_id: draft.shift_id,
+    location_id: draft.location_id,
+    label: draft.label,
+    source_type: draft.sales_channel === "takeaway" ? "takeaway" : "walk_in",
+    customer_id: draft.selected_customer?.id ?? null,
+    customer_display: draft.customer_name || draft.selected_customer?.display_name || null,
+    note: draft.note || null,
+    items: draft.items.map((item) => ({
+      product_id: item.product_id,
+      variant_id: item.variant_id,
+      qty: item.qty,
+      discount_amount: item.discount_amount,
+      discount_type: item.discount_type,
+      expected_unit_price: item.original_price,
+      ...(item.expected_price_version ? { expected_price_version: item.expected_price_version } : {}),
+      ...(item.price_override ? { price_override: item.price_override } : {}),
+      display_name: item.product_name,
+      display_variant_name: item.variant_name,
+      display_sku: item.sku,
+      display_unit_code: item.unit_code,
+    })),
+    order_discount: draft.order_discount,
+    loyalty_discount_intent: draft.loyalty_discount,
+    currency: "THB",
+    cart_version: 1,
+    idempotency_key: idempotencyKey,
+  };
 }
 
 type ReplacementPlanEntry = {
@@ -269,6 +357,11 @@ export default function POSPage(): JSX.Element {
   });
   const [holdLabel, setHoldLabel] = useState("");
   const [heldBillsVersion, setHeldBillsVersion] = useState(0);
+  const [heldBillsSearch, setHeldBillsSearch] = useState("");
+  const [heldBillsFilter, setHeldBillsFilter] = useState<"active" | "mine" | "counter" | "history">("active");
+  const [heldBillsBusy, setHeldBillsBusy] = useState<string | null>(null);
+  const [pendingResumeDraft, setPendingResumeDraft] = useState<HeldSaleDraft | null>(null);
+  const [resumedHoldDraft, setResumedHoldDraft] = useState<{ id: string; version: number } | null>(null);
   const [replacementRulesVersion, setReplacementRulesVersion] = useState(0);
   const [recentSalesOpen, setRecentSalesOpen] = useState(false);
   const [historyOrder, setHistoryOrder] = useState<SaleOrder | null>(null);
@@ -393,15 +486,37 @@ export default function POSPage(): JSX.Element {
     },
   });
   const heldBillsQuery = useQuery({
-    queryKey: ["pos", "held-bills", currentShift?.id, heldBillsVersion],
+    queryKey: ["pos", "held-bills", currentShift?.id, branchId, heldBillsVersion, isOnline, heldBillsSearch, heldBillsFilter],
     queryFn: async () => {
       if (!currentShift) {
         return [] as HeldSaleDraft[];
       }
-      const rows = await db.heldBills.where("shift_id").equals(currentShift.id).toArray();
-      return rows.sort((left, right) => right.held_at - left.held_at);
+      const localRows = await db.heldBills.where("shift_id").equals(currentShift.id).toArray();
+      if (!isOnline || !hasPermission("pos.draft.view")) {
+        return localRows.sort((left, right) => right.held_at - left.held_at);
+      }
+      if (hasPermission("pos.draft.create")) {
+        for (const local of localRows.filter((row) => !row.server_backed)) {
+          try {
+            await posApi.createHoldDraft(holdDraftPayload(local, `offline-hold:${local.id}`));
+            await db.heldBills.delete(local.id);
+          } catch {
+            await db.heldBills.update(local.id, { sync_state: "needs_review" });
+          }
+        }
+      }
+      const response = await posApi.listHoldDrafts({
+        mine: heldBillsFilter === "mine",
+        this_counter: heldBillsFilter === "counter",
+        include_history: heldBillsFilter === "history",
+        search: heldBillsSearch.trim() || undefined,
+      });
+      const serverRows = response.data.data.map(normalizeServerHoldDraft);
+      const remainingLocal = await db.heldBills.where("shift_id").equals(currentShift.id).toArray();
+      return [...serverRows, ...remainingLocal].sort((left, right) => right.held_at - left.held_at);
     },
     enabled: Boolean(currentShift),
+    refetchInterval: heldBillsOpen && isOnline ? 15_000 : false,
   });
   const replacementRulesQuery = useQuery({
     queryKey: ["pos", "local-replacement-rules", branchId, replacementRulesVersion],
@@ -1275,6 +1390,7 @@ export default function POSPage(): JSX.Element {
     setLoyaltyDiscount(0);
     setNote("");
     setExchangeContext(null);
+    setResumedHoldDraft(null);
     checkoutIdRef.current = generateClientOrderId();
   }
 
@@ -1282,77 +1398,206 @@ export default function POSPage(): JSX.Element {
     setHeldBillsVersion((value) => value + 1);
   }
 
-  async function handleHoldBill(): Promise<void> {
-    if (!currentShift || cart.items.length === 0) {
-      return;
-    }
-    const defaultLabel = customerName.trim() || selectedCustomer?.display_name || `${cart.items[0]?.product_name ?? "บิล"} +${Math.max(cart.items.length - 1, 0)}`;
-    const draft: HeldSaleDraft = {
-      id: generateClientOrderId(),
+  function currentHoldDraft(label: string, id: string): HeldSaleDraft {
+    if (!currentShift) throw new Error("ต้องเปิดกะก่อนพักบิล");
+    return {
+      id,
       shift_id: currentShift.id,
       location_id: currentShift.location_id,
       branch_id: branchId ?? null,
       sales_channel: isTakeawayMode ? "takeaway" : "walk_in",
-      label: holdLabel.trim() || defaultLabel,
+      label,
       items: cart.items,
       order_discount: orderDiscount,
       loyalty_discount: loyaltyDiscount,
-      payment_method: paymentMethod,
-      paid_amount: paidAmount,
-      payment_reference: paymentReference,
-      split_payment_enabled: splitPaymentEnabled,
-      secondary_payment_method: secondaryPaymentMethod,
-      secondary_payment_amount: secondaryPaymentAmount,
-      secondary_payment_reference: secondaryPaymentReference,
+      payment_method: "cash",
+      paid_amount: 0,
+      payment_reference: null,
+      split_payment_enabled: false,
+      secondary_payment_method: "promptpay",
+      secondary_payment_amount: 0,
+      secondary_payment_reference: null,
       customer_name: customerName,
-      customer_phone: customerPhone,
-      customer_tax_id: customerTaxId,
-      customer_search: customerSearch,
+      customer_phone: "",
+      customer_tax_id: "",
+      customer_search: "",
       selected_customer: selectedCustomer,
       note,
       exchange_context: exchangeContext,
       held_at: Date.now(),
+      sync_state: isOnline ? "pending_sync" : "local_only",
+      server_backed: false,
     };
-    await db.heldBills.put(draft);
-    resetActiveSale();
-    setHoldLabel("");
-    await refreshHeldBills();
-    toast({ title: "พักบิลแล้ว", description: `${draft.label} ถูกเก็บไว้เรียบร้อย` });
   }
 
-  async function handleResumeHeldBill(draft: HeldSaleDraft): Promise<void> {
-    if (cart.items.length > 0 && !window.confirm("มีสินค้าอยู่ในตะกร้าปัจจุบัน ต้องการแทนที่ด้วยบิลที่พักไว้หรือไม่")) {
-      return;
+  async function handleHoldBill(): Promise<boolean> {
+    if (!currentShift || cart.items.length === 0) {
+      return false;
     }
-    setCartItems(draft.items);
+    const defaultLabel = customerName.trim() || selectedCustomer?.display_name || `${cart.items[0]?.product_name ?? "บิล"} +${Math.max(cart.items.length - 1, 0)}`;
+    const id = generateClientOrderId();
+    const draft = currentHoldDraft(holdLabel.trim() || defaultLabel, id);
+    setHeldBillsBusy("create");
+    try {
+      if (isOnline) {
+        if (!hasPermission("pos.draft.create")) {
+          throw new Error("คุณไม่มีสิทธิ์พักบิลบน Server");
+        }
+        await posApi.createHoldDraft(holdDraftPayload(draft, `hold:${id}`));
+      } else {
+        await db.heldBills.put(draft);
+      }
+      resetActiveSale();
+      setHoldLabel("");
+      await refreshHeldBills();
+      toast({
+        title: "พักบิลแล้ว",
+        description: isOnline ? `${draft.label} พร้อมเรียกต่อจากทุก Counter` : `${draft.label} อยู่ในเครื่องนี้และรอซิงก์`,
+      });
+      return true;
+    } catch (error) {
+      toast({
+        title: "ยังพักบิลไม่สำเร็จ",
+        description: `${getErrorMessage(error)} ตะกร้ายังอยู่ครบ`,
+        variant: "destructive",
+      });
+      return false;
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  function restoreHeldCart(draft: HeldSaleDraft, items: CartItem[]): void {
+    setCartItems(items.map(normalizeHeldCartItem));
     setOrderDiscount(draft.order_discount);
-    setPaymentMethod(draft.payment_method);
-    setPaidAmount(draft.paid_amount);
-    setCreditRef(draft.payment_reference ?? "");
-    setSplitPaymentEnabled(draft.split_payment_enabled ?? false);
-    setSecondaryPaymentMethod(draft.secondary_payment_method ?? "promptpay");
-    setSecondaryPaymentAmount(draft.secondary_payment_amount ?? 0);
-    setSecondaryPaymentReference(draft.secondary_payment_reference ?? "");
+    setPaymentMethod("cash");
+    setPaidAmount(0);
+    setCreditRef("");
+    setSplitPaymentEnabled(false);
+    setSecondaryPaymentMethod("promptpay");
+    setSecondaryPaymentAmount(0);
+    setSecondaryPaymentReference("");
     setCustomerName(draft.customer_name);
-    setCustomerPhone(draft.customer_phone);
-    setCustomerTaxId(draft.customer_tax_id);
-    setCustomerSearch(draft.customer_search);
+    setCustomerPhone("");
+    setCustomerTaxId("");
+    setCustomerSearch("");
     setDebouncedCustomerSearch("");
     setSelectedCustomer(draft.selected_customer);
     setLoyaltyDiscount(draft.loyalty_discount);
     setNote(draft.note);
     setExchangeContext(draft.exchange_context ?? null);
     navigate(draft.sales_channel === "takeaway" ? "/pos?channel=takeaway" : "/pos", { replace: true });
-    await db.heldBills.delete(draft.id);
-    await refreshHeldBills();
-    setHeldBillsOpen(false);
-    toast({ title: "เรียกบิลกลับแล้ว", description: `${draft.label} พร้อมขายต่อ` });
+  }
+
+  async function resumeHeldBillNow(draft: HeldSaleDraft): Promise<void> {
+    if (!currentShift) return;
+    setHeldBillsBusy(draft.id);
+    try {
+      if (!draft.server_backed || !draft.server_id) {
+        restoreHeldCart(draft, draft.items);
+        await db.heldBills.delete(draft.id);
+        setResumedHoldDraft(null);
+      } else {
+        if (!isOnline) throw new Error("เชื่อมต่อ Server ก่อนเรียกบิลจากทุก Counter");
+        const claimKey = `claim:${draft.server_id}:${generateClientOrderId()}`;
+        const claim = (await posApi.claimHoldDraft(draft.server_id, {
+          expected_version: draft.version,
+          idempotency_key: claimKey,
+          shift_id: currentShift.id,
+          location_id: currentShift.location_id,
+        })).data.data as HoldDraftClaimResult;
+        if (claim.requires_review) {
+          const accepted = window.confirm(
+            `ราคา/ข้อมูลบิลเปลี่ยน ${claim.price_changes.length} จุด ต้องการยอมรับข้อมูลล่าสุดจาก Server และเรียกบิลกลับหรือไม่?`,
+          );
+          if (!accepted) {
+            await posApi.releaseHoldDraft(draft.server_id, {
+              expected_version: claim.draft.version,
+              idempotency_key: `release:${draft.server_id}:${generateClientOrderId()}`,
+              claim_id: claim.draft.claim_id,
+              shift_id: currentShift.id,
+              reason: "Cashier rejected revalidation changes",
+            });
+            await refreshHeldBills();
+            return;
+          }
+        }
+        const resumeKey = `resume:${draft.server_id}:${generateClientOrderId()}`;
+        const resumed = (await posApi.resumeHoldDraft(draft.server_id, {
+          expected_version: claim.draft.version,
+          idempotency_key: resumeKey,
+          claim_id: claim.draft.claim_id,
+          shift_id: currentShift.id,
+          location_id: currentShift.location_id,
+          accept_revalidation: claim.requires_review,
+        })).data.data as ServerHoldDraft;
+        restoreHeldCart(draft, claim.resume_cart.items);
+        setResumedHoldDraft({ id: resumed.id, version: resumed.version });
+      }
+      await refreshHeldBills();
+      setHeldBillsOpen(false);
+      setPendingResumeDraft(null);
+      toast({ title: "เรียกบิลกลับแล้ว", description: `${draft.label} พร้อมขายต่อ และจะตรวจราคาอีกครั้งตอนชำระ` });
+    } catch (error) {
+      toast({ title: "เรียกบิลกลับไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+      await refreshHeldBills();
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function handleResumeHeldBill(draft: HeldSaleDraft): Promise<void> {
+    if (cart.items.length > 0) {
+      setPendingResumeDraft(draft);
+      return;
+    }
+    await resumeHeldBillNow(draft);
   }
 
   async function handleDeleteHeldBill(draftId: string): Promise<void> {
-    await db.heldBills.delete(draftId);
-    await refreshHeldBills();
-    toast({ title: "ลบบิลที่พักไว้แล้ว" });
+    const draft = (heldBillsQuery.data ?? []).find((item) => item.id === draftId);
+    if (!draft) return;
+    const reason = window.prompt("ระบุเหตุผลที่ยกเลิกบิลพัก", "ลูกค้าไม่รับรายการแล้ว");
+    if (!reason?.trim()) return;
+    setHeldBillsBusy(draftId);
+    try {
+      if (draft.server_backed && draft.server_id) {
+        await posApi.discardHoldDraft(draft.server_id, {
+          expected_version: draft.version,
+          idempotency_key: `discard:${draft.server_id}:${generateClientOrderId()}`,
+          reason: reason.trim(),
+          shift_id: currentShift?.id,
+        });
+      } else {
+        await db.heldBills.delete(draftId);
+      }
+      await refreshHeldBills();
+      toast({ title: "ยกเลิกบิลที่พักไว้แล้ว" });
+    } catch (error) {
+      toast({ title: "ยกเลิกบิลไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function handleReopenHeldBill(draft: HeldSaleDraft): Promise<void> {
+    if (!draft.server_backed || !draft.server_id || !currentShift || !isOnline) return;
+    setHeldBillsBusy(draft.id);
+    try {
+      await posApi.reopenHoldDraft(draft.server_id, {
+        expected_version: draft.version,
+        idempotency_key: `reopen:${draft.server_id}:${generateClientOrderId()}`,
+        shift_id: currentShift.id,
+        location_id: currentShift.location_id,
+        reason: "Manual recovery from Hold Draft history",
+      });
+      await refreshHeldBills();
+      toast({ title: "สร้างบิลกู้คืนแล้ว", description: "ตรวจราคาและรายการล่าสุดก่อนเรียกกลับ" });
+    } catch (error) {
+      toast({ title: "กู้คืนบิลไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setHeldBillsBusy(null);
+    }
   }
 
   async function queueOfflineSale(): Promise<void> {
@@ -1466,7 +1711,11 @@ export default function POSPage(): JSX.Element {
           pricing_calculation_hash: quote.calculation_hash,
         } : {}),
         ...(approvalToken ? { approval_token: approvalToken } : {}),
-        ...(priceOverrideApprovalToken ? { price_override_approval_token: priceOverrideApprovalToken } : {})
+        ...(priceOverrideApprovalToken ? { price_override_approval_token: priceOverrideApprovalToken } : {}),
+        ...(resumedHoldDraft ? {
+          source_hold_draft_id: resumedHoldDraft.id,
+          source_hold_draft_version: resumedHoldDraft.version,
+        } : {}),
     };
   }
 
@@ -1668,6 +1917,7 @@ export default function POSPage(): JSX.Element {
   }, [paymentMethod]);
   const amountDue = Math.max(finalTotal - currentPaidAmount, 0);
   const heldBills = heldBillsQuery.data ?? [];
+  const activeHeldBillCount = heldBills.filter((draft) => !draft.status || draft.status === "active" || draft.status === "claimed").length;
   const replacementRules = replacementRulesQuery.data ?? [];
   const recentSales = recentSalesQuery.data ?? [];
   const branchSettings = branchSettingsQuery.data;
@@ -1921,7 +2171,7 @@ export default function POSPage(): JSX.Element {
         </div>
 
         <PosWorkspaceNav
-          heldBillCount={heldBills.length}
+          heldBillCount={activeHeldBillCount}
           onHeldBills={() => setHeldBillsOpen(true)}
           onNavigate={openWorkspace}
         />
@@ -2279,7 +2529,7 @@ export default function POSPage(): JSX.Element {
                   className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
                   onClick={() => setHeldBillsOpen(true)}
                 >
-                  พักไว้ {heldBills.length}
+                  พักไว้ {activeHeldBillCount}
                 </button>
               </div>
               <div className="flex items-center gap-2">
@@ -2887,40 +3137,110 @@ export default function POSPage(): JSX.Element {
       </Dialog>
 
       <Dialog open={heldBillsOpen} onOpenChange={setHeldBillsOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-4xl">
           <DialogHeader>
-            <DialogTitle>บิลที่พักไว้</DialogTitle>
+            <DialogTitle className="flex flex-wrap items-center gap-2">
+              บิลที่พักไว้
+              <span className={`rounded-full px-3 py-1 text-xs font-bold ${isOnline ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                {isOnline ? "Server-backed · ทุก Counter" : "ในเครื่อง · รอซิงก์"}
+              </span>
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <Input
-              placeholder="ตั้งชื่อบิลก่อนพัก เช่น โต๊ะ 2 / ลูกค้าฝากไว้ / คิวถัดไป"
-              value={holdLabel}
-              onChange={(event) => setHoldLabel(event.target.value)}
-            />
-            {heldBills.length === 0 ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <Input
+                className="h-14"
+                placeholder="ตั้งชื่อบิลก่อนพัก เช่น โต๊ะ 2 / คิวถัดไป"
+                value={holdLabel}
+                onChange={(event) => setHoldLabel(event.target.value)}
+              />
+              <Input
+                className="h-14"
+                placeholder="ค้นหาเลข Draft ชื่อบิล หรือลูกค้า"
+                value={heldBillsSearch}
+                onChange={(event) => setHeldBillsSearch(event.target.value)}
+                aria-label="ค้นหาบิลที่พักไว้"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4" role="tablist" aria-label="กรองบิลที่พักไว้">
+              {([
+                ["active", "ใช้งานได้"],
+                ["mine", "ของฉัน"],
+                ["counter", "Counter นี้"],
+                ["history", "ประวัติ"],
+              ] as const).map(([value, label]) => (
+                <Button
+                  key={value}
+                  type="button"
+                  variant={heldBillsFilter === value ? "default" : "outline"}
+                  className="h-14"
+                  disabled={value === "counter" && !currentCounterDevice}
+                  onClick={() => setHeldBillsFilter(value)}
+                  role="tab"
+                  aria-selected={heldBillsFilter === value}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+            {!hasPermission("pos.draft.view") && isOnline ? (
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-6 text-center text-sm font-semibold text-amber-900">
+                ไม่มีสิทธิ์ดูบิลพักของสาขา กรุณาให้ผู้จัดการกำหนดสิทธิ์ POS Hold Draft
+              </div>
+            ) : heldBillsQuery.isLoading ? (
+              <div className="space-y-3" aria-label="กำลังโหลดบิลที่พักไว้">
+                {[1, 2, 3].map((item) => <div key={item} className="h-24 animate-pulse rounded-2xl bg-slate-100" />)}
+              </div>
+            ) : heldBillsQuery.isError ? (
+              <div className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-6 text-center text-sm text-rose-800">
+                โหลดบิลพักจาก Server ไม่สำเร็จ ตะกร้าปัจจุบันไม่ถูกเปลี่ยน
+                <Button className="ml-3 h-12" variant="outline" onClick={() => void heldBillsQuery.refetch()}>ลองใหม่</Button>
+              </div>
+            ) : heldBills.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
                 ยังไม่มีบิลที่พักไว้
               </div>
             ) : (
-              <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
+              <div className="max-h-[32rem] space-y-3 overflow-y-auto pr-1">
                 {heldBills.map((draft) => {
                   const itemCount = draft.items.reduce((sum, item) => sum + item.qty, 0);
                   const draftTotal = draft.items.reduce((sum, item) => sum + item.subtotal, 0) - draft.order_discount - draft.loyalty_discount;
+                  const actionable = !draft.status || draft.status === "active";
+                  const claimed = draft.status === "claimed";
+                  const historical = draft.status === "resumed" || draft.status === "expired" || draft.status === "cancelled";
                   return (
-                    <div key={draft.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="font-semibold text-slate-900">{draft.label}</div>
+                    <div key={draft.id} className="min-h-28 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-label={`${draft.draft_no ?? "Local"} ${draft.label}`}>
+                      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-slate-900">{draft.label}</span>
+                            <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-slate-600">{draft.draft_no ?? "LOCAL"}</span>
+                            <span className={`rounded-full px-2 py-1 text-xs font-bold ${draft.server_backed ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                              {draft.server_backed ? "ทุก Counter" : draft.sync_state === "needs_review" ? "ต้องตรวจสอบ" : "ในเครื่อง"}
+                            </span>
+                            {claimed ? <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-bold text-blue-800">กำลังเปิดอีกเครื่อง</span> : null}
+                            {draft.status && !actionable && !claimed ? <span className="rounded-full bg-slate-200 px-2 py-1 text-xs font-bold text-slate-700">{draft.status}</span> : null}
+                          </div>
                           <div className="mt-1 text-sm text-slate-500">
                             {draft.customer_name || "ลูกค้าทั่วไป"} • {itemCount} ชิ้น • {formatThaiCurrency(Math.max(draftTotal, 0))}
                           </div>
                           <div className="mt-1 text-xs text-slate-400">
                             พักไว้ {new Date(draft.held_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
+                            {draft.origin_device_code ? ` • ${draft.origin_device_code}` : ""}
+                            {draft.version ? ` • v${draft.version}` : ""}
                           </div>
                         </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" onClick={() => void handleDeleteHeldBill(draft.id)}>ลบ</Button>
-                          <Button onClick={() => void handleResumeHeldBill(draft)}>เรียกบิลกลับ</Button>
+                        <div className="flex flex-wrap gap-2">
+                          {actionable ? (
+                            <>
+                              <Button className="h-14" variant="outline" disabled={heldBillsBusy === draft.id || !hasPermission("pos.draft.discard")} onClick={() => void handleDeleteHeldBill(draft.id)}>ยกเลิก</Button>
+                              <Button className="h-14 min-w-36" disabled={heldBillsBusy === draft.id || !hasPermission("pos.draft.resume")} onClick={() => void handleResumeHeldBill(draft)}>
+                                {heldBillsBusy === draft.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}เรียกบิลกลับ
+                              </Button>
+                            </>
+                          ) : null}
+                          {claimed ? <Button className="h-14" variant="outline" onClick={() => void refreshHeldBills()}>รีเฟรชสถานะ</Button> : null}
+                          {historical && draft.status !== "converted" ? <Button className="h-14" variant="outline" disabled={!isOnline || heldBillsBusy === draft.id} onClick={() => void handleReopenHeldBill(draft)}>สร้างบิลกู้คืน</Button> : null}
                         </div>
                       </div>
                     </div>
@@ -2930,10 +3250,55 @@ export default function POSPage(): JSX.Element {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setHeldBillsOpen(false)}>ปิด</Button>
-            <Button onClick={() => void handleHoldBill()} disabled={cart.items.length === 0 || !currentShift}>
-              พักบิลปัจจุบัน
+            <Button className="h-14" variant="outline" onClick={() => setHeldBillsOpen(false)}>ปิด</Button>
+            <Button className="h-16 min-w-52" onClick={() => void handleHoldBill()} disabled={cart.items.length === 0 || !currentShift || heldBillsBusy === "create"}>
+              {heldBillsBusy === "create" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              พักบิล • ล้างตะกร้า
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(pendingResumeDraft)} onOpenChange={(open) => { if (!open) setPendingResumeDraft(null); }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>ตะกร้าปัจจุบันมีสินค้า</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-slate-600">
+            <p>เลือกวิธีจัดการก่อนเรียก <strong>{pendingResumeDraft?.label}</strong> กลับมา ห้ามรวมรายการอัตโนมัติเพราะอาจทำให้สินค้าและส่วนลดซ้ำ</p>
+            <Button
+              className="h-16 w-full justify-start text-base"
+              disabled={heldBillsBusy !== null}
+              onClick={() => void (async () => {
+                const target = pendingResumeDraft;
+                if (!target) return;
+                const held = await handleHoldBill();
+                if (held) await resumeHeldBillNow(target);
+              })()}
+            >
+              พักตะกร้าปัจจุบันก่อน แล้วเรียกบิล
+            </Button>
+            <Button
+              className="h-16 w-full justify-start text-base"
+              variant="destructive"
+              disabled={heldBillsBusy !== null}
+              onClick={() => void (async () => {
+                const target = pendingResumeDraft;
+                if (!target) return;
+                const accepted = await confirm({
+                  title: "แทนที่ตะกร้าปัจจุบัน",
+                  description: `สินค้า ${cart.items.length} รายการในตะกร้าปัจจุบันจะถูกแทนที่`,
+                  confirmLabel: "แทนที่ตะกร้า",
+                  variant: "destructive",
+                });
+                if (accepted) await resumeHeldBillNow(target);
+              })()}
+            >
+              แทนที่ตะกร้า
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button className="h-14" variant="outline" onClick={() => setPendingResumeDraft(null)}>กลับ</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

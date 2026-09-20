@@ -46,7 +46,7 @@ from app.models.distribution import (
     CompanyDistributionEvent,
     CompanyDistributionShipment,
 )
-from app.models.pos import CashierShift, SaleOrder, SaleOrderItem, Payment
+from app.models.pos import CashierShift, Payment, PosHoldDraft, PosHoldDraftAudit, SaleOrder, SaleOrderItem
 from app.models.purchase import (
     Supplier,
     PurchaseOrder,
@@ -209,6 +209,8 @@ __all__ = [
     "SaleOrder",
     "SaleOrderItem",
     "Payment",
+    "PosHoldDraft",
+    "PosHoldDraftAudit",
     "Supplier",
     "PurchaseOrder",
     "PurchaseOrderItem",

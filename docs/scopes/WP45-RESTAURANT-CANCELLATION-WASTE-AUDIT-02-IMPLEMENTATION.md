@@ -1,7 +1,7 @@
 # WP45 — Restaurant Cancellation Approval + Waste/Audit Implementation
 
 วันที่: `2026-09-20`
-สถานะ: **Implemented and passed Local Engineering Gate; UAT pending**
+สถานะ: **Implemented; passed Local/UAT Engineering Gate**
 ขอบเขต: **Restaurant POS/KDS; Local/UAT only**
 
 ## 1. Cancellation policy

@@ -24,7 +24,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -3145,6 +3145,9 @@ export default function POSPage(): JSX.Element {
                 {isOnline ? "Server-backed · ทุก Counter" : "ในเครื่อง · รอซิงก์"}
               </span>
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              ค้นหา กรอง เรียกกลับ หรือกู้คืนบิลที่พักไว้ของสาขาปัจจุบัน
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="grid gap-3 md:grid-cols-2">

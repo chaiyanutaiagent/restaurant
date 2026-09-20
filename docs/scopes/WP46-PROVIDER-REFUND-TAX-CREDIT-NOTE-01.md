@@ -1,7 +1,7 @@
 # WP46 — Provider Refund + Tax/Credit Note Scope
 
 วันที่: `2026-09-20`
-สถานะ: **Implemented locally; UAT deployment pending — Local/UAT only**
+สถานะ: **PASS — Local/UAT engineering gate closed; Production blocked**
 
 ## Outcome
 

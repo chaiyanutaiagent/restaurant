@@ -1,7 +1,7 @@
 # WP46 — Provider Refund + Tax/Credit Note Implementation
 
 วันที่: `2026-09-20`
-สถานะ: **Implemented; Local Engineering Gate passed; UAT deployment pending**
+สถานะ: **Implemented; Local/UAT Engineering Gate passed**
 ขอบเขต: **Restaurant POS; Local/UAT sandbox only**
 
 ## 1. Server-authoritative refund
@@ -70,6 +70,9 @@
   - negative ledger exactly-once, stock disposition `none`, reconciliation cash/provider
   - synthetic non-fiscal Credit Note และ append-only audit
 - TypeScript type-check, production/PWA build, Python compile และ Git whitespace gate: ผ่าน
+- final UAT API smoke และ public routes: ผ่าน
+- Desktop/iPad landscape `1024×768`, refund quote/VAT, maker-checker และ accessibility console: ผ่าน
+- application-first rollback ไป WP45 แล้วกลับ WP46: ผ่าน, RTO `9 seconds`
 - non-blocking backlog เดิม: frontend bundle มี large-chunk warning
 
 ## 8. Runtime boundaries

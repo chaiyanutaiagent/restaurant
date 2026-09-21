@@ -19,6 +19,7 @@ from app.models.refund import ProviderRefundEvent, RefundOperation, RefundOperat
 from app.models.stock import StockBalance, StockMovement
 from app.services.refund_service import provider_webhook_signature
 from tests.smoke_approval_api import MANAGER_PIN, PASSWORD, expect, expect_detail_code, issue_approval, login, prepare
+from tests.smoke_wp44_hold_drafts_api import expect_shift_blocker
 from tests.smoke_wp43_pricing_api import pricing_payload, sale_payload
 
 
@@ -168,7 +169,14 @@ def run() -> None:
         replay = expect(client.post("/api/v1/pos/refunds", headers=cashier, json={**execute_payload, "approval_token": approval["approval_token"]}), 201)
         if replay["id"] != cash_operation["id"]:
             raise RuntimeError("Refund execute replay created another operation")
-        expect_detail_code(client.post(f"/api/v1/pos/shifts/{shift['id']}/close", headers=cashier, json={"closing_cash": 500}), 409, "refunds_pending")
+        expect_shift_blocker(
+            client.post(
+                f"/api/v1/pos/shifts/{shift['id']}/close",
+                headers=cashier,
+                json={"closing_cash": 500},
+            ),
+            "refunds_pending",
+        )
         cash_action = {"expected_version": cash_operation["row_version"], "idempotency_key": f"wp46-cash-{uuid.uuid4()}"}
         cash_done = expect(client.post(f"/api/v1/pos/refunds/{cash_operation['id']}/cash-confirm", headers=manager, json=cash_action), 200)
         if cash_done["status"] != "completed":

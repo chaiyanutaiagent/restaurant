@@ -54,6 +54,15 @@ class WP52RestaurantExceptionUXTests(unittest.TestCase):
             2,
         )
 
+    def test_device_pairing_actions_use_accessible_in_app_confirmation(self) -> None:
+        devices_page = (ROOT / "frontend/src/pages/devices/DevicesPage.tsx").read_text()
+
+        self.assertNotIn("window.prompt", devices_page)
+        self.assertNotIn("window.confirm", devices_page)
+        self.assertIn("ยืนยันออก PIN ใหม่", devices_page)
+        self.assertIn("เปิดหน้าจับคู่เครื่องนี้", devices_page)
+        self.assertIn("ยืนยันยกเลิกอุปกรณ์", devices_page)
+
 
 if __name__ == "__main__":
     unittest.main()

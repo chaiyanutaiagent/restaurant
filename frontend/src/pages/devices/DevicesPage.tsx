@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { branchApi } from "@/lib/adminApi";
@@ -64,7 +65,10 @@ function ProvisioningPanel({ provisioning }: { provisioning: DeviceProvisioning 
         <div className="space-y-4">
           <div><p className="text-xs font-semibold uppercase tracking-wider text-emerald-800">Device Code</p><p className="mt-1 font-mono text-2xl font-black text-emerald-950">{provisioning.device.device_code}</p></div>
           <div><p className="text-xs font-semibold uppercase tracking-wider text-emerald-800">Pairing PIN</p><p className="mt-1 font-mono text-5xl font-black tracking-[0.25em] text-emerald-950">{provisioning.pairing_pin}</p></div>
-          <Button type="button" variant="outline" onClick={() => void navigator.clipboard.writeText(webPairingUrl(provisioning.pairing_qr_payload))}>คัดลอกลิงก์จับคู่</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild type="button"><a href={webPairingUrl(provisioning.pairing_qr_payload)}>เปิดหน้าจับคู่เครื่องนี้</a></Button>
+            <Button type="button" variant="outline" onClick={() => void navigator.clipboard.writeText(webPairingUrl(provisioning.pairing_qr_payload))}>คัดลอกลิงก์จับคู่</Button>
+          </div>
         </div>
         {qrUrl ? <img src={qrUrl} alt="QR สำหรับจับคู่อุปกรณ์" className="mx-auto w-56 rounded-2xl border-8 border-white" /> : <Loader2 className="h-8 w-8 animate-spin" />}
       </CardContent>
@@ -83,6 +87,10 @@ export default function DevicesPage(): JSX.Element {
   const [stationKey, setStationKey] = useState("");
   const [reason, setReason] = useState("ติดตั้งอุปกรณ์ประจำสาขา");
   const [provisioning, setProvisioning] = useState<DeviceProvisioning | null>(null);
+  const [rotateTarget, setRotateTarget] = useState<DeviceRead | null>(null);
+  const [rotateReason, setRotateReason] = useState("ติดตั้งหรือจับคู่เครื่องใหม่");
+  const [revokeTarget, setRevokeTarget] = useState<DeviceRead | null>(null);
+  const [revokeReason, setRevokeReason] = useState("");
 
   const branchesQuery = useQuery({
     queryKey: ["device-branches"],
@@ -122,12 +130,18 @@ export default function DevicesPage(): JSX.Element {
     mutationFn: async ({ id, reason: actionReason }: { id: string; reason: string }) => (await api.post<ApiResponse<DeviceProvisioning>>(`/system/devices/${id}/pairing-code`, { reason: actionReason })).data.data,
     onSuccess: (result) => {
       setProvisioning(result);
+      setRotateTarget(null);
+      setRotateReason("ติดตั้งหรือจับคู่เครื่องใหม่");
       void queryClient.invalidateQueries({ queryKey: ["system-devices"] });
     },
   });
   const revokeMutation = useMutation({
     mutationFn: async ({ id, reason: actionReason }: { id: string; reason: string }) => api.post(`/system/devices/${id}/revoke`, { reason: actionReason }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["system-devices"] }),
+    onSuccess: () => {
+      setRevokeTarget(null);
+      setRevokeReason("");
+      void queryClient.invalidateQueries({ queryKey: ["system-devices"] });
+    },
   });
   const actionError = createMutation.error ?? rotateMutation.error ?? revokeMutation.error;
   const devices = devicesQuery.data ?? [];
@@ -180,12 +194,52 @@ export default function DevicesPage(): JSX.Element {
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100"><TabletSmartphone className="h-5 w-5" /></div>
               <div className="min-w-48 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-bold">{device.name}</p><Badge variant={device.status === "revoked" ? "destructive" : "secondary"}>{STATUS_LABEL[device.status]}</Badge><Badge variant="outline">{TYPE_LABEL[device.device_type]}</Badge>{device.status === "paired" ? <Badge className={wasSeenRecently(device.last_seen_at) ? "bg-emerald-600" : "bg-slate-500"}><Activity className="mr-1 h-3 w-3" />{wasSeenRecently(device.last_seen_at) ? "พบล่าสุด" : "ไม่พบล่าสุด"}</Badge> : null}</div><p className="mt-1 font-mono text-xs text-gray-500">{device.device_code} · {branchName[device.branch_id] ?? device.branch_id}{device.station_key ? ` · ${device.station_key}` : ""}</p></div>
               <div className="text-right text-xs text-gray-500"><p>จับคู่ {dateTime(device.paired_at)}</p><p>ล่าสุด {dateTime(device.last_seen_at)}</p></div>
-              {canManage && device.status !== "revoked" ? <div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={rotateMutation.isPending} onClick={() => { const actionReason = window.prompt("เหตุผลที่ออก Pairing PIN ใหม่", "ติดตั้งหรือจับคู่เครื่องใหม่"); if (actionReason?.trim()) rotateMutation.mutate({ id: device.id, reason: actionReason.trim() }); }}><RotateCcwKey className="h-4 w-4" />PIN ใหม่</Button><Button type="button" size="sm" variant="destructive" disabled={revokeMutation.isPending} onClick={() => { const actionReason = window.prompt("เหตุผลที่ยกเลิกอุปกรณ์ (มีผลทันที)"); if (actionReason?.trim() && window.confirm(`ยืนยันยกเลิก ${device.name}?`)) revokeMutation.mutate({ id: device.id, reason: actionReason.trim() }); }}><Unplug className="h-4 w-4" />ยกเลิก</Button></div> : null}
+              {canManage && device.status !== "revoked" ? <div className="flex gap-2"><Button type="button" className="h-11" variant="outline" disabled={rotateMutation.isPending} onClick={() => { setProvisioning(null); setRotateTarget(device); }}><RotateCcwKey className="h-4 w-4" />PIN ใหม่</Button><Button type="button" className="h-11" variant="destructive" disabled={revokeMutation.isPending} onClick={() => setRevokeTarget(device)}><Unplug className="h-4 w-4" />ยกเลิก</Button></div> : null}
             </div>
           ))}
           {!devicesQuery.isLoading && (devicesQuery.data?.length ?? 0) === 0 ? <p className="py-12 text-center text-gray-500">ยังไม่มีอุปกรณ์ใน Scope นี้</p> : null}
         </CardContent>
       </Card>
+
+      <Dialog open={Boolean(rotateTarget)} onOpenChange={(open) => { if (!open && !rotateMutation.isPending) setRotateTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ออก Pairing PIN ใหม่</DialogTitle>
+            <DialogDescription>PIN เดิมของ {rotateTarget?.name ?? "อุปกรณ์นี้"} จะใช้ไม่ได้ทันที และ PIN ใหม่จะแสดงเพียงครั้งเดียว</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="rotate-device-reason">เหตุผล</Label>
+            <Input id="rotate-device-reason" value={rotateReason} onChange={(event) => setRotateReason(event.target.value)} autoFocus />
+          </div>
+          {rotateMutation.error ? <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{deviceErrorMessage(rotateMutation.error)}</p> : null}
+          <DialogFooter>
+            <Button type="button" className="h-11" variant="outline" disabled={rotateMutation.isPending} onClick={() => setRotateTarget(null)}>ยกเลิก</Button>
+            <Button type="button" className="h-11" disabled={rotateMutation.isPending || !rotateReason.trim()} onClick={() => { if (rotateTarget) rotateMutation.mutate({ id: rotateTarget.id, reason: rotateReason.trim() }); }}>
+              {rotateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcwKey className="h-4 w-4" />}ยืนยันออก PIN ใหม่
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(revokeTarget)} onOpenChange={(open) => { if (!open && !revokeMutation.isPending) setRevokeTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ยกเลิกอุปกรณ์</DialogTitle>
+            <DialogDescription>การยกเลิก {revokeTarget?.name ?? "อุปกรณ์นี้"} มีผลทันที เครื่องจะเข้า Workspace ไม่ได้จนกว่าจะลงทะเบียนและจับคู่ใหม่</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="revoke-device-reason">เหตุผลที่ยกเลิก</Label>
+            <Input id="revoke-device-reason" value={revokeReason} onChange={(event) => setRevokeReason(event.target.value)} placeholder="ระบุเหตุผลเพื่อบันทึก Audit" autoFocus />
+          </div>
+          {revokeMutation.error ? <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{deviceErrorMessage(revokeMutation.error)}</p> : null}
+          <DialogFooter>
+            <Button type="button" className="h-11" variant="outline" disabled={revokeMutation.isPending} onClick={() => setRevokeTarget(null)}>กลับ</Button>
+            <Button type="button" className="h-11" variant="destructive" disabled={revokeMutation.isPending || !revokeReason.trim()} onClick={() => { if (revokeTarget) revokeMutation.mutate({ id: revokeTarget.id, reason: revokeReason.trim() }); }}>
+              {revokeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unplug className="h-4 w-4" />}ยืนยันยกเลิกอุปกรณ์
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

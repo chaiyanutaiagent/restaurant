@@ -28,7 +28,24 @@ Automated evidence completed locally:
 - WAP offline regression: 9 passed.
 - Blank database migration `upgrade → downgrade → upgrade`: pass.
 
-Gate A remains open until the UAT deployment smoke, automated reconciliation load and rollback rehearsal are attached to the release commit.
+UAT evidence attached to application commit `b329d2c` with smoke harness commit `e2b8101`:
+
+- Verified pre-deploy backup for five databases, Redis metadata and uploads.
+- UAT deployment and migration to `wp47offline0023 (head)` completed.
+- Public API readiness and HTTPS response-policy checks passed.
+- Automated smoke passed with 100 offline cash orders, 10 lost-ack replays and 20 network transitions.
+- Canonical parity passed for Sale, Payment, Session, Journal, Outbox and Stock movements; total THB 16,900.00.
+- Offline PromptPay and cross-tenant attempts were rejected/quarantined without creating Sales.
+- App-only rollback to WP46 and restoration to WP47 passed in 10 and 11 seconds respectively.
+- Production container identities remained unchanged.
+- Browser smoke at 1024×768 passed without document-level horizontal overflow or console errors. An unpaired browser was correctly redirected to Device Pairing before accessing the Sync Center.
+
+Gate A status: **PASS WITH UAT DATA-CLEANUP FINDINGS**.
+
+Open data/security findings before Business/Security sign-off:
+
+- Remove duplicated categories and prevent raw material, Retail and approval-test products from appearing in the Restaurant POS menu selector.
+- Disable temporary `UAT_AUTH_BYPASS_ENABLED=true` before formal permission/security UAT.
 
 ## Gate B — Physical UAT
 
@@ -46,7 +63,7 @@ The following must be executed on the real paired Counter/iPad. They are deliber
 - Kill switch, export, rollback and recovery evidence.
 - Separate submitter, Technical checker and Business checker accounts.
 
-Gate B status: **READY FOR PHYSICAL UAT after UAT deploy; not yet passed.**
+Gate B status: **READY FOR PHYSICAL UAT; not yet passed.**
 
 ## Gate C — Production decision
 
@@ -59,7 +76,7 @@ Production deployment and Production feature flags are not authorized. These blo
 3. Live payment/refund provider security, webhook verification, reconciliation and SLA are approved.
 4. Accountant/Tax Owner approves fiscal Tax Invoice/Credit Note behaviour and evidence.
 5. Security Owner approves encrypted-storage threat model, device revocation and incident recovery.
-6. Load, monitoring, alerting, support runbook and rollback rehearsal pass on the UAT release candidate.
+6. Load, monitoring, alerting and the support runbook pass on the UAT release candidate. The app-only rollback rehearsal is already complete.
 
 Until every blocker is closed, keep:
 

@@ -31,7 +31,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP43–WP47 | Price, Hold, Cancellation, Refund/Tax and physical-readiness foundations | Implemented/Adapted; package gates recorded | Live provider/physical owner sign-off still gated |
 | WP48 | Shared design system and UAT cleanup | Implemented; UAT gate closed | Production unchanged |
 | WP49 | Restaurant order entry, Table and QR | Implemented; UAT gate closed | Production unchanged |
-| WP50 | Restaurant Shift Operations | In progress | Local/UAT only |
+| WP50 | Restaurant Shift Operations | Implemented; UAT gate closed | Production unchanged |
 | WP51 | Restaurant Hold Draft and Order Center UX | Planned; WP44 Server contract already exists | Local/UAT only |
 | WP52 | Restaurant Cancel, Discount, Refund, Receipt Center UX | Planned; WP43/WP45/WP46 contracts reused | Sandbox/UAT only |
 | WP53 | Restaurant Offline and Sync Recovery UX | Planned | Local/UAT only |
@@ -86,10 +86,10 @@ The superseded non-v2 Action Center file is not counted.
 | D13 | `design-system/13-restaurant-pos-table-modifier.png` | WP49/WP52 | Adapted | Table/session flow exists; quick options are unpriced notes until a priced-modifier contract exists. |
 | D14 | `design-system/14-restaurant-pos-kds.png` | WP49 | Adapted | Server-backed KDS exists and received the WP49 Staff order. |
 | D15 | `design-system/15-restaurant-pos-payment-receipt.png` | WP46/WP52 | Adapted | Current checkout/refund/receipt contracts exist; combined final UX is WP52. |
-| D16 | `design-system/16-restaurant-pos-shift-flow-board.png` | WP50 | In progress | Explicit Staff shift is distinct from Store sales-round closure. |
-| D17 | `design-system/17-restaurant-pos-open-shift.png` | WP50 | In progress | Server-confirmed Company/Branch/User/Location/Counter attribution required. |
-| D18 | `design-system/18-restaurant-pos-close-shift.png` | WP50 | In progress | Server summary, cash count, variance, blockers and audit required. |
-| D19 | `design-system/19-restaurant-pos-staff-handover.png` | WP50 | In progress | Close/logout/cache clearing must preserve Counter pairing. |
+| D16 | `design-system/16-restaurant-pos-shift-flow-board.png` | WP50 | Implemented | Explicit Staff shift is distinct from Store sales-round closure and passed UAT. |
+| D17 | `design-system/17-restaurant-pos-open-shift.png` | WP50 | Implemented | Server confirms Company/Branch/User/Location/Counter attribution and idempotency. |
+| D18 | `design-system/18-restaurant-pos-close-shift.png` | WP50 | Implemented | Server summary, count, variance, blockers, immutable snapshot and audit passed UAT. |
+| D19 | `design-system/19-restaurant-pos-staff-handover.png` | WP50 | Implemented | Handover clears Staff authentication while retaining Counter pairing; UAT passed. |
 | D20 | `design-system/20-restaurant-pos-hold-order-flow-board.png` | WP51 | Planned | WP44 Server-backed draft contract will be reused. |
 | D21 | `design-system/21-restaurant-pos-hold-bill-sheet.png` | WP51 | Planned | Mutation must remain versioned and Server-backed. |
 | D22 | `design-system/22-restaurant-pos-held-bills-resume.png` | WP51 | Planned | Claim/resume/release/discard permissions already exist. |

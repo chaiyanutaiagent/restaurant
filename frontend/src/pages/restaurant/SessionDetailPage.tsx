@@ -166,7 +166,7 @@ export default function SessionDetailPage(): JSX.Element {
     queryFn: async () => (
       await authApi.post("/restaurant/cancellations/preview", cancellationPayload())
     ).data.data as CancellationPreview,
-    enabled: Boolean(cancelTarget) && navigator.onLine,
+    enabled: Boolean(cancelTarget) && isOnline,
     retry: false,
   });
 
@@ -432,7 +432,7 @@ export default function SessionDetailPage(): JSX.Element {
                           <button
                             type="button"
                             onClick={() => itemStatusMutation.mutate({ itemId: item.id, status: "served", expectedVersion: item.row_version })}
-                            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
+                            className="min-h-11 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700"
                           >
                             เสิร์ฟแล้ว
                           </button>
@@ -448,7 +448,7 @@ export default function SessionDetailPage(): JSX.Element {
                               itemVersion: item.row_version,
                               idempotencyKey: requestKey("cancel-item"),
                             })}
-                            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50"
+                            className="min-h-11 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50"
                           >
                             ยกเลิก
                           </button>
@@ -487,7 +487,7 @@ export default function SessionDetailPage(): JSX.Element {
                     orderVersion: order.row_version,
                     idempotencyKey: requestKey("cancel-order"),
                   })}
-                  className="rounded-lg border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                  className="min-h-11 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50"
                 >
                   ยกเลิกออเดอร์
                 </button>
@@ -517,7 +517,7 @@ export default function SessionDetailPage(): JSX.Element {
                         <button
                           type="button"
                           onClick={() => itemStatusMutation.mutate({ itemId: item.id, status: "served", expectedVersion: item.row_version })}
-                          className="mr-2 rounded-lg border border-emerald-200 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                          className="mr-2 min-h-11 rounded-xl border border-emerald-200 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50"
                         >
                           เสิร์ฟแล้ว
                         </button>
@@ -533,7 +533,7 @@ export default function SessionDetailPage(): JSX.Element {
                             itemVersion: item.row_version,
                             idempotencyKey: requestKey("cancel-item"),
                           })}
-                          className="rounded-lg border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                          className="min-h-11 rounded-xl border border-red-200 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50"
                         >
                           ยกเลิก
                         </button>
@@ -577,7 +577,7 @@ export default function SessionDetailPage(): JSX.Element {
                   {session?.status !== "closed" ? (
                     <button
                       type="button"
-                      disabled={!navigator.onLine}
+                      disabled={!isOnline}
                       onClick={() => {
                         setReopenTarget(record);
                         setReopenReason("ลูกค้าขอเปิดรายการใหม่");
@@ -644,7 +644,7 @@ export default function SessionDetailPage(): JSX.Element {
               {cancelTarget?.label}
             </div>
 
-            {!navigator.onLine ? (
+            {!isOnline ? (
               <div role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
                 ออฟไลน์ — การยกเลิกต้องยืนยันกับ Server เพื่อป้องกันบิล สต๊อก และ KDS ไม่ตรงกัน
               </div>
@@ -661,18 +661,38 @@ export default function SessionDetailPage(): JSX.Element {
                 </Button>
               </div>
             ) : cancellationPreviewQuery.data ? (
-              <div className="grid gap-3 sm:grid-cols-3" aria-live="polite">
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <p className="text-xs font-semibold text-slate-500">สถานะครัว</p>
-                  <p className="mt-1 font-bold text-slate-950">{STATUS_LABEL[cancellationPreviewQuery.data.stage_before]}</p>
+              <div className="space-y-3" aria-live="polite">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-slate-200 p-4">
+                    <p className="text-xs font-semibold text-slate-500">สถานะครัว</p>
+                    <p className="mt-1 font-bold text-slate-950">{STATUS_LABEL[cancellationPreviewQuery.data.stage_before]}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 p-4">
+                    <p className="text-xs font-semibold text-slate-500">ผลกระทบบิล</p>
+                    <p className="mt-1 font-bold text-slate-950">-{formatThaiCurrency(Number(cancellationPreviewQuery.data.bill_impact.amount_removed))}</p>
+                  </div>
+                  <div className={`rounded-2xl border p-4 ${cancellationPreviewQuery.data.waste_disposition === "full" ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+                    <p className="text-xs font-semibold text-slate-500">วัตถุดิบ / Waste</p>
+                    <p className="mt-1 font-bold text-slate-950">{cancellationPreviewQuery.data.waste_disposition === "full" ? "ตัด Waste เต็มตามสูตร" : "ไม่ตัด Waste"}</p>
+                  </div>
                 </div>
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <p className="text-xs font-semibold text-slate-500">ผลกระทบบิล</p>
-                  <p className="mt-1 font-bold text-slate-950">-{formatThaiCurrency(Number(cancellationPreviewQuery.data.bill_impact.amount_removed))}</p>
-                </div>
-                <div className={`rounded-2xl border p-4 ${cancellationPreviewQuery.data.waste_disposition === "full" ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
-                  <p className="text-xs font-semibold text-slate-500">วัตถุดิบ / Waste</p>
-                  <p className="mt-1 font-bold text-slate-950">{cancellationPreviewQuery.data.waste_disposition === "full" ? "ตัด Waste เต็มตามสูตร" : "ไม่ตัด Waste"}</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 p-4">
+                    <p className="text-sm font-bold text-slate-900">รายการที่ได้รับผลกระทบ</p>
+                    <div className="mt-2 space-y-1 text-sm text-slate-600">
+                      {cancellationPreviewQuery.data.affected_items.map((item) => (
+                        <div key={item.id} className="flex justify-between gap-3"><span>{item.product_name}</span><strong>×{item.qty}</strong></div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-sm font-bold text-amber-950">ผลต่อ Waste Ledger</p>
+                    <div className="mt-2 space-y-1 text-sm text-amber-900">
+                      {cancellationPreviewQuery.data.waste_lines.length > 0 ? cancellationPreviewQuery.data.waste_lines.map((line) => (
+                        <div key={line.product_id} className="flex justify-between gap-3"><span>{line.product_name}</span><strong>{line.quantity} {line.unit || ""}</strong></div>
+                      )) : <p>ไม่สร้าง Waste movement</p>}
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -732,7 +752,7 @@ export default function SessionDetailPage(): JSX.Element {
               className="h-14 min-w-44 text-base font-bold"
               variant="destructive"
               disabled={
-                !navigator.onLine
+                !isOnline
                 || cancellationPreviewQuery.isLoading
                 || cancellationPreviewQuery.isError
                 || !cancellationPreviewQuery.data?.waste_ready

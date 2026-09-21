@@ -44,10 +44,6 @@ export const posApi = {
   getSale: (id: string) => api.get<ApiResponse<SaleOrder>>(`/pos/sales/${id}`),
   voidSale: (id: string, reason: string, approvalToken?: string) =>
     api.post(`/pos/sales/${id}/void`, { void_reason: reason, approval_token: approvalToken }),
-  refundSale: (id: string, reason: string, approvalToken?: string) =>
-    api.post(`/pos/sales/${id}/refund`, { refund_reason: reason, approval_token: approvalToken }),
-  partialRefundSale: (id: string, data: { refund_reason: string; items: Array<{ order_item_id: string; qty: number }>; approval_token?: string }) =>
-    api.post<ApiResponse<SaleOrder>>(`/pos/sales/${id}/refund/partial`, data),
   createRefundQuote: (data: object) => api.post<ApiResponse<RefundQuote>>("/pos/refunds/quotes", data),
   executeRefund: (data: object) => api.post<ApiResponse<RefundOperation>>("/pos/refunds", data),
   listRefunds: (params?: { order_id?: string }) => api.get<ApiResponse<RefundOperation[]>>("/pos/refunds", { params }),

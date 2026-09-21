@@ -33,7 +33,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP49 | Restaurant order entry, Table and QR | Implemented; UAT gate closed | Production unchanged |
 | WP50 | Restaurant Shift Operations | Implemented; UAT gate closed | Production unchanged |
 | WP51 | Restaurant Hold Draft and Order Center UX | Implemented; UAT gate closed | Production unchanged |
-| WP52 | Restaurant Cancel, Discount, Refund, Receipt Center UX | Planned; WP43/WP45/WP46 contracts reused | Sandbox/UAT only |
+| WP52 | Restaurant Cancel, Discount, Refund, Receipt Center UX | In progress; contract/action matrix recorded | Sandbox/UAT only |
 | WP53 | Restaurant Offline and Sync Recovery UX | Planned | Local/UAT only |
 | WP54 | Restaurant Counter Readiness and physical-UAT shell | Planned | No physical pass implied |
 | WP55 | Retail foundation and Scan-first sale | Planned | Legacy source unchanged |

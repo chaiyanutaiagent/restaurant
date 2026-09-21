@@ -26,6 +26,8 @@ type Props = {
 type ReasonCode = "customer_request" | "wrong_item" | "quality_issue" | "duplicate_charge" | "payment_error" | "other";
 type ProviderScenario = "succeeded" | "failed" | "processing_then_succeeded" | "unknown_then_succeeded" | "unknown_persistent";
 
+const UAT_SIMULATOR_ENABLED = import.meta.env.DEV || import.meta.env.VITE_REFUND_UAT_SIMULATOR === "true";
+
 function money(value: number | string): string {
   return new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB" }).format(Number(value));
 }
@@ -245,15 +247,17 @@ export default function RefundWorkspaceDialog({ open, order, shift, online, onOp
                   </div>
                 ))}
               </div>
-              <details className="rounded-xl border border-dashed border-slate-300 p-3 text-sm">
-                <summary className="cursor-pointer font-medium">UAT Provider simulator</summary>
-                <select className="mt-3 h-12 w-full rounded-xl border border-slate-300 bg-white px-3" value={scenario} onChange={(event) => setScenario(event.target.value as ProviderScenario)}>
-                  <option value="succeeded">สำเร็จ</option><option value="failed">ล้มเหลวแล้ว retry ได้</option>
-                  <option value="processing_then_succeeded">กำลังทำ → inquiry สำเร็จ</option>
-                  <option value="unknown_then_succeeded">ไม่ทราบผล → inquiry สำเร็จ</option>
-                  <option value="unknown_persistent">ไม่ทราบผลต่อเนื่อง</option>
-                </select>
-              </details>
+              {UAT_SIMULATOR_ENABLED ? (
+                <details className="rounded-xl border border-dashed border-slate-300 p-3 text-sm">
+                  <summary className="cursor-pointer font-medium">UAT Provider simulator · Sandbox เท่านั้น</summary>
+                  <select className="mt-3 h-12 w-full rounded-xl border border-slate-300 bg-white px-3" value={scenario} onChange={(event) => setScenario(event.target.value as ProviderScenario)}>
+                    <option value="succeeded">สำเร็จ</option><option value="failed">ล้มเหลวแล้ว retry ได้</option>
+                    <option value="processing_then_succeeded">กำลังทำ → inquiry สำเร็จ</option>
+                    <option value="unknown_then_succeeded">ไม่ทราบผล → inquiry สำเร็จ</option>
+                    <option value="unknown_persistent">ไม่ทราบผลต่อเนื่อง</option>
+                  </select>
+                </details>
+              ) : null}
               <div className="flex items-start gap-3 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">
                 <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />รายการคืนเงินทุกยอดใช้ maker-checker ผู้ขอและผู้อนุมัติต้องเป็นคนละคน
               </div>

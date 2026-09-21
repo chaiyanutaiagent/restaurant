@@ -25,6 +25,15 @@ type ManagerApprovalDialogProps = {
   onApproved: (approvalToken: string) => Promise<void>;
 };
 
+const ACTION_LABEL: Partial<Record<ApprovalAction, string>> = {
+  "pos.discount.override": "อนุมัติส่วนลดเกินเพดาน Cashier",
+  "pos.price.override": "อนุมัติเปลี่ยนราคาสินค้า",
+  "pos.sale.void": "อนุมัติ Void บิล",
+  "pos.refund.create": "อนุมัติคืนสินค้า / คืนเงิน",
+  "fb.order.cancel_after_kitchen": "อนุมัติยกเลิกรายการหลังครัวเริ่มทำ",
+  "fb.order.cancel.reopen": "อนุมัติเปิดรายการที่ยกเลิกเป็นออเดอร์ใหม่",
+};
+
 export default function ManagerApprovalDialog({
   open,
   onOpenChange,
@@ -94,9 +103,16 @@ export default function ManagerApprovalDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+            <div className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">คำขอที่กำลังอนุมัติ</div>
+            <div className="mt-1 font-bold">{ACTION_LABEL[action] || action}</div>
+            <div className="mt-2 text-blue-800">เหตุผลจากผู้ขอ: {reason}</div>
+            <div className="mt-2 text-xs text-blue-700">Server จะผูกการอนุมัติกับคำขอนี้เท่านั้น หากยอด รายการ หรือสาขาเปลี่ยน ต้องขอใหม่</div>
+          </div>
           <div className="grid gap-2">
             <Label htmlFor="approval-manager-username">Username ผู้อนุมัติ</Label>
             <Input
+              className="h-12"
               id="approval-manager-username"
               autoComplete="username"
               value={approverUsername}
@@ -106,6 +122,7 @@ export default function ManagerApprovalDialog({
           <div className="grid gap-2">
             <Label htmlFor="approval-manager-pin">Manager PIN</Label>
             <Input
+              className="h-14 text-center text-xl tracking-[0.45em]"
               id="approval-manager-pin"
               type="password"
               inputMode="numeric"
@@ -133,10 +150,10 @@ export default function ManagerApprovalDialog({
           </p>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+          <Button className="h-12" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
             ยกเลิก
           </Button>
-          <Button onClick={() => void submit()} disabled={isSubmitting}>
+          <Button className="h-14 min-w-44" onClick={() => void submit()} disabled={isSubmitting}>
             {isSubmitting ? "กำลังตรวจสอบ..." : "อนุมัติและทำรายการ"}
           </Button>
         </DialogFooter>

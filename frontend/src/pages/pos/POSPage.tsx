@@ -67,6 +67,8 @@ import RedeemPointsDialog from "@/pages/crm/RedeemPointsDialog";
 import CloseShiftDialog from "@/pages/pos/CloseShiftDialog";
 import ReceiptView from "@/pages/pos/ReceiptView";
 import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
+import BillReceiptCenterDialog from "@/components/pos/BillReceiptCenterDialog";
+import DiscountWorkspaceDialog from "@/components/pos/DiscountWorkspaceDialog";
 import HoldDraftWorkspaceDialog from "@/components/pos/HoldDraftWorkspaceDialog";
 import PosWorkspaceNav from "@/components/pos/PosWorkspaceNav";
 import RefundWorkspaceDialog from "@/components/pos/RefundWorkspaceDialog";
@@ -310,14 +312,6 @@ const paymentMethodLabels: Record<PaymentMethod, string> = {
   other: "อื่นๆ",
 };
 
-function getOrderStatusLabel(status: SaleOrder["status"]): string {
-  if (status === "voided") return "voided";
-  if (status === "refunded") return "refunded";
-  if (status === "partially_refunded") return "partially refunded";
-  if (status === "completed") return "completed";
-  return "pending sync";
-}
-
 export default function POSPage(): JSX.Element {
   const navigate = useNavigate();
   const logout = useLogout("/login?next=/pos");
@@ -400,7 +394,7 @@ export default function POSPage(): JSX.Element {
   const [resumedHoldDraft, setResumedHoldDraft] = useState<{ id: string; version: number } | null>(null);
   const [replacementRulesVersion, setReplacementRulesVersion] = useState(0);
   const [recentSalesOpen, setRecentSalesOpen] = useState(false);
-  const [historyOrder, setHistoryOrder] = useState<SaleOrder | null>(null);
+  const [discountWorkspaceOpen, setDiscountWorkspaceOpen] = useState(false);
   const [priceEditorOpen, setPriceEditorOpen] = useState(false);
   const [priceEditProductId, setPriceEditProductId] = useState<string | null>(null);
   const [priceEditValue, setPriceEditValue] = useState("");
@@ -408,11 +402,6 @@ export default function POSPage(): JSX.Element {
   const [priceEditReasonCode, setPriceEditReasonCode] = useState<"customer_recovery" | "price_match" | "manager_comp" | "damaged_item" | "manual_correction" | "other">("other");
   const [voidOrder, setVoidOrder] = useState<SaleOrder | null>(null);
   const [voidReason, setVoidReason] = useState("");
-  const [refundOrder, setRefundOrder] = useState<SaleOrder | null>(null);
-  const [refundReason, setRefundReason] = useState("");
-  const [partialRefundOrder, setPartialRefundOrder] = useState<SaleOrder | null>(null);
-  const [partialRefundReason, setPartialRefundReason] = useState("");
-  const [partialRefundQtys, setPartialRefundQtys] = useState<Record<string, string>>({});
   const [refundWorkspaceOrder, setRefundWorkspaceOrder] = useState<SaleOrder | null>(null);
   const [pendingManagerApproval, setPendingManagerApproval] = useState<PendingManagerApproval | null>(null);
   const [exchangeContext, setExchangeContext] = useState<ExchangeContextDraft | null>(null);
@@ -587,7 +576,7 @@ export default function POSPage(): JSX.Element {
       if (!currentShift) {
         return [] as SaleOrder[];
       }
-      const response = await posApi.listSales({ shift_id: currentShift.id, limit: 12, page: 1 });
+      const response = await posApi.listSales({ shift_id: currentShift.id, limit: 100, page: 1 });
       return response.data.data as SaleOrder[];
     },
     enabled: Boolean(currentShift) && isOnline,
@@ -1316,152 +1305,6 @@ export default function POSPage(): JSX.Element {
     }
   }
 
-  async function executeRefundSale(approvalToken?: string): Promise<void> {
-    if (!refundOrder) return;
-    await posApi.refundSale(refundOrder.id, refundReason.trim(), approvalToken);
-    toast({ title: "Refund สำเร็จ", description: refundOrder.order_number });
-    setRefundOrder(null);
-    setRefundReason("");
-    await recentSalesQuery.refetch();
-  }
-
-  async function handleRefundSale(): Promise<void> {
-    if (!refundOrder || !refundReason.trim()) {
-      toast({ title: "กรุณาระบุเหตุผลในการคืนสินค้า" });
-      return;
-    }
-    if (!hasPermission("pos.refund.create")) {
-      const orderId = refundOrder.id;
-      const reason = refundReason.trim();
-      setPendingManagerApproval({
-        action: "pos.refund.create",
-        requestPayload: { order_id: orderId, refund_reason: reason },
-        reason,
-        description: `คืนเงินเต็มบิล ${refundOrder.order_number} ต้องได้รับอนุมัติจาก Manager`,
-        onApproved: executeRefundSale
-      });
-      return;
-    }
-    try {
-      await executeRefundSale();
-    } catch (error) {
-      toast({ title: "Refund ไม่สำเร็จ", description: error instanceof Error ? error.message : "ลองใหม่อีกครั้ง" });
-    }
-  }
-
-  async function beginExchangeFlow(
-    order: SaleOrder,
-    refundAmount: number,
-    refundReasonValue: string,
-    refundedItemNames: string[],
-    refundedSourceItems: Array<{ product_id: string; product_name: string }>,
-  ): Promise<void> {
-    if (cart.items.length > 0) {
-      const ok = await confirm({ title: "เริ่มบิลแลกสินค้า", description: "มีสินค้าอยู่ในตะกร้าปัจจุบัน ต้องการล้างแล้วเริ่มบิลแลกหรือไม่", confirmLabel: "ล้างและเริ่ม", variant: "destructive" });
-      if (!ok) return;
-    }
-    resetActiveSale();
-    setCustomerName(order.customer_name ?? "");
-    setCustomerPhone(order.customer_phone ?? "");
-    setCustomerTaxId(order.customer_tax_id ?? "");
-    setSelectedCustomer(null);
-    setExchangeContext({
-      source_order_id: order.id,
-      source_order_number: order.order_number,
-      refund_amount: refundAmount,
-      refunded_items: refundedItemNames,
-      source_items: refundedSourceItems,
-      refund_reason: refundReasonValue,
-    });
-    const noteLines = [
-      `EXCHANGE FROM ${order.order_number}`,
-      `Refund ${formatThaiCurrency(refundAmount)}`,
-      refundedItemNames.length > 0 ? `Returned: ${refundedItemNames.join(", ")}` : "",
-      refundReasonValue ? `Reason: ${refundReasonValue}` : "",
-    ].filter(Boolean);
-    setNote(noteLines.join("\n"));
-    setRecentSalesOpen(false);
-    searchRef.current?.focus();
-    toast({
-      title: "เริ่มบิลแลกสินค้าแล้ว",
-      description: `อ้างอิง ${order.order_number} และพร้อมเพิ่มสินค้าใหม่ต่อได้เลย`,
-    });
-  }
-
-  async function handlePartialRefundSale(
-    startExchange = false,
-    approvalToken?: string
-  ): Promise<void> {
-    if (!partialRefundOrder || !partialRefundReason.trim()) {
-      toast({ title: "กรุณาระบุเหตุผลในการคืนสินค้า" });
-      return;
-    }
-    const refundItems = partialRefundOrder.items
-      .map((item) => {
-        const qty = Number(partialRefundQtys[item.id] ?? 0);
-        return {
-          order_item_id: item.id,
-          qty: Number.isFinite(qty) ? qty : 0,
-        };
-      })
-      .filter((item) => item.qty > 0);
-    if (refundItems.length === 0) {
-      toast({ title: "เลือกสินค้าที่ต้องการคืนก่อน" });
-      return;
-    }
-    if (!hasPermission("pos.refund.create") && !approvalToken) {
-      const orderId = partialRefundOrder.id;
-      const reason = partialRefundReason.trim();
-      setPendingManagerApproval({
-        action: "pos.refund.create",
-        requestPayload: {
-          order_id: orderId,
-          refund_reason: reason,
-          items: refundItems
-        },
-        reason,
-        description: `คืนบางรายการจากบิล ${partialRefundOrder.order_number} ต้องได้รับอนุมัติจาก Manager`,
-        onApproved: (token) => handlePartialRefundSale(startExchange, token)
-      });
-      return;
-    }
-    const refundedItemNames = partialRefundOrder.items
-      .filter((item) => refundItems.some((entry) => entry.order_item_id === item.id))
-      .map((item) => item.product_name);
-    try {
-      const response = await posApi.partialRefundSale(partialRefundOrder.id, {
-        refund_reason: partialRefundReason.trim(),
-        items: refundItems,
-        approval_token: approvalToken,
-      });
-      const updatedOrder = response.data.data as SaleOrder;
-      const refundAmount = partialRefundPreview.amount;
-      toast({ title: "คืนบางรายการสำเร็จ", description: partialRefundOrder.order_number });
-      setPartialRefundOrder(null);
-      setPartialRefundReason("");
-      setPartialRefundQtys({});
-      await recentSalesQuery.refetch();
-      if (startExchange) {
-        await beginExchangeFlow(
-          updatedOrder,
-          refundAmount,
-          partialRefundReason.trim(),
-          refundedItemNames,
-          partialRefundOrder.items
-            .filter((item) => refundItems.some((entry) => entry.order_item_id === item.id))
-            .map((item) => ({
-              product_id: item.product_id,
-              product_name: item.product_name,
-              qty: refundItems.find((entry) => entry.order_item_id === item.id)?.qty ?? 1,
-            })),
-        );
-      }
-    } catch (error) {
-      if (approvalToken) throw error;
-      toast({ title: "คืนบางรายการไม่สำเร็จ", description: error instanceof Error ? error.message : "ลองใหม่อีกครั้ง" });
-    }
-  }
-
   function resetActiveSale(): void {
     setCartItems([]);
     setOrderDiscount(0);
@@ -2118,39 +1961,6 @@ export default function POSPage(): JSX.Element {
   const effectiveDiscountPct = grossBeforeDiscount > 0
     ? Math.max(0, ((grossBeforeDiscount - netAfterDiscount) * 100) / grossBeforeDiscount)
     : 0;
-  const refundableStatuses: SaleOrder["status"][] = ["completed", "partially_refunded"];
-  const partialRefundPreview = useMemo(() => {
-    if (!partialRefundOrder) {
-      return { amount: 0, itemCount: 0 };
-    }
-    let amount = 0;
-    let itemCount = 0;
-    partialRefundOrder.items.forEach((item) => {
-      const requestedQty = Number(partialRefundQtys[item.id] ?? 0);
-      if (!Number.isFinite(requestedQty) || requestedQty <= 0 || item.qty <= 0) {
-        return;
-      }
-      const safeQty = Math.min(requestedQty, Math.max(Number(item.qty) - Number(item.refunded_qty ?? 0), 0));
-      if (safeQty <= 0) {
-        return;
-      }
-      const ratio = safeQty / Number(item.qty);
-      const lineSubtotal = Number(item.subtotal) * ratio;
-      const orderDiscountShare = partialRefundOrder.subtotal > 0
-        ? Number(partialRefundOrder.discount_amount) * (lineSubtotal / Number(partialRefundOrder.subtotal))
-        : 0;
-      const excludedVat = item.vat_type === "excluded" ? Number(item.vat_amount) * ratio : 0;
-      amount += lineSubtotal - orderDiscountShare + excludedVat;
-      itemCount += 1;
-    });
-    return { amount: roundMoney(amount), itemCount };
-  }, [partialRefundOrder, partialRefundQtys]);
-  const historyRefundableAmount = historyOrder
-    ? Math.max(Number(historyOrder.total_amount) - Number(historyOrder.refund_amount ?? 0), 0)
-    : 0;
-  const historySalePayments = historyOrder?.payments.filter((payment) => Number(payment.amount) >= 0) ?? [];
-  const historyRefundPayments = historyOrder?.payments.filter((payment) => Number(payment.amount) < 0) ?? [];
-  const historyNoteLines = historyOrder?.note?.split("\n").map((line) => line.trim()).filter(Boolean) ?? [];
   const exchangeNote = useMemo(() => {
     if (!exchangeContext) {
       return note || null;
@@ -2304,7 +2114,7 @@ export default function POSPage(): JSX.Element {
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
               <Button size="sm" variant="outline" onClick={() => setRecentSalesOpen(true)} disabled={!currentShift}>
-                ล่าสุด
+                ศูนย์บิล
               </Button>
               <Button size="sm" variant="outline" className="min-h-11" onClick={() => setCloseShiftOpen(true)} disabled={!currentShift}>จัดการกะ</Button>
               <Button size="sm" variant="outline" aria-label="สถานะเครื่องและการพิมพ์" onClick={() => setDeviceStatusOpen(true)}>
@@ -2887,13 +2697,15 @@ export default function POSPage(): JSX.Element {
                   <div className="flex justify-between"><span>ยอดรวม</span><span>{formatThaiCurrency(cart.subtotal)}</span></div>
                   <div className="flex items-center justify-between gap-3">
                     <span>ส่วนลด</span>
-                    <input
-                      type="number"
-                      className="h-9 w-28 rounded-md border border-slate-300 bg-white px-2 text-right disabled:bg-slate-100 disabled:text-slate-400"
-                      value={orderDiscount}
-                      disabled={isTakeawayMode || !discountAllowed}
-                      onChange={(event) => handleOrderDiscountChange(Number(event.target.value))}
-                    />
+                    <Button
+                      type="button"
+                      className="h-11 min-w-28 justify-end"
+                      variant="outline"
+                      disabled={isTakeawayMode || !discountAllowed || cart.subtotal <= 0}
+                      onClick={() => setDiscountWorkspaceOpen(true)}
+                    >
+                      {orderDiscount > 0 ? `- ${formatThaiCurrency(orderDiscount)}` : "กำหนดส่วนลด"}
+                    </Button>
                   </div>
                   <div className="text-xs text-slate-500">
                     {isTakeawayMode
@@ -3435,251 +3247,46 @@ export default function POSPage(): JSX.Element {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={recentSalesOpen} onOpenChange={setRecentSalesOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>ออเดอร์ล่าสุดในกะนี้</DialogTitle>
-            <DialogDescription className="sr-only">
-              รายการขายล่าสุดสำหรับดูรายละเอียด พิมพ์ซ้ำ หรือเริ่มกระบวนการคืนสินค้าและคืนเงิน
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            {recentSales.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
-                ยังไม่มีออเดอร์ในกะนี้
-              </div>
-            ) : (
-              <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
-                {recentSales.map((order) => (
-                  <div key={order.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    {(() => {
-                      const refundedAmount = Number(order.refund_amount ?? 0);
-                      const remainingRefund = Math.max(Number(order.total_amount) - refundedAmount, 0);
-                      const refundableItemCount = order.items.filter((item) => Number(item.qty) - Number(item.refunded_qty ?? 0) > 0).length;
-                      return (
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <div className="font-semibold text-slate-900">{order.order_number}</div>
-                        <div className="mt-1 text-sm text-slate-500">
-                          {order.customer_name || "ลูกค้าทั่วไป"} • {formatThaiCurrency(order.total_amount)} • {formatThaiDate(order.created_at)}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-400">
-                          สถานะ {getOrderStatusLabel(order.status)}
-                        </div>
-                        {refundedAmount > 0 ? (
-                          <div className="mt-2 text-xs text-amber-700">
-                            คืนแล้ว {formatThaiCurrency(refundedAmount)} • คงเหลือคืนได้ {formatThaiCurrency(remainingRefund)}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            setHistoryOrder(order);
-                          }}
-                        >
-                          รายละเอียด
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            setLastOrder(order);
-                            setShowReceipt(true);
-                            setRecentSalesOpen(false);
-                            }}
-                          >
-                          พิมพ์ซ้ำ
-                        </Button>
-                        {canVoidSale && order.status === "completed" && order.payments
-                          .filter((payment) => Number(payment.amount) > 0)
-                          .every((payment) => ["authorized", "pending"].includes(payment.settlement_state || "unknown")) ? (
-                          <Button variant="outline" onClick={() => { setVoidOrder(order); setVoidReason(""); }}>
-                            Void บิล
-                          </Button>
-                        ) : null}
-                        {canRefundSale && refundableStatuses.includes(order.status) && refundableItemCount > 0 ? (
-                          <Button
-                            variant="outline"
-                            onClick={() => setRefundWorkspaceOrder(order)}
-                          >
-                            คืนสินค้า / คืนเงิน
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                      );
-                    })()}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRecentSalesOpen(false)}>ปิด</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <BillReceiptCenterDialog
+        open={recentSalesOpen}
+        orders={recentSales}
+        isLoading={recentSalesQuery.isLoading}
+        isError={recentSalesQuery.isError}
+        isRefreshing={recentSalesQuery.isFetching}
+        updatedAt={recentSalesQuery.dataUpdatedAt}
+        online={isOnline}
+        canVoid={canVoidSale}
+        canRefund={canRefundSale}
+        onOpenChange={setRecentSalesOpen}
+        onRetry={() => { void recentSalesQuery.refetch(); }}
+        onPrint={(order) => {
+          setLastOrder(order);
+          setShowReceipt(true);
+          setRecentSalesOpen(false);
+        }}
+        onVoid={(order) => {
+          setVoidOrder(order);
+          setVoidReason("");
+          setRecentSalesOpen(false);
+        }}
+        onRefund={(order) => {
+          setRefundWorkspaceOrder(order);
+          setRecentSalesOpen(false);
+        }}
+      />
 
-      <Dialog open={Boolean(historyOrder)} onOpenChange={(open) => { if (!open) setHistoryOrder(null); }}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>รายละเอียดบิลย้อนหลัง</DialogTitle>
-          </DialogHeader>
-          {historyOrder ? (
-            <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-4">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">บิล</div>
-                  <div className="mt-1 font-semibold text-slate-900">{historyOrder.order_number}</div>
-                  <div className="mt-1 text-xs text-slate-500">{formatThaiDate(historyOrder.created_at)}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">สถานะ</div>
-                  <div className="mt-1 font-semibold text-slate-900">{getOrderStatusLabel(historyOrder.status)}</div>
-                  <div className="mt-1 text-xs text-slate-500">{historyOrder.customer_name || "ลูกค้าทั่วไป"}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">ยอดขายเดิม</div>
-                  <div className="mt-1 font-semibold text-slate-900">{formatThaiCurrency(historyOrder.total_amount)}</div>
-                  <div className="mt-1 text-xs text-slate-500">VAT {formatThaiCurrency(historyOrder.vat_amount)}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">คืนสะสม</div>
-                  <div className="mt-1 font-semibold text-amber-700">{formatThaiCurrency(Number(historyOrder.refund_amount ?? 0))}</div>
-                  <div className="mt-1 text-xs text-slate-500">คงเหลือคืนได้ {formatThaiCurrency(historyRefundableAmount)}</div>
-                </div>
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-[1.3fr_0.9fr]">
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-slate-200">
-                    <div className="border-b border-slate-200 px-4 py-3">
-                      <div className="font-semibold text-slate-900">รายการสินค้า</div>
-                    </div>
-                    <div className="max-h-[22rem] space-y-3 overflow-y-auto p-4">
-                      {historyOrder.items.map((item) => {
-                        const refundedQty = Number(item.refunded_qty ?? 0);
-                        const refundableQty = Math.max(Number(item.qty) - refundedQty, 0);
-                        return (
-                          <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                              <div>
-                                <div className="font-medium text-slate-900">{item.product_name}</div>
-                                {item.variant_name ? <div className="text-xs text-slate-500">{item.variant_name}</div> : null}
-                                <div className="mt-2 text-sm text-slate-500">
-                                  {formatThaiCurrency(item.unit_price)} x {item.qty} • รวม {formatThaiCurrency(item.subtotal)}
-                                </div>
-                              </div>
-                              <div className="text-sm text-right">
-                                <div className="text-slate-600">คืนแล้ว {refundedQty}</div>
-                                <div className="text-slate-500">คืนได้อีก {refundableQty}</div>
-                                {Number(item.refunded_amount ?? 0) > 0 ? (
-                                  <div className="text-amber-700">ยอดคืนสะสม {formatThaiCurrency(Number(item.refunded_amount ?? 0))}</div>
-                                ) : null}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {historyNoteLines.length > 0 ? (
-                    <div className="rounded-2xl border border-slate-200">
-                      <div className="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">หมายเหตุและประวัติ</div>
-                      <div className="space-y-2 p-4 text-sm text-slate-600">
-                        {historyNoteLines.map((line, index) => (
-                          <div key={`${historyOrder.id}-timeline-${index}`} className="rounded-xl bg-slate-50 px-3 py-2">
-                            {line}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-slate-200">
-                    <div className="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">ข้อมูลลูกค้า</div>
-                    <div className="space-y-2 p-4 text-sm text-slate-600">
-                      <div>ชื่อ: {historyOrder.customer_name || "ลูกค้าทั่วไป"}</div>
-                      <div>โทร: {historyOrder.customer_phone || "-"}</div>
-                      <div>เลขผู้เสียภาษี: {historyOrder.customer_tax_id || "-"}</div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200">
-                    <div className="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">ประวัติการชำระเงิน</div>
-                    <div className="space-y-3 p-4">
-                      {historySalePayments.length === 0 ? (
-                        <div className="text-sm text-slate-500">ไม่มีข้อมูลการชำระเงิน</div>
-                      ) : (
-                        historySalePayments.map((payment) => (
-                          <div key={payment.id} className="rounded-xl bg-slate-50 px-3 py-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="font-medium text-slate-900">{paymentMethodLabels[payment.payment_method] ?? "อื่นๆ"}</div>
-                                <div className="text-xs text-slate-500">{formatThaiDate(payment.paid_at)}</div>
-                                {payment.reference_no ? <div className="text-xs text-slate-500">อ้างอิง {payment.reference_no}</div> : null}
-                              </div>
-                              <div className="font-semibold text-slate-900">{formatThaiCurrency(Number(payment.amount))}</div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50">
-                    <div className="border-b border-amber-200 px-4 py-3 font-semibold text-amber-900">ประวัติคืนสินค้า / คืนเงิน</div>
-                    <div className="space-y-3 p-4">
-                      <div className="flex items-center justify-between text-sm text-amber-900">
-                        <span>คืนสะสม</span>
-                        <span className="font-semibold">{formatThaiCurrency(Number(historyOrder.refund_amount ?? 0))}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-sm text-amber-900">
-                        <span>คงเหลือคืนได้</span>
-                        <span className="font-semibold">{formatThaiCurrency(historyRefundableAmount)}</span>
-                      </div>
-                      {historyRefundPayments.length === 0 ? (
-                        <div className="text-sm text-amber-800">ยังไม่มี payment ติดลบจากการ refund</div>
-                      ) : (
-                        historyRefundPayments.map((payment) => (
-                          <div key={payment.id} className="rounded-xl bg-white/70 px-3 py-3 text-sm text-amber-900">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="font-medium">{paymentMethodLabels[payment.payment_method] ?? "อื่นๆ"}</div>
-                                <div className="text-xs text-amber-800">{formatThaiDate(payment.paid_at)}</div>
-                                {payment.reference_no ? <div className="text-xs text-amber-800">อ้างอิง {payment.reference_no}</div> : null}
-                              </div>
-                              <div className="font-semibold">{formatThaiCurrency(Number(payment.amount))}</div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setHistoryOrder(null)}>ปิด</Button>
-            <Button
-              onClick={() => {
-                if (!historyOrder) {
-                  return;
-                }
-                setLastOrder(historyOrder);
-                setShowReceipt(true);
-              }}
-            >
-              เปิดใบเสร็จเพื่อพิมพ์ซ้ำ
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DiscountWorkspaceDialog
+        open={discountWorkspaceOpen}
+        subtotal={cart.subtotal}
+        currentAmount={orderDiscount}
+        enabled={!isTakeawayMode && discountAllowed}
+        online={isOnline}
+        canOverride={canOverrideDiscount}
+        cashierLimitPct={cashierDiscountLimit}
+        hardLimitPct={maxDiscountPct}
+        onOpenChange={setDiscountWorkspaceOpen}
+        onApply={handleOrderDiscountChange}
+      />
 
       <Dialog open={priceEditorOpen} onOpenChange={setPriceEditorOpen}>
         <DialogContent className="max-w-md">
@@ -3740,114 +3347,6 @@ export default function POSPage(): JSX.Element {
           <DialogFooter>
             <Button variant="outline" onClick={() => { setVoidOrder(null); setVoidReason(""); }}>ยกเลิก</Button>
             <Button onClick={() => void handleVoidSale()}>ยืนยัน void</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={Boolean(partialRefundOrder)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPartialRefundOrder(null);
-            setPartialRefundReason("");
-            setPartialRefundQtys({});
-          }
-        }}
-      >
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>คืนบางรายการ / Partial Refund</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="text-sm text-slate-600">
-              {partialRefundOrder ? `บิล ${partialRefundOrder.order_number} • คาดว่าจะคืน ${formatThaiCurrency(partialRefundPreview.amount)}` : ""}
-            </div>
-            {partialRefundOrder ? (
-              <div className="max-h-[24rem] space-y-3 overflow-y-auto pr-1">
-                {partialRefundOrder.items.map((item) => {
-                  const availableQty = Math.max(Number(item.qty) - Number(item.refunded_qty ?? 0), 0);
-                  return (
-                    <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div>
-                          <div className="font-medium text-slate-900">{item.product_name}</div>
-                          <div className="mt-1 text-sm text-slate-500">
-                            ขาย {item.qty} • คืนแล้ว {item.refunded_qty ?? 0} • คงเหลือคืนได้ {availableQty}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-400">
-                            มูลค่าต่อรายการ {formatThaiCurrency(item.subtotal)}{item.refunded_amount ? ` • คืนสะสม ${formatThaiCurrency(item.refunded_amount)}` : ""}
-                          </div>
-                        </div>
-                        <Input
-                          className="w-full md:w-32"
-                          type="number"
-                          min="0"
-                          max={availableQty.toString()}
-                          step="1"
-                          value={partialRefundQtys[item.id] ?? ""}
-                          onChange={(event) => {
-                            const nextValue = event.target.value;
-                            setPartialRefundQtys((current) => ({ ...current, [item.id]: nextValue }));
-                          }}
-                          placeholder="จำนวนคืน"
-                          disabled={availableQty <= 0}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-            <textarea
-              className="min-h-24 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              placeholder="เหตุผลที่ต้องคืนสินค้า / ใช้กรณี exchange ได้เช่น คืนชิ้นเดิมแล้วขายชิ้นใหม่ต่อ"
-              value={partialRefundReason}
-              onChange={(event) => setPartialRefundReason(event.target.value)}
-            />
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              เลือกสินค้าที่ต้องคืน แล้วค่อยสร้างบิลขายใหม่ถ้าต้องการ exchange ต่อในหน้า POS เดิม
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setPartialRefundOrder(null);
-                setPartialRefundReason("");
-                setPartialRefundQtys({});
-              }}
-            >
-              ยกเลิก
-            </Button>
-            <Button variant="outline" onClick={() => void handlePartialRefundSale()}>
-              คืนอย่างเดียว
-            </Button>
-            <Button onClick={() => void handlePartialRefundSale(true)}>
-              คืนและเปิดบิลแลก {partialRefundPreview.itemCount > 0 ? formatThaiCurrency(partialRefundPreview.amount) : ""}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={Boolean(refundOrder)} onOpenChange={(open) => { if (!open) { setRefundOrder(null); setRefundReason(""); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Refund / คืนทั้งหมดที่เหลือในบิล</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="text-sm text-slate-600">
-              {refundOrder ? `บิล ${refundOrder.order_number} • คงเหลือคืนได้ ${formatThaiCurrency(Math.max(Number(refundOrder.total_amount) - Number(refundOrder.refund_amount ?? 0), 0))}` : ""}
-            </div>
-            <textarea
-              className="min-h-24 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              placeholder="เหตุผลที่ต้องคืนสินค้า / refund"
-              value={refundReason}
-              onChange={(event) => setRefundReason(event.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setRefundOrder(null); setRefundReason(""); }}>ยกเลิก</Button>
-            <Button onClick={() => void handleRefundSale()}>ยืนยัน refund</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

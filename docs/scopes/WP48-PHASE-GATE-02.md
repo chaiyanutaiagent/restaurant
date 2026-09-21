@@ -1,7 +1,7 @@
 # WP48 Phase Gate
 
 Date: 2026-09-21  
-Decision: **LOCAL ENGINEERING PASS — UAT EVIDENCE PENDING**
+Decision: **UAT PASS — PHASE GATE CLOSED**
 
 ## Gate A — Scope and contract
 
@@ -16,7 +16,7 @@ Result: **PASS**.
 ## Gate B — Local engineering
 
 - Backend regression: 444 passed, 1 skipped.
-- WP48 focused tests: 6 passed.
+- WP48 focused tests: 21 passed.
 - Frontend TypeScript: pass.
 - Frontend production/PWA build: pass, with the existing large-chunk advisory.
 - Python syntax: pass.
@@ -26,17 +26,18 @@ Result: **PASS**.
 
 ## Gate C — UAT
 
-Pending:
+- Immutable candidate `486a259` was deployed only to the `restaurant-pos-uat-drill` stack.
+- UAT application images are `restaurant-pos-backend:wp48-486a259` and `restaurant-pos-frontend:wp48-486a259`; their immutable image IDs are recorded in `WP48-UAT-EVIDENCE-03.md`.
+- Runtime inspection confirmed `UAT_AUTH_BYPASS_ENABLED=false` and `IDENTITY_DATABASE=platform_core`.
+- Cashier, Branch Manager, Accountant and Purchasing identities passed real login, role landing and Restaurant catalogue checks. The temporary Cashier password used for browser UAT was restored through the bounded UAT command after the check.
+- Restaurant POS returned 28 allowed menu items in 7 unique categories; raw/Retail catalogue leakage was not observed.
+- Company and POS surfaces were checked at 1440×900 and 1024×768. There was no horizontal viewport overflow and visible interactive targets met the 44px baseline.
+- Company context, Action Center, Product readiness and Device/Sync state were present; Hotel PMS remained hidden from the current product shell.
+- App-only rollback from WP48 to WP47 completed in 11 seconds and restore to WP48 completed in 13 seconds; health and formal-role smoke checks passed after restore.
+- Production container identities and start times were unchanged before and after the drill.
 
-- immutable UAT deployment identity;
-- auth bypass disabled in the UAT runtime;
-- bounded real-role identities prepared and login/landing allow-deny matrix checked;
-- catalogue cleanup verified against UAT data;
-- desktop/tablet browser evidence;
-- app-only rollback and Production-isolation evidence.
-
-Result: **PENDING**. WP49 must not start until this gate is closed.
+Result: **PASS**. WP49 may start under the existing Local/UAT-only authorization.
 
 ## Production decision
 
-**NO-GO.** Production deployment, migrations, data-source changes and feature activation remain unauthorized.
+**NO-GO.** Production deployment, migrations, data-source changes and feature activation remain unauthorized. Closing WP48 does not alter that boundary.

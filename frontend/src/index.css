@@ -130,6 +130,22 @@ a {
   }
 }
 
+/* POS is operated continuously by mouse and touch on the same counter screen.
+   Keep its interactive hit areas deterministic even when a desktop browser
+   reports a fine pointer for a touch-capable display. */
+[data-pos-touch-surface] button:not([role="switch"]),
+[data-pos-touch-surface] [role="button"],
+[data-pos-touch-surface] input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+[data-pos-touch-surface] select,
+[data-pos-touch-surface] textarea {
+  min-height: var(--app-touch-target);
+}
+
+[data-pos-touch-surface] button:not([role="switch"]),
+[data-pos-touch-surface] [role="button"] {
+  min-width: var(--app-touch-target);
+}
+
 @media (min-width: 768px) and (max-width: 1279px) {
   :root {
     --app-radius: 14px;

@@ -68,6 +68,7 @@ from app.schemas.stock import StockBalanceRead, StockMovementRead
 from app.schemas.pos import CloseShiftRequest, ShiftRead
 from app.services.dining_service import DiningService
 from app.services.restaurant_cancellation_service import RestaurantCancellationService
+from app.services.pricing_service import pricing_error
 from app.services.sale_service import SaleService
 from app.services.offline_sale_authorization import (
     OFFLINE_POLICY_VERSION,
@@ -5791,6 +5792,12 @@ async def wap_create_paid_order(
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
+    if payload.is_offline:
+        raise pricing_error(
+            status.HTTP_409_CONFLICT,
+            "stale_price",
+            "Offline orders must be submitted through the authorized sync endpoint",
+        )
     svc = DiningService(db)
     try:
         result = await svc.create_wap_paid_order(current.company_id, current.branch_id, current.user_id, payload)
@@ -5808,6 +5815,12 @@ async def store_create_paid_order(
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
+    if payload.is_offline:
+        raise pricing_error(
+            status.HTTP_409_CONFLICT,
+            "stale_price",
+            "Offline orders must be submitted through the authorized sync endpoint",
+        )
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
     brand_branch = await _ensure_brand_branch(db, current.company_id, current.branch_id, brand)

@@ -44,6 +44,16 @@ class WP52RestaurantExceptionUXTests(unittest.TestCase):
         self.assertIn("ยอดสุดท้ายและสิทธิ์จะถูกตรวจซ้ำโดย Server", discount)
         self.assertIn("Structured discount reason ยังไม่มี", discount)
 
+    def test_legacy_online_order_routes_cannot_bypass_offline_sync_authorization(self) -> None:
+        restaurant_router = (ROOT / "backend/app/routers/restaurant.py").read_text()
+
+        self.assertEqual(
+            restaurant_router.count(
+                "Offline orders must be submitted through the authorized sync endpoint"
+            ),
+            2,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

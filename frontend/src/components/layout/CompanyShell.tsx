@@ -156,7 +156,7 @@ export default function CompanyShell(): JSX.Element {
         )}
       >
         <div className="flex min-h-16 items-center justify-between border-b border-slate-200 px-5">
-          <Link to="/company" className="flex items-center gap-3 font-black text-slate-950">
+          <Link to="/company" className="flex min-h-11 items-center gap-3 font-black text-slate-950">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-700 text-white shadow-sm">
               F
             </span>

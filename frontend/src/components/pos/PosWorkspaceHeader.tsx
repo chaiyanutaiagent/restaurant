@@ -44,10 +44,10 @@ export default function PosWorkspaceHeader({ title }: PosWorkspaceHeaderProps): 
           </span>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <Button size="sm" variant="outline" onClick={() => navigate("/pos")}>
+          <Button size="sm" variant="outline" className="h-11 rounded-xl px-4" onClick={() => navigate("/pos")}>
             <ArrowLeft className="mr-1 h-4 w-4" /> หน้าขาย
           </Button>
-          <Button size="sm" variant="outline" aria-label="กลับหน้าผู้ดูแล" onClick={() => navigate("/admin")}>
+          <Button size="sm" variant="outline" className="h-11 w-11 rounded-xl p-0" aria-label="กลับหน้าผู้ดูแล" onClick={() => navigate("/admin")}>
             <LayoutDashboard className="h-4 w-4" />
           </Button>
         </div>

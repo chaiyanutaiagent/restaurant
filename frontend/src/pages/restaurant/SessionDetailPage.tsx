@@ -150,7 +150,7 @@ export default function SessionDetailPage(): JSX.Element {
         is_active: true,
         is_for_sale: true,
         catalog_scope: "restaurant_menu",
-        limit: 200,
+        limit: 100,
       })).data.data as ProductListItem[],
     enabled: addOrderOpen,
   });

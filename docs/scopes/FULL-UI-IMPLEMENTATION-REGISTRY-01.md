@@ -32,7 +32,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP48 | Shared design system and UAT cleanup | Implemented; UAT gate closed | Production unchanged |
 | WP49 | Restaurant order entry, Table and QR | Implemented; UAT gate closed | Production unchanged |
 | WP50 | Restaurant Shift Operations | Implemented; UAT gate closed | Production unchanged |
-| WP51 | Restaurant Hold Draft and Order Center UX | Planned; WP44 Server contract already exists | Local/UAT only |
+| WP51 | Restaurant Hold Draft and Order Center UX | Implemented; UAT gate closed | Production unchanged |
 | WP52 | Restaurant Cancel, Discount, Refund, Receipt Center UX | Planned; WP43/WP45/WP46 contracts reused | Sandbox/UAT only |
 | WP53 | Restaurant Offline and Sync Recovery UX | Planned | Local/UAT only |
 | WP54 | Restaurant Counter Readiness and physical-UAT shell | Planned | No physical pass implied |
@@ -90,16 +90,16 @@ The superseded non-v2 Action Center file is not counted.
 | D17 | `design-system/17-restaurant-pos-open-shift.png` | WP50 | Implemented | Server confirms Company/Branch/User/Location/Counter attribution and idempotency. |
 | D18 | `design-system/18-restaurant-pos-close-shift.png` | WP50 | Implemented | Server summary, count, variance, blockers, immutable snapshot and audit passed UAT. |
 | D19 | `design-system/19-restaurant-pos-staff-handover.png` | WP50 | Implemented | Handover clears Staff authentication while retaining Counter pairing; UAT passed. |
-| D20 | `design-system/20-restaurant-pos-hold-order-flow-board.png` | WP51 | Planned | WP44 Server-backed draft contract will be reused. |
-| D21 | `design-system/21-restaurant-pos-hold-bill-sheet.png` | WP51 | Planned | Mutation must remain versioned and Server-backed. |
-| D22 | `design-system/22-restaurant-pos-held-bills-resume.png` | WP51 | Planned | Claim/resume/release/discard permissions already exist. |
-| D23 | `design-system/23-restaurant-pos-order-center.png` | WP51 | Planned | Branch scope and conflict states required. |
+| D20 | `design-system/20-restaurant-pos-hold-order-flow-board.png` | WP51 | Implemented | Server-backed hold creation, explicit cart replacement and Order Center separation passed UAT. |
+| D21 | `design-system/21-restaurant-pos-hold-bill-sheet.png` | WP51 | Implemented | Search/filter/sort, owner/Counter/shift/location, item detail and audit use the versioned Server contract. |
+| D22 | `design-system/22-restaurant-pos-held-bills-resume.png` | WP51 | Implemented | Claim/resume/release/discard/reassign/reopen, revalidation and conflict handling passed API smoke. |
+| D23 | `design-system/23-restaurant-pos-order-center.png` | WP51 | Implemented | Branch-scoped search/filter, canonical status/source and detail pane passed Desktop/tablet UAT. |
 | D24 | `design-system/24-restaurant-pos-cancel-discount-refund-flow-board.png` | WP52 | Planned | WP43/WP45/WP46 contracts are authoritative. |
 | D25 | `design-system/25-restaurant-pos-cancel-item-sheet.png` | WP52 | Planned | Kitchen stage, waste and reason are Server-controlled. |
 | D26 | `design-system/26-restaurant-pos-discount-sheet.png` | WP52 | Planned | Price/discount limits and approval stay Server-authoritative. |
 | D27 | `design-system/27-restaurant-pos-manager-approval.png` | WP52 | Planned | Maker-checker evidence may not be synthesized on the Client. |
 | D28 | `design-system/28-restaurant-pos-refund-sheet.png` | WP52 | Planned | Provider unknown/reconcile and tax links remain fail-closed. |
-| D29 | `design-system/29-restaurant-pos-held-bills-server-backed.png` | WP51 | Planned | Server is the Hold Draft source of truth. |
+| D29 | `design-system/29-restaurant-pos-held-bills-server-backed.png` | WP51 | Implemented | Server remains the source of truth; hold creates no payment, stock, tax or KDS side effect. |
 | D30 | `design-system/30-customer-qr-ordering-flow.png` | WP49/WP64 | Adapted | Session-scoped Restaurant QR works; broader Public Experience is WP64. |
 | D31 | `design-system/31-restaurant-kds-pickup-flow.png` | WP49/WP52 | Adapted | KDS works; final Order Center/Pickup cohesion is WP52. |
 | D32 | `design-system/32-restaurant-pos-bill-receipt-center.png` | WP52 | Planned | Existing bill/receipt routes will be composed without enabling real tax issuance. |

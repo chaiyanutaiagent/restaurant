@@ -48,5 +48,15 @@ Environment: **UAT only**
 
 - Roll back application images to the captured pre-WP51 UAT IDs and confirm health/readiness.
 - Restore WP51 images and confirm the same checks.
+- Run Compose from the immutable target release directory with that release's own `.env` file. The
+  release `.env` pins both image names and the Server-held `PRODUCTION_ENV_FILE`; never replace the
+  latter with an ad-hoc relative path during a rehearsal.
+- Before `up -d`, resolve the Compose configuration and verify the backend/frontend images, Compose
+  project and runtime environment target. Abort if any value differs from the captured UAT manifest.
+- Recreate only `backend` and `frontend` with `--no-deps`; do not recreate PostgreSQL, Redis, nginx or
+  cloudflared and do not run a database downgrade for this additive release.
+- If a preflight or health check fails, immediately reapply the current WP51 release from its own
+  immutable directory and `.env`, then verify public health/readiness and Production identities before
+  attempting another rehearsal.
 - Close WP51 only after evidence records pass/fail for every scenario and verifies Production identities did not change.
 - Update D20–D23 and D29 completion state only from recorded evidence; do not edit or commit `docs/ux-ui`.

@@ -2,7 +2,7 @@
 
 Date: 2026-09-21  
 Environment: Local and UAT only  
-Production: unchanged; deployment and feature activation are not authorized
+Production: unchanged; Production deployment and feature activation are not authorized
 
 ## Objective
 

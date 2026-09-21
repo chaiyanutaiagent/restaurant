@@ -1,7 +1,7 @@
 # WP52 — Restaurant Cancel, Discount, Refund and Receipt Center Implementation
 
 Date: 2026-09-21
-Status: **LOCAL ENGINEERING GATE PASS — UAT PENDING**
+Status: **LOCAL/UAT ENGINEERING PASS — PAIRED-COUNTER VISUAL GATE PENDING**
 
 ## Delivered composition
 
@@ -26,18 +26,26 @@ Status: **LOCAL ENGINEERING GATE PASS — UAT PENDING**
 
 - Frontend TypeScript: **PASS**.
 - Frontend production/PWA build with the Sandbox simulator defaulted off: **PASS**.
-- WP43–WP52 focused Python suite in an isolated Docker test image: **PASS — 59 tests**.
+- WP43–WP52 focused Python suite in an isolated Docker test image: **PASS — 60 tests**.
+- Full backend regression: **PASS — 460 tests, 1 skipped**.
 - Git whitespace validation: **PASS**.
-- Local containers were rebuilt for visual inspection; formal visual UAT remains pending because the local browser reached the login gate and no credential was transmitted.
+- Local containers were rebuilt and passed health inspection.
 
-## UAT candidate plan
+## UAT result
 
-- Build immutable backend/frontend images from the WP52 feature commit.
-- Build the UAT frontend with `VITE_REFUND_UAT_SIMULATOR=true`; retain the Production default `false`.
-- Deploy only to `restaurant-pos-uat-drill` with the existing WP43/WP45/WP46 UAT/Sandbox flags.
-- Verify Desktop 1440×900 and iPad 1024×768, including no overflow and 44px controls.
-- Exercise Bill Center search/filter/detail, safe Void gating, discount threshold/approval, cancellation stage/Waste preview, Refund quote/provider recovery and synthetic `NON-FISCAL` tax state.
-- Re-run API smokes, confirm Production identities unchanged and rehearse app-image rollback before closing the phase gate.
+- Immutable WP52 frontend and backend images are deployed to `restaurant-pos-uat-drill` only.
+- WP43, WP45 and WP46 Server/API smokes pass on UAT.
+- Formal `uat.branch-manager` browser UAT passes POS loading and the Discount workspace at 1440×900 and 1024×768.
+- The first UAT smoke found and closed a legacy direct-offline-submit bypass; signed WP47 sync remains the only offline mutation path.
+- Application-only rollback to WP51 completed in 13 seconds and restore to WP52 completed in 12 seconds.
+- The current browser has no paired UAT Counter, so Bill Center/Void/Cancellation/Refund action UAT remains pending and is not claimed as passed.
+
+## UAT deployment
+
+- Frontend `restaurant-pos-frontend:wp52-44a1b36` was built with `VITE_REFUND_UAT_SIMULATOR=true`; the Docker default remains `false`.
+- Backend `restaurant-pos-backend:wp52-e4e3ad9` includes the direct-offline-submit correction and final smoke harness.
+- Only `restaurant-pos-uat-drill` was updated with the existing WP43/WP45/WP46 UAT/Sandbox flags.
+- Production identities and flags remained unchanged.
 
 ## Boundaries still closed
 
@@ -48,3 +56,9 @@ Status: **LOCAL ENGINEERING GATE PASS — UAT PENDING**
 - Atomic exchange and priced modifiers.
 
 Scope and action matrix: [WP52-RESTAURANT-CANCEL-DISCOUNT-REFUND-RECEIPT-SCOPE-01.md](./WP52-RESTAURANT-CANCEL-DISCOUNT-REFUND-RECEIPT-SCOPE-01.md)
+
+UAT plan: [WP52-UAT-PLAN-03.md](./WP52-UAT-PLAN-03.md)
+
+UAT evidence: [WP52-UAT-EVIDENCE-04.md](./WP52-UAT-EVIDENCE-04.md)
+
+Phase gate: [WP52-PHASE-GATE-05.md](./WP52-PHASE-GATE-05.md)

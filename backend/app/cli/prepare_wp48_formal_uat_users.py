@@ -114,13 +114,18 @@ async def _ensure_role(db, company_id: uuid.UUID, preset_key: str) -> Role:
             is_system=False,
             is_branch_assignable=policy.is_branch_assignable,
             allowed_scope_types=list(policy.allowed_scopes),
+            permissions=list(permissions),
         )
         db.add(role)
         await db.flush()
+    else:
+        # Existing roles are loaded with selectinload above, so replacing the
+        # collection is safe.  A newly-created async ORM relationship must be
+        # populated in the constructor to avoid an implicit lazy-load.
+        role.permissions = list(permissions)
     role.description = f"WP48 formal UAT role from preset {preset_key}"
     role.is_branch_assignable = policy.is_branch_assignable
     role.allowed_scope_types = list(policy.allowed_scopes)
-    role.permissions = list(permissions)
     return role
 
 

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 from types import SimpleNamespace
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
-from app.cli.prepare_wp48_formal_uat_users import UAT_PROFILES, require_uat
+from app.cli.prepare_wp48_formal_uat_users import UAT_PROFILES, _ensure_role, require_uat
+from app.models.role import Permission
+from app.services.role_preset_service import ROLE_PRESET_POLICIES
 
 
 def _args(**overrides: object) -> argparse.Namespace:
@@ -35,6 +38,21 @@ def _settings(**overrides: object) -> SimpleNamespace:
 
 
 class Wp48FormalUatUserGuardTests(unittest.TestCase):
+    def test_new_role_populates_permissions_without_async_lazy_load(self) -> None:
+        policy = next(item for item in ROLE_PRESET_POLICIES if item.key == "cashier")
+        permissions = [Permission(code=code, name=code) for code in policy.permission_codes]
+        scalars_result = SimpleNamespace(all=lambda: permissions)
+        db = AsyncMock()
+        db.scalars.return_value = scalars_result
+        db.scalar.return_value = None
+        db.add = Mock()
+
+        role = asyncio.run(_ensure_role(db, uuid.uuid4(), "cashier"))
+
+        self.assertEqual({permission.code for permission in role.permissions}, set(policy.permission_codes))
+        db.add.assert_called_once_with(role)
+        db.flush.assert_awaited_once()
+
     def test_refuses_non_uat_or_enabled_auth_bypass(self) -> None:
         for configured in (
             _settings(environment="production"),

@@ -1,7 +1,7 @@
 # WP51 — Restaurant Hold Draft and Order Center Implementation
 
 Date: 2026-09-21
-Status: **LOCAL ENGINEERING PASS — AWAITING UAT**
+Status: **LOCAL/UAT PASS — PHASE GATE CLOSED**
 
 ## Implemented
 
@@ -41,6 +41,20 @@ Status: **LOCAL ENGINEERING PASS — AWAITING UAT**
 - Frontend TypeScript: **PASS**.
 - Frontend production/PWA build: **PASS**.
 - `git diff --check`: **PASS**.
+
+## UAT and release evidence
+
+- UAT feature release: `b1a2701`; smoke-harness alignment: `3a398bd`.
+- Final UAT images: `restaurant-pos-backend:wp51-b1a2701` and
+  `restaurant-pos-frontend:wp51-b1a2701`.
+- Formal Branch Manager browser UAT passed on Desktop 1440×900 and iPad landscape 1024×768 with no
+  page-level horizontal overflow and no visible interactive control below the 44×44px baseline.
+- Server-backed Hold API smoke passed creation/replay, no-side-effect, claim conflict, resume,
+  revalidation, discard, reopen, reassign, isolation, audit and shift-blocker scenarios.
+- Corrected app-only rollback to WP50 and restoration to WP51 each completed in 11 seconds; public
+  health/readiness passed and Production identities remained unchanged.
+- Detailed evidence: [WP51-UAT-EVIDENCE-04.md](./WP51-UAT-EVIDENCE-04.md).
+- Phase decision: [WP51-PHASE-GATE-05.md](./WP51-PHASE-GATE-05.md).
 
 ## Unchanged safety boundaries
 

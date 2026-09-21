@@ -47,6 +47,12 @@ def default_route_for_permissions(
         {"fb.menu.view", "fb.order.create", "fb.kitchen.ticket.manage", "fb.table.manage"}
     ):
         return "/restaurant"
+    if business_type == "restaurant" and any(
+        code.startswith("pos.") for code in permission_set
+    ):
+        # Restaurant cashiers can also carry Takeaway permissions, but their
+        # signed Brand/Branch context must keep them in the Restaurant POS.
+        return "/pos"
     if business_type == "retail_pos" and any(
         code.startswith("pos.") for code in permission_set
     ):

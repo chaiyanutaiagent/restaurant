@@ -46,6 +46,13 @@ class CompanyContextContractTests(unittest.TestCase):
         self.assertEqual(default_route_for_permissions(["system.company.view"]), "/company")
         self.assertEqual(default_route_for_permissions([]), "/403")
 
+    def test_restaurant_cashier_does_not_land_in_takeaway(self) -> None:
+        permissions = ["pos.sale.create", "takeaway.sale.create", "takeaway.shift.manage"]
+        self.assertEqual(
+            default_route_for_permissions(permissions, business_type="restaurant"),
+            "/pos",
+        )
+
     def test_runtime_environment_is_canonical(self) -> None:
         self.assertEqual(canonical_runtime_environment("production"), "production")
         self.assertEqual(canonical_runtime_environment("development"), "uat")

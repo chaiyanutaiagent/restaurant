@@ -162,7 +162,7 @@ export default function CompanyHomePage(): JSX.Element {
             <Link to="/company/apps" className="inline-flex min-h-11 items-center gap-1 px-2 text-sm font-bold text-blue-700">ดูแอปทั้งหมด <ArrowRight className="h-4 w-4" /></Link>
           </div>
           <div className="grid gap-3 p-4 md:grid-cols-2 2xl:grid-cols-3">
-            {data.sections.map((section) => {
+            {data.sections.filter((section) => section.module_key !== "hotel_pms").map((section) => {
               const route = moduleRoute[section.module_key];
               const disabled = !route || ["planned", "dark_launch"].includes(section.readiness);
               const card = (

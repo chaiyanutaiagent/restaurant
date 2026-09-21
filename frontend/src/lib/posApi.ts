@@ -1,13 +1,40 @@
 import api from "./api";
 import type { ApiResponse } from "@/types/api";
-import type { HoldDraftClaimResult, PricingCalculation, RefundOperation, RefundQuote, SaleOrder, ServerHoldDraft } from "@/types/pos";
+import type { CashMovement, CashierShift, HoldDraftClaimResult, PosShiftSummary, PricingCalculation, RefundOperation, RefundQuote, SaleOrder, ServerHoldDraft } from "@/types/pos";
 import type { StockLocation } from "@/types/stock";
 
 export const posApi = {
-  openShift: (data: { location_id: string; opening_cash: number }) => api.post("/pos/shifts/open", data),
-  getCurrentShift: () => api.get("/pos/shifts/current"),
-  closeShift: (shiftId: string, data: { closing_cash: number; note?: string }) =>
-    api.post(`/pos/shifts/${shiftId}/close`, data),
+  openShift: (data: { location_id: string; opening_cash: number; shift_type?: "staff_cashier" | "operational_cashless"; idempotency_key?: string }) =>
+    api.post<ApiResponse<CashierShift>>("/pos/shifts/open", data),
+  getCurrentShift: () => api.get<ApiResponse<CashierShift | null>>("/pos/shifts/current"),
+  getShiftSummary: (shiftId: string) => api.get<ApiResponse<PosShiftSummary>>(`/pos/shifts/${shiftId}/summary`),
+  createCashMovement: (shiftId: string, data: {
+    movement_type: "cash_in" | "cash_out";
+    amount: number;
+    reason_code: "change_fund" | "cash_drop" | "petty_cash" | "supplier_payment" | "correction" | "other";
+    reason: string;
+    expected_shift_version: number;
+    idempotency_key: string;
+    approval_token?: string;
+  }) => api.post<ApiResponse<CashMovement>>(`/pos/shifts/${shiftId}/cash-movements`, data),
+  closeShift: (shiftId: string, data: {
+    closing_cash: number;
+    reason_code?: "count_short" | "count_over" | "change_error" | "cash_movement" | "other";
+    note?: string;
+    cash_count?: Array<{ denomination: number; quantity: number }>;
+    expected_version?: number;
+    idempotency_key?: string;
+    approval_token?: string;
+  }) => api.post<ApiResponse<CashierShift>>(`/pos/shifts/${shiftId}/close`, data),
+  handoverShift: (shiftId: string, data: {
+    closing_cash: number;
+    reason_code?: "count_short" | "count_over" | "change_error" | "cash_movement" | "other";
+    note?: string;
+    cash_count?: Array<{ denomination: number; quantity: number }>;
+    expected_version?: number;
+    idempotency_key?: string;
+    approval_token?: string;
+  }) => api.post<ApiResponse<{ shift: CashierShift; device_code: string; staff_logout_required: boolean; device_pairing_preserved: boolean }>>(`/pos/shifts/${shiftId}/handover`, data),
   listShifts: (params?: { branch_id?: string; page?: number; limit?: number }) =>
     api.get("/pos/shifts", { params }),
   createSale: (data: object) => api.post<ApiResponse<SaleOrder>>("/pos/sales", data),

@@ -19,10 +19,12 @@ from app.dependencies import (
     require_permission,
 )
 from app.models.company import Company
-from app.models.pos import PosHoldDraftAudit, SaleOrder
+from app.models.pos import CashierShift, PosCashMovement, PosHoldDraftAudit, SaleOrder
 from app.models.refund import RefundOperation, RefundPaymentLeg, RefundTaxLink
 from app.models.settings import BranchSettings
 from app.schemas.pos import (
+    CashMovementCreateRequest,
+    CashMovementRead,
     CloseShiftRequest,
     CreateSaleRequest,
     HoldDraftActionRequest,
@@ -43,7 +45,7 @@ from app.schemas.pos import (
 from app.schemas.pricing import PricingCalculateRequest
 from app.services.approval_service import ApprovalEvidence, ApprovalService, has_permission
 from app.services.hold_draft_service import HoldDraftService, hold_error
-from app.services.pricing_service import PricingResult, PricingService, pricing_error
+from app.services.pricing_service import PricingResult, PricingService, canonical_hash, pricing_error
 from app.services.refund_service import RefundService, serialize_operation, serialize_quote
 from app.services.sale_service import SaleService, pricing_request_for_sale, sale_request_hash
 from app.utils.promptpay import generate_promptpay_payload
@@ -69,6 +71,78 @@ def _approval_payload(
     if order_id is not None:
         value["order_id"] = str(order_id)
     return value
+
+
+def _shift_approval_payload(
+    shift_id: uuid.UUID,
+    payload: CashMovementCreateRequest | CloseShiftRequest,
+) -> dict[str, Any]:
+    value = payload.model_dump(
+        mode="json",
+        exclude={"approval_token"},
+        exclude_none=True,
+    )
+    value["shift_id"] = str(shift_id)
+    return value
+
+
+def _shift_request_hash(payload: CashMovementCreateRequest | CloseShiftRequest) -> str:
+    return canonical_hash(
+        payload.model_dump(
+            mode="json",
+            exclude={"approval_token"},
+            exclude_none=True,
+        )
+    )
+
+
+async def _cash_movement_replay(
+    db: AsyncSession,
+    current: TokenData,
+    shift_id: uuid.UUID,
+    payload: CashMovementCreateRequest,
+) -> PosCashMovement | None:
+    if current.branch_id is None:
+        return None
+    row = await db.scalar(
+        select(PosCashMovement).where(
+            PosCashMovement.company_id == current.company_id,
+            PosCashMovement.branch_id == current.branch_id,
+            PosCashMovement.idempotency_key == payload.idempotency_key,
+        )
+    )
+    if row is not None and (
+        row.shift_id != shift_id or row.request_hash != _shift_request_hash(payload)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "duplicate_request", "message": "Idempotency key belongs to another cash movement"},
+        )
+    return row
+
+
+async def _closed_shift_replay(
+    db: AsyncSession,
+    current: TokenData,
+    shift_id: uuid.UUID,
+    payload: CloseShiftRequest,
+) -> CashierShift | None:
+    key = payload.idempotency_key or f"legacy-close:{shift_id}"
+    row = await db.scalar(
+        select(CashierShift).where(
+            CashierShift.id == shift_id,
+            CashierShift.company_id == current.company_id,
+            CashierShift.user_id == current.user_id,
+        )
+    )
+    if row is None or row.status == "open":
+        return None
+    if row.close_idempotency_key == key and row.close_request_hash == _shift_request_hash(payload):
+        return row
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "shift_closed", "message": "Shift is already closed"},
+    )
 
 
 async def _authorize_sale_discount(
@@ -231,6 +305,79 @@ async def get_current_shift(
     return ok(ShiftRead.model_validate(shift).model_dump() if shift else None)
 
 
+@router.get("/shifts/{shift_id}/summary")
+async def get_shift_summary(
+    shift_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("pos.cashier.open_shift")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    _require_matching_counter_device(current, counter_device)
+    summary = await _sale_service(db, current).get_shift_summary(
+        shift_id,
+        current.company_id,
+        current.user_id,
+        include_journal=current.target_database != "retail_pos",
+    )
+    return ok(summary)
+
+
+@router.post("/shifts/{shift_id}/cash-movements", status_code=status.HTTP_201_CREATED)
+async def create_cash_movement(
+    shift_id: uuid.UUID,
+    payload: CashMovementCreateRequest,
+    request: Request,
+    current: TokenData = Depends(require_permission("pos.cash_movement.create")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    _require_matching_counter_device(current, counter_device)
+    if current.target_database == "retail_pos":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "feature_not_enabled", "message": "Retail cash movement will be enabled in its Retail work package"},
+        )
+    replay = await _cash_movement_replay(db, current, shift_id, payload)
+    if replay is not None:
+        return ok(CashMovementRead.model_validate(replay).model_dump())
+    if current.branch_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    branch_settings = await db.scalar(
+        select(BranchSettings).where(
+            BranchSettings.company_id == current.company_id,
+            BranchSettings.branch_id == current.branch_id,
+        )
+    )
+    threshold = Decimal(
+        branch_settings.pos_cash_movement_approval_threshold
+        if branch_settings else 1000
+    )
+    approval_evidence = None
+    if Decimal(payload.amount) >= threshold:
+        approval_evidence = await ApprovalService(db).authorize_operation(
+            current=current,
+            action="pos.cash_movement.approve",
+            request_payload=_shift_approval_payload(shift_id, payload),
+            approval_token=payload.approval_token,
+            reason=f"Cash movement {payload.amount} reaches approval threshold {threshold}",
+            resource_type="CashierShift",
+            resource_id=str(shift_id),
+            allow_direct=False,
+        )
+    movement = await _sale_service(db, current).create_cash_movement(
+        shift_id,
+        current.company_id,
+        current.user_id,
+        payload,
+        approval_evidence=approval_evidence,
+        device_id=counter_device.device_id if counter_device else None,
+        device_code=counter_device.device_code if counter_device else None,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    return ok(CashMovementRead.model_validate(movement).model_dump())
+
+
 @router.post("/shifts/{shift_id}/close")
 async def close_shift(
     shift_id: uuid.UUID,
@@ -241,7 +388,40 @@ async def close_shift(
     counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
     _require_matching_counter_device(current, counter_device)
-    shift = await _sale_service(db, current).close_shift(
+    replay = await _closed_shift_replay(db, current, shift_id, payload)
+    if replay is not None:
+        return ok(ShiftRead.model_validate(replay).model_dump())
+    service = _sale_service(db, current)
+    summary = await service.get_shift_summary(
+        shift_id,
+        current.company_id,
+        current.user_id,
+        include_journal=current.target_database != "retail_pos",
+    )
+    branch_settings = await db.scalar(
+        select(BranchSettings).where(
+            BranchSettings.company_id == current.company_id,
+            BranchSettings.branch_id == current.branch_id,
+        )
+    ) if current.branch_id else None
+    threshold = Decimal(
+        branch_settings.pos_shift_variance_approval_threshold
+        if branch_settings else 500
+    )
+    difference = Decimal(payload.closing_cash) - Decimal(str(summary["expected_cash"]))
+    approval_evidence = None
+    if abs(difference) >= threshold:
+        approval_evidence = await ApprovalService(db).authorize_operation(
+            current=current,
+            action="pos.shift.variance.approve",
+            request_payload=_shift_approval_payload(shift_id, payload),
+            approval_token=payload.approval_token,
+            reason=f"Shift cash variance {difference} reaches approval threshold {threshold}",
+            resource_type="CashierShift",
+            resource_id=str(shift_id),
+            allow_direct=False,
+        )
+    shift = await service.close_shift(
         shift_id,
         current.company_id,
         current.user_id,
@@ -250,8 +430,81 @@ async def close_shift(
         device_code=counter_device.device_code if counter_device else None,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
+        approval_evidence=approval_evidence,
+        include_journal=current.target_database != "retail_pos",
     )
     return ok(ShiftRead.model_validate(shift).model_dump())
+
+
+@router.post("/shifts/{shift_id}/handover")
+async def handover_shift(
+    shift_id: uuid.UUID,
+    payload: CloseShiftRequest,
+    request: Request,
+    current: TokenData = Depends(require_permission("pos.cashier.handover")),
+    db: AsyncSession = Depends(get_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    if counter_device is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "counter_device_required", "message": "A paired Counter is required for handover"},
+        )
+    _require_matching_counter_device(current, counter_device)
+    replay = await _closed_shift_replay(db, current, shift_id, payload)
+    if replay is not None:
+        return ok({
+            "shift": ShiftRead.model_validate(replay).model_dump(),
+            "device_code": counter_device.device_code,
+            "staff_logout_required": True,
+            "device_pairing_preserved": True,
+        })
+    service = _sale_service(db, current)
+    summary = await service.get_shift_summary(
+        shift_id,
+        current.company_id,
+        current.user_id,
+        include_journal=current.target_database != "retail_pos",
+    )
+    branch_settings = await db.scalar(
+        select(BranchSettings).where(
+            BranchSettings.company_id == current.company_id,
+            BranchSettings.branch_id == current.branch_id,
+        )
+    ) if current.branch_id else None
+    threshold = Decimal(branch_settings.pos_shift_variance_approval_threshold if branch_settings else 500)
+    difference = Decimal(payload.closing_cash) - Decimal(str(summary["expected_cash"]))
+    approval_evidence = None
+    if abs(difference) >= threshold:
+        approval_evidence = await ApprovalService(db).authorize_operation(
+            current=current,
+            action="pos.shift.variance.approve",
+            request_payload=_shift_approval_payload(shift_id, payload),
+            approval_token=payload.approval_token,
+            reason=f"Shift handover variance {difference} reaches approval threshold {threshold}",
+            resource_type="CashierShift",
+            resource_id=str(shift_id),
+            allow_direct=False,
+        )
+    shift = await service.close_shift(
+        shift_id,
+        current.company_id,
+        current.user_id,
+        payload,
+        device_id=counter_device.device_id,
+        device_code=counter_device.device_code,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        approval_evidence=approval_evidence,
+        include_journal=current.target_database != "retail_pos",
+        handover=True,
+    )
+    return ok({
+        "shift": ShiftRead.model_validate(shift).model_dump(),
+        "device_code": counter_device.device_code,
+        "staff_logout_required": True,
+        "device_pairing_preserved": True,
+    })
 
 
 @router.get("/shifts")

@@ -276,7 +276,7 @@ class HoldDraftService:
                 CashierShift.user_id == user_id,
                 CashierShift.location_id == location_id,
                 CashierShift.status == "open",
-            )
+            ).with_for_update()
         )
         if shift is None:
             raise hold_error(

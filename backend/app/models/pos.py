@@ -69,6 +69,25 @@ class CashierShift(UUIDMixin, TimestampMixin, Base):
         index=True,
     )
     shift_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    shift_type: Mapped[str] = mapped_column(
+        String(30), nullable=False, server_default=text("'staff_cashier'")
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    open_idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    open_request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    close_idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    close_request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    close_reason_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    cash_count_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    opened_device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    opened_device_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    closed_device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    closed_device_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    closed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    approval_evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    close_snapshot_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'open'"))
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -96,8 +115,62 @@ class CashierShift(UUIDMixin, TimestampMixin, Base):
     company: Mapped["Company"] = relationship("Company")
     branch: Mapped["Branch"] = relationship("Branch")
     location: Mapped["StockLocation"] = relationship("StockLocation")
-    user: Mapped["User"] = relationship("User")
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
     orders: Mapped[list["SaleOrder"]] = relationship("SaleOrder", back_populates="shift")
+
+
+class PosCashMovement(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "pos_cash_movements"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "branch_id", "idempotency_key",
+            name="uq_pos_cash_movements_idempotency",
+        ),
+        CheckConstraint(
+            "movement_type IN ('cash_in', 'cash_out')",
+            name="cash_movement_type_supported",
+        ),
+        CheckConstraint("amount > 0", name="cash_movement_amount_positive"),
+        CheckConstraint("status = 'posted'", name="cash_movement_status_supported"),
+        CheckConstraint("shift_version >= 1", name="cash_movement_shift_version_positive"),
+        Index("ix_pos_cash_movements_shift_posted", "shift_id", "posted_at"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False, index=True
+    )
+    branch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id"), nullable=False, index=True
+    )
+    shift_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cashier_shifts.id"), nullable=False, index=True
+    )
+    location_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("stock_locations.id"), nullable=False
+    )
+    requester_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    approver_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    device_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    movement_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'posted'"))
+    shift_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    approval_evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    journal_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("journal_entries.id"), nullable=True
+    )
+    posted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
 
 
 class SaleOrder(UUIDMixin, TimestampMixin, Base):

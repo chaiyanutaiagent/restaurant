@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useLogout } from "@/hooks/useAuth";
 import { authApi } from "@/lib/api";
 import { branchApi } from "@/lib/adminApi";
 import { crmApi } from "@/lib/crmApi";
@@ -293,6 +294,7 @@ function getOrderStatusLabel(status: SaleOrder["status"]): string {
 
 export default function POSPage(): JSX.Element {
   const navigate = useNavigate();
+  const logout = useLogout("/login?next=/pos");
   const location = useLocation();
   const isTakeawayMode = new URLSearchParams(location.search).get("channel") === "takeaway";
   const queryClient = useQueryClient();
@@ -400,6 +402,7 @@ export default function POSPage(): JSX.Element {
   const takeawayKitchenSlipRef = useRef<HTMLDivElement | null>(null);
   const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
   const checkoutIdRef = useRef(generateClientOrderId());
+  const openShiftIdempotencyRef = useRef(`shift-open:${generateClientOrderId()}`);
 
   const scannerStreamRef = useRef<MediaStream | null>(null);
   const scannerFrameRef = useRef<number | null>(null);
@@ -1150,25 +1153,49 @@ export default function POSPage(): JSX.Element {
   }
 
   async function handleOpenShift(): Promise<void> {
-    if (!selectedLocationId) {
+    if (!selectedLocationId || !isOnline || !pairedDevice) {
+      toast({
+        title: "ยังเปิดกะไม่ได้",
+        description: !isOnline ? "ต้องออนไลน์เพื่อให้ Server ยืนยันกะ" : !pairedDevice ? "กรุณาจับคู่เครื่อง Counter ก่อน" : "กรุณาเลือกคลัง",
+        variant: "destructive",
+      });
       return;
     }
-    const response = await posApi.openShift({ location_id: selectedLocationId, opening_cash: openingCash });
-    const shift = response.data.data as CashierShift;
-    setCurrentShift(shift);
-    window.localStorage.setItem(SHIFT_CACHE_KEY, JSON.stringify(shift));
-    setShiftGateOpen(false);
+    try {
+      const response = await posApi.openShift({
+        location_id: selectedLocationId,
+        opening_cash: openingCash,
+        shift_type: "staff_cashier",
+        idempotency_key: openShiftIdempotencyRef.current,
+      });
+      const shift = response.data.data;
+      setCurrentShift(shift);
+      window.localStorage.setItem(SHIFT_CACHE_KEY, JSON.stringify(shift));
+      openShiftIdempotencyRef.current = `shift-open:${generateClientOrderId()}`;
+      setShiftGateOpen(false);
+      toast({ title: "Server ยืนยันเปิดกะแล้ว", description: `${shift.shift_number} · Counter ${shift.opened_device_code ?? pairedDevice.device_code}` });
+    } catch (error) {
+      toast({ title: "เปิดกะไม่สำเร็จ", description: error instanceof Error ? error.message : "ตรวจสอบ Counter และลองใหม่", variant: "destructive" });
+    }
   }
 
-  async function handleCloseShift(closingCash: number, shiftNote: string): Promise<void> {
-    if (!currentShift) {
-      return;
-    }
-    const response = await posApi.closeShift(currentShift.id, { closing_cash: closingCash, note: shiftNote });
-    setCurrentShift(response.data.data as CashierShift);
+  function handleShiftUpdated(shift: CashierShift): void {
+    setCurrentShift(shift);
+    window.localStorage.setItem(SHIFT_CACHE_KEY, JSON.stringify(shift));
+  }
+
+  function handleShiftClosed(shift: CashierShift): void {
+    setCurrentShift(shift);
     window.localStorage.removeItem(SHIFT_CACHE_KEY);
     setCartItems([]);
     navigate("/admin");
+  }
+
+  function handleShiftHandover(shift: CashierShift): void {
+    setCurrentShift(shift);
+    window.localStorage.removeItem(SHIFT_CACHE_KEY);
+    setCartItems([]);
+    logout();
   }
 
   function handleOrderDiscountChange(nextValue: number): void {
@@ -1985,30 +2012,6 @@ export default function POSPage(): JSX.Element {
     ? Math.max(0, ((grossBeforeDiscount - netAfterDiscount) * 100) / grossBeforeDiscount)
     : 0;
   const refundableStatuses: SaleOrder["status"][] = ["completed", "partially_refunded"];
-  const paymentAuditSummary = useMemo(() => {
-    const totals = new Map<string, number>();
-    recentSales
-      .filter((order) => order.status === "completed" || order.status === "partially_refunded" || order.status === "refunded")
-      .forEach((order) => {
-        order.payments.forEach((payment) => {
-          totals.set(payment.payment_method, (totals.get(payment.payment_method) ?? 0) + Number(payment.amount));
-        });
-      });
-    return Array.from(totals.entries()).map(([method, amount]) => ({
-      method: paymentMethodLabels[method as PaymentMethod] ?? "อื่นๆ",
-      amount,
-    }));
-  }, [recentSales]);
-  const expectedCashNow = useMemo(() => {
-    const cashPayments = recentSales
-      .filter((order) => order.status === "completed" || order.status === "partially_refunded" || order.status === "refunded")
-      .flatMap((order) => order.payments.filter((payment) => payment.payment_method === "cash"))
-      .reduce((sum, payment) => sum + Number(payment.amount), 0);
-    const totalChange = recentSales
-      .filter((order) => order.status === "completed" || order.status === "partially_refunded" || order.status === "refunded")
-      .reduce((sum, order) => sum + Number(order.change_amount), 0);
-    return Number(currentShift?.opening_cash ?? 0) + cashPayments - totalChange;
-  }, [currentShift?.opening_cash, recentSales]);
   const partialRefundPreview = useMemo(() => {
     if (!partialRefundOrder) {
       return { amount: 0, itemCount: 0 };
@@ -2196,7 +2199,7 @@ export default function POSPage(): JSX.Element {
               <Button size="sm" variant="outline" onClick={() => setRecentSalesOpen(true)} disabled={!currentShift}>
                 ล่าสุด
               </Button>
-              <Button size="sm" variant="outline" onClick={() => setCloseShiftOpen(true)} disabled={!currentShift}>ปิดกะ</Button>
+              <Button size="sm" variant="outline" className="min-h-11" onClick={() => setCloseShiftOpen(true)} disabled={!currentShift}>จัดการกะ</Button>
               <Button size="sm" variant="outline" aria-label="สถานะเครื่องและการพิมพ์" onClick={() => setDeviceStatusOpen(true)}>
                 <MonitorCog className="h-4 w-4" />
               </Button>
@@ -3042,41 +3045,36 @@ export default function POSPage(): JSX.Element {
       </Dialog>
 
       <Dialog open={shiftGateOpen} onOpenChange={setShiftGateOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-3xl p-0">
+          <div className="border-b border-slate-200 px-5 py-5 pr-16 md:px-7">
           <DialogHeader>
-            <DialogTitle>เปิดกะก่อนเริ่มขาย</DialogTitle>
+            <DialogTitle className="text-xl">เปิดกะพนักงานก่อนเริ่มขาย</DialogTitle>
+            <DialogDescription>Server จะผูกพนักงาน สาขา คลัง และ Counter ให้เป็นกะเดียวกัน</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-              <p className="font-semibold">ผู้เปิดกะ: {staffDisplayName}</p>
-              <p className="mt-1 text-blue-700">Employee ID: {staffIdentifier} · ระบบบันทึกเวลาและเครื่อง Counter ให้อัตโนมัติ</p>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">คลังสินค้า</label>
-              <select
-                className="h-11 w-full rounded-md border border-slate-300 px-3"
-                value={selectedLocationId}
-                onChange={(event) => setSelectedLocationId(event.target.value)}
-              >
-                <option value="">เลือกคลัง</option>
-                {locations.map((location) => (
-                  <option key={location.id} value={location.id}>{location.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">เงินเปิดลิ้นชัก</label>
-              <input
-                type="number"
-                className="h-11 w-full rounded-md border border-slate-300 px-3"
-                value={openingCash}
-                onChange={(event) => setOpeningCash(Number(event.target.value))}
-              />
-            </div>
           </div>
-          <DialogFooter>
-            <Button onClick={() => void handleOpenShift()} disabled={!selectedLocationId}>เปิดกะ</Button>
-          </DialogFooter>
+          <div className="space-y-5 p-5 md:p-7">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900"><p className="text-xs font-semibold text-blue-600">พนักงาน</p><p className="mt-1 font-bold">{staffDisplayName}</p><p className="text-xs">ID {staffIdentifier}</p></div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm"><p className="text-xs font-semibold text-slate-500">สาขา</p><p className="mt-1 font-bold text-slate-900">{branchName}</p></div>
+              <div className={`rounded-2xl border p-4 text-sm ${pairedDevice ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-800"}`}><p className="text-xs font-semibold">Counter</p><p className="mt-1 font-bold">{pairedDevice?.name ?? "ยังไม่จับคู่เครื่อง"}</p><p className="text-xs">{pairedDevice?.device_code ?? "ต้องจับคู่ก่อนเปิดกะ"}</p></div>
+            </div>
+            <section>
+              <h3 className="text-sm font-bold text-slate-900">เลือกคลังที่ขาย</h3>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {locations.map((stockLocation) => <button key={stockLocation.id} type="button" onClick={() => setSelectedLocationId(stockLocation.id)} className={`min-h-14 rounded-xl border px-4 text-left text-sm font-semibold ${selectedLocationId === stockLocation.id ? "border-blue-600 bg-blue-50 text-blue-800 ring-2 ring-blue-100" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>{stockLocation.name}</button>)}
+              </div>
+              {locations.length === 0 ? <div className="mt-2 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">สาขานี้ยังไม่มีคลังสำหรับ POS</div> : null}
+            </section>
+            <section>
+              <label className="text-sm font-bold text-slate-900">เงินทอนตั้งต้น</label>
+              <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                <input aria-label="เงินทอนตั้งต้น" type="number" min={0} inputMode="decimal" className="h-14 w-full rounded-xl border border-slate-300 px-4 text-xl font-bold" value={openingCash} onChange={(event) => setOpeningCash(Math.max(0, Number(event.target.value) || 0))} />
+                <div className="flex gap-2">{[500, 1000, 2000].map((amount) => <button key={amount} type="button" onClick={() => setOpeningCash(amount)} className="min-h-14 rounded-xl border border-slate-200 px-3 text-sm font-bold hover:bg-slate-50">฿{amount.toLocaleString()}</button>)}</div>
+              </div>
+            </section>
+            {!isOnline ? <div className="flex min-h-12 items-center gap-2 rounded-xl bg-amber-50 px-4 text-sm font-semibold text-amber-800"><WifiOff className="h-5 w-5" />เปิดกะใหม่ไม่ได้ขณะ Offline</div> : null}
+            <Button className="h-14 w-full text-base" onClick={() => void handleOpenShift()} disabled={!selectedLocationId || !isOnline || !pairedDevice}>ยืนยันเปิดกะกับ Server</Button>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -3085,10 +3083,16 @@ export default function POSPage(): JSX.Element {
           open={closeShiftOpen}
           onOpenChange={setCloseShiftOpen}
           shift={currentShift}
-          expectedCashNow={expectedCashNow}
-          paymentSummary={paymentAuditSummary}
+          online={isOnline}
           operatorLabel={staffAuditLabel}
-          onConfirm={handleCloseShift}
+          cashMovementApprovalThreshold={Number(branchSettingsQuery.data?.pos_cash_movement_approval_threshold ?? 1000)}
+          varianceSoftThreshold={Number(branchSettingsQuery.data?.pos_shift_variance_soft_threshold ?? 100)}
+          varianceApprovalThreshold={Number(branchSettingsQuery.data?.pos_shift_variance_approval_threshold ?? 500)}
+          canCreateCashMovement={hasPermission("pos.cash_movement.create")}
+          canHandover={hasPermission("pos.cashier.handover") && Boolean(pairedDevice)}
+          onShiftUpdated={handleShiftUpdated}
+          onClosed={handleShiftClosed}
+          onHandover={handleShiftHandover}
         />
       ) : null}
 

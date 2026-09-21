@@ -13,9 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.audit import AuditLog
+from app.models.accounting import JournalEntry
 from app.models.branch import Branch
 from app.models.company import Company
-from app.models.pos import CashierShift, Payment, SaleOrder, SaleOrderItem
+from app.models.offline_sync import OfflinePosOperation
+from app.models.pos import CashierShift, Payment, PosCashMovement, SaleOrder, SaleOrderItem
 from app.models.refund import RefundOperation
 from app.models.pricing import PriceOverrideAudit
 from app.models.product import Product, ProductVariant
@@ -24,6 +26,7 @@ from app.models.settings import BranchSettings
 from app.models.stock import StockBalance, StockLocation
 from app.models.user import User
 from app.schemas.pos import (
+    CashMovementCreateRequest,
     CloseShiftRequest,
     CreateSaleRequest,
     OpenShiftRequest,
@@ -160,6 +163,27 @@ class SaleService:
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> CashierShift:
+        request_hash = canonical_hash(
+            data.model_dump(mode="json", exclude_none=True)
+        )
+        if data.idempotency_key:
+            replay = await self.db.scalar(
+                select(CashierShift).where(
+                    CashierShift.company_id == company_id,
+                    CashierShift.branch_id == branch_id,
+                    CashierShift.open_idempotency_key == data.idempotency_key,
+                )
+            )
+            if replay is not None:
+                if replay.open_request_hash != request_hash:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "duplicate_request",
+                            "message": "Open-shift idempotency key was replayed with different data",
+                        },
+                    )
+                return replay
         existing = await self.get_open_shift(company_id, user_id, branch_id)
         if existing is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Shift already open")
@@ -186,6 +210,12 @@ class SaleService:
             user_id=user_id,
             shift_number=f"S{now_local:%Y%m%d}-{int(count) + 1:03d}",
             opening_cash=q2(data.opening_cash),
+            shift_type=data.shift_type,
+            version=1,
+            open_idempotency_key=data.idempotency_key,
+            open_request_hash=request_hash,
+            opened_device_id=device_id,
+            opened_device_code=device_code,
         )
         self.db.add(shift)
         await self.db.flush()
@@ -202,6 +232,9 @@ class SaleService:
                     "operator_user_id": str(user_id),
                     "location_id": str(data.location_id),
                     "opening_cash": str(q2(data.opening_cash)),
+                    "shift_type": data.shift_type,
+                    "version": 1,
+                    "idempotency_key": data.idempotency_key,
                     "device_id": str(device_id) if device_id else None,
                     "device_code": device_code,
                 },
@@ -212,6 +245,328 @@ class SaleService:
         await self.db.commit()
         await self.db.refresh(shift)
         return shift
+
+    async def get_shift_summary(
+        self,
+        shift_id: uuid.UUID,
+        company_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        include_journal: bool = True,
+    ) -> dict[str, object]:
+        shift = await self.db.scalar(
+            select(CashierShift).where(
+                CashierShift.id == shift_id,
+                CashierShift.company_id == company_id,
+                CashierShift.user_id == user_id,
+            )
+        )
+        if shift is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
+        return await self._build_shift_summary(shift, include_journal=include_journal)
+
+    async def _build_shift_summary(
+        self,
+        shift: CashierShift,
+        *,
+        include_journal: bool,
+    ) -> dict[str, object]:
+        active_statuses = ("completed", "partially_refunded", "refunded")
+        order_count = await self.db.scalar(
+            select(func.count(SaleOrder.id)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status.in_(active_statuses),
+            )
+        ) or 0
+        void_count = await self.db.scalar(
+            select(func.count(SaleOrder.id)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status == "voided",
+            )
+        ) or 0
+        gross_sales = await self.db.scalar(
+            select(func.coalesce(func.sum(SaleOrder.total_amount), 0)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status.in_(active_statuses),
+            )
+        ) or Decimal("0")
+        refund_total = await self.db.scalar(
+            select(func.coalesce(func.sum(SaleOrder.refund_amount), 0)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status.in_(active_statuses),
+            )
+        ) or Decimal("0")
+        void_total = await self.db.scalar(
+            select(func.coalesce(func.sum(SaleOrder.total_amount), 0)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status == "voided",
+            )
+        ) or Decimal("0")
+        change_total = await self.db.scalar(
+            select(func.coalesce(func.sum(SaleOrder.change_amount), 0)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status.in_(active_statuses),
+            )
+        ) or Decimal("0")
+        payment_rows = (
+            await self.db.execute(
+                select(Payment.payment_method, func.coalesce(func.sum(Payment.amount), 0))
+                .join(SaleOrder, SaleOrder.id == Payment.order_id)
+                .where(
+                    SaleOrder.shift_id == shift.id,
+                    SaleOrder.status.in_(active_statuses),
+                )
+                .group_by(Payment.payment_method)
+                .order_by(Payment.payment_method.asc())
+            )
+        ).all()
+        payment_totals = {
+            str(method): str(q2(Decimal(amount))) for method, amount in payment_rows
+        }
+        cash_net = q2(Decimal(payment_totals.get("cash", "0")))
+        movement_rows = (
+            await self.db.scalars(
+                select(PosCashMovement)
+                .where(PosCashMovement.shift_id == shift.id)
+                .order_by(PosCashMovement.posted_at.asc(), PosCashMovement.id.asc())
+            )
+        ).all()
+        cash_in = q2(sum((Decimal(row.amount) for row in movement_rows if row.movement_type == "cash_in"), Decimal("0")))
+        cash_out = q2(sum((Decimal(row.amount) for row in movement_rows if row.movement_type == "cash_out"), Decimal("0")))
+        expected_cash = q2(
+            Decimal(shift.opening_cash or 0) + cash_net - Decimal(change_total) + cash_in - cash_out
+        )
+
+        pending_drafts = await HoldDraftService(self.db).count_pending_for_shift(shift.id)
+        pending_refunds = await self.db.scalar(
+            select(func.count(RefundOperation.id)).where(
+                RefundOperation.shift_id == shift.id,
+                RefundOperation.status.in_((
+                    "requested", "processing", "cash_due", "unknown",
+                    "needs_reconciliation", "tax_pending",
+                )),
+            )
+        ) or 0
+        pending_offline = await self.db.scalar(
+            select(func.count(OfflinePosOperation.id)).where(
+                OfflinePosOperation.shift_id == shift.id,
+                OfflinePosOperation.status.in_((
+                    "pending_sync", "syncing", "server_acknowledged", "needs_review",
+                    "quarantined", "unknown",
+                )),
+            )
+        ) or 0
+        unresolved_payments = await self.db.scalar(
+            select(func.count(Payment.id))
+            .join(SaleOrder, SaleOrder.id == Payment.order_id)
+            .where(
+                SaleOrder.shift_id == shift.id,
+                Payment.amount > 0,
+                Payment.settlement_state.notin_(("settled", "captured")),
+            )
+        ) or 0
+
+        journal_missing_sales = 0
+        journal_missing_movements = 0
+        journal_state = "not_applicable"
+        if include_journal:
+            sale_ids = (
+                await self.db.scalars(
+                    select(SaleOrder.id).where(SaleOrder.shift_id == shift.id)
+                )
+            ).all()
+            movement_ids = [row.id for row in movement_rows]
+            posted_sale_refs = set()
+            posted_movement_refs = set()
+            if sale_ids:
+                posted_sale_refs = set(
+                    (
+                        await self.db.scalars(
+                            select(JournalEntry.reference_id).where(
+                                JournalEntry.company_id == shift.company_id,
+                                JournalEntry.reference_type == "SaleOrder",
+                                JournalEntry.reference_id.in_([str(value) for value in sale_ids]),
+                                JournalEntry.is_posted.is_(True),
+                            )
+                        )
+                    ).all()
+                )
+            if movement_ids:
+                posted_movement_refs = set(
+                    (
+                        await self.db.scalars(
+                            select(JournalEntry.reference_id).where(
+                                JournalEntry.company_id == shift.company_id,
+                                JournalEntry.reference_type == "PosCashMovement",
+                                JournalEntry.reference_id.in_([str(value) for value in movement_ids]),
+                                JournalEntry.is_posted.is_(True),
+                                JournalEntry.is_reversed.is_(False),
+                            )
+                        )
+                    ).all()
+                )
+            journal_missing_sales = sum(1 for value in sale_ids if str(value) not in posted_sale_refs)
+            journal_missing_movements = sum(1 for value in movement_ids if str(value) not in posted_movement_refs)
+            journal_state = "matched" if journal_missing_sales + journal_missing_movements == 0 else "needs_reconciliation"
+
+        blockers: list[dict[str, object]] = []
+        blocker_specs = (
+            ("hold_drafts_pending", int(pending_drafts), "พักบิลยังไม่ถูกจัดการ", "/pos"),
+            ("refunds_pending", int(pending_refunds), "รายการคืนเงินยังไม่สิ้นสุด", "/pos"),
+            ("offline_operations_pending", int(pending_offline), "รายการ Offline/Outbox ยังไม่กระทบยอด", "/pos/offline-sync"),
+            ("payments_unresolved", int(unresolved_payments), "สถานะการชำระเงินยังไม่แน่นอน", "/pos"),
+            ("journal_reconciliation_pending", int(journal_missing_sales + journal_missing_movements), "รายการบัญชียังไม่ครบ", "/accounting"),
+        )
+        for code, count, message, action_path in blocker_specs:
+            if count:
+                blockers.append({"code": code, "count": count, "message": message, "action_path": action_path})
+
+        return {
+            "shift_id": str(shift.id),
+            "shift_number": shift.shift_number,
+            "shift_type": shift.shift_type,
+            "status": shift.status,
+            "version": shift.version,
+            "company_id": str(shift.company_id),
+            "branch_id": str(shift.branch_id),
+            "location_id": str(shift.location_id),
+            "operator_user_id": str(shift.user_id),
+            "opened_at": shift.opened_at.isoformat(),
+            "opening_cash": str(q2(shift.opening_cash)),
+            "gross_sales": str(q2(gross_sales)),
+            "net_sales": str(q2(Decimal(gross_sales) - Decimal(refund_total))),
+            "refund_total": str(q2(refund_total)),
+            "void_total": str(q2(void_total)),
+            "order_count": int(order_count),
+            "void_count": int(void_count),
+            "payment_totals": payment_totals,
+            "cash_received_net": str(cash_net),
+            "change_total": str(q2(change_total)),
+            "cash_in_total": str(cash_in),
+            "cash_out_total": str(cash_out),
+            "expected_cash": str(expected_cash),
+            "cash_movements": [
+                {
+                    "id": str(row.id),
+                    "movement_type": row.movement_type,
+                    "amount": str(q2(row.amount)),
+                    "reason_code": row.reason_code,
+                    "reason": row.reason,
+                    "requester_id": str(row.requester_id),
+                    "approver_id": str(row.approver_id) if row.approver_id else None,
+                    "posted_at": row.posted_at.isoformat(),
+                    "journal_entry_id": str(row.journal_entry_id) if row.journal_entry_id else None,
+                }
+                for row in movement_rows
+            ],
+            "pending": {
+                "hold_drafts": int(pending_drafts),
+                "refunds": int(pending_refunds),
+                "offline_operations": int(pending_offline),
+                "unresolved_payments": int(unresolved_payments),
+            },
+            "journal": {
+                "state": journal_state,
+                "missing_sales": journal_missing_sales,
+                "missing_cash_movements": journal_missing_movements,
+            },
+            "blockers": blockers,
+            "can_close": shift.status == "open" and not blockers,
+            "reopen_allowed": False,
+        }
+
+    async def create_cash_movement(
+        self,
+        shift_id: uuid.UUID,
+        company_id: uuid.UUID,
+        user_id: uuid.UUID,
+        data: CashMovementCreateRequest,
+        *,
+        approval_evidence: ApprovalEvidence | None,
+        device_id: uuid.UUID | None,
+        device_code: str | None,
+        ip_address: str | None,
+        user_agent: str | None,
+    ) -> PosCashMovement:
+        request_hash = canonical_hash(
+            data.model_dump(mode="json", exclude={"approval_token"}, exclude_none=True)
+        )
+        shift = await self.db.scalar(
+            select(CashierShift)
+            .where(
+                CashierShift.id == shift_id,
+                CashierShift.company_id == company_id,
+                CashierShift.user_id == user_id,
+            )
+            .with_for_update()
+        )
+        if shift is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
+        if shift.status != "open":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "shift_closed", "message": "Cash movement requires an open shift"})
+        existing = await self.db.scalar(
+            select(PosCashMovement).where(
+                PosCashMovement.company_id == company_id,
+                PosCashMovement.branch_id == shift.branch_id,
+                PosCashMovement.idempotency_key == data.idempotency_key,
+            )
+        )
+        if existing is not None:
+            if existing.shift_id != shift.id or existing.request_hash != request_hash:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "duplicate_request", "message": "Cash movement idempotency key was replayed with different data"})
+            return existing
+        if shift.version != data.expected_shift_version:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "version_conflict", "message": "Shift changed; reload before recording cash", "current_version": shift.version})
+        shift.version += 1
+        movement = PosCashMovement(
+            company_id=company_id,
+            branch_id=shift.branch_id,
+            shift_id=shift.id,
+            location_id=shift.location_id,
+            requester_id=user_id,
+            approver_id=approval_evidence.approver_id if approval_evidence else None,
+            device_id=device_id,
+            device_code=device_code,
+            movement_type=data.movement_type,
+            amount=q2(data.amount),
+            reason_code=data.reason_code,
+            reason=data.reason.strip(),
+            shift_version=shift.version,
+            idempotency_key=data.idempotency_key,
+            request_hash=request_hash,
+            approval_evidence=approval_evidence.as_audit_value() if approval_evidence else None,
+        )
+        self.db.add(movement)
+        await self.db.flush()
+        journal = await AccountingService(self.db).post_cash_movement(movement, company_id, user_id)
+        movement.journal_entry_id = journal.id
+        self.db.add(
+            AuditLog(
+                company_id=company_id,
+                branch_id=shift.branch_id,
+                user_id=user_id,
+                action="pos.shift.cash_movement",
+                resource="PosCashMovement",
+                resource_id=str(movement.id),
+                new_value={
+                    "shift_id": str(shift.id),
+                    "shift_version": shift.version,
+                    "movement_type": movement.movement_type,
+                    "amount": str(movement.amount),
+                    "reason_code": movement.reason_code,
+                    "reason": movement.reason,
+                    "device_id": str(device_id) if device_id else None,
+                    "device_code": device_code,
+                    "approval": movement.approval_evidence,
+                    "journal_entry_id": str(journal.id),
+                },
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        )
+        await self.db.commit()
+        await self.db.refresh(movement)
+        return movement
 
     async def get_open_shift(
         self,
@@ -239,70 +594,106 @@ class SaleService:
         device_code: str | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
+        approval_evidence: ApprovalEvidence | None = None,
+        include_journal: bool = True,
+        handover: bool = False,
     ) -> CashierShift:
+        request_hash = canonical_hash(
+            data.model_dump(mode="json", exclude={"approval_token"}, exclude_none=True)
+        )
+        idempotency_key = data.idempotency_key or f"legacy-close:{shift_id}"
         shift = await self.db.scalar(
-            select(CashierShift).where(
-                CashierShift.id == shift_id,
-                CashierShift.company_id == company_id,
-                CashierShift.user_id == user_id,
-            )
+            select(CashierShift)
+            .where(
+                    CashierShift.id == shift_id,
+                    CashierShift.company_id == company_id,
+                    CashierShift.user_id == user_id,
+                )
+            .with_for_update()
         )
         if shift is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
         if shift.status != "open":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Shift already closed")
-
-        pending_drafts = await HoldDraftService(self.db).count_pending_for_shift(shift.id)
-        if pending_drafts:
+            if (
+                shift.close_idempotency_key == idempotency_key
+                and shift.close_request_hash == request_hash
+            ):
+                return shift
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "shift_closed", "message": "Shift is already closed"},
+            )
+        if data.expected_version is not None and shift.version != data.expected_version:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
-                    "code": "hold_drafts_pending",
-                    "message": "Resolve, reassign or discard Hold Drafts before closing this shift",
-                    "pending_count": pending_drafts,
+                    "code": "version_conflict",
+                    "message": "Shift changed; reload the Server summary before closing",
+                    "current_version": shift.version,
                 },
             )
 
-        pending_refunds = await self.db.scalar(
-            select(func.count(RefundOperation.id)).where(
-                RefundOperation.shift_id == shift.id,
-                RefundOperation.status.in_((
-                    "requested", "processing", "cash_due", "unknown",
-                    "needs_reconciliation", "tax_pending",
-                )),
-            )
-        ) or 0
-        if pending_refunds:
+        summary = await self._build_shift_summary(shift, include_journal=include_journal)
+        blockers = summary["blockers"]
+        if blockers:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
-                    "code": "refunds_pending",
-                    "message": "Resolve pending or unknown refunds before closing this shift",
-                    "pending_count": int(pending_refunds),
+                    "code": "shift_close_blocked",
+                    "message": "Resolve every Server blocker before closing this shift",
+                    "blockers": blockers,
                 },
             )
 
-        cash_paid = await self.db.scalar(
-            select(func.coalesce(func.sum(Payment.amount), 0))
-            .join(SaleOrder, SaleOrder.id == Payment.order_id)
-            .where(
-                SaleOrder.shift_id == shift.id,
-                SaleOrder.status.in_(("completed", "partially_refunded", "refunded")),
-                Payment.payment_method == "cash",
-            )
-        ) or Decimal("0")
-        cash_change = await self.db.scalar(
-            select(func.coalesce(func.sum(SaleOrder.change_amount), 0)).where(
-                SaleOrder.shift_id == shift.id,
-                SaleOrder.status.in_(("completed", "partially_refunded", "refunded")),
-            )
-        ) or Decimal("0")
-        expected_cash = q2(Decimal(shift.opening_cash or 0) + Decimal(cash_paid) - Decimal(cash_change))
+        expected_cash = q2(Decimal(str(summary["expected_cash"])))
         closing_cash = q2(data.closing_cash)
+        cash_difference = q2(closing_cash - expected_cash)
+        if cash_difference != 0 and (data.reason_code is None or not (data.note or "").strip()):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "variance_reason_required",
+                    "message": "Reason code and note are required when counted cash differs",
+                },
+            )
+        branch_settings = await self.db.scalar(
+            select(BranchSettings).where(
+                BranchSettings.company_id == company_id,
+                BranchSettings.branch_id == shift.branch_id,
+            )
+        )
+        approval_threshold = Decimal(
+            branch_settings.pos_shift_variance_approval_threshold
+            if branch_settings else 500
+        )
+        if abs(cash_difference) >= approval_threshold and approval_evidence is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "approval_required",
+                    "action": "pos.shift.variance.approve",
+                    "message": "Manager approval is required for this cash variance",
+                    "cash_difference": str(cash_difference),
+                    "approval_threshold": str(q2(approval_threshold)),
+                },
+            )
         shift.expected_cash = expected_cash
         shift.closing_cash = closing_cash
-        shift.cash_difference = q2(closing_cash - expected_cash)
-        shift.note = data.note
+        shift.cash_difference = cash_difference
+        shift.note = data.note.strip() if data.note else None
+        shift.close_reason_code = data.reason_code
+        shift.cash_count_json = [row.model_dump(mode="json") for row in data.cash_count] or None
+        shift.close_idempotency_key = idempotency_key
+        shift.close_request_hash = request_hash
+        shift.closed_device_id = device_id
+        shift.closed_device_code = device_code
+        shift.closed_by_user_id = user_id
+        shift.approval_evidence = approval_evidence.as_audit_value() if approval_evidence else None
+        shift.close_snapshot_json = summary
+        shift.total_sales = q2(Decimal(str(summary["net_sales"])))
+        shift.total_orders = int(summary["order_count"])
+        shift.total_voids = int(summary["void_count"])
+        shift.version += 1
         shift.status = "closed"
         shift.closed_at = datetime.now(timezone.utc)
         self.db.add(
@@ -310,7 +701,7 @@ class SaleService:
                 company_id=company_id,
                 branch_id=shift.branch_id,
                 user_id=user_id,
-                action="pos.shift.close",
+                action="pos.shift.handover" if handover else "pos.shift.close",
                 resource="CashierShift",
                 resource_id=str(shift.id),
                 old_value={
@@ -326,9 +717,15 @@ class SaleService:
                     "closing_cash": str(closing_cash),
                     "expected_cash": str(expected_cash),
                     "cash_difference": str(shift.cash_difference),
+                    "reason_code": data.reason_code,
+                    "version": shift.version,
+                    "idempotency_key": idempotency_key,
                     "device_id": str(device_id) if device_id else None,
                     "device_code": device_code,
                     "note": data.note,
+                    "approval": shift.approval_evidence,
+                    "summary": summary,
+                    "handover": handover,
                 },
                 ip_address=ip_address,
                 user_agent=user_agent,
@@ -801,6 +1198,7 @@ class SaleService:
 
         shift.total_sales = q2(Decimal(shift.total_sales or 0) + total_amount)
         shift.total_orders = int(shift.total_orders or 0) + 1
+        shift.version = int(shift.version or 1) + 1
         self.db.add(
             AuditLog(
                 company_id=company_id,
@@ -931,7 +1329,14 @@ class SaleService:
         order = await self.get_sale(order_id, company_id)
         if order.status != "completed":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order cannot be voided")
-        shift = await self.get_open_shift(company_id, user_id, order.branch_id)
+        shift = await self.db.scalar(
+            select(CashierShift).where(
+                CashierShift.company_id == company_id,
+                CashierShift.user_id == user_id,
+                CashierShift.branch_id == order.branch_id,
+                CashierShift.status == "open",
+            ).with_for_update()
+        )
         if shift is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active shift required to void sale")
         unsafe_payment = next(
@@ -1004,6 +1409,7 @@ class SaleService:
         order.void_reason = data.void_reason
         order.shift.total_voids = int(order.shift.total_voids or 0) + 1
         order.shift.total_sales = q2(max(Decimal("0"), Decimal(order.shift.total_sales or 0) - Decimal(order.total_amount)))
+        shift.version = int(shift.version or 1) + 1
         self.db.add(
             AuditLog(
                 company_id=company_id,
@@ -1059,7 +1465,14 @@ class SaleService:
         order = await self.get_sale(order_id, company_id)
         if order.status not in {"completed", "partially_refunded"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order cannot be refunded")
-        active_shift = await self.get_open_shift(company_id, user_id, order.branch_id)
+        active_shift = await self.db.scalar(
+            select(CashierShift).where(
+                CashierShift.company_id == company_id,
+                CashierShift.user_id == user_id,
+                CashierShift.branch_id == order.branch_id,
+                CashierShift.status == "open",
+            ).with_for_update()
+        )
         if active_shift is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active shift required to refund sale")
         refundable_items = [
@@ -1104,7 +1517,14 @@ class SaleService:
         order = await self.get_sale(order_id, company_id)
         if order.status not in {"completed", "partially_refunded"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order cannot be partially refunded")
-        active_shift = await self.get_open_shift(company_id, user_id, order.branch_id)
+        active_shift = await self.db.scalar(
+            select(CashierShift).where(
+                CashierShift.company_id == company_id,
+                CashierShift.user_id == user_id,
+                CashierShift.branch_id == order.branch_id,
+                CashierShift.status == "open",
+            ).with_for_update()
+        )
         if active_shift is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active shift required to refund sale")
         if not payload.items:
@@ -1320,6 +1740,7 @@ class SaleService:
         note_line = f"REFUND {datetime.now(BANGKOK).strftime('%d/%m/%Y %H:%M')} {refund_total:,.2f}: {refund_reason.strip()}"
         order.note = f"{order.note}\n{note_line}".strip() if order.note else note_line
         active_shift.total_sales = q2(max(Decimal("0"), Decimal(active_shift.total_sales or 0) - refund_total))
+        active_shift.version = int(active_shift.version or 1) + 1
 
         for original_payment_id, payment_method, amount, reference_no in refundable_allocations:
             self.db.add(
@@ -1430,7 +1851,7 @@ class SaleService:
                 CashierShift.company_id == company_id,
                 CashierShift.branch_id == branch_id,
                 CashierShift.user_id == user_id,
-            )
+            ).with_for_update()
         )
         if shift is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")

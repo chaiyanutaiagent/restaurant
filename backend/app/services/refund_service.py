@@ -676,6 +676,7 @@ class RefundService:
         if shift is None or shift.status != "open":
             raise refund_error("active_shift_required", "Refund shift is no longer open")
         shift.total_sales = q2(max(Decimal("0"), Decimal(shift.total_sales or 0) - Decimal(operation.total_amount)))
+        shift.version = int(shift.version or 1) + 1
 
         for leg in await self._load_legs(operation.id, lock=True):
             existing = await self.db.scalar(select(Payment.id).where(

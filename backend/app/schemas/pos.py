@@ -13,17 +13,72 @@ from app.schemas.pricing import PriceOverrideIntent, PricingChannel
 
 class OpenShiftRequest(BaseSchema):
     location_id: uuid.UUID
-    opening_cash: Decimal = Decimal("0")
+    opening_cash: Decimal = Field(default=Decimal("0"), ge=0)
+    shift_type: Literal["staff_cashier", "operational_cashless"] = "staff_cashier"
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=100)
+
+
+class CashDenominationCount(BaseSchema):
+    denomination: Decimal = Field(gt=0)
+    quantity: int = Field(ge=0, le=10000)
+
+
+ShiftVarianceReason = Literal[
+    "count_short",
+    "count_over",
+    "change_error",
+    "cash_movement",
+    "other",
+]
 
 
 class CloseShiftRequest(BaseSchema):
-    closing_cash: Decimal
-    note: str | None = None
+    closing_cash: Decimal = Field(ge=0)
+    reason_code: ShiftVarianceReason | None = None
+    note: str | None = Field(default=None, max_length=500)
+    cash_count: list[CashDenominationCount] = Field(default_factory=list, max_length=20)
+    expected_version: int | None = Field(default=None, ge=1)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=100)
+    approval_token: str | None = None
+
+    @model_validator(mode="after")
+    def validate_cash_count(self) -> "CloseShiftRequest":
+        if self.cash_count:
+            counted = sum(
+                (Decimal(item.denomination) * item.quantity for item in self.cash_count),
+                Decimal("0"),
+            ).quantize(Decimal("0.01"))
+            if counted != Decimal(self.closing_cash).quantize(Decimal("0.01")):
+                raise ValueError("Cash denomination total must equal closing cash")
+        return self
+
+
+CashMovementType = Literal["cash_in", "cash_out"]
+CashMovementReason = Literal[
+    "change_fund",
+    "cash_drop",
+    "petty_cash",
+    "supplier_payment",
+    "correction",
+    "other",
+]
+
+
+class CashMovementCreateRequest(BaseSchema):
+    movement_type: CashMovementType
+    amount: Decimal = Field(gt=0)
+    reason_code: CashMovementReason
+    reason: str = Field(min_length=3, max_length=500)
+    expected_shift_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    approval_token: str | None = None
 
 
 class ShiftRead(BaseSchema):
     id: uuid.UUID
     shift_number: str
+    shift_type: str = "staff_cashier"
+    version: int = 1
     status: str
     branch_id: uuid.UUID
     location_id: uuid.UUID
@@ -37,6 +92,32 @@ class ShiftRead(BaseSchema):
     total_sales: Decimal
     total_orders: int
     total_voids: int
+    close_reason_code: str | None = None
+    cash_count_json: list[dict[str, Any]] | None = None
+    opened_device_id: uuid.UUID | None = None
+    opened_device_code: str | None = None
+    closed_device_id: uuid.UUID | None = None
+    closed_device_code: str | None = None
+    closed_by_user_id: uuid.UUID | None = None
+    close_snapshot_json: dict[str, Any] | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CashMovementRead(BaseSchema):
+    id: uuid.UUID
+    shift_id: uuid.UUID
+    movement_type: str
+    amount: Decimal
+    reason_code: str
+    reason: str
+    status: str
+    shift_version: int
+    requester_id: uuid.UUID
+    approver_id: uuid.UUID | None = None
+    device_code: str | None = None
+    journal_entry_id: uuid.UUID | None = None
+    posted_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 

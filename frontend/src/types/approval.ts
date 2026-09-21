@@ -5,7 +5,9 @@ export type ApprovalAction =
   | "pos.refund.create"
   | "inventory.stock.adjust"
   | "fb.order.cancel_after_kitchen"
-  | "fb.order.cancel.reopen";
+  | "fb.order.cancel.reopen"
+  | "pos.cash_movement.approve"
+  | "pos.shift.variance.approve";
 
 export interface ManagerPinStatus {
   is_set: boolean;

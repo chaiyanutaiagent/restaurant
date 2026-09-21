@@ -289,6 +289,7 @@ RETAIL_RUNTIME_REQUIRED_TABLES = {
     "stock_count_sessions",
     "stock_count_items",
     "cashier_shifts",
+    "pos_cash_movements",
     "sale_orders",
     "sale_order_items",
     "payments",

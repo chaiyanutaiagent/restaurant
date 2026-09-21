@@ -96,6 +96,9 @@ type SettingsFormState = {
   pos_price_override_max_deviation_pct: number;
   pos_price_override_min_margin_pct: number;
   pos_price_override_self_approval: boolean;
+  pos_cash_movement_approval_threshold: number;
+  pos_shift_variance_soft_threshold: number;
+  pos_shift_variance_approval_threshold: number;
   stock_adjust_approval_threshold_qty: number;
   promptpay_target: string;
   promptpay_name: string;
@@ -123,6 +126,9 @@ function settingsToForm(settings: BranchSettings | null | undefined): SettingsFo
     pos_price_override_max_deviation_pct: settings?.pos_price_override_max_deviation_pct ?? 50,
     pos_price_override_min_margin_pct: settings?.pos_price_override_min_margin_pct ?? 0,
     pos_price_override_self_approval: settings?.pos_price_override_self_approval ?? false,
+    pos_cash_movement_approval_threshold: settings?.pos_cash_movement_approval_threshold ?? 1000,
+    pos_shift_variance_soft_threshold: settings?.pos_shift_variance_soft_threshold ?? 100,
+    pos_shift_variance_approval_threshold: settings?.pos_shift_variance_approval_threshold ?? 500,
     stock_adjust_approval_threshold_qty: settings?.stock_adjust_approval_threshold_qty ?? 10,
     promptpay_target: settings?.promptpay_target ?? "",
     promptpay_name: settings?.promptpay_name ?? "",
@@ -588,6 +594,21 @@ export default function BranchSettingsPage(): JSX.Element {
                   } : prev)}
                 />
               </Field>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="font-medium text-slate-900">นโยบายเงินสดและส่วนต่างตอนปิดกะ</p>
+                <p className="mt-1 text-sm text-slate-500">รายการที่ถึงเกณฑ์ต้องใช้ Manager คนอื่นอนุมัติ และบันทึกใน Audit</p>
+                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  <Field label="เงินเข้า/ออกที่ต้องอนุมัติ ฿">
+                    <Input type="number" min={0} value={settings?.pos_cash_movement_approval_threshold ?? 1000} onChange={(event) => setSettingsForm((prev) => prev ? { ...prev, pos_cash_movement_approval_threshold: Number(event.target.value || 0) } : prev)} />
+                  </Field>
+                  <Field label="เตือนส่วนต่างตั้งแต่ ฿">
+                    <Input type="number" min={0} max={settings?.pos_shift_variance_approval_threshold ?? 500} value={settings?.pos_shift_variance_soft_threshold ?? 100} onChange={(event) => setSettingsForm((prev) => prev ? { ...prev, pos_shift_variance_soft_threshold: Number(event.target.value || 0) } : prev)} />
+                  </Field>
+                  <Field label="ส่วนต่างที่ต้องอนุมัติ ฿">
+                    <Input type="number" min={settings?.pos_shift_variance_soft_threshold ?? 0} value={settings?.pos_shift_variance_approval_threshold ?? 500} onChange={(event) => setSettingsForm((prev) => prev ? { ...prev, pos_shift_variance_approval_threshold: Number(event.target.value || 0) } : prev)} />
+                  </Field>
+                </div>
+              </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="font-medium text-slate-900">นโยบายเปลี่ยนราคาหน้าร้าน</p>
                 <p className="mt-1 text-sm text-slate-500">ทุกครั้งต้องระบุเหตุผลและถูกบันทึกใน Audit; เกินเกณฑ์อัตโนมัติต้อง Manager อนุมัติ</p>

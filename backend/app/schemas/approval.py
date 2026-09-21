@@ -17,6 +17,8 @@ ApprovalAction = Literal[
     "inventory.stock.adjust",
     "fb.order.cancel_after_kitchen",
     "fb.order.cancel.reopen",
+    "pos.cash_movement.approve",
+    "pos.shift.variance.approve",
 ]
 
 

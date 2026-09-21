@@ -27,6 +27,8 @@ from app.schemas.approval import (
     ManagerPinStatusRead,
 )
 from app.schemas.pos import (
+    CashMovementCreateRequest,
+    CloseShiftRequest,
     CreateSaleRequest,
     PartialRefundRequest,
     RefundRequest,
@@ -52,6 +54,8 @@ DIRECT_PERMISSION_BY_ACTION: dict[str, str] = {
     "inventory.stock.adjust": "inventory.stock.adjust",
     "fb.order.cancel_after_kitchen": "fb.order.cancel.approve",
     "fb.order.cancel.reopen": "fb.order.cancel.reopen",
+    "pos.cash_movement.approve": "pos.cash_movement.approve",
+    "pos.shift.variance.approve": "pos.shift.variance.approve",
 }
 
 REQUEST_PERMISSION_BY_ACTION: dict[str, str] = {
@@ -62,6 +66,8 @@ REQUEST_PERMISSION_BY_ACTION: dict[str, str] = {
     "inventory.stock.adjust": "inventory.stock.adjust.request",
     "fb.order.cancel_after_kitchen": "fb.order.cancel.request",
     "fb.order.cancel.reopen": "fb.order.cancel.reopen.request",
+    "pos.cash_movement.approve": "pos.cash_movement.create",
+    "pos.shift.variance.approve": "pos.cashier.close_shift",
 }
 
 
@@ -152,6 +158,26 @@ def normalize_approval_request_payload(
                 "idempotency_key": idempotency_key,
                 "reason": reason,
             }
+        elif action == "pos.cash_movement.approve":
+            shift_id = values.pop("shift_id", None)
+            normalized = CashMovementCreateRequest.model_validate(values).model_dump(
+                mode="json",
+                exclude={"approval_token"},
+                exclude_none=True,
+            )
+            if shift_id is None:
+                raise ValueError("shift_id is required")
+            normalized["shift_id"] = str(uuid.UUID(str(shift_id)))
+        elif action == "pos.shift.variance.approve":
+            shift_id = values.pop("shift_id", None)
+            normalized = CloseShiftRequest.model_validate(values).model_dump(
+                mode="json",
+                exclude={"approval_token"},
+                exclude_none=True,
+            )
+            if shift_id is None:
+                raise ValueError("shift_id is required")
+            normalized["shift_id"] = str(uuid.UUID(str(shift_id)))
         else:
             raise ValueError("Unsupported approval action")
         if action in {"pos.sale.void", "pos.refund.create"}:

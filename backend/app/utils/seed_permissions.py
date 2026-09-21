@@ -241,6 +241,30 @@ PERMISSIONS: list[dict[str, str]] = [
         "description": "Close cashier shifts.",
     },
     {
+        "code": "pos.cashier.handover",
+        "name": "Handover Cashier Counter",
+        "module": "pos",
+        "description": "Close a staff shift and hand the paired Counter to the next staff session.",
+    },
+    {
+        "code": "pos.cash_movement.create",
+        "name": "Create POS Cash Movement",
+        "module": "pos",
+        "description": "Record cash paid into or removed from an open cashier shift.",
+    },
+    {
+        "code": "pos.cash_movement.approve",
+        "name": "Approve POS Cash Movement",
+        "module": "pos",
+        "description": "Approve POS cash movements above the Branch policy threshold.",
+    },
+    {
+        "code": "pos.shift.variance.approve",
+        "name": "Approve Cashier Shift Variance",
+        "module": "pos",
+        "description": "Approve cashier shift variance above the Branch policy threshold.",
+    },
+    {
         "code": "pos.report.view",
         "name": "View POS Reports",
         "module": "pos",

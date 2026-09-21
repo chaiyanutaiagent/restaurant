@@ -5,6 +5,8 @@ export type OrderStatus = "completed" | "voided" | "partially_refunded" | "refun
 export interface CashierShift {
   id: string;
   shift_number: string;
+  shift_type: "staff_cashier" | "operational_cashless";
+  version: number;
   status: ShiftStatus;
   branch_id: string;
   location_id: string;
@@ -18,6 +20,90 @@ export interface CashierShift {
   total_sales: number;
   total_orders: number;
   total_voids: number;
+  close_reason_code: string | null;
+  cash_count_json: Array<{ denomination: number; quantity: number }> | null;
+  opened_device_id: string | null;
+  opened_device_code: string | null;
+  closed_device_id: string | null;
+  closed_device_code: string | null;
+  closed_by_user_id: string | null;
+  close_snapshot_json: PosShiftSummary | null;
+}
+
+export interface ShiftBlocker {
+  code: string;
+  count: number;
+  message: string;
+  action_path: string;
+}
+
+export interface ShiftCashMovement {
+  id: string;
+  movement_type: "cash_in" | "cash_out";
+  amount: string;
+  reason_code: string;
+  reason: string;
+  requester_id: string;
+  approver_id: string | null;
+  posted_at: string;
+  journal_entry_id: string | null;
+}
+
+export interface PosShiftSummary {
+  shift_id: string;
+  shift_number: string;
+  shift_type: string;
+  status: ShiftStatus;
+  version: number;
+  company_id: string;
+  branch_id: string;
+  location_id: string;
+  operator_user_id: string;
+  opened_at: string;
+  opening_cash: string;
+  gross_sales: string;
+  net_sales: string;
+  refund_total: string;
+  void_total: string;
+  order_count: number;
+  void_count: number;
+  payment_totals: Record<string, string>;
+  cash_received_net: string;
+  change_total: string;
+  cash_in_total: string;
+  cash_out_total: string;
+  expected_cash: string;
+  cash_movements: ShiftCashMovement[];
+  pending: {
+    hold_drafts: number;
+    refunds: number;
+    offline_operations: number;
+    unresolved_payments: number;
+  };
+  journal: {
+    state: "matched" | "needs_reconciliation" | "not_applicable";
+    missing_sales: number;
+    missing_cash_movements: number;
+  };
+  blockers: ShiftBlocker[];
+  can_close: boolean;
+  reopen_allowed: false;
+}
+
+export interface CashMovement {
+  id: string;
+  shift_id: string;
+  movement_type: "cash_in" | "cash_out";
+  amount: number;
+  reason_code: string;
+  reason: string;
+  status: "posted";
+  shift_version: number;
+  requester_id: string;
+  approver_id: string | null;
+  device_code: string | null;
+  journal_entry_id: string | null;
+  posted_at: string;
 }
 
 export interface CartItem {

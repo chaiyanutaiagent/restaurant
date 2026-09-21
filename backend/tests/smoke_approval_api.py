@@ -173,6 +173,10 @@ async def prepare() -> dict[str, str]:
             "pos.refund.request",
             "pos.cashier.open_shift",
             "pos.cashier.close_shift",
+            "pos.cashier.handover",
+            "pos.cash_movement.create",
+            "pos.cash_movement.approve",
+            "pos.shift.variance.approve",
             "pos.draft.view",
             "pos.draft.create",
             "pos.draft.update",
@@ -219,6 +223,8 @@ async def prepare() -> dict[str, str]:
             permissions["pos.price.override"],
             permissions["pos.price.override.request"],
             permissions["pos.refund.create"],
+            permissions["pos.cash_movement.approve"],
+            permissions["pos.shift.variance.approve"],
             permissions["pos.draft.view"],
             permissions["pos.draft.update"],
             permissions["pos.draft.resume"],
@@ -250,6 +256,8 @@ async def prepare() -> dict[str, str]:
             permissions["pos.refund.request"],
             permissions["pos.cashier.open_shift"],
             permissions["pos.cashier.close_shift"],
+            permissions["pos.cashier.handover"],
+            permissions["pos.cash_movement.create"],
             permissions["pos.draft.view"],
             permissions["pos.draft.create"],
             permissions["pos.draft.update"],
@@ -515,7 +523,8 @@ async def prepare() -> dict[str, str]:
                 raise RuntimeError("Restaurant reference projection failed during approval smoke setup")
             if batch.claimed == 0:
                 break
-        await project_retail_reference_snapshot()
+        if settings.retail_database_url:
+            await project_retail_reference_snapshot()
     database_engines = {
         id(database_engine): database_engine
         for database_engine in (

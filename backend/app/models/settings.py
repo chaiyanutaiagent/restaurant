@@ -54,6 +54,15 @@ class BranchSettings(UUIDMixin, TimestampMixin, Base):
             "pos_hold_draft_ttl_minutes >= 15 AND pos_hold_draft_ttl_minutes <= 1440",
             name="pos_hold_draft_ttl_range",
         ),
+        CheckConstraint(
+            "pos_cash_movement_approval_threshold >= 0",
+            name="pos_cash_movement_approval_threshold_nonnegative",
+        ),
+        CheckConstraint(
+            "pos_shift_variance_soft_threshold >= 0 AND "
+            "pos_shift_variance_approval_threshold >= pos_shift_variance_soft_threshold",
+            name="pos_shift_variance_thresholds_nonnegative",
+        ),
     )
 
     company_id: Mapped[uuid.UUID] = mapped_column(
@@ -107,6 +116,15 @@ class BranchSettings(UUIDMixin, TimestampMixin, Base):
     )
     pos_hold_draft_ttl_minutes: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("120")
+    )
+    pos_cash_movement_approval_threshold: Mapped[float] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("1000")
+    )
+    pos_shift_variance_soft_threshold: Mapped[float] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("100")
+    )
+    pos_shift_variance_approval_threshold: Mapped[float] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("500")
     )
     stock_adjust_approval_threshold_qty: Mapped[float] = mapped_column(
         Numeric(12, 4),

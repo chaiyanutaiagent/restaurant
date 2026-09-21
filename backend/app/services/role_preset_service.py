@@ -10,7 +10,7 @@ from app.models.role import Permission
 from app.schemas.role import RolePresetRead, RoleScope
 
 
-ROLE_PRESET_POLICY_VERSION = "2026-09-20.3"
+ROLE_PRESET_POLICY_VERSION = "2026-09-21.4"
 
 TAKEAWAY_OWNER_PERMISSIONS = (
     "takeaway.catalog.view",
@@ -87,6 +87,10 @@ COMPANY_OWNER_PERMISSION_CODES = (
     "pos.refund.request",
     "pos.cashier.open_shift",
     "pos.cashier.close_shift",
+    "pos.cashier.handover",
+    "pos.cash_movement.create",
+    "pos.cash_movement.approve",
+    "pos.shift.variance.approve",
     "pos.report.view",
     "inventory.product.view",
     "inventory.product.create",
@@ -241,6 +245,10 @@ ROLE_PRESET_POLICIES = (
             "pos.refund.create",
             "pos.cashier.open_shift",
             "pos.cashier.close_shift",
+            "pos.cashier.handover",
+            "pos.cash_movement.create",
+            "pos.cash_movement.approve",
+            "pos.shift.variance.approve",
             "pos.report.view",
             "inventory.product.view",
             "inventory.stock.view",
@@ -519,6 +527,8 @@ ROLE_PRESET_POLICIES = (
             "pos.refund.request",
             "pos.cashier.open_shift",
             "pos.cashier.close_shift",
+            "pos.cashier.handover",
+            "pos.cash_movement.create",
             "inventory.product.view",
             "inventory.stock.view",
             "takeaway.catalog.view",

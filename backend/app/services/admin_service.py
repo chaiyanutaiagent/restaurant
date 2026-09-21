@@ -660,6 +660,23 @@ class AdminService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Automatic price override limit cannot exceed the hard override limit",
             )
+        requested_variance_soft = Decimal(
+            changes.get(
+                "pos_shift_variance_soft_threshold",
+                settings.pos_shift_variance_soft_threshold,
+            )
+        )
+        requested_variance_approval = Decimal(
+            changes.get(
+                "pos_shift_variance_approval_threshold",
+                settings.pos_shift_variance_approval_threshold,
+            )
+        )
+        if requested_variance_approval < requested_variance_soft:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Shift variance approval threshold cannot be below the warning threshold",
+            )
         for field, value in changes.items():
             setattr(settings, field, value)
         self._audit(company_id, None, "system.branch.settings_updated", "Branch", branch_id)

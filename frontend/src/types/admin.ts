@@ -106,6 +106,9 @@ export interface BranchSettings {
   pos_price_override_min_margin_pct: number;
   pos_price_override_self_approval: boolean;
   pos_hold_draft_ttl_minutes: number;
+  pos_cash_movement_approval_threshold: number;
+  pos_shift_variance_soft_threshold: number;
+  pos_shift_variance_approval_threshold: number;
   stock_adjust_approval_threshold_qty: number;
   promptpay_target: string | null;
   promptpay_name: string | null;

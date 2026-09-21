@@ -26,7 +26,10 @@ export const productApi = {
     limit?: number;
     search?: string;
     category_id?: string;
+    product_type?: string;
     is_active?: boolean;
+    is_for_sale?: boolean;
+    catalog_scope?: "all" | "restaurant_menu";
   }) => api.get("/products", { params }),
   get: (id: string) => api.get(`/products/${id}`),
   create: (data: Partial<Product>) => api.post("/products", data),

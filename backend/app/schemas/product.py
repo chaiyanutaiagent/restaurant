@@ -200,6 +200,7 @@ class ProductListItem(BaseSchema):
     vat_type: str
     vat_rate: Decimal
     is_active: bool
+    is_for_sale: bool
     image_url: str | None = None
     category_id: uuid.UUID | None = None
     unit_id: uuid.UUID | None = None

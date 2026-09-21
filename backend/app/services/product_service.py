@@ -140,6 +140,9 @@ class ProductService:
         category_id: uuid.UUID | None = None,
         product_type: str | None = None,
         is_active: bool | None = None,
+        is_for_sale: bool | None = None,
+        brand_id: uuid.UUID | None = None,
+        include_company_wide: bool = False,
     ) -> tuple[list[Product], int]:
         filters = [Product.company_id == company_id, Product.deleted_at.is_(None)]
         if category_id:
@@ -148,6 +151,13 @@ class ProductService:
             filters.append(Product.product_type == product_type)
         if is_active is not None:
             filters.append(Product.is_active.is_(is_active))
+        if is_for_sale is not None:
+            filters.append(Product.is_for_sale.is_(is_for_sale))
+        if brand_id is not None:
+            brand_filter = Product.brand_id == brand_id
+            if include_company_wide:
+                brand_filter = or_(brand_filter, Product.brand_id.is_(None))
+            filters.append(brand_filter)
         if search:
             like = f"%{search.strip()}%"
             filters.append(

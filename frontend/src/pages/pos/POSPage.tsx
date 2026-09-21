@@ -459,7 +459,13 @@ export default function POSPage(): JSX.Element {
   const onlineSearchQuery = useQuery({
     queryKey: ["pos", "products", searchTerm],
     queryFn: async () => {
-      const response = await productApi.list({ search: searchTerm, is_active: true, page: 1, limit: 100 });
+      const response = await productApi.list({
+        search: searchTerm,
+        is_active: true,
+        catalog_scope: "restaurant_menu",
+        page: 1,
+        limit: 100,
+      });
       return response.data.data as ProductListItem[];
     },
     enabled: isOnline && searchTerm.trim().length > 0,
@@ -591,7 +597,7 @@ export default function POSPage(): JSX.Element {
     let active = true;
     if (!isOnline) return () => { active = false; };
     void Promise.all([
-      syncProductCatalog(),
+      syncProductCatalog("restaurant_menu"),
       syncStockBalances(branchId ?? undefined),
       syncPendingSales(),
     ]).then(() => {
@@ -675,23 +681,41 @@ export default function POSPage(): JSX.Element {
   const branches = branchQuery.data ?? [];
   const branchName = branches.find((item) => item.branch_id === branchId)?.branch_name ?? "สาขาหลัก";
   const locations = locationsQuery.data ?? [];
-  const categories = categoriesQuery.data ?? [];
+  const catalogCategories = categoriesQuery.data ?? [];
   const stockBalances = stockBalancesQuery.data ?? [];
   const baseProducts = (isOnline && searchTerm.trim().length > 0 ? onlineSearchQuery.data : offlineProducts) ?? [];
   const takeawayMenuByProductId = useMemo(
     () => new Map((takeawayMenuQuery.data?.products ?? []).map((product) => [product.id, product])),
     [takeawayMenuQuery.data?.products],
   );
+  const restaurantProducts = useMemo(
+    () => baseProducts.filter((product) => product.product_type === "menu_item" && product.is_for_sale),
+    [baseProducts],
+  );
   const products = useMemo(() => {
-    if (!isTakeawayMode) return baseProducts;
+    if (!isTakeawayMode) return restaurantProducts;
     if (!takeawayMenuQuery.data) return [];
-    return baseProducts
+    return restaurantProducts
       .filter((product) => takeawayMenuByProductId.get(product.id)?.is_available)
       .map((product) => ({
         ...product,
         selling_price: Number(takeawayMenuByProductId.get(product.id)?.selling_price ?? product.selling_price),
       }));
-  }, [baseProducts, isTakeawayMode, takeawayMenuByProductId, takeawayMenuQuery.data]);
+  }, [isTakeawayMode, restaurantProducts, takeawayMenuByProductId, takeawayMenuQuery.data]);
+  const categories = useMemo(() => {
+    const categoryById = new Map(catalogCategories.map((category) => [category.id, category]));
+    const groups = new Map<string, { key: string; name: string; ids: Set<string> }>();
+    for (const product of restaurantProducts) {
+      if (!product.category_id) continue;
+      const category = categoryById.get(product.category_id);
+      if (!category?.is_active) continue;
+      const key = category.name.trim().replace(/\s+/g, " ").toLocaleLowerCase("th-TH");
+      const group = groups.get(key) ?? { key, name: category.name.trim(), ids: new Set<string>() };
+      group.ids.add(category.id);
+      groups.set(key, group);
+    }
+    return [...groups.values()].sort((left, right) => left.name.localeCompare(right.name, "th"));
+  }, [catalogCategories, restaurantProducts]);
   const stockByProduct = useMemo(
     () => new Map(stockBalances.map((item) => [`${item.product_id}:${item.variant_id ?? "base"}`, item])),
     [stockBalances],
@@ -699,12 +723,13 @@ export default function POSPage(): JSX.Element {
 
   const visibleProducts = useMemo(() => {
     return products.filter((item) => {
-      if (selectedCategory && item.category_id !== selectedCategory) {
+      const category = categories.find((entry) => entry.key === selectedCategory);
+      if (category && (!item.category_id || !category.ids.has(item.category_id))) {
         return false;
       }
       return true;
     });
-  }, [products, selectedCategory]);
+  }, [categories, products, selectedCategory]);
 
   const cart = useMemo(() => calcCart(cartItems, orderDiscount, "amount"), [cartItems, orderDiscount]);
   const takeawayExpectedTotal = useMemo(
@@ -1028,9 +1053,15 @@ export default function POSPage(): JSX.Element {
     }
     let candidate =
       visibleProducts.find((item) => item.barcode?.toLowerCase() === keyword || item.sku.toLowerCase() === keyword) ??
-      offlineProducts.find((item) => item.barcode?.toLowerCase() === keyword || item.sku.toLowerCase() === keyword);
+      restaurantProducts.find((item) => item.barcode?.toLowerCase() === keyword || item.sku.toLowerCase() === keyword);
     if (!candidate && isOnline) {
-      const response = await productApi.list({ search: keyword, is_active: true, page: 1, limit: 20 });
+      const response = await productApi.list({
+        search: keyword,
+        is_active: true,
+        catalog_scope: "restaurant_menu",
+        page: 1,
+        limit: 20,
+      });
       const rows = response.data.data as ProductListItem[];
       candidate = rows.find((item) => item.barcode?.toLowerCase() === keyword || item.sku.toLowerCase() === keyword);
     }
@@ -2255,10 +2286,10 @@ export default function POSPage(): JSX.Element {
                   </button>
                   {categories.map((category) => (
                     <button
-                      key={category.id}
+                      key={category.key}
                       type="button"
-                      className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-left text-sm font-medium ${selectedCategory === category.id ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
-                      onClick={() => setSelectedCategory(category.id)}
+                      className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-left text-sm font-medium ${selectedCategory === category.key ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
+                      onClick={() => setSelectedCategory(category.key)}
                     >
                       {category.name}
                     </button>

@@ -86,6 +86,7 @@ export interface ProductListItem {
   vat_type: VatType;
   vat_rate: string | number;
   is_active: boolean;
+  is_for_sale: boolean;
   image_url: string | null;
   category_id: string | null;
   unit_id: string | null;

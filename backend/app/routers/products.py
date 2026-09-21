@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Response, UploadFile, status
@@ -172,9 +172,25 @@ async def list_products(
     category_id: uuid.UUID | None = Query(default=None),
     product_type: str | None = Query(default=None),
     is_active: bool | None = Query(default=None),
+    is_for_sale: bool | None = Query(default=None),
+    catalog_scope: Literal["all", "restaurant_menu"] = Query(default="all"),
     current: TokenData = Depends(require_permission("inventory.product.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    effective_product_type = product_type
+    effective_is_for_sale = is_for_sale
+    effective_brand_id: uuid.UUID | None = None
+    include_company_wide = False
+    if catalog_scope == "restaurant_menu":
+        if current.branch_id is None or current.brand_id is None or current.business_type != "restaurant":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Restaurant menu requires a signed Restaurant Brand and Branch context",
+            )
+        effective_product_type = "menu_item"
+        effective_is_for_sale = True
+        effective_brand_id = current.brand_id
+        include_company_wide = True
     service = ProductService(db)
     products, total = await service.list_products(
         current.company_id,
@@ -182,8 +198,11 @@ async def list_products(
         limit=limit,
         search=search,
         category_id=category_id,
-        product_type=product_type,
+        product_type=effective_product_type,
         is_active=is_active,
+        is_for_sale=effective_is_for_sale,
+        brand_id=effective_brand_id,
+        include_company_wide=include_company_wide,
     )
     data = [ProductListItem.model_validate(product).model_dump() for product in products]
     return ok(data, meta={"total": total, "page": page, "limit": limit})

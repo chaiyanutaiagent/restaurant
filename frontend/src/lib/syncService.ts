@@ -12,7 +12,7 @@ type SyncedProduct = ProductListItem & { synced_at: number };
 type SyncedCategory = Category & { synced_at: number };
 type SyncedUnit = Unit & { synced_at: number };
 type SyncedStockBalance = StockBalance & { synced_at: number };
-export async function syncProductCatalog(): Promise<void> {
+export async function syncProductCatalog(catalogScope: "all" | "restaurant_menu" = "all"): Promise<void> {
   try {
     const limit = 100;
     let page = 1;
@@ -20,7 +20,7 @@ export async function syncProductCatalog(): Promise<void> {
     const products: SyncedProduct[] = [];
 
     do {
-      const response = await productApi.list({ page, limit, is_active: true });
+      const response = await productApi.list({ page, limit, is_active: true, catalog_scope: catalogScope });
       const items = response.data.data as ProductListItem[];
       total = response.data.meta.total ?? items.length;
       products.push(...items.map((item) => ({ ...item, synced_at: Date.now() })));

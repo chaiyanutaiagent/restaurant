@@ -47,6 +47,21 @@ def hold_payload(context: dict[str, str], shift_id: str, key: str, label: str) -
     }
 
 
+def expect_shift_blocker(response, blocker_code: str) -> None:
+    if response.status_code != 409:
+        raise RuntimeError(f"Expected HTTP 409, got {response.status_code}: {response.text}")
+    detail = response.json().get("detail")
+    if not isinstance(detail, dict):
+        raise RuntimeError(f"Expected structured shift blocker, got: {response.text}")
+    if detail.get("code") == blocker_code:
+        return
+    blockers = detail.get("blockers")
+    if detail.get("code") != "shift_close_blocked" or not isinstance(blockers, list):
+        raise RuntimeError(f"Expected shift_close_blocked, got: {response.text}")
+    if blocker_code not in {item.get("code") for item in blockers if isinstance(item, dict)}:
+        raise RuntimeError(f"Expected blocker {blocker_code}, got: {response.text}")
+
+
 async def database_snapshot(context: dict[str, str]) -> dict[str, Decimal | int]:
     engine = create_async_engine(settings.database_url, poolclass=NullPool)
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -215,13 +230,12 @@ def run() -> None:
         after_hold = asyncio.run(database_snapshot(context))
         if before != after_hold:
             raise RuntimeError(f"Hold Draft created a financial or stock side effect: {before} -> {after_hold}")
-        expect_detail_code(
+        expect_shift_blocker(
             client.post(
                 f"/api/v1/pos/shifts/{shift['id']}/close",
                 headers=cashier_headers,
                 json={"closing_cash": "0"},
             ),
-            409,
             "hold_drafts_pending",
         )
 

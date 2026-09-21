@@ -470,9 +470,13 @@ class HoldDraftRead(BaseSchema):
     location_id: uuid.UUID
     origin_shift_id: uuid.UUID
     owner_user_id: uuid.UUID
+    owner_display: str | None = None
     assignee_user_id: uuid.UUID | None = None
+    assignee_display: str | None = None
     origin_device_id: uuid.UUID | None = None
     origin_device_code: str | None = None
+    origin_shift_number: str | None = None
+    location_name: str | None = None
     parent_draft_id: uuid.UUID | None = None
     converted_order_id: uuid.UUID | None = None
     label: str

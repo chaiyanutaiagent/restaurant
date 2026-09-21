@@ -432,12 +432,24 @@ export interface HeldSaleDraft {
   version?: number;
   expires_at?: string;
   owner_user_id?: string;
+  owner_display?: string | null;
   assignee_user_id?: string | null;
+  assignee_display?: string | null;
   origin_device_id?: string | null;
   origin_device_code?: string | null;
+  origin_shift_number?: string | null;
+  location_name?: string | null;
+  table_id?: string | null;
+  queue_label?: string | null;
   claim_id?: string | null;
   claimed_by?: string | null;
   claim_expires_at?: string | null;
+  last_revalidation?: Record<string, unknown> | null;
+  resumed_at?: string | null;
+  expired_at?: string | null;
+  cancelled_at?: string | null;
+  converted_at?: string | null;
+  cancel_reason?: string | null;
   server_backed?: boolean;
 }
 
@@ -450,11 +462,19 @@ export interface ServerHoldDraft {
   location_id: string;
   origin_shift_id: string;
   owner_user_id: string;
+  owner_display: string | null;
   assignee_user_id: string | null;
+  assignee_display: string | null;
   origin_device_id: string | null;
   origin_device_code: string | null;
+  origin_shift_number: string | null;
+  location_name: string | null;
+  parent_draft_id: string | null;
+  converted_order_id: string | null;
   label: string;
   source_type: "walk_in" | "takeaway" | "restaurant_table" | "restaurant_quick_service";
+  table_id: string | null;
+  queue_label: string | null;
   customer_id: string | null;
   customer_display: string | null;
   note: string | null;
@@ -465,7 +485,9 @@ export interface ServerHoldDraft {
     currency: string;
     cart_version: number;
   };
+  pricing_context: Record<string, unknown>;
   pricing_snapshot: Record<string, unknown>;
+  last_revalidation: Record<string, unknown> | null;
   status: "active" | "claimed" | "resumed" | "expired" | "converted" | "cancelled";
   version: number;
   claim_id: string | null;
@@ -475,9 +497,28 @@ export interface ServerHoldDraft {
   expires_at: string;
   resumed_at: string | null;
   resumed_by: string | null;
+  expired_at: string | null;
+  cancelled_at: string | null;
   cancel_reason: string | null;
+  converted_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface HoldDraftAuditEntry {
+  id: string;
+  action: string;
+  from_status: ServerHoldDraft["status"] | null;
+  to_status: ServerHoldDraft["status"];
+  from_version: number | null;
+  to_version: number;
+  actor_user_id: string;
+  actor_display: string | null;
+  device_id: string | null;
+  shift_id: string | null;
+  reason: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface HoldDraftClaimResult {

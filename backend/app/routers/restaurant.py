@@ -1648,6 +1648,34 @@ async def delete_table(
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
+def _serialize_order_center_session(session: DiningSession, table: DiningTable | None) -> dict[str, Any]:
+    active_orders = [order for order in session.orders if order.status != "cancelled"]
+    active_orders.sort(key=lambda order: order.created_at or session.opened_at)
+    all_items = [item for order in active_orders for item in order.items]
+    total = sum(float(item.unit_price) * item.qty for item in all_items)
+    return {
+        "id": str(session.id),
+        "status": session.status,
+        "source_type": "dine_in" if session.table_id else "quick_service",
+        "table_name": table.name if table else None,
+        "queue_number": session.queue_number,
+        "customer_name": session.customer_name,
+        "customer_phone": session.customer_phone,
+        "note": session.note,
+        "order_numbers": [order.order_number for order in active_orders],
+        "latest_order_number": active_orders[-1].order_number if active_orders else None,
+        "opened_at": session.opened_at.isoformat(),
+        "updated_at": session.updated_at.isoformat() if session.updated_at else session.opened_at.isoformat(),
+        "closed_at": session.closed_at.isoformat() if session.closed_at else None,
+        "item_count": len(all_items),
+        "pending_count": sum(item.qty for item in all_items if item.status == "pending"),
+        "cooking_count": sum(item.qty for item in all_items if item.status == "cooking"),
+        "ready_count": sum(item.qty for item in all_items if item.status == "done"),
+        "served_count": sum(item.qty for item in all_items if item.status == "served"),
+        "total_amount": round(total, 2),
+        "sale_order_id": str(session.sale_order_id) if session.sale_order_id else None,
+    }
+
 @router.get("/sessions")
 async def list_sessions(
     status_filter: str | None = Query(default=None, alias="status"),
@@ -1682,26 +1710,7 @@ async def list_sessions(
     result = []
     for s in sessions:
         table = await db.get(DiningTable, s.table_id) if s.table_id else None
-        all_items = [i for o in s.orders if o.status != "cancelled" for i in o.items]
-        total = sum(float(i.unit_price) * i.qty for i in all_items)
-        result.append({
-            "id": str(s.id),
-            "status": s.status,
-            "source_type": "dine_in" if s.table_id else "quick_service",
-            "table_name": table.name if table else None,
-            "queue_number": s.queue_number,
-            "customer_name": s.customer_name,
-            "customer_phone": s.customer_phone,
-            "opened_at": s.opened_at.isoformat(),
-            "closed_at": s.closed_at.isoformat() if s.closed_at else None,
-            "item_count": len(all_items),
-            "pending_count": sum(i.qty for i in all_items if i.status == "pending"),
-            "cooking_count": sum(i.qty for i in all_items if i.status == "cooking"),
-            "ready_count": sum(i.qty for i in all_items if i.status == "done"),
-            "served_count": sum(i.qty for i in all_items if i.status == "served"),
-            "total_amount": round(total, 2),
-            "sale_order_id": str(s.sale_order_id) if s.sale_order_id else None,
-        })
+        result.append(_serialize_order_center_session(s, table))
     return ok(result)
 
 

@@ -63,7 +63,7 @@ export default function PosWorkspaceNav({
       visible: canCreateRestaurantOrder,
     },
     {
-      label: "ออเดอร์ QR",
+      label: "ศูนย์ออเดอร์",
       path: "/restaurant/orders",
       icon: QrCode,
       active: (pathname) => pathname === "/restaurant/orders" || pathname.startsWith("/restaurant/session/"),

@@ -22,6 +22,8 @@ from app.models.company import Company
 from app.models.pos import CashierShift, PosCashMovement, PosHoldDraftAudit, SaleOrder
 from app.models.refund import RefundOperation, RefundPaymentLeg, RefundTaxLink
 from app.models.settings import BranchSettings
+from app.models.stock import StockLocation
+from app.models.user import User
 from app.schemas.pos import (
     CashMovementCreateRequest,
     CashMovementRead,
@@ -29,6 +31,7 @@ from app.schemas.pos import (
     CreateSaleRequest,
     HoldDraftActionRequest,
     HoldDraftCreateRequest,
+    HoldDraftRead,
     HoldDraftUpdateRequest,
     OpenShiftRequest,
     PartialRefundRequest,
@@ -55,6 +58,79 @@ router = APIRouter(prefix="/api/v1/pos", tags=["pos"])
 
 def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"data": data, "meta": {"version": settings.app_version, **(meta or {})}, "error": None}
+
+
+def _user_display(user: User | None) -> str | None:
+    if user is None:
+        return None
+    return user.display_name or " ".join(part for part in [user.first_name, user.last_name] if part) or user.username
+
+
+async def _enrich_hold_drafts(
+    db: AsyncSession,
+    rows: list[HoldDraftRead],
+    *,
+    company_id: uuid.UUID,
+    branch_id: uuid.UUID,
+) -> list[dict[str, Any]]:
+    user_ids = {row.owner_user_id for row in rows}
+    user_ids.update(row.assignee_user_id for row in rows if row.assignee_user_id)
+    shift_ids = {row.origin_shift_id for row in rows}
+    location_ids = {row.location_id for row in rows}
+    users = (
+        list(
+            (
+                await db.scalars(
+                    select(User).where(User.company_id == company_id, User.id.in_(user_ids))
+                )
+            ).all()
+        )
+        if user_ids
+        else []
+    )
+    shifts = (
+        list(
+            (
+                await db.scalars(
+                    select(CashierShift).where(
+                        CashierShift.company_id == company_id,
+                        CashierShift.branch_id == branch_id,
+                        CashierShift.id.in_(shift_ids),
+                    )
+                )
+            ).all()
+        )
+        if shift_ids
+        else []
+    )
+    locations = (
+        list(
+            (
+                await db.scalars(
+                    select(StockLocation).where(
+                        StockLocation.company_id == company_id,
+                        StockLocation.branch_id == branch_id,
+                        StockLocation.id.in_(location_ids),
+                    )
+                )
+            ).all()
+        )
+        if location_ids
+        else []
+    )
+    user_map = {row.id: row for row in users}
+    shift_map = {row.id: row.shift_number for row in shifts}
+    location_map = {row.id: row.name for row in locations}
+    return [
+        {
+            **row.model_dump(mode="json"),
+            "owner_display": _user_display(user_map.get(row.owner_user_id)),
+            "assignee_display": _user_display(user_map.get(row.assignee_user_id)) if row.assignee_user_id else None,
+            "origin_shift_number": shift_map.get(row.origin_shift_id),
+            "location_name": location_map.get(row.location_id),
+        }
+        for row in rows
+    ]
 
 
 def _approval_payload(
@@ -571,7 +647,15 @@ async def list_hold_drafts(
         search=search,
         include_history=include_history,
     )
-    return ok([row.model_dump(mode="json") for row in rows], meta={"total": len(rows)})
+    return ok(
+        await _enrich_hold_drafts(
+            db,
+            rows,
+            company_id=current.company_id,
+            branch_id=current.branch_id,
+        ),
+        meta={"total": len(rows)},
+    )
 
 
 @router.get("/drafts/{draft_id}")
@@ -588,7 +672,13 @@ async def get_hold_draft(
         brand_id=current.brand_id,
         branch_id=current.branch_id,
     )
-    return ok(draft.model_dump(mode="json"))
+    enriched = await _enrich_hold_drafts(
+        db,
+        [draft],
+        company_id=current.company_id,
+        branch_id=current.branch_id,
+    )
+    return ok(enriched[0])
 
 
 @router.patch("/drafts/{draft_id}")
@@ -758,6 +848,22 @@ async def list_hold_draft_audit(
             )
         ).all()
     )
+    actor_ids = {row.actor_user_id for row in rows}
+    actors = (
+        list(
+            (
+                await db.scalars(
+                    select(User).where(
+                        User.company_id == current.company_id,
+                        User.id.in_(actor_ids),
+                    )
+                )
+            ).all()
+        )
+        if actor_ids
+        else []
+    )
+    actor_map = {row.id: row for row in actors}
     return ok(
         [
             {
@@ -768,6 +874,7 @@ async def list_hold_draft_audit(
                 "from_version": row.from_version,
                 "to_version": row.to_version,
                 "actor_user_id": str(row.actor_user_id),
+                "actor_display": _user_display(actor_map.get(row.actor_user_id)),
                 "device_id": str(row.device_id) if row.device_id else None,
                 "shift_id": str(row.shift_id) if row.shift_id else None,
                 "reason": row.reason,

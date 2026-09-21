@@ -67,6 +67,7 @@ import RedeemPointsDialog from "@/pages/crm/RedeemPointsDialog";
 import CloseShiftDialog from "@/pages/pos/CloseShiftDialog";
 import ReceiptView from "@/pages/pos/ReceiptView";
 import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
+import HoldDraftWorkspaceDialog from "@/components/pos/HoldDraftWorkspaceDialog";
 import PosWorkspaceNav from "@/components/pos/PosWorkspaceNav";
 import RefundWorkspaceDialog from "@/components/pos/RefundWorkspaceDialog";
 import TakeawayOrderSlip from "@/components/pos/TakeawayOrderSlip";
@@ -176,6 +177,19 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "ทำรายการไม่สำเร็จ";
 }
 
+function getHoldConflict(error: unknown): { message: string; currentVersion?: number; currentStatus?: string; claimedBy?: string } | null {
+  if (!error || typeof error !== "object" || !("response" in error)) return null;
+  const response = (error as { response?: { status?: number; data?: { detail?: Record<string, unknown> } } }).response;
+  const detail = response?.data?.detail;
+  if (response?.status !== 409 || !detail || detail.code !== "draft_conflict") return null;
+  return {
+    message: typeof detail.message === "string" ? detail.message : "บิลพักถูกเปลี่ยนจากอีกเครื่อง",
+    currentVersion: typeof detail.current_version === "number" ? detail.current_version : undefined,
+    currentStatus: typeof detail.current_status === "string" ? detail.current_status : undefined,
+    claimedBy: typeof detail.claimed_by === "string" ? detail.claimed_by : undefined,
+  };
+}
+
 function normalizeHeldCartItem(item: CartItem): CartItem {
   return {
     ...item,
@@ -221,12 +235,24 @@ function normalizeServerHoldDraft(draft: ServerHoldDraft): HeldSaleDraft {
     version: draft.version,
     expires_at: draft.expires_at,
     owner_user_id: draft.owner_user_id,
+    owner_display: draft.owner_display,
     assignee_user_id: draft.assignee_user_id,
+    assignee_display: draft.assignee_display,
     origin_device_id: draft.origin_device_id,
     origin_device_code: draft.origin_device_code,
+    origin_shift_number: draft.origin_shift_number,
+    location_name: draft.location_name,
+    table_id: draft.table_id,
+    queue_label: draft.queue_label,
     claim_id: draft.claim_id,
     claimed_by: draft.claimed_by,
     claim_expires_at: draft.claim_expires_at,
+    last_revalidation: draft.last_revalidation,
+    resumed_at: draft.resumed_at,
+    expired_at: draft.expired_at,
+    cancelled_at: draft.cancelled_at,
+    converted_at: draft.converted_at,
+    cancel_reason: draft.cancel_reason,
     server_backed: true,
   };
 }
@@ -358,6 +384,7 @@ export default function POSPage(): JSX.Element {
   const [closeShiftOpen, setCloseShiftOpen] = useState(false);
   const [confirm, ConfirmDialog] = useConfirm();
   const [heldBillsOpen, setHeldBillsOpen] = useState(false);
+  const [holdCreateOpen, setHoldCreateOpen] = useState(false);
   const [customerSectionOpen, setCustomerSectionOpen] = useState(false);
   const [cardDensity, setCardDensity] = useState<"normal" | "compact" | "list">(() => {
     return (window.localStorage.getItem("pos-card-density") as "normal" | "compact" | "list") ?? "normal";
@@ -368,6 +395,8 @@ export default function POSPage(): JSX.Element {
   const [heldBillsFilter, setHeldBillsFilter] = useState<"active" | "mine" | "counter" | "history">("active");
   const [heldBillsBusy, setHeldBillsBusy] = useState<string | null>(null);
   const [pendingResumeDraft, setPendingResumeDraft] = useState<HeldSaleDraft | null>(null);
+  const [pendingRevalidation, setPendingRevalidation] = useState<{ draft: HeldSaleDraft; claim: HoldDraftClaimResult } | null>(null);
+  const [holdConflict, setHoldConflict] = useState<{ message: string; currentVersion?: number; currentStatus?: string; claimedBy?: string } | null>(null);
   const [resumedHoldDraft, setResumedHoldDraft] = useState<{ id: string; version: number } | null>(null);
   const [replacementRulesVersion, setReplacementRulesVersion] = useState(0);
   const [recentSalesOpen, setRecentSalesOpen] = useState(false);
@@ -1513,6 +1542,7 @@ export default function POSPage(): JSX.Element {
       }
       resetActiveSale();
       setHoldLabel("");
+      setHoldCreateOpen(false);
       await refreshHeldBills();
       toast({
         title: "พักบิลแล้ว",
@@ -1571,40 +1601,74 @@ export default function POSPage(): JSX.Element {
           location_id: currentShift.location_id,
         })).data.data as HoldDraftClaimResult;
         if (claim.requires_review) {
-          const accepted = window.confirm(
-            `ราคา/ข้อมูลบิลเปลี่ยน ${claim.price_changes.length} จุด ต้องการยอมรับข้อมูลล่าสุดจาก Server และเรียกบิลกลับหรือไม่?`,
-          );
-          if (!accepted) {
-            await posApi.releaseHoldDraft(draft.server_id, {
-              expected_version: claim.draft.version,
-              idempotency_key: `release:${draft.server_id}:${generateClientOrderId()}`,
-              claim_id: claim.draft.claim_id,
-              shift_id: currentShift.id,
-              reason: "Cashier rejected revalidation changes",
-            });
-            await refreshHeldBills();
-            return;
-          }
+          setPendingRevalidation({ draft, claim });
+          await refreshHeldBills();
+          return;
         }
-        const resumeKey = `resume:${draft.server_id}:${generateClientOrderId()}`;
-        const resumed = (await posApi.resumeHoldDraft(draft.server_id, {
-          expected_version: claim.draft.version,
-          idempotency_key: resumeKey,
-          claim_id: claim.draft.claim_id,
-          shift_id: currentShift.id,
-          location_id: currentShift.location_id,
-          accept_revalidation: claim.requires_review,
-        })).data.data as ServerHoldDraft;
-        restoreHeldCart(draft, claim.resume_cart.items);
-        setResumedHoldDraft({ id: resumed.id, version: resumed.version });
+        await finalizeHeldResume(draft, claim, false);
+        return;
       }
       await refreshHeldBills();
       setHeldBillsOpen(false);
       setPendingResumeDraft(null);
       toast({ title: "เรียกบิลกลับแล้ว", description: `${draft.label} พร้อมขายต่อ และจะตรวจราคาอีกครั้งตอนชำระ` });
     } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
       toast({ title: "เรียกบิลกลับไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
       await refreshHeldBills();
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function finalizeHeldResume(draft: HeldSaleDraft, claim: HoldDraftClaimResult, acceptRevalidation: boolean): Promise<void> {
+    if (!currentShift || !draft.server_id) return;
+    setHeldBillsBusy(draft.id);
+    try {
+      const resumed = (await posApi.resumeHoldDraft(draft.server_id, {
+        expected_version: claim.draft.version,
+        idempotency_key: `resume:${draft.server_id}:${generateClientOrderId()}`,
+        claim_id: claim.draft.claim_id,
+        shift_id: currentShift.id,
+        location_id: currentShift.location_id,
+        accept_revalidation: acceptRevalidation,
+      })).data.data as ServerHoldDraft;
+      restoreHeldCart(draft, claim.resume_cart.items);
+      setResumedHoldDraft({ id: resumed.id, version: resumed.version });
+      setPendingRevalidation(null);
+      setPendingResumeDraft(null);
+      setHeldBillsOpen(false);
+      await refreshHeldBills();
+      toast({ title: "เรียกบิลกลับแล้ว", description: `${draft.label} พร้อมขายต่อ และจะตรวจราคาอีกครั้งตอนชำระ` });
+    } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
+      toast({ title: "เรียกบิลกลับไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+      await refreshHeldBills();
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function rejectHeldRevalidation(): Promise<void> {
+    const pending = pendingRevalidation;
+    if (!pending?.draft.server_id || !currentShift) return;
+    setHeldBillsBusy(pending.draft.id);
+    try {
+      await posApi.releaseHoldDraft(pending.draft.server_id, {
+        expected_version: pending.claim.draft.version,
+        idempotency_key: `release:${pending.draft.server_id}:${generateClientOrderId()}`,
+        claim_id: pending.claim.draft.claim_id,
+        shift_id: currentShift.id,
+        reason: "Cashier rejected revalidation changes",
+      });
+      setPendingRevalidation(null);
+      await refreshHeldBills();
+    } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
+      toast({ title: "ปล่อยสิทธิ์ไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
     } finally {
       setHeldBillsBusy(null);
     }
@@ -1618,27 +1682,68 @@ export default function POSPage(): JSX.Element {
     await resumeHeldBillNow(draft);
   }
 
-  async function handleDeleteHeldBill(draftId: string): Promise<void> {
-    const draft = (heldBillsQuery.data ?? []).find((item) => item.id === draftId);
-    if (!draft) return;
-    const reason = window.prompt("ระบุเหตุผลที่ยกเลิกบิลพัก", "ลูกค้าไม่รับรายการแล้ว");
-    if (!reason?.trim()) return;
-    setHeldBillsBusy(draftId);
+  async function handleDeleteHeldBill(draft: HeldSaleDraft, reason: string): Promise<void> {
+    setHeldBillsBusy(draft.id);
     try {
       if (draft.server_backed && draft.server_id) {
         await posApi.discardHoldDraft(draft.server_id, {
           expected_version: draft.version,
           idempotency_key: `discard:${draft.server_id}:${generateClientOrderId()}`,
-          reason: reason.trim(),
+          reason,
           shift_id: currentShift?.id,
         });
       } else {
-        await db.heldBills.delete(draftId);
+        await db.heldBills.delete(draft.id);
       }
       await refreshHeldBills();
       toast({ title: "ยกเลิกบิลที่พักไว้แล้ว" });
     } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
       toast({ title: "ยกเลิกบิลไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function handleReleaseHeldBill(draft: HeldSaleDraft): Promise<void> {
+    if (!draft.server_id || !draft.claim_id || !currentShift) return;
+    setHeldBillsBusy(draft.id);
+    try {
+      await posApi.releaseHoldDraft(draft.server_id, {
+        expected_version: draft.version,
+        idempotency_key: `release:${draft.server_id}:${generateClientOrderId()}`,
+        claim_id: draft.claim_id,
+        shift_id: currentShift.id,
+        reason: "Operator released Hold Draft claim",
+      });
+      await refreshHeldBills();
+      toast({ title: "ปล่อยสิทธิ์บิลแล้ว" });
+    } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
+      toast({ title: "ปล่อยสิทธิ์ไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function handleReassignHeldBill(draft: HeldSaleDraft, assigneeUserId: string, reason: string): Promise<void> {
+    if (!draft.server_id) return;
+    setHeldBillsBusy(draft.id);
+    try {
+      await posApi.updateHoldDraft(draft.server_id, {
+        expected_version: draft.version,
+        idempotency_key: `reassign:${draft.server_id}:${generateClientOrderId()}`,
+        assignee_user_id: assigneeUserId,
+        reason,
+      });
+      await refreshHeldBills();
+      toast({ title: "มอบหมายบิลแล้ว" });
+    } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
+      toast({ title: "มอบหมายไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
     } finally {
       setHeldBillsBusy(null);
     }
@@ -1658,6 +1763,8 @@ export default function POSPage(): JSX.Element {
       await refreshHeldBills();
       toast({ title: "สร้างบิลกู้คืนแล้ว", description: "ตรวจราคาและรายการล่าสุดก่อนเรียกกลับ" });
     } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
       toast({ title: "กู้คืนบิลไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
     } finally {
       setHeldBillsBusy(null);
@@ -2581,7 +2688,7 @@ export default function POSPage(): JSX.Element {
                 <button
                   type="button"
                   className="min-h-11 rounded-xl bg-amber-50 px-3 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-40"
-                  onClick={() => void handleHoldBill()}
+                  onClick={() => setHoldCreateOpen(true)}
                   disabled={cart.items.length === 0 || !currentShift}
                 >
                   พักบิล
@@ -3182,127 +3289,55 @@ export default function POSPage(): JSX.Element {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={heldBillsOpen} onOpenChange={setHeldBillsOpen}>
-        <DialogContent className="max-w-4xl">
+      <HoldDraftWorkspaceDialog
+        open={heldBillsOpen}
+        onOpenChange={setHeldBillsOpen}
+        drafts={heldBills}
+        isLoading={heldBillsQuery.isLoading}
+        isError={heldBillsQuery.isError}
+        isOnline={isOnline}
+        canView={hasPermission("pos.draft.view")}
+        canCreate={hasPermission("pos.draft.create") && Boolean(currentShift) && cart.items.length > 0}
+        canResume={hasPermission("pos.draft.resume")}
+        canDiscard={hasPermission("pos.draft.discard")}
+        canReassign={hasPermission("pos.draft.reassign")}
+        currentUserId={user?.id}
+        branchId={branchId}
+        hasCounter={Boolean(currentCounterDevice)}
+        busyId={heldBillsBusy}
+        search={heldBillsSearch}
+        onSearchChange={setHeldBillsSearch}
+        filter={heldBillsFilter}
+        onFilterChange={setHeldBillsFilter}
+        onRetry={() => void heldBillsQuery.refetch()}
+        onCreate={() => { setHeldBillsOpen(false); setHoldCreateOpen(true); }}
+        onResume={handleResumeHeldBill}
+        onRelease={handleReleaseHeldBill}
+        onDiscard={handleDeleteHeldBill}
+        onReassign={handleReassignHeldBill}
+        onReopen={handleReopenHeldBill}
+      />
+
+      <Dialog open={holdCreateOpen} onOpenChange={setHoldCreateOpen}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="flex flex-wrap items-center gap-2">
-              บิลที่พักไว้
-              <span className={`rounded-full px-3 py-1 text-xs font-bold ${isOnline ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-                {isOnline ? "Server-backed · ทุก Counter" : "ในเครื่อง · รอซิงก์"}
-              </span>
-            </DialogTitle>
-            <DialogDescription className="sr-only">
-              ค้นหา กรอง เรียกกลับ หรือกู้คืนบิลที่พักไว้ของสาขาปัจจุบัน
-            </DialogDescription>
+            <DialogTitle>พักบิลปัจจุบัน</DialogTitle>
+            <DialogDescription>บันทึก Draft สำเร็จก่อนจึงล้างตะกร้า รายการนี้ยังไม่ส่งครัว ไม่ตัดสต๊อก ไม่สร้างภาษี และไม่รับชำระ</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-2">
-              <Input
-                className="h-14"
-                placeholder="ตั้งชื่อบิลก่อนพัก เช่น โต๊ะ 2 / คิวถัดไป"
-                value={holdLabel}
-                onChange={(event) => setHoldLabel(event.target.value)}
-              />
-              <Input
-                className="h-14"
-                placeholder="ค้นหาเลข Draft ชื่อบิล หรือลูกค้า"
-                value={heldBillsSearch}
-                onChange={(event) => setHeldBillsSearch(event.target.value)}
-                aria-label="ค้นหาบิลที่พักไว้"
-              />
+          <div className="space-y-4">
+            <Input className="h-14" placeholder="ชื่อบิล เช่น โต๊ะ 2 / ลูกค้ารอรับ" value={holdLabel} onChange={(event) => setHoldLabel(event.target.value)} autoFocus />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 p-4"><div className="text-xs font-semibold text-slate-400">Context</div><div className="mt-1 font-bold">{currentCounterDevice?.device_code ?? "เครื่องนี้"} · {currentShift?.shift_number ?? "ยังไม่เปิดกะ"}</div><div className="text-sm text-slate-500">{currentLocationName} · {staffDisplayName}</div></div>
+              <div className="rounded-2xl border border-slate-200 p-4"><div className="text-xs font-semibold text-slate-400">ยอดประมาณการ</div><div className="mt-1 text-2xl font-black">{formatThaiCurrency(finalTotal)}</div><div className="text-sm text-slate-500">{cart.items.reduce((sum, item) => sum + Number(item.qty), 0)} ชิ้น</div></div>
             </div>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4" role="tablist" aria-label="กรองบิลที่พักไว้">
-              {([
-                ["active", "ใช้งานได้"],
-                ["mine", "ของฉัน"],
-                ["counter", "Counter นี้"],
-                ["history", "ประวัติ"],
-              ] as const).map(([value, label]) => (
-                <Button
-                  key={value}
-                  type="button"
-                  variant={heldBillsFilter === value ? "default" : "outline"}
-                  className="h-14"
-                  disabled={value === "counter" && !currentCounterDevice}
-                  onClick={() => setHeldBillsFilter(value)}
-                  role="tab"
-                  aria-selected={heldBillsFilter === value}
-                >
-                  {label}
-                </Button>
-              ))}
+            <div className={`rounded-2xl border p-4 text-sm ${isOnline ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+              {isOnline ? "บันทึกบน Server และเรียกต่อได้จาก Counter อื่นในสาขา" : "ออฟไลน์: เก็บ Local shadow เฉพาะเครื่องนี้ และต้องตรวจสอบหลังเชื่อมต่อ"}
             </div>
-            {!hasPermission("pos.draft.view") && isOnline ? (
-              <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-6 text-center text-sm font-semibold text-amber-900">
-                ไม่มีสิทธิ์ดูบิลพักของสาขา กรุณาให้ผู้จัดการกำหนดสิทธิ์ POS Hold Draft
-              </div>
-            ) : heldBillsQuery.isLoading ? (
-              <div className="space-y-3" aria-label="กำลังโหลดบิลที่พักไว้">
-                {[1, 2, 3].map((item) => <div key={item} className="h-24 animate-pulse rounded-2xl bg-slate-100" />)}
-              </div>
-            ) : heldBillsQuery.isError ? (
-              <div className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-6 text-center text-sm text-rose-800">
-                โหลดบิลพักจาก Server ไม่สำเร็จ ตะกร้าปัจจุบันไม่ถูกเปลี่ยน
-                <Button className="ml-3 h-12" variant="outline" onClick={() => void heldBillsQuery.refetch()}>ลองใหม่</Button>
-              </div>
-            ) : heldBills.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
-                ยังไม่มีบิลที่พักไว้
-              </div>
-            ) : (
-              <div className="max-h-[32rem] space-y-3 overflow-y-auto pr-1">
-                {heldBills.map((draft) => {
-                  const itemCount = draft.items.reduce((sum, item) => sum + item.qty, 0);
-                  const draftTotal = draft.items.reduce((sum, item) => sum + item.subtotal, 0) - draft.order_discount - draft.loyalty_discount;
-                  const actionable = !draft.status || draft.status === "active";
-                  const claimed = draft.status === "claimed";
-                  const historical = draft.status === "resumed" || draft.status === "expired" || draft.status === "cancelled";
-                  return (
-                    <div key={draft.id} className="min-h-28 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-label={`${draft.draft_no ?? "Local"} ${draft.label}`}>
-                      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-semibold text-slate-900">{draft.label}</span>
-                            <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-slate-600">{draft.draft_no ?? "LOCAL"}</span>
-                            <span className={`rounded-full px-2 py-1 text-xs font-bold ${draft.server_backed ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-                              {draft.server_backed ? "ทุก Counter" : draft.sync_state === "needs_review" ? "ต้องตรวจสอบ" : "ในเครื่อง"}
-                            </span>
-                            {claimed ? <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-bold text-blue-800">กำลังเปิดอีกเครื่อง</span> : null}
-                            {draft.status && !actionable && !claimed ? <span className="rounded-full bg-slate-200 px-2 py-1 text-xs font-bold text-slate-700">{draft.status}</span> : null}
-                          </div>
-                          <div className="mt-1 text-sm text-slate-500">
-                            {draft.customer_name || "ลูกค้าทั่วไป"} • {itemCount} ชิ้น • {formatThaiCurrency(Math.max(draftTotal, 0))}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-400">
-                            พักไว้ {new Date(draft.held_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
-                            {draft.origin_device_code ? ` • ${draft.origin_device_code}` : ""}
-                            {draft.version ? ` • v${draft.version}` : ""}
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {actionable ? (
-                            <>
-                              <Button className="h-14" variant="outline" disabled={heldBillsBusy === draft.id || !hasPermission("pos.draft.discard")} onClick={() => void handleDeleteHeldBill(draft.id)}>ยกเลิก</Button>
-                              <Button className="h-14 min-w-36" disabled={heldBillsBusy === draft.id || !hasPermission("pos.draft.resume")} onClick={() => void handleResumeHeldBill(draft)}>
-                                {heldBillsBusy === draft.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}เรียกบิลกลับ
-                              </Button>
-                            </>
-                          ) : null}
-                          {claimed ? <Button className="h-14" variant="outline" onClick={() => void refreshHeldBills()}>รีเฟรชสถานะ</Button> : null}
-                          {historical && draft.status !== "converted" ? <Button className="h-14" variant="outline" disabled={!isOnline || heldBillsBusy === draft.id} onClick={() => void handleReopenHeldBill(draft)}>สร้างบิลกู้คืน</Button> : null}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </div>
           <DialogFooter>
-            <Button className="h-14" variant="outline" onClick={() => setHeldBillsOpen(false)}>ปิด</Button>
-            <Button className="h-16 min-w-52" onClick={() => void handleHoldBill()} disabled={cart.items.length === 0 || !currentShift || heldBillsBusy === "create"}>
-              {heldBillsBusy === "create" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              พักบิล • ล้างตะกร้า
+            <Button className="h-12" variant="outline" onClick={() => setHoldCreateOpen(false)}>กลับ</Button>
+            <Button className="h-14 min-w-52" onClick={() => void handleHoldBill()} disabled={cart.items.length === 0 || !currentShift || heldBillsBusy === "create"}>
+              {heldBillsBusy === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}พักบิล • ล้างตะกร้า
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3348,6 +3383,54 @@ export default function POSPage(): JSX.Element {
           </div>
           <DialogFooter>
             <Button className="h-14" variant="outline" onClick={() => setPendingResumeDraft(null)}>กลับ</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(pendingRevalidation)} onOpenChange={(open) => { if (!open) void rejectHeldRevalidation(); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>ตรวจความเปลี่ยนแปลงก่อนเรียกบิล</DialogTitle>
+            <DialogDescription>Server ตรวจราคา ภาษี และจำนวนพร้อมขายใหม่แล้ว กรุณาเลือกยอมรับข้อมูลล่าสุดหรือกลับโดยไม่เปลี่ยนตะกร้า</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[55vh] space-y-3 overflow-y-auto">
+            {(pendingRevalidation?.claim.price_changes ?? []).map((change, index) => {
+              const kind = typeof change.kind === "string" ? change.kind : "price";
+              return (
+                <div key={`${kind}-${index}`} className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                  {kind === "total" ? (
+                    <><div className="font-bold">ยอดรวมเปลี่ยน</div><div className="mt-1">{formatThaiCurrency(Number(change.old_total ?? 0))} → {formatThaiCurrency(Number(change.new_total ?? 0))}</div></>
+                  ) : kind === "availability" ? (
+                    <><div className="font-bold">จำนวนพร้อมขายเปลี่ยน · {String(change.product_name ?? "สินค้า")}</div><div className="mt-1">ต้องการ {String(change.requested_qty ?? "-")} · พร้อมขาย {String(change.available_qty ?? "-")}</div></>
+                  ) : (
+                    <><div className="font-bold">ราคาเปลี่ยน · {String(change.product_name ?? "สินค้า")}</div><div className="mt-1">{formatThaiCurrency(Number(change.old_unit_price ?? 0))} → {formatThaiCurrency(Number(change.new_unit_price ?? 0))}</div></>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button className="h-12" variant="outline" disabled={heldBillsBusy !== null} onClick={() => void rejectHeldRevalidation()}>ไม่ยอมรับ · ปล่อยบิลไว้</Button>
+            <Button className="h-14" disabled={!pendingRevalidation || heldBillsBusy !== null} onClick={() => { if (pendingRevalidation) void finalizeHeldResume(pendingRevalidation.draft, pendingRevalidation.claim, true); }}>
+              {heldBillsBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}ยอมรับข้อมูลล่าสุดและเรียกกลับ
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(holdConflict)} onOpenChange={(open) => { if (!open) setHoldConflict(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>บิลถูกเปลี่ยนจากอีกเครื่อง</DialogTitle>
+            <DialogDescription>Server เป็นผู้ตัดสินผลล่าสุด ระบบไม่รวมข้อมูลและไม่เขียนทับอัตโนมัติ</DialogDescription>
+          </DialogHeader>
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+            <div className="font-bold">{holdConflict?.message}</div>
+            <div className="mt-2">สถานะล่าสุด: {holdConflict?.currentStatus ?? "ต้องโหลดใหม่"} · version {holdConflict?.currentVersion ?? "ล่าสุดบน Server"}</div>
+            {holdConflict?.claimedBy ? <div className="mt-1">ผู้ถือสิทธิ์: {holdConflict.claimedBy}</div> : null}
+          </div>
+          <DialogFooter>
+            <Button className="h-12" onClick={() => { setHoldConflict(null); void refreshHeldBills(); setHeldBillsOpen(true); }}>โหลดข้อมูลล่าสุด</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

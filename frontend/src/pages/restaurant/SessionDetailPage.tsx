@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AxiosError } from "axios";
 import { AlertTriangle, ChefHat, Clock, Phone, Plus, ReceiptText, ShieldCheck, Trash2, User, UtensilsCrossed } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import PageHeader from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,13 @@ import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
 import { useToast } from "@/components/ui/use-toast";
 import { authApi } from "@/lib/api";
 import { formatThaiCurrency } from "@/lib/cartUtils";
+import { categoryApi, productApi } from "@/lib/productApi";
+import { useOnlineStatus } from "@/lib/syncService";
+import RestaurantOrderComposer, {
+  type StaffMenuProduct,
+  type StaffOrderCartLine,
+} from "@/components/pos/RestaurantOrderComposer";
+import type { Category, ProductListItem } from "@/types/product";
 
 type SessionItem = {
   id: string; product_id: string; product_name: string; qty: number;
@@ -23,7 +30,6 @@ type SessionData = {
   pending_count?: number; cooking_count?: number; ready_count?: number; served_count?: number; qr_pending_count?: number;
 };
 
-type MenuProduct = { id: string; name: string; selling_price: number; category_name: string | null };
 type ApiErrorDetail = { code?: string; message?: string; blockers?: string[]; current_order_version?: number; current_item_version?: number };
 type ApiErrorBody = { detail?: string | ApiErrorDetail; error?: string };
 type CancelTarget =
@@ -102,9 +108,10 @@ export default function SessionDetailPage(): JSX.Element {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const isOnline = useOnlineStatus();
   const [addOrderOpen, setAddOrderOpen] = useState(false);
-  const [orderCart, setOrderCart] = useState<{ product: MenuProduct; qty: number; special_request: string }[]>([]);
-  const [menuSearch, setMenuSearch] = useState("");
+  const [orderCart, setOrderCart] = useState<StaffOrderCartLine[]>([]);
+  const orderIdempotencyKeyRef = useRef(requestKey("staff-order"));
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
   const [cancelReasonCode, setCancelReasonCode] = useState<CancellationReasonCode>("customer_changed_mind");
   const [cancelReasonNote, setCancelReasonNote] = useState("");
@@ -136,9 +143,21 @@ export default function SessionDetailPage(): JSX.Element {
   });
 
   const menuQuery = useQuery({
-    queryKey: ["menu-products"],
+    queryKey: ["restaurant-staff-order-products"],
     queryFn: async () =>
-      (await authApi.get("/products?product_type=menu_item&is_active=true&limit=200")).data.data as MenuProduct[],
+      (await productApi.list({
+        product_type: "menu_item",
+        is_active: true,
+        is_for_sale: true,
+        catalog_scope: "restaurant_menu",
+        limit: 200,
+      })).data.data as ProductListItem[],
+    enabled: addOrderOpen,
+  });
+
+  const menuCategoriesQuery = useQuery({
+    queryKey: ["restaurant-staff-order-categories"],
+    queryFn: async () => (await categoryApi.list(false)).data.data as Category[],
     enabled: addOrderOpen,
   });
 
@@ -167,8 +186,11 @@ export default function SessionDetailPage(): JSX.Element {
           product_id: c.product.id,
           qty: c.qty,
           special_request: c.special_request || null,
+          expected_unit_price: Number(c.product.selling_price),
         })),
         note: null,
+        cart_version: 1,
+        idempotency_key: orderIdempotencyKeyRef.current,
       });
     },
     onSuccess: async () => {
@@ -176,6 +198,7 @@ export default function SessionDetailPage(): JSX.Element {
       toast({ title: "เพิ่มออเดอร์แล้ว" });
       setAddOrderOpen(false);
       setOrderCart([]);
+      orderIdempotencyKeyRef.current = requestKey("staff-order");
     },
     onError: (error) => toast({ title: "เพิ่มออเดอร์ไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" }),
   });
@@ -271,17 +294,43 @@ export default function SessionDetailPage(): JSX.Element {
   const cookingCount = allItems.filter((item) => item.status === "cooking").length;
   const readyCount = allItems.filter((item) => item.status === "done").length;
   const servedCount = allItems.filter((item) => item.status === "served").length;
-  const products = (menuQuery.data ?? []).filter((p) =>
-    !menuSearch || p.name.toLowerCase().includes(menuSearch.toLowerCase())
-  );
+  const categoryNameById = new Map((menuCategoriesQuery.data ?? []).map((category) => [category.id, category.name]));
+  const staffMenuProducts: StaffMenuProduct[] = (menuQuery.data ?? []).map((product) => ({
+    id: product.id,
+    name: product.name,
+    selling_price: product.selling_price,
+    image_url: product.image_url,
+    category_id: product.category_id,
+    category_name: product.category_id ? categoryNameById.get(product.category_id) ?? null : null,
+    is_available: product.is_active && product.is_for_sale,
+  }));
 
-  function addToCart(product: MenuProduct): void {
+  function addToCart(product: StaffMenuProduct, specialRequest = ""): void {
+    const normalizedRequest = specialRequest.trim();
     setOrderCart((prev) => {
-      const ex = prev.find((c) => c.product.id === product.id);
-      return ex
-        ? prev.map((c) => c.product.id === product.id ? { ...c, qty: c.qty + 1 } : c)
-        : [...prev, { product, qty: 1, special_request: "" }];
+      const existing = prev.find((line) => line.product.id === product.id && line.special_request === normalizedRequest);
+      return existing
+        ? prev.map((line) => line.line_id === existing.line_id ? { ...line, qty: line.qty + 1 } : line)
+        : [...prev, {
+            line_id: requestKey("staff-line"),
+            product,
+            qty: 1,
+            special_request: normalizedRequest,
+          }];
     });
+  }
+
+  function changeCartQuantity(lineId: string, delta: number): void {
+    setOrderCart((current) => current
+      .map((line) => line.line_id === lineId ? { ...line, qty: line.qty + delta } : line)
+      .filter((line) => line.qty > 0));
+  }
+
+  function closeOrderComposer(): void {
+    if (orderCart.length > 0 && !window.confirm("ปิดหน้าสั่งเพิ่มและล้างรายการที่ยังไม่ได้ส่งครัวหรือไม่?")) return;
+    setAddOrderOpen(false);
+    setOrderCart([]);
+    orderIdempotencyKeyRef.current = requestKey("staff-order");
   }
 
   return (
@@ -554,85 +603,27 @@ export default function SessionDetailPage(): JSX.Element {
         )}
       </div>
 
-      {/* Add Order Sheet */}
-      {addOrderOpen && (
-        <div className="fixed inset-0 z-40 flex flex-col bg-white">
-          <div className="flex items-center justify-between border-b px-5 py-4">
-            <h2 className="text-lg font-bold">สั่งเพิ่ม (Staff)</h2>
-            <Button variant="ghost" onClick={() => { setAddOrderOpen(false); setOrderCart([]); }}>
-              ปิด
-            </Button>
-          </div>
-          <div className="flex flex-1 overflow-hidden">
-            {/* Product list */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-2 border-r">
-              <input
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm mb-3"
-                placeholder="ค้นหาเมนู..."
-                value={menuSearch}
-                onChange={(e) => setMenuSearch(e.target.value)}
-                autoFocus
-              />
-              {products.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => addToCart(p)}
-                  className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-slate-400 hover:bg-slate-50"
-                >
-                  <div>
-                    <p className="font-medium text-slate-900">{p.name}</p>
-                    {p.category_name && <p className="text-xs text-slate-400">{p.category_name}</p>}
-                  </div>
-                  <span className="font-bold text-emerald-700">{formatThaiCurrency(p.selling_price)}</span>
-                </button>
-              ))}
-            </div>
-            {/* Cart */}
-            <div className="flex w-72 flex-col border-l">
-              <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                {orderCart.length === 0 && (
-                  <p className="text-center text-slate-400 py-8 text-sm">เลือกเมนูด้านซ้าย</p>
-                )}
-                {orderCart.map((c) => (
-                  <div key={c.product.id} className="rounded-xl border border-slate-200 p-3">
-                    <div className="flex items-center justify-between">
-                      <p className="font-medium text-slate-900 text-sm">{c.product.name}</p>
-                      <button type="button" onClick={() => setOrderCart((p) => p.filter((x) => x.product.id !== c.product.id))}>
-                        <Trash2 className="h-4 w-4 text-red-400" />
-                      </button>
-                    </div>
-                    <div className="mt-2 flex items-center gap-2">
-                      <button type="button" onClick={() => setOrderCart((p) => p.map((x) => x.product.id === c.product.id ? { ...x, qty: Math.max(1, x.qty - 1) } : x))}
-                        className="h-7 w-7 rounded-full border text-slate-600">−</button>
-                      <span className="w-6 text-center font-bold text-sm">{c.qty}</span>
-                      <button type="button" onClick={() => setOrderCart((p) => p.map((x) => x.product.id === c.product.id ? { ...x, qty: x.qty + 1 } : x))}
-                        className="h-7 w-7 rounded-full bg-slate-950 text-white">+</button>
-                      <span className="ml-auto text-sm font-semibold text-emerald-700">{formatThaiCurrency(c.product.selling_price * c.qty)}</span>
-                    </div>
-                    <input className="mt-2 w-full rounded-lg border border-slate-200 px-2 py-1 text-xs"
-                      placeholder="หมายเหตุ" value={c.special_request}
-                      onChange={(e) => setOrderCart((p) => p.map((x) => x.product.id === c.product.id ? { ...x, special_request: e.target.value } : x))} />
-                  </div>
-                ))}
-              </div>
-              <div className="border-t p-4">
-                <div className="mb-3 flex justify-between font-bold">
-                  <span>รวม</span>
-                  <span className="text-emerald-700">{formatThaiCurrency(orderCart.reduce((s, c) => s + c.product.selling_price * c.qty, 0))}</span>
-                </div>
-                <Button
-                  className="w-full bg-slate-950 hover:bg-slate-800"
-                  disabled={orderCart.length === 0 || addOrderMutation.isPending}
-                  onClick={() => addOrderMutation.mutate()}
-                >
-                  {addOrderMutation.isPending ? "กำลังส่ง..." : "ส่งออเดอร์ไปครัว"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <RestaurantOrderComposer
+        open={addOrderOpen}
+        title={session?.table_name ? `สั่งเพิ่ม · โต๊ะ ${session.table_name}` : `สั่งเพิ่ม · คิว ${String(session?.queue_number ?? "-").padStart(3, "0")}`}
+        subtitle={session?.customer_name ? `ลูกค้า ${session.customer_name}` : "Staff order · ส่งเข้าครัวหลัง Server ตรวจราคา"}
+        products={staffMenuProducts}
+        categories={(menuCategoriesQuery.data ?? []).map((category) => ({ id: category.id, name: category.name }))}
+        cart={orderCart}
+        isLoading={menuQuery.isLoading || menuCategoriesQuery.isLoading}
+        isError={menuQuery.isError || menuCategoriesQuery.isError}
+        isSubmitting={addOrderMutation.isPending}
+        isOnline={isOnline}
+        onRetry={() => {
+          void menuQuery.refetch();
+          void menuCategoriesQuery.refetch();
+        }}
+        onClose={closeOrderComposer}
+        onAdd={addToCart}
+        onQuantityChange={changeCartQuantity}
+        onRemove={(lineId) => setOrderCart((current) => current.filter((line) => line.line_id !== lineId))}
+        onSubmit={() => addOrderMutation.mutate()}
+      />
 
       <Dialog open={Boolean(cancelTarget)} onOpenChange={(open) => {
         if (!open && !cancelMutation.isPending) {

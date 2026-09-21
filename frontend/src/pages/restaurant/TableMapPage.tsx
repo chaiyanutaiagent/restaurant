@@ -426,16 +426,16 @@ export default function TableMapPage(): JSX.Element {
   );
 
   return (
-    <div>
+    <div data-pos-touch-surface>
       <PageHeader
         title="แผนที่โต๊ะ"
         subtitle={`${tables.filter((t) => t.status === "occupied" || t.status === "bill_requested").length} / ${tables.length} โต๊ะที่มีลูกค้า`}
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={!branchId} onClick={() => setTakeawayDialogOpen(true)}>
+            <Button className="h-11 rounded-xl bg-emerald-600 px-4 hover:bg-emerald-700" disabled={!branchId} onClick={() => setTakeawayDialogOpen(true)}>
               <ShoppingBag className="mr-2 h-4 w-4" /> ออก QR รับกลับ
             </Button>
-            <Button className="bg-orange-500 hover:bg-orange-600" disabled={!branchId} onClick={() => setAddOpen(true)}>
+            <Button className="h-11 rounded-xl bg-blue-600 px-4 hover:bg-blue-700" disabled={!branchId} onClick={() => setAddOpen(true)}>
               <Plus className="mr-2 h-4 w-4" /> เพิ่มโต๊ะ
             </Button>
           </div>
@@ -499,7 +499,7 @@ export default function TableMapPage(): JSX.Element {
               </div>
               <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
                 {zoneTables.map((table) => (
-            <div key={table.id} className={`rounded-2xl border-2 p-5 shadow-sm transition-all ${table.qr_pending_count ? "ring-2 ring-orange-300" : ""} ${STATUS_STYLE[table.status] ?? "border-slate-200 bg-white"}`}>
+            <article key={table.id} className={`flex min-h-[288px] flex-col rounded-2xl border-2 p-5 shadow-sm transition-all ${table.qr_pending_count ? "ring-2 ring-orange-300" : ""} ${STATUS_STYLE[table.status] ?? "border-slate-200 bg-white"}`}>
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-lg font-bold text-slate-900">{table.name}</h3>
@@ -523,7 +523,7 @@ export default function TableMapPage(): JSX.Element {
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                      className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                       aria-label={`จัดการโต๊ะ ${table.name}`}
                     >
                       <MoreVertical className="h-4 w-4" />
@@ -574,12 +574,12 @@ export default function TableMapPage(): JSX.Element {
                 </div>
               ) : null}
 
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-auto flex flex-wrap gap-2 pt-4">
                 <button
                   type="button"
                   onClick={() => showQr(table)}
                   disabled={!table.session_qr_token}
-                  className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
+                  className="flex min-h-11 items-center gap-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <QrCode className="h-3 w-3" /> QR รอบนี้
                 </button>
@@ -588,7 +588,7 @@ export default function TableMapPage(): JSX.Element {
                   <button
                     type="button"
                     onClick={() => openTable(table)}
-                    className="flex-1 rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+                    className="min-h-11 flex-1 rounded-xl bg-blue-600 px-3 py-2 text-sm font-bold text-white hover:bg-blue-700"
                   >
                     เปิดโต๊ะ
                   </button>
@@ -597,14 +597,14 @@ export default function TableMapPage(): JSX.Element {
                     <button
                       type="button"
                       onClick={() => navigate(`/restaurant/session/${table.active_session_id}/detail`)}
-                      className="flex items-center gap-1 rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+                      className="flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl bg-blue-600 px-3 py-2 text-sm font-bold text-white hover:bg-blue-700"
                     >
                       ดู/สั่งเพิ่ม
                     </button>
                     <button
                       type="button"
                       onClick={() => navigate(`/restaurant/session/${table.active_session_id}/checkout`)}
-                      className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
+                      className="flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700"
                     >
                       <ReceiptText className="h-3 w-3" />
                       รวมบิล
@@ -612,14 +612,14 @@ export default function TableMapPage(): JSX.Element {
                     <button
                       type="button"
                       onClick={() => table.active_session_id && closeSessionMutation.mutate(table.active_session_id)}
-                      className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+                      className="min-h-11 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
                     >
                       ปิด
                     </button>
                   </>
                 ) : null}
               </div>
-            </div>
+            </article>
                 ))}
               </div>
             </section>

@@ -70,6 +70,7 @@ import PosWorkspaceNav from "@/components/pos/PosWorkspaceNav";
 import RefundWorkspaceDialog from "@/components/pos/RefundWorkspaceDialog";
 import TakeawayOrderSlip from "@/components/pos/TakeawayOrderSlip";
 import type { ApprovalAction } from "@/types/approval";
+import { PLATFORM_BRAND } from "@/config/platformBrand";
 
 const SHIFT_CACHE_KEY = "restaurant-pos-current-shift";
 const BARCODE_FORMATS = ["ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e", "qr_code"] as const;
@@ -2145,7 +2146,12 @@ export default function POSPage(): JSX.Element {
         {/* Tablet v2: compact identity and health header */}
         <div className="border-b border-slate-200/80 bg-white/90 px-4 py-2.5 backdrop-blur">
           <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
-            <span className="whitespace-nowrap text-base font-bold text-slate-900">Restaurant POS</span>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-base font-black text-white shadow-sm" aria-hidden="true">F</span>
+              <span className="hidden whitespace-nowrap text-base font-black text-blue-700 xl:inline">{PLATFORM_BRAND.productName}</span>
+              <span className="hidden h-7 w-px bg-slate-200 xl:block" aria-hidden="true" />
+              <span className="whitespace-nowrap text-base font-black text-slate-900">ขายหน้าร้าน</span>
+            </div>
             <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto text-xs">
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-700">{branchName}</span>
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-600">{currentLocationName}</span>

@@ -56,4 +56,4 @@ Production identities were unchanged during WP55 verification:
 
 ## Evidence conclusion
 
-WP55 implementation, Restaurant regression and the authenticated Retail context matrix pass. The bounded UAT persona remains active only for the independent QA retest and must be disabled with sessions revoked afterward. Production remains NO-GO.
+WP55 implementation, Restaurant regression and the authenticated Retail context matrix pass. After independent QA, the bounded UAT persona was disabled and all refresh sessions/active assignments were revoked. Production remains NO-GO.

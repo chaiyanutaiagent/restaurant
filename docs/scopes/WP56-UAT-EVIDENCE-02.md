@@ -8,13 +8,13 @@ Production: unchanged and not authorized
 
 | Item | Identity |
 |---|---|
-| Source commit | `81aba50` |
-| Source archive | `restaurant-wp56-81aba50.tar.gz` |
-| Archive SHA-256 | `1595ed300cab2c28a90bf5c3afd124c294d77abc457023d5dc85013c5f83abc3` |
+| Runtime source commit | `f02c9a6` |
+| Source archive | `restaurant-wp56-f02c9a6.tar.gz` |
+| Archive SHA-256 | `b36641236ef58fd9df79036be220ec623a01e2c651cf2a0a2e6452086aefa74f` |
 | Backend image | `restaurant-pos-backend:wp56-81aba50` |
 | Backend image ID | `sha256:437379f20f1b0045ae0f5e812bc44afd56fc809753450f514bbcbf010ba61ee3` |
-| Frontend image | `restaurant-pos-frontend:wp56-81aba50` |
-| Frontend image ID | `sha256:1d82a11f44328eb1e3682d14c70a51e2a767e35bca70a6d59a900856254f0d31` |
+| Frontend image | `restaurant-pos-frontend:wp56-f02c9a6` |
+| Frontend image ID | `sha256:c575c1d471dc0bdbb1452165e950708068fc78c9c1728e4b6556ea2f7f7e3ed0` |
 | Public route | `https://uat-pos.foodchainservice.com/` |
 
 ## Data protection and schema
@@ -34,6 +34,14 @@ Production: unchanged and not authorized
 - Controlled cash-only sale `SO20260922-0001` completed at ฿37; Payment was settled cash, stock changed 12 → 11, the pricing quote was consumed and the sale-completed outbox event was pending for projection.
 - Bill Center showed the controlled sale and receipt after explicit refresh. The Return/Refund button was disabled with the WP57 reason.
 - Public `/health/ready` returned `ok`; no post-deploy 500, schema exception or traceback was found.
+
+## Independent QA result and P3 closure
+
+- Independent QA returned functional PASS for signed context, Retail-only navigation, SKU/barcode lookup, cart retention, cash-only payment, Bill Center/receipt, Hold/Return/Refund WP57 gates and absence of 500/schema errors.
+- QA completed one additional controlled cash sale at Server price ฿37 and verified receipt `SO20260922-0002`; no duplicate/repeat sale was performed.
+- QA found P3 `QA-UAT-81ABA50-001`: opening the receipt dialog emitted the Radix missing-description accessibility warning.
+- Runtime commit `f02c9a6` added an explicit receipt `DialogDescription`. The final public bundle `index-ClvJfjFa.js` displayed the description, and no missing-description warning was emitted by that bundle.
+- After QA, the guarded UAT-only command disabled `uat.retail-cashier`, revoked all refresh sessions and revoked all active staff assignments. The audit action `uat.retail.persona.disable` was verified.
 
 ## Deployment incident and recovery
 
@@ -58,4 +66,4 @@ Production remained unchanged:
 
 ## Gate conclusion
 
-WP56 software UAT and rollback/restore pass. The phase remains **conditional / Production NO-GO** until the independent QA retest finishes, the bounded UAT persona is disabled with sessions revoked, and physical tablet/scanner/printer/cash-drawer/network-loss evidence is attached. No live provider transaction, real tax document or Retail Production data-source cutover is authorized.
+WP56 software UAT, independent QA and rollback/restore pass. The bounded UAT persona is disabled and its sessions/assignments are revoked. The phase remains **conditional / Production NO-GO** only until physical tablet/scanner/printer/cash-drawer/network-loss evidence is attached. No live provider transaction, real tax document or Retail Production data-source cutover is authorized.

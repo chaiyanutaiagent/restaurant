@@ -76,7 +76,7 @@ WP56 moves Retail product selection from Client assumptions to an online Server-
 5. [x] Verify non-cash/offline checkout, Retail Hold and Retail Return/Refund fail closed.
 6. [x] Verify Bill Center and receipt UI without claiming printer/cash-drawer physical pass.
 7. [x] Record immutable image identities, app-only rollback/restore and Production before/after identities.
-8. [ ] Complete independent QA retest, then disable the bounded persona and revoke its sessions.
+8. [x] Complete independent QA retest, then disable the bounded persona and revoke its sessions/assignments.
 9. [ ] Complete physical tablet, scanner, printer, cash drawer and network-loss UAT.
 
-WP56 implementation and authenticated software UAT are complete. The phase remains conditional pending independent QA and physical device/network acceptance; no Production readiness is claimed. Detailed evidence is in `WP56-UAT-EVIDENCE-02.md`.
+WP56 implementation, authenticated software UAT and independent QA are complete. The phase remains conditional pending physical device/network acceptance; no Production readiness is claimed. Detailed evidence is in `WP56-UAT-EVIDENCE-02.md`.

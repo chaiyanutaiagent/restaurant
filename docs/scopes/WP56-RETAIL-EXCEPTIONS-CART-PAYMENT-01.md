@@ -41,7 +41,7 @@ WP56 moves Retail product selection from Client assumptions to an online Server-
 
 - Added a bounded UAT-only administrator password-rotation command with HTTPS `uat-*`, development-environment, Platform identity, auth-bypass-off and explicit confirmation guards.
 - The command reads the new password only from environment, revokes refresh tokens and writes an audit entry.
-- Added a separate bounded `uat.retail-cashier` persona command. It derives the canonical Cashier permission preset, resolves exactly one active Retail UAT Brand/Branch, writes signed `retail_pos` context and can disable the user and revoke its sessions after QA.
+- Added a separate bounded `uat.retail-cashier` persona command. It derives the canonical Cashier permission preset, resolves exactly one active Retail UAT Brand/Branch, writes signed `retail_pos` context, maps that UAT storefront to the isolated `UI-MAIN` showcase location with audit evidence, and can disable the user and revoke its sessions after QA.
 - Fixed the clean Docker regression fallback so runner-contract tests receive the repository `/scripts` directory.
 
 ## Intentional deferrals

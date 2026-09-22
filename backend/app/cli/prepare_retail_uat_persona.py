@@ -11,7 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.database import PlatformSessionLocal
+from app.database import PlatformSessionLocal, RetailSessionLocal
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.branch import Branch
@@ -19,6 +19,7 @@ from app.models.company import Company
 from app.models.restaurant import Brand, BrandBranch
 from app.models.role import Permission, Role
 from app.models.staff_assignment import StaffRoleAssignment
+from app.models.stock import StockLocation
 from app.models.user import User, UserBranch
 from app.services.role_preset_service import ROLE_PRESET_POLICIES
 from app.services.staff_scope_policy import assignment_scope_key
@@ -148,6 +149,59 @@ async def _revoke_tokens(db, user_id: uuid.UUID, now: datetime) -> None:
         .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
         .values(revoked_at=now)
     )
+
+
+async def _ensure_retail_store_mapping(
+    *,
+    company_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    brand_id: uuid.UUID,
+    branch_id: uuid.UUID,
+) -> uuid.UUID:
+    if RetailSessionLocal is None:
+        raise RuntimeError("Retail UAT database is not configured")
+    async with RetailSessionLocal() as db:
+        brand = await db.get(Brand, brand_id)
+        link = await db.scalar(
+            select(BrandBranch).where(
+                BrandBranch.company_id == company_id,
+                BrandBranch.brand_id == brand_id,
+                BrandBranch.branch_id == branch_id,
+                BrandBranch.is_active.is_(True),
+            )
+        )
+        location = await db.scalar(
+            select(StockLocation).where(
+                StockLocation.company_id == company_id,
+                StockLocation.branch_id == branch_id,
+                StockLocation.code == "UI-MAIN",
+                StockLocation.is_active.is_(True),
+                StockLocation.deleted_at.is_(None),
+            )
+        )
+        if brand is None or brand.business_type != "retail_pos" or not brand.is_active:
+            raise RuntimeError("Active Retail UAT Brand was not found in the Retail database")
+        if link is None or location is None:
+            raise RuntimeError("Retail UAT store link or UI-MAIN location was not found")
+        link.store_location_id = location.id
+        db.add(
+            AuditLog(
+                company_id=company_id,
+                branch_id=branch_id,
+                user_id=actor_id,
+                action="uat.retail.store_location.prepare",
+                resource="BrandBranch",
+                resource_id=str(link.id),
+                new_value={
+                    "brand_id": str(brand_id),
+                    "branch_id": str(branch_id),
+                    "store_location_id": str(location.id),
+                    "location_code": "UI-MAIN",
+                },
+            )
+        )
+        await db.commit()
+        return location.id
 
 
 async def prepare(args: argparse.Namespace) -> dict[str, object]:
@@ -292,12 +346,19 @@ async def prepare(args: argparse.Namespace) -> dict[str, object]:
             )
         )
         await db.commit()
+        store_location_id = await _ensure_retail_store_mapping(
+            company_id=args.company_id,
+            actor_id=actor.id,
+            brand_id=brand.id,
+            branch_id=branch.id,
+        )
         return {
             "prepared": True,
             "username": UAT_USERNAME,
             "role": "cashier",
             "brand_id": str(brand.id),
             "branch_id": str(branch.id),
+            "store_location_id": str(store_location_id),
             "auth_bypass": False,
         }
 

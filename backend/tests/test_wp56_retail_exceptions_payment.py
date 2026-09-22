@@ -142,6 +142,12 @@ class RetailUatPersonaGuardTests(unittest.TestCase):
         with patch.multiple(settings, **safe_values):
             require_retail_persona_uat(self._args(disabled=True), password="")
 
+    def test_persona_maps_only_the_audited_retail_showcase_store(self) -> None:
+        source = (ROOT / "backend/app/cli/prepare_retail_uat_persona.py").read_text()
+        self.assertIn('StockLocation.code == "UI-MAIN"', source)
+        self.assertIn("link.store_location_id = location.id", source)
+        self.assertIn('action="uat.retail.store_location.prepare"', source)
+
 
 class RetailLookupGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_lookup_rejects_unsigned_retail_context_before_database_access(self) -> None:

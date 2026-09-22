@@ -88,9 +88,10 @@ class SandboxRefundAdapter:
 
 
 class RefundService:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, *, retail_cash_pilot: bool = False):
         self.db = db
         self.stock_service = StockService(db)
+        self.retail_cash_pilot = retail_cash_pilot
 
     async def create_quote(
         self,
@@ -169,19 +170,20 @@ class RefundService:
                         "Sellable stock return is not supported for prepared food, bundles or services",
                     )
 
-        redeemed = await self.db.scalar(
-            select(PointsTransaction.id).where(
-                PointsTransaction.company_id == company_id,
-                PointsTransaction.reference_type == "SaleOrder",
-                PointsTransaction.reference_id == str(order.id),
-                PointsTransaction.transaction_type == "redeem",
+        if not self.retail_cash_pilot:
+            redeemed = await self.db.scalar(
+                select(PointsTransaction.id).where(
+                    PointsTransaction.company_id == company_id,
+                    PointsTransaction.reference_type == "SaleOrder",
+                    PointsTransaction.reference_id == str(order.id),
+                    PointsTransaction.transaction_type == "redeem",
+                )
             )
-        )
-        if redeemed is not None:
-            raise refund_error(
-                "loyalty_restore_contract_required",
-                "This sale used redeemed points and requires manual review until reserve/restore is atomic",
-            )
+            if redeemed is not None:
+                raise refund_error(
+                    "loyalty_restore_contract_required",
+                    "This sale used redeemed points and requires manual review until reserve/restore is atomic",
+                )
 
         items_snapshot: list[dict[str, Any]] = []
         subtotal = Decimal("0")
@@ -222,6 +224,19 @@ class RefundService:
         )).all())
         if not payments:
             raise refund_error("original_payment_missing", "Original payment data is missing")
+        if self.retail_cash_pilot:
+            unsupported = [payment for payment in payments if payment.payment_method != "cash"]
+            if unsupported:
+                raise refund_error(
+                    "retail_provider_not_ready",
+                    "Retail Pilot supports cash returns only; provider refunds remain disabled",
+                )
+            unsettled = [payment for payment in payments if payment.settlement_state != "settled"]
+            if unsettled:
+                raise refund_error(
+                    "retail_payment_not_settled",
+                    "Retail cash Return requires a settled original payment",
+                )
         negative_rows = list((await self.db.scalars(
             select(Payment).where(Payment.order_id == order.id, Payment.amount < 0)
         )).all())
@@ -278,9 +293,14 @@ class RefundService:
             "remaining_refundable_before": str(remaining_order), "rounding_rule": "THB_HALF_UP_0.01",
         }
         policy = {
-            "version": REFUND_POLICY_VERSION, "maker_checker_required": True,
-            "server_authoritative": True, "stock_disposition": data.stock_disposition,
-            "credit_note": "uat_non_fiscal_only", "offline_allowed": False,
+            "version": "wp57-retail-cash-v1" if self.retail_cash_pilot else REFUND_POLICY_VERSION,
+            "maker_checker_required": True,
+            "server_authoritative": True,
+            "stock_disposition": data.stock_disposition,
+            "credit_note": "not_available" if self.retail_cash_pilot else "uat_non_fiscal_only",
+            "provider_refund": "disabled" if self.retail_cash_pilot else "sandbox_only",
+            "loyalty": "not_available" if self.retail_cash_pilot else "reversed_when_applicable",
+            "offline_allowed": False,
         }
         quote_payload = {
             "company_id": str(company_id), "branch_id": str(branch_id), "order_id": str(order.id),
@@ -349,6 +369,11 @@ class RefundService:
         ).with_for_update())
         if order is None or order.row_version != quote.order_version:
             raise refund_error("version_conflict", "Sale changed after the refund quote")
+        if self.retail_cash_pilot and any(row["leg_type"] != "cash" for row in quote.payment_snapshot):
+            raise refund_error(
+                "retail_provider_not_ready",
+                "Retail Pilot supports cash returns only; provider refunds remain disabled",
+            )
         if any(row["leg_type"] == "provider" for row in quote.payment_snapshot):
             if settings.refund_provider_mode != "sandbox":
                 raise refund_error("provider_disabled", "Refund provider adapter is disabled")
@@ -626,7 +651,8 @@ class RefundService:
             to_state=operation.status, idempotency_key=audit_key,
             evidence={
                 "payment_states": sorted(states), "provider_scenario": operation.provider_scenario,
-                "simulated": True, "request_hash": action_request_hash,
+                "simulated": not self.retail_cash_pilot, "request_hash": action_request_hash,
+                "retail_cash_pilot": self.retail_cash_pilot,
             },
         ))
 
@@ -692,9 +718,25 @@ class RefundService:
                     provider_refund_state="succeeded", note=operation.reason_note or operation.reason_code,
                 ))
 
-        await self._reverse_earned_points(operation, order, actor_id, items)
         operation.finalized_at = datetime.now(timezone.utc)
         operation.status = "succeeded"
+        if self.retail_cash_pilot:
+            link = await self.db.scalar(
+                select(RefundTaxLink).where(RefundTaxLink.operation_id == operation.id)
+            )
+            if link is None:
+                self.db.add(
+                    RefundTaxLink(
+                        operation_id=operation.id,
+                        status="not_required",
+                        idempotency_key=f"retail-non-fiscal:{operation.id}",
+                    )
+                )
+            operation.status = "completed"
+            operation.tax_completed_at = datetime.now(timezone.utc)
+            return
+
+        await self._reverse_earned_points(operation, order, actor_id, items)
         await self._create_credit_note(operation, order, actor_id, items)
         brand_context = await self._brand_context(order)
         await ensure_sale_state_changed_handoff(

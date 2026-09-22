@@ -31,7 +31,7 @@ class WP52RestaurantExceptionUXTests(unittest.TestCase):
         dockerfile = (ROOT / "frontend/Dockerfile").read_text()
 
         self.assertIn('VITE_REFUND_UAT_SIMULATOR === "true"', refund)
-        self.assertIn("UAT_SIMULATOR_ENABLED ?", refund)
+        self.assertIn("UAT_SIMULATOR_ENABLED && !cashPilot ?", refund)
         self.assertIn("ARG VITE_REFUND_UAT_SIMULATOR=false", dockerfile)
 
     def test_cancellation_and_discount_surfaces_remain_server_authoritative(self) -> None:

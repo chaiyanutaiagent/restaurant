@@ -64,11 +64,14 @@ class RetailPaymentReadinessTests(unittest.TestCase):
     def test_restaurant_payment_contract_is_unchanged(self) -> None:
         _enforce_retail_payment_readiness(_current("restaurant"), _sale("promptpay"))
 
-    def test_retail_refund_mutations_fail_closed_until_wp57(self) -> None:
+    def test_retail_cash_return_capabilities_open_but_unsafe_paths_fail_closed(self) -> None:
+        for capability in ("quote", "execute", "cash_confirm"):
+            _enforce_retail_refund_readiness(_current(), capability=capability)
+
         with self.assertRaises(HTTPException) as raised:
             _enforce_retail_refund_readiness(_current())
         self.assertEqual(raised.exception.status_code, 409)
-        self.assertEqual(raised.exception.detail["code"], "retail_return_not_ready")
+        self.assertEqual(raised.exception.detail["code"], "retail_return_capability_not_available")
 
         _enforce_retail_refund_readiness(_current("restaurant"))
 
@@ -195,7 +198,7 @@ class RetailUxContractTests(unittest.TestCase):
         self.assertIn('catalog_scope: "retail_sale"', page)
         self.assertIn("signedRows.find((item) => item.id === result.product?.id)", page)
 
-    def test_retail_pricing_quote_schema_is_bounded_and_hold_waits_for_wp57(self) -> None:
+    def test_retail_pricing_quote_schema_remains_bounded_after_wp57_enablement(self) -> None:
         page = (ROOT / "frontend/src/pages/pos/POSPage.tsx").read_text()
         navigation = (ROOT / "frontend/src/components/pos/PosWorkspaceNav.tsx").read_text()
         retail_env = (ROOT / "backend/alembic_retail/env.py").read_text()
@@ -204,13 +207,11 @@ class RetailUxContractTests(unittest.TestCase):
             / "backend/alembic_retail/versions/p10retail0004_add_server_authoritative_pricing.py"
         ).read_text()
 
-        self.assertIn('enabled: Boolean(currentShift) && !isRetailMode', page)
-        self.assertIn('holdEnabled={!isRetailMode}', page)
-        self.assertIn('"พักบิล · WP57"', navigation)
-        self.assertIn('canRefund={canRefundSale && !isRetailMode}', page)
-        self.assertIn('Retail Return / Refund จะเปิดหลังผ่าน WP57', page)
-        self.assertIn('"บิล / ใบเสร็จ · คืนสินค้า WP57"', navigation)
-        self.assertIn('{!isRetailMode ? (', page)
+        self.assertIn('enabled: Boolean(currentShift)', page)
+        self.assertIn('holdEnabled', page)
+        self.assertIn('"บิล / คืนสินค้า"', navigation)
+        self.assertIn('canRefund={canRefundSale}', page)
+        self.assertIn('cashPilot={isRetailMode}', page)
         self.assertIn('รายละเอียดใบเสร็จจาก Server สำหรับตรวจสอบและพิมพ์ซ้ำ', page)
         self.assertIn('"price_calculations"', retail_env)
         self.assertIn('down_revision: Union[str, None] = "p9retail0003"', migration)

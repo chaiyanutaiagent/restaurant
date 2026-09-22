@@ -110,11 +110,11 @@ export default function PosWorkspaceNav({
     const retailItems = [
       { label: "ขาย", icon: Store, onClick: () => open("/pos", "ขาย") },
       {
-        label: holdEnabled ? `พักบิล ${heldBillCount ?? 0}` : "พักบิล · WP57",
+        label: holdEnabled ? `พักบิล ${heldBillCount ?? 0}` : "พักบิลยังไม่พร้อม",
         icon: ClipboardList,
         onClick: holdEnabled ? onHeldBills : undefined,
       },
-      { label: "บิล / ใบเสร็จ · คืนสินค้า WP57", icon: FileClock, onClick: onBillCenter },
+      { label: "บิล / คืนสินค้า", icon: FileClock, onClick: onBillCenter },
       { label: "กะ", icon: Clock3, onClick: onShift },
       { label: "สถานะเครื่อง", icon: MonitorCog, onClick: onDeviceStatus },
     ];

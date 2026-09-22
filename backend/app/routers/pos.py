@@ -336,12 +336,45 @@ def _require_matching_counter_device(
         )
 
 
+def _require_retail_operational_context(current: TokenData) -> bool:
+    retail_claimed = current.business_type == "retail_pos" or current.target_database == "retail_pos"
+    if not retail_claimed:
+        return False
+    if (
+        current.business_type != "retail_pos"
+        or current.target_database != "retail_pos"
+        or current.brand_id is None
+        or current.branch_id is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "retail_context_required",
+                "message": "Retail operation requires a signed Retail Company, Brand and Branch context",
+            },
+        )
+    return True
+
+
 def _sale_service(db: AsyncSession, current: TokenData) -> SaleService:
+    _require_retail_operational_context(current)
     retail_cutover = (
         current.target_database == "retail_pos"
         and settings.retail_service_database == "retail"
     )
     return SaleService(db, legacy_side_effects_enabled=not retail_cutover)
+
+
+def _hold_service(db: AsyncSession, current: TokenData) -> HoldDraftService:
+    _require_retail_operational_context(current)
+    return HoldDraftService(db)
+
+
+def _refund_service(db: AsyncSession, current: TokenData) -> RefundService:
+    return RefundService(
+        db,
+        retail_cash_pilot=_require_retail_operational_context(current),
+    )
 
 
 def _enforce_retail_payment_readiness(
@@ -376,15 +409,21 @@ def _enforce_retail_payment_readiness(
         )
 
 
-def _enforce_retail_refund_readiness(current: TokenData) -> None:
-    """Keep Retail return/refund mutations closed until the WP57 contract is live."""
-    if current.business_type != "retail_pos" and current.target_database != "retail_pos":
+def _enforce_retail_refund_readiness(
+    current: TokenData,
+    *,
+    capability: str = "legacy",
+) -> None:
+    """Permit only the WP57 cash Return state machine inside signed Retail context."""
+    if not _require_retail_operational_context(current):
+        return
+    if capability in {"quote", "execute", "cash_confirm"}:
         return
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail={
-            "code": "retail_return_not_ready",
-            "message": "Retail return and refund are disabled until WP57 is enabled",
+            "code": "retail_return_capability_not_available",
+            "message": "Retail Pilot supports Server-authoritative cash Return only; Exchange, provider refund and tax retry remain disabled",
         },
     )
 
@@ -452,12 +491,8 @@ async def create_cash_movement(
     db: AsyncSession = Depends(get_db),
     counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
+    _require_retail_operational_context(current)
     _require_matching_counter_device(current, counter_device)
-    if current.target_database == "retail_pos":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "feature_not_enabled", "message": "Retail cash movement will be enabled in its Retail work package"},
-        )
     replay = await _cash_movement_replay(db, current, shift_id, payload)
     if replay is not None:
         return ok(CashMovementRead.model_validate(replay).model_dump())
@@ -495,6 +530,7 @@ async def create_cash_movement(
         device_code=counter_device.device_code if counter_device else None,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
+        include_journal=current.target_database != "retail_pos",
     )
     return ok(CashMovementRead.model_validate(movement).model_dump())
 
@@ -508,6 +544,7 @@ async def close_shift(
     db: AsyncSession = Depends(get_db),
     counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
+    _require_retail_operational_context(current)
     _require_matching_counter_device(current, counter_device)
     replay = await _closed_shift_replay(db, current, shift_id, payload)
     if replay is not None:
@@ -566,6 +603,7 @@ async def handover_shift(
     db: AsyncSession = Depends(get_db),
     counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
+    _require_retail_operational_context(current)
     if counter_device is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -647,10 +685,11 @@ async def create_hold_draft(
     db: AsyncSession = Depends(get_db),
     counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
+    _require_retail_operational_context(current)
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
     _require_matching_counter_device(current, counter_device)
-    draft = await HoldDraftService(db).create(
+    draft = await _hold_service(db, current).create(
         company_id=current.company_id,
         brand_id=current.brand_id,
         branch_id=current.branch_id,
@@ -682,7 +721,7 @@ async def list_hold_drafts(
             "counter_device_required",
             "A paired Counter device is required for the this-counter filter",
         )
-    rows = await HoldDraftService(db).list(
+    rows = await _hold_service(db, current).list(
         company_id=current.company_id,
         brand_id=current.brand_id,
         branch_id=current.branch_id,
@@ -711,7 +750,7 @@ async def get_hold_draft(
 ) -> dict[str, Any]:
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
-    draft = await HoldDraftService(db).get(
+    draft = await _hold_service(db, current).get(
         draft_id=draft_id,
         company_id=current.company_id,
         brand_id=current.brand_id,
@@ -737,7 +776,7 @@ async def update_hold_draft(
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
     _require_matching_counter_device(current, counter_device)
-    draft = await HoldDraftService(db).update(
+    draft = await _hold_service(db, current).update(
         draft_id=draft_id,
         company_id=current.company_id,
         brand_id=current.brand_id,
@@ -761,7 +800,7 @@ async def claim_hold_draft(
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
     _require_matching_counter_device(current, counter_device)
-    result = await HoldDraftService(db).claim(
+    result = await _hold_service(db, current).claim(
         draft_id=draft_id,
         company_id=current.company_id,
         brand_id=current.brand_id,
@@ -784,7 +823,7 @@ async def resume_hold_draft(
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
     _require_matching_counter_device(current, counter_device)
-    draft = await HoldDraftService(db).resume(
+    draft = await _hold_service(db, current).resume(
         draft_id=draft_id,
         company_id=current.company_id,
         brand_id=current.brand_id,
@@ -807,7 +846,7 @@ async def release_hold_draft_claim(
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
     _require_matching_counter_device(current, counter_device)
-    draft = await HoldDraftService(db).release_claim(
+    draft = await _hold_service(db, current).release_claim(
         draft_id=draft_id,
         company_id=current.company_id,
         brand_id=current.brand_id,
@@ -830,7 +869,7 @@ async def discard_hold_draft(
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
     _require_matching_counter_device(current, counter_device)
-    draft = await HoldDraftService(db).discard(
+    draft = await _hold_service(db, current).discard(
         draft_id=draft_id,
         company_id=current.company_id,
         brand_id=current.brand_id,
@@ -853,7 +892,7 @@ async def reopen_hold_draft(
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
     _require_matching_counter_device(current, counter_device)
-    draft = await HoldDraftService(db).reopen(
+    draft = await _hold_service(db, current).reopen(
         draft_id=draft_id,
         company_id=current.company_id,
         brand_id=current.brand_id,
@@ -874,7 +913,7 @@ async def list_hold_draft_audit(
 ) -> dict[str, Any]:
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
-    await HoldDraftService(db).get(
+    await _hold_service(db, current).get(
         draft_id=draft_id,
         company_id=current.company_id,
         brand_id=current.brand_id,
@@ -1178,10 +1217,10 @@ async def create_refund_quote(
     current: TokenData = Depends(require_any_permission("pos.refund.create", "pos.refund.request")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    _enforce_retail_refund_readiness(current)
+    _enforce_retail_refund_readiness(current, capability="quote")
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
-    quote = await RefundService(db).create_quote(
+    quote = await _refund_service(db, current).create_quote(
         company_id=current.company_id,
         branch_id=current.branch_id,
         user_id=current.user_id,
@@ -1196,10 +1235,10 @@ async def execute_refund(
     current: TokenData = Depends(require_any_permission("pos.refund.create", "pos.refund.request")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    _enforce_retail_refund_readiness(current)
+    _enforce_retail_refund_readiness(current, capability="execute")
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
-    service = RefundService(db)
+    service = _refund_service(db, current)
     replay = await service.find_execute_replay(
         company_id=current.company_id,
         branch_id=current.branch_id,
@@ -1236,7 +1275,7 @@ async def list_refunds(
 ) -> dict[str, Any]:
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
-    service = RefundService(db)
+    service = _refund_service(db, current)
     rows = await service.list_operations(current.company_id, current.branch_id, order_id)
     return ok([await serialize_operation(service, row) for row in rows])
 
@@ -1247,6 +1286,7 @@ async def refund_reconciliation(
     current: TokenData = Depends(require_permission("pos.sale.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _require_retail_operational_context(current)
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
     filters = [RefundOperation.company_id == current.company_id, RefundOperation.branch_id == current.branch_id]
@@ -1286,7 +1326,7 @@ async def get_refund(
 ) -> dict[str, Any]:
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
-    service = RefundService(db)
+    service = _refund_service(db, current)
     row = await service.get_operation(operation_id, current.company_id, current.branch_id)
     return ok(await serialize_operation(service, row))
 
@@ -1298,10 +1338,10 @@ async def confirm_cash_refund(
     current: TokenData = Depends(require_permission("pos.refund.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    _enforce_retail_refund_readiness(current)
+    _enforce_retail_refund_readiness(current, capability="cash_confirm")
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
-    service = RefundService(db)
+    service = _refund_service(db, current)
     row = await service.confirm_cash(operation_id, current.company_id, current.branch_id, current.user_id, payload)
     return ok(await serialize_operation(service, row))
 
@@ -1316,7 +1356,7 @@ async def inquire_refund(
     _enforce_retail_refund_readiness(current)
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
-    service = RefundService(db)
+    service = _refund_service(db, current)
     row = await service.inquire(operation_id, current.company_id, current.branch_id, current.user_id, payload)
     return ok(await serialize_operation(service, row))
 
@@ -1331,7 +1371,7 @@ async def retry_refund(
     _enforce_retail_refund_readiness(current)
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
-    service = RefundService(db)
+    service = _refund_service(db, current)
     row = await service.retry(operation_id, current.company_id, current.branch_id, current.user_id, payload)
     return ok(await serialize_operation(service, row))
 
@@ -1346,7 +1386,7 @@ async def retry_refund_tax(
     _enforce_retail_refund_readiness(current)
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
-    service = RefundService(db)
+    service = _refund_service(db, current)
     row = await service.retry_tax(operation_id, current.company_id, current.branch_id, current.user_id, payload)
     return ok(await serialize_operation(service, row))
 

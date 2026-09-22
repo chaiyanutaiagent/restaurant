@@ -19,6 +19,7 @@ type Props = {
   order: SaleOrder | null;
   shift: CashierShift | null;
   online: boolean;
+  cashPilot?: boolean;
   onOpenChange: (open: boolean) => void;
   onCompleted: () => Promise<void> | void;
 };
@@ -52,7 +53,7 @@ const statusCopy: Record<string, { title: string; detail: string; tone: string }
   tax_pending: { title: "คืนเงินแล้ว · เอกสารรอตรวจ", detail: "Credit Note ยังไม่เสร็จ รายการยังปิดกะไม่ได้", tone: "bg-amber-50 text-amber-900" }
 };
 
-export default function RefundWorkspaceDialog({ open, order, shift, online, onOpenChange, onCompleted }: Props): JSX.Element {
+export default function RefundWorkspaceDialog({ open, order, shift, online, cashPilot = false, onOpenChange, onCompleted }: Props): JSX.Element {
   const { toast } = useToast();
   const [qty, setQty] = useState<Record<string, number>>({});
   const [reasonCode, setReasonCode] = useState<ReasonCode>("customer_request");
@@ -188,7 +189,14 @@ export default function RefundWorkspaceDialog({ open, order, shift, online, onOp
           {!online ? (
             <div role="alert" className="flex gap-3 rounded-2xl bg-red-50 p-4 text-red-800">
               <WifiOff className="mt-0.5 h-5 w-5 shrink-0" />
-              <div><div className="font-semibold">Offline — ปิดการคืนเงินชั่วคราว</div><div className="text-sm">Refund, approval, provider และ Credit Note ต้องยืนยันกับ Server</div></div>
+              <div><div className="font-semibold">Offline — ปิดการคืนเงินชั่วคราว</div><div className="text-sm">Return และการอนุมัติต้องยืนยันกับ Server</div></div>
+            </div>
+          ) : null}
+
+          {cashPilot ? (
+            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+              <div className="font-semibold">Retail Cash Pilot</div>
+              <div className="mt-1">คืนได้เฉพาะ Payment เงินสดที่ Server ยืนยันแล้ว · Provider, Exchange, Loyalty และเอกสารภาษีจริงยังปิดอยู่</div>
             </div>
           ) : null}
 
@@ -247,7 +255,7 @@ export default function RefundWorkspaceDialog({ open, order, shift, online, onOp
                   </div>
                 ))}
               </div>
-              {UAT_SIMULATOR_ENABLED ? (
+              {UAT_SIMULATOR_ENABLED && !cashPilot ? (
                 <details className="rounded-xl border border-dashed border-slate-300 p-3 text-sm">
                   <summary className="cursor-pointer font-medium">UAT Provider simulator · Sandbox เท่านั้น</summary>
                   <select className="mt-3 h-12 w-full rounded-xl border border-slate-300 bg-white px-3" value={scenario} onChange={(event) => setScenario(event.target.value as ProviderScenario)}>
@@ -270,7 +278,11 @@ export default function RefundWorkspaceDialog({ open, order, shift, online, onOp
                 <div className="flex items-center gap-2 text-lg font-bold">
                   {operation.status === "completed" ? <CheckCircle2 /> : <AlertTriangle />}{status.title}
                 </div>
-                <div className="mt-1 text-sm">{status.detail}</div>
+                <div className="mt-1 text-sm">
+                  {cashPilot && operation.status === "completed"
+                    ? "Payment เงินสด สต๊อก และ Audit ถูกกระทบยอดแล้ว · ไม่ออกเอกสารภาษีจริง"
+                    : status.detail}
+                </div>
                 <div className="mt-3 text-2xl font-bold">{money(operation.total_amount)}</div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
@@ -283,8 +295,8 @@ export default function RefundWorkspaceDialog({ open, order, shift, online, onOp
                 ))}
               </div>
               <div className="rounded-2xl border border-slate-200 p-4 text-sm">
-                <div className="font-semibold">Credit Note / ภาษี</div>
-                <div className="mt-1">{operation.tax ? operation.tax.status : "กำลังตรวจเอกสารเดิม"}</div>
+                <div className="font-semibold">{cashPilot ? "ภาษี" : "Credit Note / ภาษี"}</div>
+                <div className="mt-1">{cashPilot ? "Cash Pilot ไม่ออกเอกสารภาษีจริง" : operation.tax ? operation.tax.status : "กำลังตรวจเอกสารเดิม"}</div>
                 {operation.tax?.credit_note_id ? <div className="text-xs text-slate-500">UAT NON-FISCAL · {operation.tax.credit_note_id}</div> : null}
               </div>
             </div>

@@ -347,15 +347,17 @@ class SaleService:
                 )),
             )
         ) or 0
-        pending_offline = await self.db.scalar(
-            select(func.count(OfflinePosOperation.id)).where(
-                OfflinePosOperation.shift_id == shift.id,
-                OfflinePosOperation.status.in_((
-                    "pending_sync", "syncing", "server_acknowledged", "needs_review",
-                    "quarantined", "unknown",
-                )),
-            )
-        ) or 0
+        pending_offline = 0
+        if include_journal:
+            pending_offline = await self.db.scalar(
+                select(func.count(OfflinePosOperation.id)).where(
+                    OfflinePosOperation.shift_id == shift.id,
+                    OfflinePosOperation.status.in_((
+                        "pending_sync", "syncing", "server_acknowledged", "needs_review",
+                        "quarantined", "unknown",
+                    )),
+                )
+            ) or 0
         unresolved_payments = await self.db.scalar(
             select(func.count(Payment.id))
             .join(SaleOrder, SaleOrder.id == Payment.order_id)
@@ -487,6 +489,7 @@ class SaleService:
         device_code: str | None,
         ip_address: str | None,
         user_agent: str | None,
+        include_journal: bool = True,
     ) -> PosCashMovement:
         request_hash = canonical_hash(
             data.model_dump(mode="json", exclude={"approval_token"}, exclude_none=True)
@@ -538,8 +541,10 @@ class SaleService:
         )
         self.db.add(movement)
         await self.db.flush()
-        journal = await AccountingService(self.db).post_cash_movement(movement, company_id, user_id)
-        movement.journal_entry_id = journal.id
+        journal = None
+        if include_journal:
+            journal = await AccountingService(self.db).post_cash_movement(movement, company_id, user_id)
+            movement.journal_entry_id = journal.id
         self.db.add(
             AuditLog(
                 company_id=company_id,
@@ -558,7 +563,8 @@ class SaleService:
                     "device_id": str(device_id) if device_id else None,
                     "device_code": device_code,
                     "approval": movement.approval_evidence,
-                    "journal_entry_id": str(journal.id),
+                    "journal_entry_id": str(journal.id) if journal else None,
+                    "journal_state": "posted" if journal else "not_applicable",
                 },
                 ip_address=ip_address,
                 user_agent=user_agent,

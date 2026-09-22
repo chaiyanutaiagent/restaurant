@@ -585,8 +585,8 @@ export default function POSPage(): JSX.Element {
       const remainingLocal = await db.heldBills.where("shift_id").equals(currentShift.id).toArray();
       return [...serverRows, ...remainingLocal].sort((left, right) => right.held_at - left.held_at);
     },
-    enabled: Boolean(currentShift) && !isRetailMode,
-    refetchInterval: !isRetailMode && heldBillsOpen && isOnline ? 15_000 : false,
+    enabled: Boolean(currentShift),
+    refetchInterval: heldBillsOpen && isOnline ? 15_000 : false,
   });
   const replacementRulesQuery = useQuery({
     queryKey: ["pos", "local-replacement-rules", branchId, replacementRulesVersion],
@@ -1669,6 +1669,14 @@ export default function POSPage(): JSX.Element {
     if (!currentShift || cart.items.length === 0) {
       return false;
     }
+    if (isRetailMode && !isOnline) {
+      toast({
+        title: "Retail ต้องเชื่อมต่อ Server ก่อนพักบิล",
+        description: "ไม่สร้าง Local shadow เพื่อป้องกันบิลซ้ำและข้อมูลราคาไม่ตรงกัน",
+        variant: "destructive",
+      });
+      return false;
+    }
     const defaultLabel = customerName.trim() || selectedCustomer?.display_name || `${cart.items[0]?.product_name ?? "บิล"} +${Math.max(cart.items.length - 1, 0)}`;
     const id = generateClientOrderId();
     const draft = currentHoldDraft(holdLabel.trim() || defaultLabel, id);
@@ -2472,8 +2480,8 @@ export default function POSPage(): JSX.Element {
         <PosWorkspaceNav
           mode={isRetailMode ? "retail" : "restaurant"}
           heldBillCount={activeHeldBillCount}
-          holdEnabled={!isRetailMode}
-          onHeldBills={!isRetailMode ? () => setHeldBillsOpen(true) : undefined}
+          holdEnabled
+          onHeldBills={() => setHeldBillsOpen(true)}
           onBillCenter={() => setRecentSalesOpen(true)}
           onShift={() => setCloseShiftOpen(true)}
           onDeviceStatus={() => setDeviceStatusOpen(true)}
@@ -3681,7 +3689,7 @@ export default function POSPage(): JSX.Element {
         </DialogContent>
       </Dialog>
 
-      {!isRetailMode ? <HoldDraftWorkspaceDialog
+      <HoldDraftWorkspaceDialog
         open={heldBillsOpen}
         onOpenChange={setHeldBillsOpen}
         drafts={heldBills}
@@ -3708,9 +3716,9 @@ export default function POSPage(): JSX.Element {
         onDiscard={handleDeleteHeldBill}
         onReassign={handleReassignHeldBill}
         onReopen={handleReopenHeldBill}
-      /> : null}
+      />
 
-      {!isRetailMode ? <Dialog open={holdCreateOpen} onOpenChange={setHoldCreateOpen}>
+      <Dialog open={holdCreateOpen} onOpenChange={setHoldCreateOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>พักบิลปัจจุบัน</DialogTitle>
@@ -3723,7 +3731,11 @@ export default function POSPage(): JSX.Element {
               <div className="rounded-2xl border border-slate-200 p-4"><div className="text-xs font-semibold text-slate-400">ยอดประมาณการ</div><div className="mt-1 text-2xl font-black">{formatThaiCurrency(finalTotal)}</div><div className="text-sm text-slate-500">{cart.items.reduce((sum, item) => sum + Number(item.qty), 0)} ชิ้น</div></div>
             </div>
             <div className={`rounded-2xl border p-4 text-sm ${isOnline ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
-              {isOnline ? "บันทึกบน Server และเรียกต่อได้จาก Counter อื่นในสาขา" : "ออฟไลน์: เก็บ Local shadow เฉพาะเครื่องนี้ และต้องตรวจสอบหลังเชื่อมต่อ"}
+              {isOnline
+                ? "บันทึกบน Server และเรียกต่อได้จาก Counter อื่นในสาขา"
+                : isRetailMode
+                  ? "Retail Offline: ปิดการพักบิลเพื่อป้องกันบิลซ้ำ กรุณาเชื่อมต่อ Server"
+                  : "ออฟไลน์: เก็บ Local shadow เฉพาะเครื่องนี้ และต้องตรวจสอบหลังเชื่อมต่อ"}
             </div>
           </div>
           <DialogFooter>
@@ -3733,7 +3745,7 @@ export default function POSPage(): JSX.Element {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog> : null}
+      </Dialog>
 
       <Dialog open={Boolean(pendingResumeDraft)} onOpenChange={(open) => { if (!open) setPendingResumeDraft(null); }}>
         <DialogContent className="max-w-xl">
@@ -3836,8 +3848,7 @@ export default function POSPage(): JSX.Element {
         updatedAt={recentSalesQuery.dataUpdatedAt}
         online={isOnline}
         canVoid={canVoidSale}
-        canRefund={canRefundSale && !isRetailMode}
-        refundUnavailableReason={isRetailMode ? "Retail Return / Refund จะเปิดหลังผ่าน WP57" : undefined}
+        canRefund={canRefundSale}
         onOpenChange={setRecentSalesOpen}
         onRetry={() => { void recentSalesQuery.refetch(); }}
         onPrint={(order) => {
@@ -3973,18 +3984,17 @@ export default function POSPage(): JSX.Element {
         settings={loyaltySettingsQuery.data ?? null}
         onRedeemed={(discountAmount) => setLoyaltyDiscount(discountAmount)}
       />
-      {!isRetailMode ? (
-        <RefundWorkspaceDialog
-          open={Boolean(refundWorkspaceOrder)}
-          order={refundWorkspaceOrder}
-          shift={currentShift}
-          online={isOnline}
-          onOpenChange={(next) => { if (!next) setRefundWorkspaceOrder(null); }}
-          onCompleted={async () => {
-            await recentSalesQuery.refetch();
-          }}
-        />
-      ) : null}
+      <RefundWorkspaceDialog
+        open={Boolean(refundWorkspaceOrder)}
+        order={refundWorkspaceOrder}
+        shift={currentShift}
+        online={isOnline}
+        cashPilot={isRetailMode}
+        onOpenChange={(next) => { if (!next) setRefundWorkspaceOrder(null); }}
+        onCompleted={async () => {
+          await recentSalesQuery.refetch();
+        }}
+      />
       {pendingManagerApproval ? (
         <ManagerApprovalDialog
           open

@@ -45,7 +45,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP61 | Shared ERP operational and finance maturity | Software UAT passed; combined Batch B gate closed | Real tax/provider/accountant gates remain |
 | WP62 | Takeaway operational UI activation | Focused software UAT checkpoint passed | Server-authoritative Dark Launch; transactions remain gated until owner/canary approval |
 | WP63 | Central Kitchen and Supply Chain UI activation | Local engineering gate passed; combined Batch C UAT pending | Read-only/dark-launch; stock/QC/recall writes remain gated |
-| WP64 | Public Customer Experience | Planned | Catalog/ecommerce owner decision required |
+| WP64 | Public Customer Experience | Local engineering gate passed; combined Batch C UAT pending | Catalog/Locator active; Ecommerce/receipt/member capabilities remain gated |
 | WP65 | Integration, Reporting, Reconciliation and Release Governance | Planned | Provider/retention/owner gates remain |
 
 Hotel PMS is out of scope and has no WP assignment.
@@ -58,7 +58,7 @@ The execution contract is recorded in `FULL-UI-BATCH-EXECUTION-PLAN-02.md`. WP54
 |---|---|---|
 | A — Retail POS | WP55–WP58 | Combined software gate passed; physical/Production HOLD; Batch B may begin on Local/UAT |
 | B — Platform/Company/ERP | WP59–WP61 | Combined software UAT gate passed; Production/external acceptance HOLD |
-| C — Takeaway/Kitchen/Public | WP62–WP64 | In progress; WP62 focused UAT and WP63 Local gate passed, WP64 next; unsafe writes remain gated |
+| C — Takeaway/Kitchen/Public | WP62–WP64 | Local candidates complete; combined software UAT/rollback pending; unsafe writes remain gated |
 | D — Governance/full-system UAT | WP65 | Planned |
 
 ## Image acceptance registry — Customer Company (10)
@@ -111,7 +111,7 @@ The superseded non-v2 Action Center file is not counted.
 | D27 | `design-system/27-restaurant-pos-manager-approval.png` | WP52 | Adapted | Bounded action/reason summaries and different-user maker-checker opened correctly for Cancellation and Refund. |
 | D28 | `design-system/28-restaurant-pos-refund-sheet.png` | WP52 | Adapted | Server quote, original-payment allocation, Sandbox boundary and non-fiscal tax state passed Desktop/iPad UAT. |
 | D29 | `design-system/29-restaurant-pos-held-bills-server-backed.png` | WP51 | Implemented | Server remains the source of truth; hold creates no payment, stock, tax or KDS side effect. |
-| D30 | `design-system/30-customer-qr-ordering-flow.png` | WP49/WP64 | Adapted | Session-scoped Restaurant QR works; broader Public Experience is WP64. |
+| D30 | `design-system/30-customer-qr-ordering-flow.png` | WP49/WP64 | Adapted | Session-scoped Restaurant QR remains active; public capability/freshness/error contract passed the WP64 Local gate. |
 | D31 | `design-system/31-restaurant-kds-pickup-flow.png` | WP49/WP52 | Adapted | KDS works; final Order Center/Pickup cohesion is WP52. |
 | D32 | `design-system/32-restaurant-pos-bill-receipt-center.png` | WP52 | Adapted | Current-shift refresh/search/filter/detail, receipt, eligible/ineligible Void and Refund routing passed paired-Counter UAT. |
 | D33 | `design-system/33-restaurant-pos-offline-sync-recovery.png` | WP53 | Implemented; conditional UAT | Real encrypted outbox drives list-detail UX; paired empty-state/tablet/rollback passed, stateful network paths remain WP54. |
@@ -142,7 +142,7 @@ The superseded non-v2 Action Center file is not counted.
 | Restaurant advanced | `cto-non-hotel/04-RESTAURANT-ADVANCED-OPERATIONS-CTO-SPEC.md` | WP49–WP54 | Active sequence; Brand-profile-specific extras remain disabled until approved. |
 | Takeaway | `cto-non-hotel/05-TAKEAWAY-POS-CTO-SPEC.md` | WP62 | Engineering exists; real-data/canary/owner gates remain. |
 | Central Kitchen / Supply Chain | `cto-non-hotel/06-CENTRAL-KITCHEN-SUPPLY-CHAIN-CTO-SPEC.md` | WP63 | UI activated read-only; opening lot, count, QC, recall and owner gates remain. |
-| Public Customer Experience | `cto-non-hotel/07-PUBLIC-CUSTOMER-EXPERIENCE-CTO-SPEC.md` | WP64 | Catalog versus ecommerce decision remains with Owner. |
+| Public Customer Experience | `cto-non-hotel/07-PUBLIC-CUSTOMER-EXPERIENCE-CTO-SPEC.md` | WP64 | Catalog/Locator Option A implemented locally; Ecommerce, receipt, member identity and consent remain Owner/contract gates. |
 | Integration / Reporting / Governance | `cto-non-hotel/08-INTEGRATION-REPORTING-GOVERNANCE-CTO-SPEC.md` | WP65 | Planned reconciliation, incident, evidence and retention maturity. |
 
 ## Governance rules

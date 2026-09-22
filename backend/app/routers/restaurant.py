@@ -101,6 +101,7 @@ from app.services.replenishment_service import ReplenishmentService, serialize_r
 from app.services.stock_cutover_service import StockCutoverService
 from app.services.transfer_service import TransferService
 from app.utils.promptpay import generate_promptpay_payload
+from app.utils.public_rate_limit import require_public_rate_limit
 from app.schemas.transfer import (
     ApproveTORequest,
     CreateTORequest,
@@ -6259,8 +6260,10 @@ async def test_fb_line_notify(
 @public_router.get("/{qr_token}")
 async def public_get_menu(
     qr_token: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-menu", subject=str(qr_token), limit=120)
     svc = DiningService(db)
     menu = await svc.get_public_menu(qr_token)
     if not menu:
@@ -6272,8 +6275,10 @@ async def public_get_menu(
 async def public_place_order(
     qr_token: uuid.UUID,
     payload: PlaceOrderRequest,
+    request: Request,
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-order", subject=str(qr_token), limit=20)
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
     if not session:
@@ -6307,9 +6312,11 @@ async def public_place_order(
 @public_router.get("/{qr_token}/status")
 async def public_order_status(
     qr_token: uuid.UUID,
+    request: Request,
     session_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-status", subject=str(qr_token), limit=300)
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
     if not session:
@@ -6325,9 +6332,11 @@ async def public_order_status(
 @public_router.post("/{qr_token}/bill")
 async def public_request_bill(
     qr_token: uuid.UUID,
+    request: Request,
     session_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-bill", subject=str(qr_token), limit=10)
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
     if not session:
@@ -6374,8 +6383,10 @@ async def _get_qs_settings(db: AsyncSession, qs_token: uuid.UUID) -> BranchSetti
 @qs_router.get("/{qs_token}")
 async def qs_get_menu(
     qs_token: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-qs-menu", subject=str(qs_token), limit=120)
     settings = await _get_qs_settings(db, qs_token)
     if not settings:
         raise HTTPException(status_code=404, detail="ไม่พบ QR นี้")
@@ -6429,10 +6440,12 @@ async def qs_get_menu(
 async def qs_place_order(
     qs_token: uuid.UUID,
     payload: PlaceOrderRequest,
+    request: Request,
     customer_name: str | None = Query(default=None),
     customer_phone: str | None = Query(default=None),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-qs-order", subject=str(qs_token), limit=20)
     settings = await _get_qs_settings(db, qs_token)
     if not settings:
         raise HTTPException(status_code=404, detail="ไม่พบ QR นี้")
@@ -6472,9 +6485,11 @@ async def qs_place_order(
 @qs_router.get("/{qs_token}/status")
 async def qs_order_status(
     qs_token: uuid.UUID,
+    request: Request,
     session_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-qs-status", subject=str(qs_token), limit=300)
     settings = await _get_qs_settings(db, qs_token)
     if not settings:
         raise HTTPException(status_code=404, detail="ไม่พบ QR นี้")

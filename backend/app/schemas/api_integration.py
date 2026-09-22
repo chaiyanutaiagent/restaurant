@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 import uuid
 
 from pydantic import ConfigDict, Field
@@ -146,10 +147,30 @@ class PublicStorefrontBranchRead(BaseSchema):
     is_pickup_available: bool
 
 
+class PublicExperienceCapabilitiesRead(BaseSchema):
+    catalog: bool = True
+    branch_locator: bool = True
+    ecommerce: bool = False
+    checkout: bool = False
+    payment: bool = False
+    member_portal: bool = False
+    digital_receipt: bool = False
+
+
+class PublicExperienceRead(BaseSchema):
+    mode: Literal["catalog_locator"] = "catalog_locator"
+    release_stage: Literal["public_read_only"] = "public_read_only"
+    generated_at: datetime
+    stale_after_seconds: int = Field(default=300, ge=60, le=3600)
+    capabilities: PublicExperienceCapabilitiesRead = Field(default_factory=PublicExperienceCapabilitiesRead)
+    hard_holds: list[str] = Field(default_factory=list)
+
+
 class PublicStorefrontSummaryRead(BaseSchema):
     company: PublicStorefrontCompanyRead
     featured_products: list[PublicStorefrontProductRead] = Field(default_factory=list)
     branches: list[PublicStorefrontBranchRead] = Field(default_factory=list)
+    experience: PublicExperienceRead
 
 
 class PublicStockLocationRead(BaseSchema):

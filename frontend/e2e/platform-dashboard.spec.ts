@@ -1020,6 +1020,14 @@ test("business slug opens only its canonical public storefront", async ({ page }
       },
       featured_products: [],
       branches: [],
+      experience: {
+        mode: "catalog_locator",
+        release_stage: "public_read_only",
+        generated_at: new Date().toISOString(),
+        stale_after_seconds: 300,
+        capabilities: { catalog: true, branch_locator: true, ecommerce: false, checkout: false, payment: false, member_portal: false, digital_receipt: false },
+        hard_holds: ["owner_ecommerce_mode_decision"],
+      },
     }));
   });
   await page.route("**/api/public/storefront/businesses/alpha-cafe/products**", async (route) => {
@@ -1050,7 +1058,7 @@ test("business slug opens only its canonical public storefront", async ({ page }
   await page.goto("/alpha-cafe");
   await expect(page.getByRole("heading", { name: "Alpha Cafe" })).toBeVisible();
   await expect(page.getByText("Alpha Signature Coffee", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "เข้าสู่ระบบแอดมิน" })).toHaveAttribute("href", "/alpha-cafe/admin");
+  await expect(page.getByRole("link", { name: "สำหรับพนักงาน" }).first()).toHaveAttribute("href", "/alpha-cafe/admin");
   await expect(page.getByText("Beta Bistro", { exact: true })).toHaveCount(0);
 });
 

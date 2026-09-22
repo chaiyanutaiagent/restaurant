@@ -50,8 +50,28 @@ export interface StorefrontBranch {
   is_pickup_available: boolean;
 }
 
+export interface PublicExperienceCapabilities {
+  catalog: boolean;
+  branch_locator: boolean;
+  ecommerce: boolean;
+  checkout: boolean;
+  payment: boolean;
+  member_portal: boolean;
+  digital_receipt: boolean;
+}
+
+export interface PublicExperience {
+  mode: "catalog_locator";
+  release_stage: "public_read_only";
+  generated_at: string;
+  stale_after_seconds: number;
+  capabilities: PublicExperienceCapabilities;
+  hard_holds: string[];
+}
+
 export interface StorefrontSummary {
   company: StorefrontCompany;
   featured_products: StorefrontProduct[];
   branches: StorefrontBranch[];
+  experience: PublicExperience;
 }

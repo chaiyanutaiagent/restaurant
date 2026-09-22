@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
+
+from fastapi import HTTPException, Request, status
 
 from app.utils.rate_limiter import check_rate_limit
 
@@ -34,3 +37,27 @@ async def check_public_rate_limit(
         count = count + 1 if stored_window == window else 1
         _fallback_counts[fallback_key] = (window, count)
     return count <= limit
+
+
+def public_request_rate_key(request: Request, scope: str, subject: str | None = None) -> str:
+    """Build a privacy-safe key without retaining an IP address or public token."""
+    client = request.client.host if request.client else "unknown"
+    material = f"{client}|{subject or '-'}"
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+    return f"{scope}:{digest}"
+
+
+async def require_public_rate_limit(
+    request: Request,
+    scope: str,
+    *,
+    subject: str | None = None,
+    limit: int,
+    window_seconds: int = 60,
+) -> None:
+    key = public_request_rate_key(request, scope, subject)
+    if not await check_public_rate_limit(key, limit=limit, window_seconds=window_seconds):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests; try again later",
+        )

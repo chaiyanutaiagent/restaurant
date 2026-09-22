@@ -66,7 +66,7 @@ def expect_detail_code(response, expected_status: int, code: str) -> None:
         raise RuntimeError(f"Expected detail code {code}, got: {response.text}")
 
 
-async def prepare() -> dict[str, str]:
+async def prepare(*, password: str = PASSWORD) -> dict[str, str]:
     marker = uuid.uuid4().hex[:8]
     async with AsyncSessionLocal() as db:
         await seed_default_permissions(db)
@@ -280,14 +280,14 @@ async def prepare() -> dict[str, str]:
             company_id=DEFAULT_COMPANY_ID,
             username=manager_username,
             display_name="Approval Manager",
-            hashed_password=hash_password(PASSWORD),
+            hashed_password=hash_password(password),
             is_active=True,
         )
         cashier = User(
             company_id=DEFAULT_COMPANY_ID,
             username=cashier_username,
             display_name="Approval Cashier",
-            hashed_password=hash_password(PASSWORD),
+            hashed_password=hash_password(password),
             is_active=True,
         )
         db.add_all([manager, cashier])
@@ -482,7 +482,7 @@ async def prepare() -> dict[str, str]:
                 company_id=DEFAULT_COMPANY_ID,
                 username=result["manager_username"],
                 display_name="Approval Manager",
-                hashed_password=hash_password(PASSWORD),
+                hashed_password=hash_password(password),
                 is_active=True,
             )
             identity_cashier = User(
@@ -490,7 +490,7 @@ async def prepare() -> dict[str, str]:
                 company_id=DEFAULT_COMPANY_ID,
                 username=result["cashier_username"],
                 display_name="Approval Cashier",
-                hashed_password=hash_password(PASSWORD),
+                hashed_password=hash_password(password),
                 is_active=True,
             )
             identity_db.add_all([identity_manager, identity_cashier])

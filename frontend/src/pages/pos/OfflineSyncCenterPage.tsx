@@ -165,6 +165,7 @@ export default function OfflineSyncCenterPage(): JSX.Element {
   const companyId = useAuthStore((state) => state.companyId);
   const branchId = useAuthStore((state) => state.branchId);
   const device = useDeviceStore((state) => state.device);
+  const hydrateDevice = useDeviceStore((state) => state.hydrate);
   const [rows, setRows] = useState<RestaurantPendingOrder[]>([]);
   const [orders, setOrders] = useState<Record<string, WapOrder | null>>({});
   const [menu, setMenu] = useState<WapMenu | null>(null);
@@ -173,6 +174,10 @@ export default function OfflineSyncCenterPage(): JSX.Element {
   const [busyAction, setBusyAction] = useState<"sync" | "inquiry" | "retry" | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number>(Date.now());
   const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    void hydrateDevice();
+  }, [hydrateDevice]);
 
   useEffect(() => {
     const subscription = liveQuery(async () => {

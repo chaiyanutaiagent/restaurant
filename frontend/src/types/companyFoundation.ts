@@ -125,3 +125,63 @@ export type OperationalStatus = {
   summary: Record<OperationalState, number>;
   generated_at: string;
 };
+
+export type CompanyErpReadinessState = "ready" | "attention" | "blocked" | "hold" | "permission_denied";
+
+export type CompanyErpReadinessArea = {
+  key: "purchasing" | "inventory" | "finance_tax" | "reporting";
+  title: string;
+  state: CompanyErpReadinessState;
+  open_items: number;
+  permission_required: string;
+  deep_link: string | null;
+  read_only: boolean;
+  message: string;
+};
+
+export type CompanyErpException = {
+  id: string;
+  source: "purchase" | "transfer" | "stock_count" | "payable" | "tax";
+  title: string;
+  reference: string;
+  severity: "info" | "warning" | "error" | "blocker";
+  branch_id: string | null;
+  branch_name: string | null;
+  owner_id: string | null;
+  age_hours: number;
+  due_at: string | null;
+  deep_link: string;
+  permission_required: string;
+  evidence_reference: string;
+  created_at: string;
+};
+
+export type CompanyErpReadiness = {
+  contract_version: string;
+  context: CompanyContext;
+  areas: CompanyErpReadinessArea[];
+  exceptions: CompanyErpException[];
+  finance: {
+    period_year: number;
+    period_month: number;
+    period_status: "not_started" | "open" | "review" | "closed" | "locked";
+    tax_configured: boolean;
+    open_blockers: number;
+    open_warnings: number;
+    pending_reconciliation: number;
+    accountant_signoff: "pending" | "recorded";
+    ready_to_close: boolean;
+    deep_link: string | null;
+  } | null;
+  controls: Array<{
+    key: string;
+    label: string;
+    state: "enforced" | "hold";
+    detail: string;
+  }>;
+  summary: Record<"open_exceptions" | "blockers" | "errors" | "overdue" | "holds", number>;
+  source_system: "operational_database";
+  source_updated_at: string | null;
+  stale_after_seconds: number;
+  generated_at: string;
+};

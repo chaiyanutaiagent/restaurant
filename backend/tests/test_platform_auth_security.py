@@ -121,6 +121,7 @@ class PlatformAuthServiceTests(unittest.IsolatedAsyncioTestCase):
             last_seen_at=datetime.now(timezone.utc),
             ip_address=None,
             user_agent=None,
+            qa_persona=None,
         )
         old_refresh_hash = session.refresh_token_hash
         old_csrf_hash = session.csrf_token_hash

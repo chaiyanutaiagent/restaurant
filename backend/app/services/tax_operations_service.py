@@ -374,6 +374,14 @@ class TaxOperationsService:
         elif action == "close":
             if period.status != "review":
                 raise HTTPException(status_code=409, detail="ต้องส่งตรวจงวดก่อนปิดงวด")
+            if period.reviewed_by == actor_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "maker_checker_conflict",
+                        "message": "Tax period reviewer and closer must be different users",
+                    },
+                )
             blocking = await self.db.scalar(select(func.count(TaxReconciliationIssue.id)).where(TaxReconciliationIssue.company_id == company_id, TaxReconciliationIssue.period_year == data.year, TaxReconciliationIssue.period_month == data.month, TaxReconciliationIssue.status == "open", TaxReconciliationIssue.severity.in_(["error", "blocker"]), TaxReconciliationIssue.branch_id == data.branch_id if data.branch_id else True))
             if blocking:
                 raise HTTPException(status_code=409, detail=f"ยังมีปัญหาภาษีที่ต้องแก้ {blocking} รายการ")

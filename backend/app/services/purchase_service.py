@@ -325,6 +325,14 @@ class PurchaseService:
         po = await self._get_po_entity(po_id, company_id)
         if po.status != "pending_approval":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only pending purchase orders can be approved")
+        if po.created_by == approver_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "maker_checker_conflict",
+                    "message": "Purchase order creator and approver must be different users",
+                },
+            )
         po.status = "approved"
         po.approved_by = approver_id
         po.approved_at = datetime.now(timezone.utc)

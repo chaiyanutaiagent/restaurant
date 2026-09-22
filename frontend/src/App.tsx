@@ -105,6 +105,7 @@ import CompanyDistributionPage from "@/pages/distribution/CompanyDistributionPag
 import CompanyActionCenterPage from "@/pages/company/CompanyActionCenterPage";
 import CompanyAppsPage from "@/pages/company/CompanyAppsPage";
 import CompanyHomePage from "@/pages/company/CompanyHomePage";
+import CompanyErpPage from "@/pages/company/CompanyErpPage";
 import CompanyPeopleAccessPage from "@/pages/company/CompanyPeopleAccessPage";
 import CompanyAccessReviewPage from "@/pages/company/CompanyAccessReviewPage";
 import CompanyAuditPage from "@/pages/company/CompanyAuditPage";
@@ -199,7 +200,7 @@ export default function App(): JSX.Element {
           <Route path="/:businessSlug" element={<StorefrontPage />} />
           <Route path="/takeaway/pickup-status/:token" element={<TakeawayPickupStatusPage />} />
           <Route path="/takeaway/order/:token" element={<TakeawayPublicOrderPage />} />
-          <Route path="/erp" element={<Navigate to="/admin" replace />} />
+          <Route path="/erp" element={<Navigate to="/company/erp" replace />} />
           <Route element={<ProtectedRoute permissions={TAKEAWAY_ENTRY_PERMISSIONS} />}>
             <Route element={<TakeawayShell />}>
               <Route path="/takeaway" element={<TakeawayWorkspaceIndexPage />} />
@@ -377,6 +378,7 @@ export default function App(): JSX.Element {
           <Route element={<ProtectedRoute />}>
             <Route element={<CompanyShell />}>
               <Route path="/company" element={<CompanyHomePage />} />
+              <Route path="/company/erp" element={<CompanyErpPage />} />
               <Route path="/company/actions" element={<CompanyActionCenterPage />} />
               <Route path="/company/apps" element={<CompanyAppsPage />} />
               <Route path="/company/people" element={<CompanyPeopleAccessPage />} />

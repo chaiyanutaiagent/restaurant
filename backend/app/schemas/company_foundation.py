@@ -20,6 +20,7 @@ OperationalState = Literal[
     "error",
     "disabled",
 ]
+ErpReadinessState = Literal["ready", "attention", "blocked", "hold", "permission_denied"]
 WorkItemSeverity = Literal["info", "warning", "error", "blocker"]
 WorkItemStatus = Literal["open", "acknowledged", "completed", "dismissed"]
 WorkItemAction = Literal[
@@ -183,4 +184,66 @@ class OperationalStatusRead(BaseSchema):
     contract_version: str = "2026-09-19.1"
     components: list[OperationalComponentRead]
     summary: dict[OperationalState, int]
+    generated_at: datetime
+
+
+class CompanyErpReadinessAreaRead(BaseSchema):
+    key: Literal["purchasing", "inventory", "finance_tax", "reporting"]
+    title: str
+    state: ErpReadinessState
+    open_items: int = 0
+    permission_required: str
+    deep_link: str | None = None
+    read_only: bool = True
+    message: str
+
+
+class CompanyErpExceptionRead(BaseSchema):
+    id: str
+    source: Literal["purchase", "transfer", "stock_count", "payable", "tax"]
+    title: str
+    reference: str
+    severity: WorkItemSeverity
+    branch_id: uuid.UUID | None = None
+    branch_name: str | None = None
+    owner_id: uuid.UUID | None = None
+    age_hours: int = Field(ge=0)
+    due_at: datetime | None = None
+    deep_link: str
+    permission_required: str
+    evidence_reference: str
+    created_at: datetime
+
+
+class CompanyErpFinanceReadinessRead(BaseSchema):
+    period_year: int
+    period_month: int
+    period_status: Literal["not_started", "open", "review", "closed", "locked"]
+    tax_configured: bool
+    open_blockers: int = 0
+    open_warnings: int = 0
+    pending_reconciliation: int = 0
+    accountant_signoff: Literal["pending", "recorded"] = "pending"
+    ready_to_close: bool = False
+    deep_link: str | None = None
+
+
+class CompanyErpControlRead(BaseSchema):
+    key: str
+    label: str
+    state: Literal["enforced", "hold"]
+    detail: str
+
+
+class CompanyErpReadinessRead(BaseSchema):
+    contract_version: str = "2026-09-22.1"
+    context: CompanyContextRead
+    areas: list[CompanyErpReadinessAreaRead]
+    exceptions: list[CompanyErpExceptionRead]
+    finance: CompanyErpFinanceReadinessRead | None = None
+    controls: list[CompanyErpControlRead]
+    summary: dict[str, int]
+    source_system: Literal["operational_database"] = "operational_database"
+    source_updated_at: datetime | None = None
+    stale_after_seconds: int = 300
     generated_at: datetime

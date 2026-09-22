@@ -32,7 +32,7 @@ import { useAuthStore } from "@/stores/auth.store";
 import type { CompanyOverviewSection, OperationalState } from "@/types/companyFoundation";
 
 const moduleRoute: Record<CompanyOverviewSection["module_key"], string> = {
-  erp: "/dashboard",
+  erp: "/company/erp",
   central_kitchen: "/company-kitchen",
   restaurant_pos: "/restaurant",
   takeaway_pos: "/takeaway",

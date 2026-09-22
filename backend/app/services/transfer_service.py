@@ -147,6 +147,14 @@ class TransferService:
         transfer_order = await self._get_to_entity(to_id, company_id)
         if transfer_order.status != "pending_approval":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only pending transfer orders can be approved")
+        if transfer_order.requested_by == approver_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "maker_checker_conflict",
+                    "message": "Transfer requester and approver must be different users",
+                },
+            )
 
         approve_map = {item.item_id: item for item in data.items}
         if set(approve_map.keys()) != {item.id for item in transfer_order.items}:

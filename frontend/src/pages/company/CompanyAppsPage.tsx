@@ -37,7 +37,7 @@ const appDefinition: Record<CompanyModuleAccess["module_key"], {
   icon: typeof Boxes;
   accent: string;
 }> = {
-  erp: { name: "ERP", description: "จัดซื้อ คลังสินค้า การเงิน ภาษี และบุคลากร", route: "/dashboard", icon: Database, accent: "bg-blue-600" },
+  erp: { name: "ERP", description: "จัดซื้อ คลังสินค้า การเงิน ภาษี และบุคลากร", route: "/company/erp", icon: Database, accent: "bg-blue-600" },
   central_kitchen: { name: "ครัวกลาง", description: "Demand วัตถุดิบ การผลิต และการกระจายสินค้า", route: "/company-kitchen", icon: ChefHat, accent: "bg-violet-600" },
   restaurant_pos: { name: "Restaurant POS", description: "หน้าร้าน โต๊ะและ QR ครัว เมนู และรายงานร้านอาหาร", route: "/restaurant", icon: UtensilsCrossed, accent: "bg-emerald-600" },
   takeaway_pos: { name: "Takeaway POS", description: "เคาน์เตอร์ ครัว คิวรับสินค้า และคลังสาขา", route: "/takeaway", icon: ShoppingBag, accent: "bg-rose-600" },

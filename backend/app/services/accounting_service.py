@@ -372,6 +372,14 @@ class AccountingService:
         entry = await self.get_entry(entry_id, company_id)
         if entry.is_reversed:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Journal entry already reversed")
+        if entry.entry_type == "manual" and entry.created_by == user_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "maker_checker_conflict",
+                    "message": "Manual journal creator and reversal approver must be different users",
+                },
+            )
         reversed_entry = await self._post_entry(
             company_id=company_id,
             branch_id=entry.branch_id,

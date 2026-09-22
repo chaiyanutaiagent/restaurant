@@ -13,6 +13,7 @@ import {
   Settings,
   ShieldCheck,
   ClipboardList,
+  Database,
   Users,
   X,
 } from "lucide-react";
@@ -50,6 +51,7 @@ type CompanyNavItem = {
 const navigation: CompanyNavItem[] = [
   { label: "หน้าหลัก", to: "/company", icon: Home, exact: true },
   { label: "งานและการแจ้งเตือน", to: "/company/actions", icon: Bell },
+  { label: "Shared ERP", to: "/company/erp", icon: Database, permissions: ["inventory.purchase.view", "inventory.transfer.view", "inventory.stock.view", "accounting.report.view", "accounting.tax.view", "system.company.edit"] },
   { label: "องค์กร", to: "/company/organization", icon: Building2, permission: "system.branch.view" },
   { label: "พนักงานและสิทธิ์", to: "/company/people", icon: Users, permissions: ["system.user.view", "system.role.view"] },
   { label: "ความปลอดภัย", to: "/company/security", icon: ShieldCheck, permission: "system.user.view" },

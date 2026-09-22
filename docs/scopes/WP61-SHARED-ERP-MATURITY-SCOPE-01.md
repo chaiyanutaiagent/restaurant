@@ -1,6 +1,6 @@
 # WP61 — Shared ERP Operational and Finance Maturity
 
-Status: READY TO START after WP60 commit/push
+Status: LOCAL ENGINEERING GATE PASSED — UAT and combined Batch B gate pending
 Environment: Local/UAT only
 Production: HOLD
 
@@ -20,6 +20,20 @@ real fiscal/provider behavior or weakening Company/Branch authority.
    desktop/tablet responsiveness.
 6. Batch B combined regression, authenticated UAT persona matrix and
    rollback/restore for WP59–WP61.
+
+## Local checkpoint delivered
+
+- Added a Server-authoritative, read-only Shared ERP readiness contract and
+  Company/Branch-scoped workspace at `/company/erp`.
+- Added purchasing, transfer, stock-count, payable and tax exception queues
+  with source evidence, owner, age, due date, branch and safe deep links.
+- Added current-period finance/tax close readiness while keeping accountant
+  sign-off and real fiscal/provider actions visibly on HOLD.
+- Enforced distinct maker/checker users for purchase approval, transfer
+  approval, tax review/close and manual journal reversal before mutation.
+- Added Loading, Empty, Error, Offline, Stale and Permission-denied states plus
+  responsive desktop/tablet layout and filters.
+- No schema migration or Production flag is introduced by WP61.
 
 ## Hard holds
 

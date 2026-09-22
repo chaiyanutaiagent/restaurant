@@ -67,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--company-id", type=uuid.UUID, required=True)
     parser.add_argument("--actor-username", required=True)
     parser.add_argument("--restaurant-brand-slug", required=True)
+    parser.add_argument("--branch-code", required=True)
     parser.add_argument("--yes", action="store_true")
     return parser
 
@@ -120,6 +121,7 @@ async def _load_scope(
                 BrandBranch.company_id == args.company_id,
                 BrandBranch.is_active.is_(True),
                 Branch.company_id == args.company_id,
+                Branch.code == args.branch_code.strip(),
                 Branch.is_active.is_(True),
                 Branch.deleted_at.is_(None),
             )
@@ -130,7 +132,9 @@ async def _load_scope(
     if actor is None:
         raise RuntimeError("Active Company superuser actor was not found")
     if len(scope) != 1:
-        raise RuntimeError("Restaurant QA Brand must resolve to exactly one active Branch")
+        raise RuntimeError(
+            "Restaurant QA Brand and Branch code must resolve to exactly one active Branch"
+        )
     brand, branch = scope[0]
     return company, actor, brand, branch
 

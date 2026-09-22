@@ -30,6 +30,7 @@ type Props = {
   online: boolean;
   canVoid: boolean;
   canRefund: boolean;
+  refundUnavailableReason?: string;
   onOpenChange: (open: boolean) => void;
   onRetry: () => void;
   onPrint: (order: SaleOrder) => void;
@@ -106,6 +107,7 @@ export default function BillReceiptCenterDialog({
   online,
   canVoid,
   canRefund,
+  refundUnavailableReason,
   onOpenChange,
   onRetry,
   onPrint,
@@ -313,11 +315,14 @@ export default function BillReceiptCenterDialog({
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                     <Button className="h-12" variant="outline" onClick={() => onPrint(selected)}><Printer className="h-4 w-4" />เปิดใบเสร็จ</Button>
                     <Button className="h-12" variant="outline" disabled={!online || !canVoid || !voidState?.allowed} onClick={() => onVoid(selected)}>Void บิล</Button>
-                    <Button className="h-12" disabled={!online || !canRefund || !refundState?.allowed} onClick={() => onRefund(selected)}>คืนสินค้า / คืนเงิน</Button>
+                    <Button className="h-12" disabled={!online || !canRefund || !refundState?.allowed} onClick={() => onRefund(selected)}>
+                      {refundUnavailableReason ? "คืนสินค้า / คืนเงิน · WP57" : "คืนสินค้า / คืนเงิน"}
+                    </Button>
                     <Button className="h-12" variant="outline" disabled title="ยังไม่มี Atomic exchange contract">แลกสินค้า · ยังไม่เปิดใช้</Button>
                   </div>
                   <div className="mt-3 space-y-1 text-xs text-slate-600">
                     {!canVoid || !canRefund ? <p className="flex items-center gap-2 text-amber-800"><ShieldX className="h-4 w-4" />บาง action ถูกปิดตามสิทธิ์ของพนักงาน</p> : null}
+                    {refundUnavailableReason ? <p className="text-amber-800">Refund: {refundUnavailableReason}</p> : null}
                     {voidState && !voidState.allowed ? <p>Void: {voidState.reason}</p> : null}
                     {refundState && !refundState.allowed ? <p>Refund: {refundState.reason}</p> : null}
                     {!online ? <p>เชื่อมต่อ Server ก่อนทำ Void, Refund หรือขอ Manager approval</p> : null}

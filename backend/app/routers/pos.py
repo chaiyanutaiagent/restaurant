@@ -376,6 +376,19 @@ def _enforce_retail_payment_readiness(
         )
 
 
+def _enforce_retail_refund_readiness(current: TokenData) -> None:
+    """Keep Retail return/refund mutations closed until the WP57 contract is live."""
+    if current.business_type != "retail_pos" and current.target_database != "retail_pos":
+        return
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "retail_return_not_ready",
+            "message": "Retail return and refund are disabled until WP57 is enabled",
+        },
+    )
+
+
 @router.post("/shifts/open", status_code=status.HTTP_201_CREATED)
 async def open_shift(
     payload: OpenShiftRequest,
@@ -1136,6 +1149,7 @@ async def refund_sale(
     ),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _enforce_retail_refund_readiness(current)
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
         detail={"code": "legacy_refund_disabled", "message": "Create a Server refund quote and use /refunds"},
@@ -1151,6 +1165,7 @@ async def partial_refund_sale(
     ),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _enforce_retail_refund_readiness(current)
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
         detail={"code": "legacy_refund_disabled", "message": "Create a Server refund quote and use /refunds"},
@@ -1163,6 +1178,7 @@ async def create_refund_quote(
     current: TokenData = Depends(require_any_permission("pos.refund.create", "pos.refund.request")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _enforce_retail_refund_readiness(current)
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
     quote = await RefundService(db).create_quote(
@@ -1180,6 +1196,7 @@ async def execute_refund(
     current: TokenData = Depends(require_any_permission("pos.refund.create", "pos.refund.request")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _enforce_retail_refund_readiness(current)
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
     service = RefundService(db)
@@ -1281,6 +1298,7 @@ async def confirm_cash_refund(
     current: TokenData = Depends(require_permission("pos.refund.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _enforce_retail_refund_readiness(current)
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
     service = RefundService(db)
@@ -1295,6 +1313,7 @@ async def inquire_refund(
     current: TokenData = Depends(require_any_permission("pos.refund.create", "pos.refund.request")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _enforce_retail_refund_readiness(current)
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
     service = RefundService(db)
@@ -1309,6 +1328,7 @@ async def retry_refund(
     current: TokenData = Depends(require_permission("pos.refund.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _enforce_retail_refund_readiness(current)
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
     service = RefundService(db)
@@ -1323,6 +1343,7 @@ async def retry_refund_tax(
     current: TokenData = Depends(require_any_permission("pos.refund.create", "accounting.etax.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _enforce_retail_refund_readiness(current)
     if current.branch_id is None:
         raise HTTPException(status_code=409, detail="Branch context required")
     service = RefundService(db)

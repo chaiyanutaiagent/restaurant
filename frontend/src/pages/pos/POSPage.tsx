@@ -3833,7 +3833,8 @@ export default function POSPage(): JSX.Element {
         updatedAt={recentSalesQuery.dataUpdatedAt}
         online={isOnline}
         canVoid={canVoidSale}
-        canRefund={canRefundSale}
+        canRefund={canRefundSale && !isRetailMode}
+        refundUnavailableReason={isRetailMode ? "Retail Return / Refund จะเปิดหลังผ่าน WP57" : undefined}
         onOpenChange={setRecentSalesOpen}
         onRetry={() => { void recentSalesQuery.refetch(); }}
         onPrint={(order) => {
@@ -3969,16 +3970,18 @@ export default function POSPage(): JSX.Element {
         settings={loyaltySettingsQuery.data ?? null}
         onRedeemed={(discountAmount) => setLoyaltyDiscount(discountAmount)}
       />
-      <RefundWorkspaceDialog
-        open={Boolean(refundWorkspaceOrder)}
-        order={refundWorkspaceOrder}
-        shift={currentShift}
-        online={isOnline}
-        onOpenChange={(next) => { if (!next) setRefundWorkspaceOrder(null); }}
-        onCompleted={async () => {
-          await recentSalesQuery.refetch();
-        }}
-      />
+      {!isRetailMode ? (
+        <RefundWorkspaceDialog
+          open={Boolean(refundWorkspaceOrder)}
+          order={refundWorkspaceOrder}
+          shift={currentShift}
+          online={isOnline}
+          onOpenChange={(next) => { if (!next) setRefundWorkspaceOrder(null); }}
+          onCompleted={async () => {
+            await recentSalesQuery.refetch();
+          }}
+        />
+      ) : null}
       {pendingManagerApproval ? (
         <ManagerApprovalDialog
           open

@@ -114,7 +114,7 @@ export default function PosWorkspaceNav({
         icon: ClipboardList,
         onClick: holdEnabled ? onHeldBills : undefined,
       },
-      { label: "บิล / คืนสินค้า", icon: FileClock, onClick: onBillCenter },
+      { label: "บิล / ใบเสร็จ · คืนสินค้า WP57", icon: FileClock, onClick: onBillCenter },
       { label: "กะ", icon: Clock3, onClick: onShift },
       { label: "สถานะเครื่อง", icon: MonitorCog, onClick: onDeviceStatus },
     ];

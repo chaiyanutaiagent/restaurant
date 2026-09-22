@@ -116,7 +116,7 @@ class RetailShellContractTests(unittest.TestCase):
     def test_retail_navigation_excludes_restaurant_surfaces(self) -> None:
         navigation = (ROOT / "frontend/src/components/pos/PosWorkspaceNav.tsx").read_text()
         retail_block = navigation.split('if (mode === "retail")', maxsplit=1)[1].split("return (", maxsplit=1)[0]
-        for label in ("ขาย", "พักบิล", "บิล / คืนสินค้า", "กะ", "สถานะเครื่อง"):
+        for label in ("ขาย", "พักบิล", "บิล / ใบเสร็จ · คืนสินค้า WP57", "กะ", "สถานะเครื่อง"):
             self.assertIn(label, retail_block)
         for forbidden in ("เปิดโต๊ะ", "KDS", "รับกลับ", "เดลิเวอรี"):
             self.assertNotIn(forbidden, retail_block)

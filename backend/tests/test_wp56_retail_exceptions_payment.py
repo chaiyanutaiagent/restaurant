@@ -12,7 +12,7 @@ from app.cli.rotate_uat_user_password import require_bounded_uat
 from app.cli.prepare_retail_uat_persona import require_bounded_uat as require_retail_persona_uat
 from app.config import settings
 from app.dependencies import TokenData
-from app.routers.pos import _enforce_retail_payment_readiness
+from app.routers.pos import _enforce_retail_payment_readiness, _enforce_retail_refund_readiness
 from app.routers.products import lookup_retail_product
 from app.schemas.pos import CreateSaleRequest
 
@@ -63,6 +63,14 @@ class RetailPaymentReadinessTests(unittest.TestCase):
 
     def test_restaurant_payment_contract_is_unchanged(self) -> None:
         _enforce_retail_payment_readiness(_current("restaurant"), _sale("promptpay"))
+
+    def test_retail_refund_mutations_fail_closed_until_wp57(self) -> None:
+        with self.assertRaises(HTTPException) as raised:
+            _enforce_retail_refund_readiness(_current())
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.detail["code"], "retail_return_not_ready")
+
+        _enforce_retail_refund_readiness(_current("restaurant"))
 
 
 class UatCredentialRotationGuardTests(unittest.TestCase):
@@ -199,6 +207,10 @@ class RetailUxContractTests(unittest.TestCase):
         self.assertIn('enabled: Boolean(currentShift) && !isRetailMode', page)
         self.assertIn('holdEnabled={!isRetailMode}', page)
         self.assertIn('"พักบิล · WP57"', navigation)
+        self.assertIn('canRefund={canRefundSale && !isRetailMode}', page)
+        self.assertIn('Retail Return / Refund จะเปิดหลังผ่าน WP57', page)
+        self.assertIn('"บิล / ใบเสร็จ · คืนสินค้า WP57"', navigation)
+        self.assertIn('{!isRetailMode ? (', page)
         self.assertIn('"price_calculations"', retail_env)
         self.assertIn('down_revision: Union[str, None] = "p9retail0003"', migration)
         self.assertIn('op.create_table(\n        "price_calculations"', migration)

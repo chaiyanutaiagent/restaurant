@@ -33,6 +33,18 @@ test("Company Admin sees shared raw stock and Brand-separated reporting in dark 
   await page.route("**/api/v1/system/me/branches", (route) => fulfill(route, []));
   await page.route("**/api/v1/company-kitchen/dashboard", (route) => fulfill(route, {
     write_enabled: false,
+    release: {
+      release_stage: "read_only",
+      writes_enabled: false,
+      generated_at: new Date().toISOString(),
+      stale_after_seconds: 300,
+      hard_holds: ["opening_lot_physical_count", "quality_control_release", "recall_traceability"],
+      checks: [
+        { key: "company_context", label: "Company context", state: "pass", detail: "Signed scope" },
+        { key: "opening_lot_physical_count", label: "Opening lot and physical count", state: "hold", detail: "Awaiting evidence" },
+        { key: "quality_control_release", label: "QC hold and release", state: "hold", detail: "Not active" },
+      ],
+    },
     kitchen: { id: "k1", name: "ครัวกลาง Foodchainservice", branch_id: "c1", branch_name: "สาขาครัวกลาง", raw_location_id: "l1", raw_location_name: "คลัง RAW กลาง", timezone: "Asia/Bangkok", costing_method: "fifo", allow_negative_stock: false, is_active: true },
     ingredients: [{ id: "i1", code: "PORK", name: "หมู", canonical_product_id: "p1", base_unit_code: "g", unit_dimension: "mass", qty_on_hand: 1500, is_active: true }],
     aliases: [
@@ -66,6 +78,8 @@ test("Company Admin sees shared raw stock and Brand-separated reporting in dark 
   await page.goto("/company-kitchen");
   await expect(page.getByRole("heading", { name: "ครัวกลางและวัตถุดิบร่วม" })).toBeVisible();
   await expect(page.getByTestId("company-kitchen-dark-launch")).toBeVisible();
+  await expect(page.getByText("Read-only Dark Launch · ครัวกลาง")).toBeVisible();
+  await expect(page.locator('[data-release-check="opening_lot_physical_count"]')).toBeVisible();
   await expect(page.getByText("หมู", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("1,500 g")).toBeVisible();
   await page.getByRole("tab", { name: "ตั้งค่าและ Mapping" }).click();

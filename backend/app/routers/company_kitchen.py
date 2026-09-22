@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,8 +41,84 @@ def require_write_activation() -> None:
     if not settings.company_kitchen_writes_enabled:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Company Kitchen write path ยังไม่เปิดใช้งาน กรุณาผ่าน rollout sign-off ก่อน",
+            detail={
+                "code": "company_kitchen_write_hold",
+                "message": "Company Kitchen writes remain closed until opening-lot, QC, owner and rollout sign-off gates pass",
+                "release_stage": "read_only",
+            },
         )
+
+
+async def require_kitchen_release_gate(request: Request) -> None:
+    if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+        require_write_activation()
+
+
+router.dependencies.append(Depends(require_kitchen_release_gate))
+
+
+def release_status(data: dict[str, Any]) -> dict[str, Any]:
+    writes_enabled = settings.company_kitchen_writes_enabled
+    kitchen_configured = data.get("kitchen") is not None
+    ingredient_count = len(data.get("ingredients", []))
+    alias_count = len(data.get("aliases", []))
+    return {
+        "release_stage": "uat_canary" if writes_enabled else "read_only",
+        "writes_enabled": writes_enabled,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "stale_after_seconds": 300,
+        "hard_holds": [
+            "opening_lot_physical_count",
+            "stock_owner_signoff",
+            "quality_control_release",
+            "recall_traceability",
+            "physical_device_uat",
+        ],
+        "checks": [
+            {
+                "key": "company_context",
+                "label": "Company context",
+                "state": "pass",
+                "detail": "Company scope comes from the signed session",
+            },
+            {
+                "key": "kitchen_configuration",
+                "label": "Kitchen and RAW location",
+                "state": "pass" if kitchen_configured else "pending",
+                "detail": "Configured" if kitchen_configured else "Kitchen/RAW location is not configured",
+            },
+            {
+                "key": "canonical_ingredients",
+                "label": "Canonical ingredients",
+                "state": "pass" if ingredient_count > 0 else "pending",
+                "detail": f"{ingredient_count} canonical ingredient records",
+            },
+            {
+                "key": "brand_alias_mapping",
+                "label": "Brand alias mapping",
+                "state": "pass" if alias_count > 0 else "pending",
+                "detail": f"{alias_count} approved mapping candidates; owner sign-off remains required",
+            },
+            {
+                "key": "opening_lot_physical_count",
+                "label": "Opening lot and physical count",
+                "state": "hold",
+                "detail": "Two-person count, cost, expiry and location evidence is not accepted yet",
+            },
+            {
+                "key": "quality_control_release",
+                "label": "QC hold and release",
+                "state": "hold",
+                "detail": "QC inspection, quarantine and release workflow is not active",
+            },
+            {
+                "key": "recall_traceability",
+                "label": "Traceability and recall",
+                "state": "hold",
+                "detail": "Immutable recall case workflow is not active",
+            },
+        ],
+    }
 
 
 class CancelRequest(BaseModel):
@@ -56,6 +132,7 @@ async def dashboard(
 ) -> dict[str, Any]:
     data = await SharedKitchenService(db).dashboard(current.company_id)
     data["write_enabled"] = settings.company_kitchen_writes_enabled
+    data["release"] = release_status(data)
     return ok(data)
 
 

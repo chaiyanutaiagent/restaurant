@@ -18,6 +18,18 @@ test("Company Admin tracks demand and finished-goods reconciliation in dark laun
   await page.route("**/api/v1/system/me/branches", (route) => fulfill(route, []));
   await page.route("**/api/v1/company-distribution/dashboard", (route) => fulfill(route, {
     write_enabled: false,
+    release: {
+      release_stage: "read_only",
+      writes_enabled: false,
+      generated_at: new Date().toISOString(),
+      stale_after_seconds: 300,
+      hard_holds: ["kitchen_write_canary", "quality_control_release", "branch_receiver_physical_uat"],
+      checks: [
+        { key: "company_context", label: "Company context", state: "pass", detail: "Signed scope" },
+        { key: "kitchen_write_canary", label: "Kitchen write canary", state: "hold", detail: "Kitchen first" },
+        { key: "branch_receiver_physical_uat", label: "Branch receiving UAT", state: "hold", detail: "Awaiting evidence" },
+      ],
+    },
     demands: [
       { id: "d1", source_module: "restaurant_pos", brand_id: "b1", brand_name: "หมูแดดเดียว", branch_id: "s1", branch_name: "สาขาสยาม", product_id: "p1", product_name: "หมูแดดเดียวพร้อมขาย", needed_on: "2026-09-15", requested_qty: 10, allocated_qty: 10, net_received_qty: 8, unit_code: "ea", status: "allocated", source_type: "restaurant_replenishment", source_id: "REQ-001", note: null },
       { id: "d2", source_module: "takeaway_pos", brand_id: "b2", brand_name: "Takeaway Express", branch_id: "s2", branch_name: "จุดขาย A", product_id: "p2", product_name: "ชุดพร้อมขาย", needed_on: "2026-09-15", requested_qty: 5, allocated_qty: 5, net_received_qty: 0, unit_code: "ea", status: "allocated", source_type: "takeaway_replenishment", source_id: "REQ-002", note: null },
@@ -37,6 +49,8 @@ test("Company Admin tracks demand and finished-goods reconciliation in dark laun
   await page.goto("/company-distribution");
   await expect(page.getByRole("heading", { name: "Demand และกระจายสินค้าสำเร็จรูป" })).toBeVisible();
   await expect(page.getByTestId("company-distribution-dark-launch")).toBeVisible();
+  await expect(page.getByText("Read-only Dark Launch · Supply Chain")).toBeVisible();
+  await expect(page.locator('[data-release-check="kitchen_write_canary"]')).toBeVisible();
   await expect(page.getByText("Restaurant POS").first()).toBeVisible();
   await expect(page.getByText("Takeaway POS").first()).toBeVisible();
   await page.getByRole("tab", { name: "Demand", exact: true }).click();

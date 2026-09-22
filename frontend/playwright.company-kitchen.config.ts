@@ -10,10 +10,13 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   outputDir: "/private/tmp/restaurant-company-kitchen-playwright",
   reporter: [["line"]],
+  projects: [
+    { name: "desktop", use: { viewport: { width: 1440, height: 900 } } },
+    { name: "tablet", use: { viewport: { width: 1024, height: 768 }, hasTouch: true } },
+  ],
   use: {
     baseURL: "http://127.0.0.1:4175",
     channel: "chrome",
-    viewport: { width: 1280, height: 800 },
     serviceWorkers: "block",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",

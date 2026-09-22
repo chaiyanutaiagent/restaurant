@@ -1,3 +1,5 @@
+import type { SupplyChainRelease } from "@/types/supplyChainRelease";
+
 export type DistributionModule = "restaurant_pos" | "takeaway_pos" | "retail_pos";
 
 export type DistributionDemand = {
@@ -70,6 +72,7 @@ export type DistributionDashboard = {
   shipments: DistributionShipment[];
   setup_options: DistributionSetupOptions;
   write_enabled: boolean;
+  release: SupplyChainRelease;
 };
 
 export type DistributionReport = {

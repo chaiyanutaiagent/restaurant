@@ -51,6 +51,11 @@ class DistributionApiTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertFalse(response.json()["data"]["write_enabled"])
+        release = response.json()["data"]["release"]
+        self.assertEqual(release["release_stage"], "read_only")
+        self.assertFalse(release["writes_enabled"])
+        self.assertIn("kitchen_write_canary", release["hard_holds"])
+        self.assertEqual(release["checks"][0]["key"], "company_context")
         service.dashboard.assert_awaited_once_with(self.company_id)
 
     def test_report_forwards_signed_company_and_dates(self) -> None:
@@ -82,7 +87,14 @@ class DistributionApiTests(unittest.TestCase):
                 "idempotency_key": "wp6-api-demand-001",
             })
         self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "company_distribution_write_hold")
         service.create_demand.assert_not_awaited()
+
+    def test_router_release_gate_precedes_payload_validation(self) -> None:
+        settings.company_distribution_writes_enabled = False
+        response = self.client.post("/api/v1/company-distribution/shipments", json={})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "company_distribution_write_hold")
 
 
 if __name__ == "__main__":

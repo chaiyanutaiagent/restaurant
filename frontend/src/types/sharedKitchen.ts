@@ -1,3 +1,5 @@
+import type { SupplyChainRelease } from "@/types/supplyChainRelease";
+
 export type CompanyKitchen = {
   id: string;
   name: string;
@@ -90,6 +92,7 @@ export type CompanyKitchenDashboard = {
   demands: CompanyProductionDemand[];
   orders: CompanyProductionOrder[];
   write_enabled: boolean;
+  release: SupplyChainRelease;
   setup_options: {
     branches: Array<{ id: string; name: string; code: string }>;
     locations: Array<{ id: string; branch_id: string; name: string; code: string }>;

@@ -59,6 +59,11 @@ class SharedKitchenApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertFalse(response.json()["data"]["write_enabled"])
+        release = response.json()["data"]["release"]
+        self.assertEqual(release["release_stage"], "read_only")
+        self.assertFalse(release["writes_enabled"])
+        self.assertIn("opening_lot_physical_count", release["hard_holds"])
+        self.assertEqual(release["checks"][0]["key"], "company_context")
         self.assertEqual(service.dashboard.await_args.args[0], self.company_id)
 
     def test_report_forwards_server_scoped_company_and_business_dates(self) -> None:
@@ -102,7 +107,14 @@ class SharedKitchenApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "company_kitchen_write_hold")
         service.receive.assert_not_awaited()
+
+    def test_router_release_gate_precedes_payload_validation(self) -> None:
+        settings.company_kitchen_writes_enabled = False
+        response = self.client.post("/api/v1/company-kitchen/production-orders", json={})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "company_kitchen_write_hold")
 
 
 if __name__ == "__main__":

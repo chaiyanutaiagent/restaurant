@@ -44,7 +44,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP60 | Company Admin maturity, access review and Company audit | Combined Batch B software UAT passed | Tenant MFA/recovery remains HOLD; Production unchanged |
 | WP61 | Shared ERP operational and finance maturity | Software UAT passed; combined Batch B gate closed | Real tax/provider/accountant gates remain |
 | WP62 | Takeaway operational UI activation | Focused software UAT checkpoint passed | Server-authoritative Dark Launch; transactions remain gated until owner/canary approval |
-| WP63 | Central Kitchen and Supply Chain UI activation | Planned | Read-only/dark-launch until stock/QC gates pass |
+| WP63 | Central Kitchen and Supply Chain UI activation | Local engineering gate passed; combined Batch C UAT pending | Read-only/dark-launch; stock/QC/recall writes remain gated |
 | WP64 | Public Customer Experience | Planned | Catalog/ecommerce owner decision required |
 | WP65 | Integration, Reporting, Reconciliation and Release Governance | Planned | Provider/retention/owner gates remain |
 
@@ -58,7 +58,7 @@ The execution contract is recorded in `FULL-UI-BATCH-EXECUTION-PLAN-02.md`. WP54
 |---|---|---|
 | A — Retail POS | WP55–WP58 | Combined software gate passed; physical/Production HOLD; Batch B may begin on Local/UAT |
 | B — Platform/Company/ERP | WP59–WP61 | Combined software UAT gate passed; Production/external acceptance HOLD |
-| C — Takeaway/Kitchen/Public | WP62–WP64 | In progress; WP62 focused software UAT passed, WP63 next; unsafe writes remain gated |
+| C — Takeaway/Kitchen/Public | WP62–WP64 | In progress; WP62 focused UAT and WP63 Local gate passed, WP64 next; unsafe writes remain gated |
 | D — Governance/full-system UAT | WP65 | Planned |
 
 ## Image acceptance registry — Customer Company (10)
@@ -76,7 +76,7 @@ The superseded non-v2 Action Center file is not counted.
 | C07 | `customer-company/07-customer-company-restaurant-pos-home.png` | WP42/WP49–WP54 | Adapted | Restaurant launcher exists; operating surfaces are delivered sequentially. |
 | C08 | `customer-company/08-customer-company-retail-pos-home.png` | WP42/WP55–WP58 | Adapted | Pilot/readiness shell only; Retail source cutover is not authorized. |
 | C09 | `customer-company/09-customer-company-takeaway-home.png` | WP42/WP62 | Implemented read-only | Operational UI is active behind a Server-authoritative Dark Launch gate; write activation remains gated. |
-| C10 | `customer-company/10-customer-company-central-kitchen-home.png` | WP42/WP63 | Read-only | Central Kitchen remains read-only/dark-launch. |
+| C10 | `customer-company/10-customer-company-central-kitchen-home.png` | WP42/WP63 | Implemented read-only | Server readiness, Kitchen/Distribution views and action holds are active; stock/QC/recall writes remain gated. |
 
 ## Image acceptance registry — Design System and Restaurant (34)
 
@@ -141,7 +141,7 @@ The superseded non-v2 Action Center file is not counted.
 | Shared ERP | `cto-non-hotel/03-SHARED-ERP-CTO-SPEC.md` | WP61 | Software UAT and Batch B gate passed. Real tax/provider/accountant acceptance remains gated. |
 | Restaurant advanced | `cto-non-hotel/04-RESTAURANT-ADVANCED-OPERATIONS-CTO-SPEC.md` | WP49–WP54 | Active sequence; Brand-profile-specific extras remain disabled until approved. |
 | Takeaway | `cto-non-hotel/05-TAKEAWAY-POS-CTO-SPEC.md` | WP62 | Engineering exists; real-data/canary/owner gates remain. |
-| Central Kitchen / Supply Chain | `cto-non-hotel/06-CENTRAL-KITCHEN-SUPPLY-CHAIN-CTO-SPEC.md` | WP63 | Read-only/dark-launch; opening lot, count, QC and recall gates remain. |
+| Central Kitchen / Supply Chain | `cto-non-hotel/06-CENTRAL-KITCHEN-SUPPLY-CHAIN-CTO-SPEC.md` | WP63 | UI activated read-only; opening lot, count, QC, recall and owner gates remain. |
 | Public Customer Experience | `cto-non-hotel/07-PUBLIC-CUSTOMER-EXPERIENCE-CTO-SPEC.md` | WP64 | Catalog versus ecommerce decision remains with Owner. |
 | Integration / Reporting / Governance | `cto-non-hotel/08-INTEGRATION-REPORTING-GOVERNANCE-CTO-SPEC.md` | WP65 | Planned reconciliation, incident, evidence and retention maturity. |
 

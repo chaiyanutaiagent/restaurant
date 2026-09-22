@@ -1,12 +1,17 @@
+import axios from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeftRight, Boxes, CheckCircle2, PackageCheck, RefreshCw, RotateCcw, Send, Truck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowLeftRight, Boxes, CheckCircle2, PackageCheck, RefreshCw, RotateCcw, Send, Truck } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import SupplyChainReleasePanel from "@/components/company/SupplyChainReleasePanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SystemState } from "@/components/ui/system-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { companyDistributionApi } from "@/lib/api";
+import { useOnlineStatus } from "@/lib/syncService";
 import { useAuthStore } from "@/stores/auth.store";
 import type { DistributionModule, DistributionShipment } from "@/types/distribution";
 
@@ -22,7 +27,10 @@ const statusLabel: Record<string, string> = {
 
 function errorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null && "response" in error) {
-    return (error as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "ทำรายการไม่สำเร็จ";
+    const detail = (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+    if (typeof detail === "string") return detail;
+    if (detail && typeof detail === "object" && "message" in detail) return String(detail.message);
+    return "ทำรายการไม่สำเร็จ";
   }
   return error instanceof Error ? error.message : "ทำรายการไม่สำเร็จ";
 }
@@ -36,7 +44,8 @@ export default function CompanyDistributionPage(): JSX.Element {
     queryFn: async () => (await companyDistributionApi.dashboard()).data.data,
   });
   const dashboard = dashboardQuery.data;
-  const enabled = Boolean(dashboard?.write_enabled) && (hasPermission("company.distribution.manage") || hasPermission("system.company.edit"));
+  const isOnline = useOnlineStatus();
+  const enabled = isOnline && Boolean(dashboard?.write_enabled && dashboard.release.writes_enabled) && (hasPermission("company.distribution.manage") || hasPermission("system.company.edit"));
   const [dateFrom, setDateFrom] = useState(() => { const day = new Date(); day.setDate(day.getDate() - 6); return day.toISOString().slice(0, 10); });
   const [dateTo, setDateTo] = useState(today());
   const reportQuery = useQuery({
@@ -57,7 +66,13 @@ export default function CompanyDistributionPage(): JSX.Element {
     },
     onError: (error) => toast({ title: "ทำรายการไม่สำเร็จ", description: errorMessage(error), variant: "destructive" }),
   });
-  const save = (message: string, run: () => Promise<unknown>): void => mutation.mutate({ message, run });
+  const save = (message: string, run: () => Promise<unknown>): void => {
+    if (!enabled) {
+      toast({ title: "ดูข้อมูลเท่านั้น", description: "Server ยังปิดคำสั่งกระจายสินค้าจนกว่า Readiness Gate จะผ่าน" });
+      return;
+    }
+    mutation.mutate({ message, run });
+  };
   const selectedBrand = dashboard?.setup_options.brands.find((row) => row.id === demand.brand_id);
   const demandBranches = dashboard?.setup_options.brand_branches.filter((row) => row.brand_id === demand.brand_id) ?? [];
   const demandProducts = dashboard?.setup_options.products.filter((row) => row.brand_id === demand.brand_id) ?? [];
@@ -70,8 +85,11 @@ export default function CompanyDistributionPage(): JSX.Element {
     }), { transit: 0, received: 0, rejected: 0, returned: 0 });
   }, [dashboard?.shipments]);
 
-  if (dashboardQuery.isLoading) return <div className="rounded-xl bg-white p-8 text-center text-slate-500">กำลังโหลดงานกระจายสินค้า...</div>;
-  if (!dashboard) return <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-red-700">โหลดข้อมูลงานกระจายสินค้าไม่สำเร็จ</div>;
+  if (dashboardQuery.isLoading) return <SystemState kind="loading" title="กำลังโหลดงานกระจายสินค้า" />;
+  if (!dashboard) {
+    const permissionDenied = axios.isAxiosError(dashboardQuery.error) && dashboardQuery.error.response?.status === 403;
+    return <SystemState kind={!isOnline ? "offline" : permissionDenied ? "permission_denied" : "error"} title={permissionDenied ? "ไม่มีสิทธิ์ดูงานกระจายสินค้า" : undefined} onAction={isOnline && !permissionDenied ? () => void dashboardQuery.refetch() : undefined} />;
+  }
 
   const act = (shipment: DistributionShipment, kind: "dispatch" | "receive" | "reject" | "return" | "cancel"): void => {
     if (kind === "dispatch") save("ส่งสินค้าและตัดคลัง READY แล้ว", () => companyDistributionApi.dispatch(shipment.id, { idempotency_key: actionKey("dispatch") }));
@@ -86,10 +104,17 @@ export default function CompanyDistributionPage(): JSX.Element {
       <header className="rounded-2xl bg-slate-950 p-6 text-white shadow-lg">
         <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
           <div><p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-300">Company Admin · Supply Chain</p><h1 className="mt-2 text-3xl font-black">Demand และกระจายสินค้าสำเร็จรูป</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">รวมคำขอจาก 3 POS แต่คงเจ้าของ Brand/Branch ชัดเจน และใช้ใบโอนสินค้าเดิมเป็นยอดสต๊อกจริงเพียงชุดเดียว</p></div>
-          <Button variant="outline" className="border-slate-600 bg-slate-900 text-white" onClick={() => void dashboardQuery.refetch()}><RefreshCw className="h-4 w-4" /> โหลดล่าสุด</Button>
+          <div className="flex flex-wrap gap-2"><Button asChild variant="outline" className="border-slate-600 bg-slate-900 text-white"><Link to="/company-kitchen"><ArrowLeft className="h-4 w-4" /> ครัวกลาง</Link></Button><Button variant="outline" className="border-slate-600 bg-slate-900 text-white" onClick={() => void dashboardQuery.refetch()}><RefreshCw className="h-4 w-4" /> โหลดล่าสุด</Button></div>
         </div>
       </header>
-      {!enabled && <div data-testid="company-distribution-dark-launch" className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900"><AlertTriangle className="h-5 w-5 shrink-0" /><div><p className="font-black">พักการส่งผลต่อสต๊อกจริงไว้ก่อน</p><p className="text-sm">ดู Demand, Shipment และ Reconciliation ได้แล้ว แต่ปุ่มสร้าง/ส่ง/รับ/ตีกลับ/คืนจะเปิดหลังผ่าน rollout sign-off</p></div></div>}
+      <SupplyChainReleasePanel
+        release={dashboard.release}
+        online={isOnline}
+        title="Read-only Dark Launch · Supply Chain"
+        description="ดู Demand, Shipment, In-transit, Reject, Return และ Reconciliation ได้ แต่ Server ยังปิดการจัดสรร ส่ง รับ ตีกลับ คืน และยกเลิกจนกว่า Kitchen/QC/Receiver Gate จะผ่าน"
+        testId="company-distribution-dark-launch"
+        accent="cyan"
+      />
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[["ระหว่างทาง", totals.transit, Truck], ["รับสุทธิ", totals.received, CheckCircle2], ["ปฏิเสธ", totals.rejected, AlertTriangle], ["คืนครัวกลาง", totals.returned, RotateCcw]].map(([label, value, Icon]) => { const CardIcon = Icon as typeof Truck; return <article key={String(label)} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><CardIcon className="h-5 w-5 text-cyan-700" /><p className="mt-4 text-sm font-semibold text-slate-500">{String(label)}</p><p className="mt-1 text-2xl font-black">{qty(value as number)}</p></article>; })}
       </section>

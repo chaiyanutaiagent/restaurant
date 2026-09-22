@@ -151,6 +151,29 @@ def validate_takeaway_write_activation_config(
         raise ValueError("Takeaway transaction writes require an HTTPS uat-* hostname")
 
 
+def validate_company_supply_chain_write_activation_config(
+    *,
+    environment: str,
+    public_base_url: str,
+    kitchen_writes_enabled: bool,
+    distribution_writes_enabled: bool,
+) -> None:
+    """Keep Company Kitchen and Distribution mutations inside a bounded UAT wave."""
+    if not kitchen_writes_enabled and not distribution_writes_enabled:
+        return
+    parsed_url = urlsplit(public_base_url)
+    if environment != "development":
+        raise ValueError("Company supply-chain writes are approved only in UAT development")
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.hostname is None
+        or not parsed_url.hostname.startswith("uat-")
+    ):
+        raise ValueError("Company supply-chain writes require an HTTPS uat-* hostname")
+    if distribution_writes_enabled and not kitchen_writes_enabled:
+        raise ValueError("Company Distribution writes require Company Kitchen writes first")
+
+
 def validate_retail_runtime_config(
     *,
     environment: str,
@@ -411,6 +434,12 @@ class Settings(BaseSettings):
             enabled=self.takeaway_uat_transaction_writes_enabled,
             feature_enabled=self.takeaway_feature_enabled,
             public_base_url=self.saas_public_base_url,
+        )
+        validate_company_supply_chain_write_activation_config(
+            environment=self.environment,
+            public_base_url=self.saas_public_base_url,
+            kitchen_writes_enabled=self.company_kitchen_writes_enabled,
+            distribution_writes_enabled=self.company_distribution_writes_enabled,
         )
         validate_retail_runtime_config(
             environment=self.environment,

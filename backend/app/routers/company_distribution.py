@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -36,8 +36,77 @@ def require_write_activation() -> None:
     if not settings.company_distribution_writes_enabled:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Company Distribution write path ยังไม่เปิดใช้งาน กรุณาผ่าน rollout sign-off ก่อน",
+            detail={
+                "code": "company_distribution_write_hold",
+                "message": "Company Distribution writes remain closed until Kitchen, QC, receiver and rollout sign-off gates pass",
+                "release_stage": "read_only",
+            },
         )
+
+
+async def require_distribution_release_gate(request: Request) -> None:
+    if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+        require_write_activation()
+
+
+router.dependencies.append(Depends(require_distribution_release_gate))
+
+
+def release_status(data: dict[str, Any]) -> dict[str, Any]:
+    writes_enabled = settings.company_distribution_writes_enabled
+    demand_count = len(data.get("demands", []))
+    shipment_count = len(data.get("shipments", []))
+    return {
+        "release_stage": "uat_canary" if writes_enabled else "read_only",
+        "writes_enabled": writes_enabled,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "stale_after_seconds": 300,
+        "hard_holds": [
+            "kitchen_write_canary",
+            "ready_stock_reconciliation",
+            "quality_control_release",
+            "branch_receiver_physical_uat",
+            "stock_owner_signoff",
+        ],
+        "checks": [
+            {
+                "key": "company_context",
+                "label": "Company context",
+                "state": "pass",
+                "detail": "Company scope comes from the signed session",
+            },
+            {
+                "key": "normalized_demand",
+                "label": "Normalized demand queue",
+                "state": "pass",
+                "detail": f"{demand_count} scoped demand records are visible",
+            },
+            {
+                "key": "shipment_reconciliation",
+                "label": "Shipment reconciliation",
+                "state": "pass" if shipment_count > 0 else "pending",
+                "detail": f"{shipment_count} shipment records use the existing Transfer/Stock ledger",
+            },
+            {
+                "key": "kitchen_write_canary",
+                "label": "Kitchen write canary",
+                "state": "hold",
+                "detail": "Kitchen must pass its limited write wave before Distribution can open",
+            },
+            {
+                "key": "quality_control_release",
+                "label": "QC release before dispatch",
+                "state": "hold",
+                "detail": "Held or quarantined lots cannot yet be enforced in dispatch",
+            },
+            {
+                "key": "branch_receiver_physical_uat",
+                "label": "Branch receiving UAT",
+                "state": "hold",
+                "detail": "Partial receive, reject, return and device evidence is not accepted yet",
+            },
+        ],
+    }
 
 
 @router.get("/dashboard")
@@ -47,6 +116,7 @@ async def dashboard(
 ) -> dict[str, Any]:
     data = await DistributionService(db).dashboard(current.company_id)
     data["write_enabled"] = settings.company_distribution_writes_enabled
+    data["release"] = release_status(data)
     return ok(data)
 
 

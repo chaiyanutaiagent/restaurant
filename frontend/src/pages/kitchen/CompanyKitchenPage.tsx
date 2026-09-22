@@ -1,12 +1,17 @@
+import axios from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Boxes, Factory, PackageCheck, Play, RefreshCw, RotateCcw, Scale, Warehouse } from "lucide-react";
+import { ArrowRight, Boxes, Factory, PackageCheck, Play, RefreshCw, RotateCcw, Scale, Warehouse } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import SupplyChainReleasePanel from "@/components/company/SupplyChainReleasePanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SystemState } from "@/components/ui/system-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { companyKitchenApi } from "@/lib/api";
+import { useOnlineStatus } from "@/lib/syncService";
 import { useAuthStore } from "@/stores/auth.store";
 
 const fieldClass = "mt-1 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm";
@@ -17,7 +22,10 @@ const money = (value: number | string): string => new Intl.NumberFormat("th-TH",
 
 function errorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null && "response" in error) {
-    return (error as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "บันทึกไม่สำเร็จ";
+    const detail = (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+    if (typeof detail === "string") return detail;
+    if (detail && typeof detail === "object" && "message" in detail) return String(detail.message);
+    return "บันทึกไม่สำเร็จ";
   }
   return error instanceof Error ? error.message : "บันทึกไม่สำเร็จ";
 }
@@ -30,8 +38,9 @@ export default function CompanyKitchenPage(): JSX.Element {
     queryFn: async () => (await companyKitchenApi.dashboard()).data.data,
   });
   const dashboard = dashboardQuery.data;
+  const isOnline = useOnlineStatus();
   const hasPermission = useAuthStore((state) => state.hasPermission);
-  const enabled = Boolean(dashboard?.write_enabled) && (
+  const enabled = isOnline && Boolean(dashboard?.write_enabled && dashboard.release.writes_enabled) && (
     hasPermission("company.kitchen.manage") || hasPermission("system.company.edit")
   );
   const [dateFrom, setDateFrom] = useState(() => { const value = new Date(); value.setDate(value.getDate() - 6); return value.toISOString().slice(0, 10); });
@@ -65,8 +74,11 @@ export default function CompanyKitchenPage(): JSX.Element {
     [dashboard?.ingredients],
   );
 
-  if (dashboardQuery.isLoading) return <div className="rounded-xl bg-white p-8 text-center text-slate-500">กำลังโหลดครัวกลาง...</div>;
-  if (!dashboard) return <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-red-700">โหลดข้อมูลครัวกลางไม่สำเร็จ</div>;
+  if (dashboardQuery.isLoading) return <SystemState kind="loading" title="กำลังโหลดครัวกลาง" />;
+  if (!dashboard) {
+    const permissionDenied = axios.isAxiosError(dashboardQuery.error) && dashboardQuery.error.response?.status === 403;
+    return <SystemState kind={!isOnline ? "offline" : permissionDenied ? "permission_denied" : "error"} title={permissionDenied ? "ไม่มีสิทธิ์ดูครัวกลาง" : undefined} onAction={isOnline && !permissionDenied ? () => void dashboardQuery.refetch() : undefined} />;
+  }
 
   const options = dashboard.setup_options;
   const rawProducts = options.products.filter((row) => row.inventory_role === "central_raw" && row.brand_id === null);
@@ -80,14 +92,26 @@ export default function CompanyKitchenPage(): JSX.Element {
   );
   const openDemands = dashboard.demands.filter((row) => row.status === "submitted");
   const activeOrders = dashboard.orders.filter((row) => ["planned", "in_progress"].includes(row.status));
-  const save = (message: string, run: () => Promise<unknown>): void => mutation.mutate({ message, run });
+  const save = (message: string, run: () => Promise<unknown>): void => {
+    if (!enabled) {
+      toast({ title: "ดูข้อมูลเท่านั้น", description: "Server ยังปิดคำสั่งครัวกลางจนกว่า Readiness Gate จะผ่าน" });
+      return;
+    }
+    mutation.mutate({ message, run });
+  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-6" data-testid="company-kitchen-page">
       <header className="rounded-2xl bg-slate-950 p-6 text-white shadow-lg">
-        <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end"><div><p className="text-xs font-black uppercase tracking-[0.24em] text-emerald-300">Company Admin · Central Kitchen</p><h1 className="mt-2 text-3xl font-black">ครัวกลางและวัตถุดิบร่วม</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">วัตถุดิบหนึ่งกองใช้ได้หลายแบรนด์ แต่สูตร ใบผลิต ผลผลิต ต้นทุน และรายงานยังแยกเจ้าของชัดเจน</p></div><Button variant="outline" className="border-slate-600 bg-slate-900 text-white" onClick={() => void dashboardQuery.refetch()}><RefreshCw className="h-4 w-4" /> โหลดล่าสุด</Button></div>
+        <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end"><div><p className="text-xs font-black uppercase tracking-[0.24em] text-emerald-300">Company Admin · Central Kitchen</p><h1 className="mt-2 text-3xl font-black">ครัวกลางและวัตถุดิบร่วม</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">วัตถุดิบหนึ่งกองใช้ได้หลายแบรนด์ แต่สูตร ใบผลิต ผลผลิต ต้นทุน และรายงานยังแยกเจ้าของชัดเจน</p></div><div className="flex flex-wrap gap-2"><Button asChild variant="outline" className="border-slate-600 bg-slate-900 text-white"><Link to="/company-distribution">งานกระจายสินค้า <ArrowRight className="h-4 w-4" /></Link></Button><Button variant="outline" className="border-slate-600 bg-slate-900 text-white" onClick={() => void dashboardQuery.refetch()}><RefreshCw className="h-4 w-4" /> โหลดล่าสุด</Button></div></div>
       </header>
-      {!enabled && <div data-testid="company-kitchen-dark-launch" className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900"><AlertTriangle className="h-5 w-5 shrink-0" /><div><p className="font-black">พักการตัดสต๊อกจริงไว้ก่อน</p><p className="text-sm">หน้าและรายงานพร้อมแล้ว ปุ่มบันทึกจะเปิดหลังผ่านการทดสอบและอนุมัติ rollout</p></div></div>}
+      <SupplyChainReleasePanel
+        release={dashboard.release}
+        online={isOnline}
+        title="Read-only Dark Launch · ครัวกลาง"
+        description="ดู Configuration, วัตถุดิบ, Mapping, Lot, Demand, ใบผลิต ต้นทุน และรายงานได้ แต่ Server ยังปิดการรับเข้า ตัด RAW ผลิต ย้อนรายการ และส่งต่อ READY"
+        testId="company-kitchen-dark-launch"
+      />
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
           ["สถานะครัว", dashboard.kitchen ? "ตั้งค่าแล้ว" : "รอตั้งค่า", Factory],

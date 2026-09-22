@@ -46,7 +46,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP62 | Takeaway operational UI activation | Combined Batch C software UAT passed | Server-authoritative Dark Launch; transactions remain gated until owner/canary approval |
 | WP63 | Central Kitchen and Supply Chain UI activation | Combined Batch C software UAT passed | Read-only; stock/QC/recall writes remain gated |
 | WP64 | Public Customer Experience | Combined Batch C software UAT and rollback passed | Catalog/Locator active; Ecommerce/receipt/member capabilities remain gated |
-| WP65 | Integration, Reporting, Reconciliation and Release Governance | Implemented locally; Local Gate passed, immutable UAT pending | Provider/retention/owner/physical/Production gates remain |
+| WP65 | Integration, Reporting, Reconciliation and Release Governance | Software UAT and Batch D rollback gate passed | Provider/retention/owner/physical/Production gates remain |
 
 Hotel PMS is out of scope and has no WP assignment.
 
@@ -59,7 +59,7 @@ The execution contract is recorded in `FULL-UI-BATCH-EXECUTION-PLAN-02.md`. WP54
 | A — Retail POS | WP55–WP58 | Combined software gate passed; physical/Production HOLD; Batch B may begin on Local/UAT |
 | B — Platform/Company/ERP | WP59–WP61 | Combined software UAT gate passed; Production/external acceptance HOLD |
 | C — Takeaway/Kitchen/Public | WP62–WP64 | Combined software UAT/rollback passed; unsafe writes and physical/Production gates remain closed |
-| D — Governance/full-system UAT | WP65 | Local engineering gate passed; immutable UAT and rollback pending |
+| D — Governance/full-system UAT | WP65 | Combined software UAT/rollback passed; Product Owner, physical/external and Production gates remain HOLD |
 
 ## Image acceptance registry — Customer Company (10)
 
@@ -143,7 +143,7 @@ The superseded non-v2 Action Center file is not counted.
 | Takeaway | `cto-non-hotel/05-TAKEAWAY-POS-CTO-SPEC.md` | WP62 | Engineering exists; real-data/canary/owner gates remain. |
 | Central Kitchen / Supply Chain | `cto-non-hotel/06-CENTRAL-KITCHEN-SUPPLY-CHAIN-CTO-SPEC.md` | WP63 | UI activated read-only; opening lot, count, QC, recall and owner gates remain. |
 | Public Customer Experience | `cto-non-hotel/07-PUBLIC-CUSTOMER-EXPERIENCE-CTO-SPEC.md` | WP64 | Catalog/Locator Option A passed combined Batch C software UAT; Ecommerce, receipt, member identity and consent remain Owner/contract gates. |
-| Integration / Reporting / Governance | `cto-non-hotel/08-INTEGRATION-REPORTING-GOVERNANCE-CTO-SPEC.md` | WP65 | API key/webhook/external-order hardening and Server-backed governance evidence implemented locally; Incident and retention/legal-hold mutations remain planned. |
+| Integration / Reporting / Governance | `cto-non-hotel/08-INTEGRATION-REPORTING-GOVERNANCE-CTO-SPEC.md` | WP65 | API key/webhook/external-order hardening, Server-backed governance and UAT rollback passed; Incident and retention/legal-hold mutations remain planned. |
 
 ## Governance rules
 

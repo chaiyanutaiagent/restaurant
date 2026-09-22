@@ -166,6 +166,51 @@ class PlatformAuthService:
         await self.db.commit()
         return token_response, refresh_token
 
+    async def issue_qa_session(
+        self,
+        username: str,
+        *,
+        persona: str,
+        ip_address: str | None,
+        user_agent: str | None,
+    ) -> tuple[PlatformTokenResponse, str]:
+        operator = await self.db.scalar(
+            select(PlatformOperator).where(
+                PlatformOperator.username == username,
+                PlatformOperator.is_active.is_(True),
+            )
+        )
+        if operator is None:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="QA Platform persona is unavailable")
+        role_codes, _ = await effective_platform_access(self.db, operator)
+        if not role_codes:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="QA Platform persona has no active role")
+        token_response, refresh_token = await self._issue_session(
+            operator,
+            mfa_verified=True,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            expires_delta=timedelta(minutes=settings.qa_access_session_minutes),
+            qa_persona=persona,
+        )
+        self.db.add(AuditLog(
+            company_id=None,
+            branch_id=None,
+            user_id=operator.id,
+            action="qa.platform.session.issue",
+            resource="PlatformOperator",
+            resource_id=str(operator.id),
+            new_value={
+                "persona": persona,
+                "session_id": str(token_response.session_id),
+                "expires_in": token_response.expires_in,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        ))
+        await self.db.commit()
+        return token_response, refresh_token
+
     async def refresh(
         self,
         raw_refresh_token: str,
@@ -494,6 +539,8 @@ class PlatformAuthService:
         mfa_verified: bool,
         ip_address: str | None,
         user_agent: str | None,
+        expires_delta: timedelta | None = None,
+        qa_persona: str | None = None,
     ) -> tuple[PlatformTokenResponse, str]:
         now = datetime.now(timezone.utc)
         refresh_token = generate_opaque_credential()
@@ -503,21 +550,28 @@ class PlatformAuthService:
             credential_version=operator.credential_version,
             refresh_token_hash=hash_opaque_credential(refresh_token),
             csrf_token_hash=hash_opaque_credential(csrf_token),
-            expires_at=now + timedelta(days=settings.refresh_token_expire_days),
+            expires_at=now + (expires_delta or timedelta(days=settings.refresh_token_expire_days)),
             last_seen_at=now,
             mfa_verified_at=now if mfa_verified else None,
             ip_address=ip_address,
             user_agent=user_agent,
+            qa_persona=qa_persona,
         )
         self.db.add(session)
         await self.db.flush()
-        return await self._token_response(operator, session, csrf_token), refresh_token
+        return await self._token_response(
+            operator,
+            session,
+            csrf_token,
+            expires_delta=expires_delta,
+        ), refresh_token
 
     async def _token_response(
         self,
         operator: PlatformOperator,
         session: PlatformSession,
         csrf_token: str,
+        expires_delta: timedelta | None = None,
     ) -> PlatformTokenResponse:
         now = datetime.now(timezone.utc)
         token = create_platform_access_token(
@@ -525,6 +579,8 @@ class PlatformAuthService:
             session_id=session.id,
             credential_version=operator.credential_version,
             is_superuser=operator.is_superuser,
+            expires_delta=expires_delta,
+            qa_persona=session.qa_persona,
         )
         claims = decode_token(token)
         return PlatformTokenResponse(

@@ -12,6 +12,7 @@ import {
   Menu,
   Settings,
   ShieldCheck,
+  ClipboardList,
   Users,
   X,
 } from "lucide-react";
@@ -51,6 +52,8 @@ const navigation: CompanyNavItem[] = [
   { label: "งานและการแจ้งเตือน", to: "/company/actions", icon: Bell },
   { label: "องค์กร", to: "/company/organization", icon: Building2, permission: "system.branch.view" },
   { label: "พนักงานและสิทธิ์", to: "/company/people", icon: Users, permissions: ["system.user.view", "system.role.view"] },
+  { label: "ความปลอดภัย", to: "/company/security", icon: ShieldCheck, permission: "system.user.view" },
+  { label: "ประวัติการเปลี่ยนแปลง", to: "/company/audit", icon: ClipboardList, permissions: ["system.company.view", "system.company.edit", "accounting.report.view"] },
   { label: "การตั้งค่า", to: "/company/settings", icon: Settings, permission: "system.company.edit" },
   { label: "แอปทั้งหมด", to: "/company/apps", icon: AppWindow },
 ];

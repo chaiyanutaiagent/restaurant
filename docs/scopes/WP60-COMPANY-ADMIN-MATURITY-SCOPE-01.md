@@ -1,7 +1,7 @@
 # WP60 — Company Admin Maturity, Access Review and Company Audit
 
-Status: IN PROGRESS — discovery and contract freeze
-Environment: Local first; UAT after focused checkpoint
+Status: FOCUSED LOCAL CHECKPOINT PASSED — Batch B combined UAT deferred through WP61
+Environment: Local checkpoint passed; QA Access Mode UAT enablement pending authenticated deploy channel
 Production: HOLD
 
 ## Objective
@@ -62,3 +62,20 @@ Produce the current-contract matrix and focused isolation/last-owner/session
 tests before changing the People & Access UI. UAT deployment requires a
 dedicated commit, immutable images, backup, migration rehearsal when applicable,
 authenticated role journey, rollback/restore and Production identity proof.
+
+## Focused checkpoint result — 2026-09-22
+
+- Company-scoped access review, active-session visibility/revocation, stale and
+  high-risk flags, reason-required outcomes and request replay protection are
+  implemented.
+- User, role, branch and scoped-assignment changes increment the affected user
+  credential generation and revoke active refresh sessions immediately.
+- Company Audit supports actor, branch, action, resource, request and date
+  filters; nested secrets are redacted and user events receive safe internal
+  deep links.
+- Tenant MFA enforcement, owner-assisted recovery and suspicious-login policy
+  remain visible but disabled/HOLD pending Product Owner decisions.
+- Focused backend suites passed 37/37, frontend type-check and production build
+  passed, both Platform and legacy migration graphs have one WP60 head.
+- Full Batch B regression, UAT journey and rollback/restore remain deferred to
+  the combined WP59–WP61 close as authorized.

@@ -6,5 +6,11 @@ services:
       SECRET_KEY: phase5-uat-isolated-hmac-key-2026-only
       ENABLE_API_DOCS: "true"
       ENVIRONMENT: development
+      QA_ACCESS_MODE_ENABLED: ${QA_ACCESS_MODE_ENABLED:-false}
+      QA_ACCESS_KEY: ${QA_ACCESS_KEY:-}
+      QA_ACCESS_COMPANY_ID: ${QA_ACCESS_COMPANY_ID:-}
+      QA_ACCESS_PERSONAS: '${QA_ACCESS_PERSONAS:-{}}'
+      QA_PLATFORM_PERSONAS: '${QA_PLATFORM_PERSONAS:-{}}'
+      QA_ACCESS_SESSION_MINUTES: ${QA_ACCESS_SESSION_MINUTES:-30}
     volumes:
       - ./backend/tests:/app/tests:ro

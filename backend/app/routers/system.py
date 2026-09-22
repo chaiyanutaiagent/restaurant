@@ -29,6 +29,7 @@ from app.schemas.user_mgmt import (
     UserCreateFull,
     UserUpdateFull,
 )
+from app.schemas.company_access import CompanyAccessMutationRequest, CompanyAccessReviewRequest
 from app.schemas.user_access import (
     BranchAssignableRoleRead,
     UserAccessApprovalResult,
@@ -43,6 +44,7 @@ from app.schemas.staff_assignment import (
 )
 from app.schemas.entitlement import BrandModuleEntitlementUpdate
 from app.services.admin_service import AdminService
+from app.services.company_access_service import CompanyAccessService
 from app.services.role_preset_service import RolePresetService
 from app.services.staff_scope_service import StaffScopeService
 from app.services.upload_service import UploadService
@@ -274,7 +276,7 @@ async def update_user(
         detail = await service.get_user_detail(user_id, current.company_id)
         if current.branch_id not in {item.branch_id for item in detail.branches}:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    await service.update_user(user_id, current.company_id, payload)
+    await service.update_user(user_id, current.company_id, payload, current.user_id)
     detail = await service.get_user_detail(user_id, current.company_id)
     return ok(detail.model_dump())
 
@@ -282,11 +284,22 @@ async def update_user(
 @router.post("/users/{user_id}/deactivate")
 async def deactivate_user(
     user_id: uuid.UUID,
+    payload: CompanyAccessMutationRequest,
     current: TokenData = Depends(require_permission("system.user.delete")),
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
+    await CompanyAccessService(db).review_access(
+        current.company_id,
+        user_id,
+        current.user_id,
+        CompanyAccessReviewRequest(
+            outcome="revoke",
+            reason=payload.reason,
+            request_id=payload.request_id,
+            expected_credential_version=payload.expected_credential_version,
+        ),
+    )
     service = AdminService(db)
-    await service.deactivate_user(user_id, current.company_id, current.user_id)
     detail = await service.get_user_detail(user_id, current.company_id)
     return ok(detail.model_dump())
 
@@ -311,7 +324,7 @@ async def assign_user_branch(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
-    await service.assign_branch(user_id, current.company_id, payload)
+    await service.assign_branch(user_id, current.company_id, payload, current.user_id)
     detail = await service.get_user_detail(user_id, current.company_id)
     return ok(detail.model_dump())
 
@@ -324,8 +337,101 @@ async def remove_user_branch(
     db: AsyncSession = Depends(get_identity_db),
 ) -> Response:
     service = AdminService(db)
-    await service.remove_branch(user_id, current.company_id, RemoveBranchRequest(branch_id=branch_id))
+    await service.remove_branch(
+        user_id,
+        current.company_id,
+        RemoveBranchRequest(branch_id=branch_id),
+        current.user_id,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/access-reviews")
+async def get_access_reviews(
+    current: TokenData = Depends(require_permission("system.user.view")),
+    db: AsyncSession = Depends(get_identity_db),
+    status_filter: str | None = Query(default=None, alias="status"),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    if status_filter not in {None, "due", "stale", "high_risk", "inactive"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid review status")
+    rows = await CompanyAccessService(db).list_access_reviews(
+        current.company_id,
+        status_filter=status_filter,
+    )
+    return ok([row.model_dump(mode="json") for row in rows])
+
+
+@router.get("/security-posture")
+async def get_tenant_security_posture(
+    current: TokenData = Depends(require_permission("system.user.view")),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    return ok(CompanyAccessService.security_posture().model_dump(mode="json"))
+
+
+@router.get("/users/{user_id}/sessions")
+async def get_user_sessions(
+    user_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("system.user.view")),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    rows = await CompanyAccessService(db).list_sessions(current.company_id, user_id)
+    return ok([row.model_dump(mode="json") for row in rows])
+
+
+@router.post("/users/{user_id}/sessions/{session_id}/revoke")
+async def revoke_user_session(
+    user_id: uuid.UUID,
+    session_id: uuid.UUID,
+    payload: CompanyAccessMutationRequest,
+    current: TokenData = Depends(require_permission("system.user.edit")),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    changed = await CompanyAccessService(db).revoke_session(
+        current.company_id,
+        user_id,
+        session_id,
+        current.user_id,
+        payload,
+    )
+    return ok({"revoked_session_count": changed})
+
+
+@router.post("/users/{user_id}/sessions/revoke")
+async def revoke_all_user_sessions(
+    user_id: uuid.UUID,
+    payload: CompanyAccessMutationRequest,
+    current: TokenData = Depends(require_permission("system.user.edit")),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    changed, credential_version = await CompanyAccessService(db).revoke_all_sessions(
+        current.company_id,
+        user_id,
+        current.user_id,
+        payload,
+    )
+    return ok({"revoked_session_count": changed, "credential_version": credential_version})
+
+
+@router.post("/users/{user_id}/access-review")
+async def review_user_access(
+    user_id: uuid.UUID,
+    payload: CompanyAccessReviewRequest,
+    current: TokenData = Depends(require_permission("system.user.edit")),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    _require_company_assignment_admin(current)
+    row = await CompanyAccessService(db).review_access(
+        current.company_id,
+        user_id,
+        current.user_id,
+        payload,
+    )
+    return ok(row.model_dump(mode="json"))
 
 
 @router.get("/roles")

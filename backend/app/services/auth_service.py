@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import uuid
 
@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.company import Company
@@ -188,6 +189,8 @@ class AuthService:
         ip_address: str | None,
         user_agent: str | None,
         station_key: str | None = None,
+        qa_persona: str | None = None,
+        qa_deadline: datetime | None = None,
     ) -> tuple[str, str]:
         company = await self.db.get(Company, user.company_id)
         if company is None or not company.is_active:
@@ -203,6 +206,13 @@ class AuthService:
             assignment_ids,
             scope_types,
         ) = await self.get_user_permissions(user, branch_id, station_key)
+        session_id = uuid.uuid4()
+        now = datetime.now(timezone.utc)
+        qa_deadline = qa_deadline or (
+            now + timedelta(minutes=settings.qa_access_session_minutes)
+            if qa_persona else None
+        )
+        expires_delta = (qa_deadline - now) if qa_deadline else None
         access_token = create_access_token(
             subject=str(user.id),
             company_id=str(user.company_id),
@@ -215,6 +225,11 @@ class AuthService:
             assignment_ids=[str(value) for value in assignment_ids],
             scope_types=scope_types,
             company_credential_version=company.credential_version,
+            user_credential_version=getattr(user, "credential_version", 1),
+            session_id=str(session_id),
+            expires_delta=expires_delta,
+            qa_persona=qa_persona,
+            qa_deadline=qa_deadline,
         )
         refresh_token = create_refresh_token(
             subject=str(user.id),
@@ -222,10 +237,16 @@ class AuthService:
             branch_id=str(resolved_branch_id) if resolved_branch_id else None,
             station_key=resolved_station_key,
             company_credential_version=company.credential_version,
+            user_credential_version=getattr(user, "credential_version", 1),
+            session_id=str(session_id),
+            expires_delta=expires_delta,
+            qa_persona=qa_persona,
+            qa_deadline=qa_deadline,
         )
         expires_at = self._extract_expiration(refresh_token)
         self.db.add(
             RefreshToken(
+                id=session_id,
                 user_id=user.id,
                 company_id=user.company_id,
                 token_hash=self._hash_token(refresh_token),
@@ -239,11 +260,16 @@ class AuthService:
                 company_id=user.company_id,
                 branch_id=resolved_branch_id,
                 user_id=user.id,
-                action="user.login",
+                action="qa.user.session.issue" if qa_persona else "user.login",
                 resource="User",
                 resource_id=str(user.id),
                 ip_address=ip_address,
                 user_agent=user_agent,
+                new_value={
+                    "qa_mode": bool(qa_persona),
+                    "persona": qa_persona,
+                    "expires_at": qa_deadline.isoformat() if qa_deadline else None,
+                },
             )
         )
         await self.db.commit()
@@ -260,6 +286,8 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token type",
             )
+        if payload.get("qa_mode") and not settings.qa_access_mode_enabled:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="QA access mode is disabled")
 
         token_hash = self._hash_token(raw_refresh_token)
         refresh_record = await self.db.scalar(
@@ -299,6 +327,16 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Refresh token has been revoked",
             )
+        if int(payload.get("user_credential_version", 1)) != getattr(user, "credential_version", 1):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User session has been revoked",
+            )
+        if payload.get("sid") and payload["sid"] != str(refresh_record.id):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh session is invalid",
+            )
         membership = await self.db.scalar(
             select(SaasTenantMembership).where(
                 SaasTenantMembership.company_id == company.id
@@ -326,6 +364,15 @@ class AuthService:
             refresh_branch_id,
             payload.get("station_key"),
         )
+        new_session_id = uuid.uuid4()
+        qa_persona = payload.get("qa_persona")
+        qa_deadline = (
+            datetime.fromtimestamp(int(payload["qa_deadline"]), tz=timezone.utc)
+            if payload.get("qa_deadline") else None
+        )
+        expires_delta = (qa_deadline - now) if qa_deadline else None
+        if expires_delta is not None and expires_delta.total_seconds() <= 0:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="QA session has expired")
         access_token = create_access_token(
             subject=str(user.id),
             company_id=str(user.company_id),
@@ -338,6 +385,11 @@ class AuthService:
             assignment_ids=[str(value) for value in assignment_ids],
             scope_types=scope_types,
             company_credential_version=company.credential_version,
+            user_credential_version=getattr(user, "credential_version", 1),
+            session_id=str(new_session_id),
+            expires_delta=expires_delta,
+            qa_persona=qa_persona,
+            qa_deadline=qa_deadline,
         )
         new_refresh_token = create_refresh_token(
             subject=str(user.id),
@@ -345,9 +397,15 @@ class AuthService:
             branch_id=str(resolved_branch_id) if resolved_branch_id else None,
             station_key=resolved_station_key,
             company_credential_version=company.credential_version,
+            user_credential_version=getattr(user, "credential_version", 1),
+            session_id=str(new_session_id),
+            expires_delta=expires_delta,
+            qa_persona=qa_persona,
+            qa_deadline=qa_deadline,
         )
         self.db.add(
             RefreshToken(
+                id=new_session_id,
                 user_id=user.id,
                 company_id=user.company_id,
                 token_hash=self._hash_token(new_refresh_token),
@@ -361,7 +419,7 @@ class AuthService:
                 company_id=user.company_id,
                 branch_id=None,
                 user_id=user.id,
-                action="user.token_refresh",
+                action="qa.user.session.refresh" if qa_persona else "user.token_refresh",
                 resource="User",
                 resource_id=str(user.id),
                 ip_address=ip_address,
@@ -397,6 +455,8 @@ class AuthService:
         new_branch_id: uuid.UUID,
         *,
         station_key: str | None = None,
+        qa_persona: str | None = None,
+        qa_deadline: datetime | None = None,
     ) -> tuple[str, str]:
         access_token, refresh_token = await self.create_session(
             user=user,
@@ -404,6 +464,8 @@ class AuthService:
             station_key=station_key,
             ip_address=None,
             user_agent=None,
+            qa_persona=qa_persona,
+            qa_deadline=qa_deadline,
         )
         self.db.add(
             AuditLog(

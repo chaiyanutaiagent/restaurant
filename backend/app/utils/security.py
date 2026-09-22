@@ -35,6 +35,10 @@ def create_access_token(
     assignment_ids: list[str] | None = None,
     scope_types: list[str] | None = None,
     company_credential_version: int = 1,
+    user_credential_version: int = 1,
+    session_id: str | None = None,
+    qa_persona: str | None = None,
+    qa_deadline: datetime | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     expire = now + (
@@ -52,6 +56,11 @@ def create_access_token(
         "scope_types": scope_types or [],
         "permissions": permissions,
         "company_credential_version": company_credential_version,
+        "user_credential_version": user_credential_version,
+        "sid": session_id,
+        "qa_mode": qa_persona is not None,
+        "qa_persona": qa_persona,
+        "qa_deadline": int(qa_deadline.timestamp()) if qa_deadline else None,
         "type": "access",
         "exp": expire,
         "iat": now,
@@ -66,6 +75,11 @@ def create_refresh_token(
     branch_id: str | None = None,
     station_key: str | None = None,
     company_credential_version: int = 1,
+    user_credential_version: int = 1,
+    session_id: str | None = None,
+    expires_delta: timedelta | None = None,
+    qa_persona: str | None = None,
+    qa_deadline: datetime | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     payload = {
@@ -74,9 +88,14 @@ def create_refresh_token(
         "branch_id": branch_id,
         "station_key": station_key,
         "company_credential_version": company_credential_version,
+        "user_credential_version": user_credential_version,
+        "sid": session_id,
+        "qa_mode": qa_persona is not None,
+        "qa_persona": qa_persona,
+        "qa_deadline": int(qa_deadline.timestamp()) if qa_deadline else None,
         "type": "refresh",
         "jti": str(uuid.uuid4()),
-        "exp": now + timedelta(days=settings.refresh_token_expire_days),
+        "exp": now + (expires_delta or timedelta(days=settings.refresh_token_expire_days)),
         "iat": now,
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
@@ -159,6 +178,7 @@ def create_platform_access_token(
     credential_version: int,
     is_superuser: bool,
     expires_delta: timedelta | None = None,
+    qa_persona: str | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     expire = now + (
@@ -169,6 +189,8 @@ def create_platform_access_token(
         "sid": str(session_id),
         "credential_version": credential_version,
         "is_superuser": is_superuser,
+        "qa_mode": qa_persona is not None,
+        "qa_persona": qa_persona,
         "type": "platform_access",
         "jti": str(uuid.uuid4()),
         "exp": expire,

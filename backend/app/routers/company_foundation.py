@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
@@ -19,6 +21,30 @@ from app.services.company_overview_service import CompanyOverviewService
 
 
 router = APIRouter(prefix="/api/v1/company", tags=["customer-company-foundation"])
+
+SENSITIVE_AUDIT_KEYS = ("password", "token", "secret", "pin", "otp", "recovery")
+
+
+def _redact_audit_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: "[REDACTED]" if any(fragment in key.lower() for fragment in SENSITIVE_AUDIT_KEYS)
+            else _redact_audit_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_audit_value(item) for item in value]
+    return value
+
+
+def _audit_deep_link(row: AuditLog) -> str | None:
+    value = row.new_value if isinstance(row.new_value, dict) else {}
+    target_user_id = value.get("target_user_id") or value.get("user_id")
+    if row.resource == "User" and row.resource_id:
+        target_user_id = row.resource_id
+    if target_user_id:
+        return f"/company/access-reviews?user={target_user_id}"
+    return None
 
 
 def ok(data: Any) -> dict[str, Any]:
@@ -129,6 +155,13 @@ async def get_operational_status(
 async def get_company_audit(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=50, ge=1, le=100),
+    actor_id: uuid.UUID | None = Query(default=None),
+    branch_id: uuid.UUID | None = Query(default=None),
+    action: str | None = Query(default=None, max_length=100),
+    resource: str | None = Query(default=None, max_length=100),
+    request_id: uuid.UUID | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
     current: TokenData = Depends(get_current_user),
     identity_db: AsyncSession = Depends(get_identity_db),
     operational_db: AsyncSession = Depends(get_restaurant_service_db),
@@ -144,7 +177,23 @@ async def get_company_audit(
     if "*" not in current.permissions and "company" not in current.scope_types:
         if current.branch_id is None:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch context required")
+        if branch_id is not None and branch_id != current.branch_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
         filters.append(AuditLog.branch_id == current.branch_id)
+    elif branch_id is not None:
+        filters.append(AuditLog.branch_id == branch_id)
+    if actor_id is not None:
+        filters.append(AuditLog.user_id == actor_id)
+    if action:
+        filters.append(AuditLog.action == action.strip())
+    if resource:
+        filters.append(AuditLog.resource == resource.strip())
+    if request_id is not None:
+        filters.append(AuditLog.new_value["request_id"].as_string() == str(request_id))
+    if date_from is not None:
+        filters.append(AuditLog.created_at >= date_from)
+    if date_to is not None:
+        filters.append(AuditLog.created_at <= date_to)
     sessions = [identity_db]
     if identity_db.bind is not operational_db.bind:
         sessions.append(operational_db)
@@ -182,8 +231,9 @@ async def get_company_audit(
                     "action": row.action,
                     "resource": row.resource,
                     "resource_id": row.resource_id,
-                    "old_value": row.old_value,
-                    "new_value": row.new_value,
+                    "old_value": _redact_audit_value(row.old_value),
+                    "new_value": _redact_audit_value(row.new_value),
+                    "deep_link": _audit_deep_link(row),
                     "created_at": row.created_at.isoformat(),
                 }
                 for row in rows

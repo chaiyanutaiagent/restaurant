@@ -27,6 +27,7 @@ from app.schemas.staff_assignment import (
 )
 from app.services.business_context_service import load_branch_business_context
 from app.services.company_owner_policy import CompanyOwnerPolicy
+from app.services.company_access_service import invalidate_user_access
 from app.services.staff_scope_policy import (
     assignment_applies_to_context,
     assignment_scope_key,
@@ -81,7 +82,7 @@ class StaffScopeService:
         actor_id: uuid.UUID,
         data: StaffRoleAssignmentCreate,
     ) -> StaffRoleAssignmentRead:
-        await self._get_user(company_id, user_id)
+        user = await self._get_user(company_id, user_id)
         employee = await self._get_employee_for_user(
             company_id,
             user_id,
@@ -162,6 +163,7 @@ class StaffScopeService:
             old_value=None,
             new_value=self._snapshot(assignment, reason=data.reason),
         )
+        await invalidate_user_access(self.db, user, reason=data.reason)
         await self.db.commit()
         return await self.get_assignment(company_id, user_id, assignment.id)
 
@@ -215,6 +217,7 @@ class StaffScopeService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
 
         await CompanyOwnerPolicy(self.db).ensure_assignment_can_be_revoked(row)
+        user = await self._get_user(company_id, user_id)
 
         old_value = self._snapshot(row, reason=row.assignment_reason)
         row.revoked_by = actor_id
@@ -229,6 +232,7 @@ class StaffScopeService:
             old_value=old_value,
             new_value=self._snapshot(row, reason=reason),
         )
+        await invalidate_user_access(self.db, user, reason=reason)
         await self.db.commit()
         employee = await self._get_employee_for_user(company_id, user_id, required=False)
         return self._build_read(row, employee)

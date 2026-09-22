@@ -30,3 +30,14 @@ export interface MeResponse {
   scope_types: Array<"company" | "brand" | "branch" | "station">;
   permissions: string[];
 }
+
+export interface QaPersona {
+  key: string;
+  label: string;
+  surface: "tenant" | "platform" | "public";
+  subject_id: string | null;
+  company_id: string | null;
+  company_name: string | null;
+  business_slug: string | null;
+  branches: Array<{ id: string; name: string; code: string; is_default: boolean }>;
+}

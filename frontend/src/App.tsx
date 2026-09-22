@@ -106,6 +106,9 @@ import CompanyActionCenterPage from "@/pages/company/CompanyActionCenterPage";
 import CompanyAppsPage from "@/pages/company/CompanyAppsPage";
 import CompanyHomePage from "@/pages/company/CompanyHomePage";
 import CompanyPeopleAccessPage from "@/pages/company/CompanyPeopleAccessPage";
+import CompanyAccessReviewPage from "@/pages/company/CompanyAccessReviewPage";
+import CompanyAuditPage from "@/pages/company/CompanyAuditPage";
+import CompanySecurityPage from "@/pages/company/CompanySecurityPage";
 import RoleAwareLanding from "@/pages/company/RoleAwareLanding";
 import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
 import PlatformTeamPage from "@/pages/platform/PlatformTeamPage";
@@ -125,6 +128,7 @@ import TakeawayWorkspaceIndexPage from "@/pages/takeaway/TakeawayWorkspaceIndexP
 import { TAKEAWAY_ENTRY_PERMISSIONS } from "@/config/takeawayWorkspace";
 import { useEffect } from "react";
 import { useAuthStore } from "@/stores/auth.store";
+import QaModeBanner from "@/components/auth/QaModeBanner";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } }
@@ -145,6 +149,7 @@ export default function App(): JSX.Element {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <QaModeBanner />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/:businessSlug/login" element={<LoginPage />} />
@@ -375,6 +380,13 @@ export default function App(): JSX.Element {
               <Route path="/company/actions" element={<CompanyActionCenterPage />} />
               <Route path="/company/apps" element={<CompanyAppsPage />} />
               <Route path="/company/people" element={<CompanyPeopleAccessPage />} />
+              <Route element={<ProtectedRoute permission="system.user.view" />}>
+                <Route path="/company/access-reviews" element={<CompanyAccessReviewPage />} />
+                <Route path="/company/security" element={<CompanySecurityPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permissions={["system.company.view", "system.company.edit", "accounting.report.view"]} />}>
+                <Route path="/company/audit" element={<CompanyAuditPage />} />
+              </Route>
               <Route element={<ProtectedRoute permission="system.branch.view" />}>
                 <Route path="/company/organization" element={<BranchesPage />} />
               </Route>

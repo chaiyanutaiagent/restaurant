@@ -20,6 +20,7 @@ from app.database import (
     get_restaurant_service_db,
 )
 from app.models.device import DeviceRegistration
+from app.models.auth import RefreshToken
 from app.models.company import Company
 from app.models.platform import PlatformOperator, PlatformSession
 from app.models.settings import BranchSettings
@@ -49,6 +50,8 @@ class TokenData:
     station_key: str | None = None
     assignment_ids: list[uuid.UUID] = field(default_factory=list)
     scope_types: list[str] = field(default_factory=list)
+    qa_persona: str | None = None
+    qa_deadline: datetime | None = None
 
 
 @dataclass
@@ -126,6 +129,35 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User session has been revoked",
         )
+    if int(payload.get("user_credential_version", 1)) != getattr(user, "credential_version", 1):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User session has been revoked",
+        )
+    if payload.get("qa_mode") and not settings.qa_access_mode_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="QA access mode is disabled",
+        )
+    if payload.get("sid"):
+        try:
+            session_id = uuid.UUID(payload["sid"])
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user session") from exc
+        active_session = await db.scalar(
+            select(RefreshToken.id).where(
+                RefreshToken.id == session_id,
+                RefreshToken.user_id == user_id,
+                RefreshToken.company_id == company_id,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > datetime.now(timezone.utc),
+            )
+        )
+        if active_session is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User session has been revoked",
+            )
     branch_id = uuid.UUID(payload["branch_id"]) if payload.get("branch_id") else None
     context = None
     if branch_id is not None:
@@ -146,6 +178,11 @@ async def get_current_user(
         station_key=payload.get("station_key"),
         assignment_ids=[uuid.UUID(value) for value in payload.get("assignment_ids", [])],
         scope_types=list(payload.get("scope_types", [])),
+        qa_persona=payload.get("qa_persona"),
+        qa_deadline=(
+            datetime.fromtimestamp(int(payload["qa_deadline"]), tz=timezone.utc)
+            if payload.get("qa_deadline") else None
+        ),
     )
 
 
@@ -158,6 +195,11 @@ async def get_current_platform_operator(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token type",
+        )
+    if payload.get("qa_mode") and not settings.qa_access_mode_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="QA access mode is disabled",
         )
     try:
         operator_id = uuid.UUID(payload["sub"])

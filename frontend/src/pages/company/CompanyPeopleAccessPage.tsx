@@ -1,4 +1,4 @@
-import { ArrowRight, ShieldCheck, UserRoundCog, Users } from "lucide-react";
+import { ArrowRight, ClipboardCheck, ShieldCheck, UserRoundCog, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/layout/PageHeader";
 import { useAuthStore } from "@/stores/auth.store";
@@ -11,6 +11,13 @@ export default function CompanyPeopleAccessPage(): JSX.Element {
       description: "ดูบัญชีผู้ใช้ สถานะ และขอบเขตสาขาที่ได้รับมอบหมาย",
       to: "/users",
       icon: Users,
+      visible: hasPermission("system.user.view"),
+    },
+    {
+      title: "ตรวจทบทวนสิทธิ์",
+      description: "ตรวจสิทธิ์เสี่ยง บัญชีที่ไม่ได้ใช้งาน และยกเลิก Session จาก Server",
+      to: "/company/access-reviews",
+      icon: ClipboardCheck,
       visible: hasPermission("system.user.view"),
     },
     {

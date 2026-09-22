@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 import uuid
+import hmac
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.config import settings
 from app.database import get_identity_db, get_restaurant_service_db
@@ -29,6 +32,7 @@ from app.schemas.platform import (
     PlatformTenantExportRequest,
 )
 from app.schemas.module_access import CompanyModuleAccessUpdate
+from app.schemas.qa_access import QaPersonaRead, QaSessionRequest
 from app.schemas.saas_billing import (
     SaasBillingEventImport,
     SaasInvoiceCreate,
@@ -74,16 +78,31 @@ def _client(request: Request) -> tuple[str | None, str | None]:
     )
 
 
-def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+def _set_refresh_cookie(response: Response, refresh_token: str, *, max_age: int | None = None) -> None:
     response.set_cookie(
         key=PLATFORM_REFRESH_COOKIE,
         value=refresh_token,
-        max_age=settings.refresh_token_expire_days * 86_400,
+        max_age=max_age or settings.refresh_token_expire_days * 86_400,
         path="/api/v1/platform/auth",
         secure=settings.is_production,
         httponly=True,
         samesite="strict",
     )
+
+
+def _platform_qa_access_guard(request: Request, access_key: str | None) -> None:
+    configured_host = urlsplit(settings.saas_public_base_url).hostname
+    request_host = (request.headers.get("host") or "").split(",", 1)[0].strip().split(":", 1)[0].lower()
+    configured_key = settings.qa_access_key or ""
+    if (
+        not settings.qa_access_mode_enabled
+        or settings.environment != "development"
+        or configured_host is None
+        or request_host != configured_host.lower()
+        or not access_key
+        or not hmac.compare_digest(access_key, configured_key)
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 
 def _clear_refresh_cookie(response: Response) -> None:
@@ -159,6 +178,55 @@ async def login(
         user_agent=user_agent,
     )
     _set_refresh_cookie(response, refresh_token)
+    return ok(result.model_dump(mode="json"))
+
+
+@router.get("/auth/qa/personas", include_in_schema=False)
+async def qa_platform_personas(
+    request: Request,
+    db: AsyncSession = Depends(get_identity_db),
+    x_qa_access_key: str | None = Header(default=None, alias="X-QA-Access-Key"),
+) -> dict[str, Any]:
+    _platform_qa_access_guard(request, x_qa_access_key)
+    result: list[QaPersonaRead] = []
+    for key, username in settings.qa_platform_personas.items():
+        operator = await db.scalar(
+            select(PlatformOperator).where(
+                PlatformOperator.username == username,
+                PlatformOperator.is_active.is_(True),
+            )
+        )
+        if operator is None:
+            continue
+        result.append(QaPersonaRead(
+            key=key,
+            label=key.replace("_", " ").replace("-", " ").title(),
+            surface="platform",
+            subject_id=operator.id,
+        ))
+    return ok([item.model_dump(mode="json") for item in result])
+
+
+@router.post("/auth/qa/session", include_in_schema=False)
+async def qa_platform_session(
+    payload: QaSessionRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_identity_db),
+    x_qa_access_key: str | None = Header(default=None, alias="X-QA-Access-Key"),
+) -> dict[str, Any]:
+    _platform_qa_access_guard(request, x_qa_access_key)
+    username = settings.qa_platform_personas.get(payload.persona)
+    if username is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="QA persona not found")
+    ip_address, user_agent = _client(request)
+    result, refresh_token = await PlatformAuthService(db).issue_qa_session(
+        username,
+        persona=payload.persona,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    _set_refresh_cookie(response, refresh_token, max_age=settings.qa_access_session_minutes * 60)
     return ok(result.model_dump(mode="json"))
 
 

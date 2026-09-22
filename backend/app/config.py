@@ -71,6 +71,37 @@ def validate_uat_auth_bypass_config(
         raise ValueError("UAT auth bypass requires an explicit Company ID and username")
 
 
+def validate_qa_access_mode_config(
+    *,
+    environment: str,
+    enabled: bool,
+    public_base_url: str,
+    access_key: str | None,
+    company_id: uuid.UUID | None,
+    personas: dict[str, str],
+    platform_personas: dict[str, str],
+) -> None:
+    if not enabled:
+        return
+    if environment != "development":
+        raise ValueError("QA access mode is allowed only in the development environment")
+    parsed_url = urlsplit(public_base_url)
+    local_host = parsed_url.hostname in {"localhost", "127.0.0.1"}
+    uat_host = (
+        parsed_url.scheme == "https"
+        and parsed_url.hostname is not None
+        and parsed_url.hostname.startswith("uat-")
+    )
+    if not (local_host or uat_host):
+        raise ValueError("QA access mode requires localhost or an HTTPS uat-* hostname")
+    if access_key is None or len(access_key.strip()) < 32:
+        raise ValueError("QA access mode requires a runtime access key of at least 32 characters")
+    if company_id is None or not personas:
+        raise ValueError("QA access mode requires an explicit Company ID and tenant personas")
+    if not platform_personas:
+        raise ValueError("QA access mode requires explicit Platform personas")
+
+
 def validate_takeaway_runtime_config(
     *,
     environment: str,
@@ -284,6 +315,12 @@ class Settings(BaseSettings):
     uat_auth_bypass_enabled: bool = False
     uat_auth_bypass_company_id: uuid.UUID | None = None
     uat_auth_bypass_username: str | None = None
+    qa_access_mode_enabled: bool = False
+    qa_access_key: str | None = None
+    qa_access_company_id: uuid.UUID | None = None
+    qa_access_personas: dict[str, str] = Field(default_factory=dict)
+    qa_platform_personas: dict[str, str] = Field(default_factory=dict)
+    qa_access_session_minutes: int = Field(default=30, ge=5, le=60)
     # WP47 design gate. This remains false until physical UAT is separately approved.
     pos_offline_mode_enabled: bool = False
     pos_offline_company_allowlist: str = ""
@@ -326,6 +363,17 @@ class Settings(BaseSettings):
             company_id=self.uat_auth_bypass_company_id,
             username=self.uat_auth_bypass_username,
         )
+        validate_qa_access_mode_config(
+            environment=self.environment,
+            enabled=self.qa_access_mode_enabled,
+            public_base_url=self.saas_public_base_url,
+            access_key=self.qa_access_key,
+            company_id=self.qa_access_company_id,
+            personas=self.qa_access_personas,
+            platform_personas=self.qa_platform_personas,
+        )
+        if self.qa_access_mode_enabled and self.uat_auth_bypass_enabled:
+            raise ValueError("QA access mode cannot coexist with credentialless UAT auth bypass")
         validate_takeaway_runtime_config(
             environment=self.environment,
             enabled=self.takeaway_feature_enabled,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import hmac
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
@@ -12,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_identity_db
 from app.dependencies import TokenData, get_current_user, get_current_user_db
-from app.models.user import User
+from app.models.user import User, UserBranch
+from app.models.branch import Branch
 from app.models.company import Company
 from app.schemas.auth import (
     BranchSwitchRequest,
@@ -23,10 +25,30 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.schemas.user import UserRead
+from app.schemas.qa_access import QaPersonaBranchRead, QaPersonaRead, QaSessionRequest
 from app.services.auth_service import AuthService
 from app.utils.security import decode_token
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+
+def _qa_access_guard(request: Request, access_key: str | None) -> None:
+    configured_host = urlsplit(settings.saas_public_base_url).hostname
+    request_host = (request.headers.get("host") or "").split(",", 1)[0].strip().split(":", 1)[0].lower()
+    configured_key = settings.qa_access_key or ""
+    if (
+        not settings.qa_access_mode_enabled
+        or settings.environment != "development"
+        or configured_host is None
+        or request_host != configured_host.lower()
+        or not access_key
+        or not hmac.compare_digest(access_key, configured_key)
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+def _qa_label(key: str) -> str:
+    return key.replace("_", " ").replace("-", " ").title()
 
 
 def ok(data: Any) -> dict[str, Any]:
@@ -143,6 +165,98 @@ async def uat_auto_login(
     return ok((await _token_response(access_token, refresh_token, user, db)).model_dump())
 
 
+@router.get("/qa/personas", include_in_schema=False)
+async def qa_personas(
+    request: Request,
+    db: AsyncSession = Depends(get_identity_db),
+    x_qa_access_key: str | None = Header(default=None, alias="X-QA-Access-Key"),
+) -> dict[str, Any]:
+    _qa_access_guard(request, x_qa_access_key)
+    company_id = settings.qa_access_company_id
+    assert company_id is not None
+    company = await db.get(Company, company_id)
+    if company is None or not company.is_active:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="QA Company is unavailable")
+    result: list[QaPersonaRead] = []
+    for key, username in settings.qa_access_personas.items():
+        user = await db.scalar(
+            select(User).where(
+                User.company_id == company_id,
+                User.username == username,
+                User.is_active.is_(True),
+                User.deleted_at.is_(None),
+            )
+        )
+        if user is None:
+            continue
+        branch_rows = (
+            await db.execute(
+                select(Branch, UserBranch.is_default)
+                .join(UserBranch, UserBranch.branch_id == Branch.id)
+                .where(
+                    UserBranch.user_id == user.id,
+                    UserBranch.deleted_at.is_(None),
+                    Branch.company_id == company_id,
+                    Branch.deleted_at.is_(None),
+                )
+                .order_by(UserBranch.is_default.desc(), Branch.name.asc())
+            )
+        ).all()
+        result.append(QaPersonaRead(
+            key=key,
+            label=_qa_label(key),
+            surface="tenant",
+            subject_id=user.id,
+            company_id=company.id,
+            company_name=company.name,
+            business_slug=company.business_slug,
+            branches=[
+                QaPersonaBranchRead(id=branch.id, name=branch.name, code=branch.code, is_default=is_default)
+                for branch, is_default in branch_rows
+            ],
+        ))
+    return ok([item.model_dump(mode="json") for item in result])
+
+
+@router.post("/qa/session", include_in_schema=False)
+async def qa_session(
+    payload: QaSessionRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_identity_db),
+    x_qa_access_key: str | None = Header(default=None, alias="X-QA-Access-Key"),
+) -> dict[str, Any]:
+    _qa_access_guard(request, x_qa_access_key)
+    username = settings.qa_access_personas.get(payload.persona)
+    company_id = settings.qa_access_company_id
+    if username is None or company_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="QA persona not found")
+    user = await db.scalar(
+        select(User)
+        .join(Company, Company.id == User.company_id)
+        .where(
+            User.company_id == company_id,
+            User.username == username,
+            User.is_active.is_(True),
+            User.deleted_at.is_(None),
+            Company.is_active.is_(True),
+        )
+    )
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="QA persona is unavailable")
+    access_token, refresh_token = await AuthService(
+        db,
+        emit_reference_events=settings.identity_database == "platform_core",
+    ).create_session(
+        user=user,
+        branch_id=payload.branch_id,
+        station_key=payload.station_key,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        qa_persona=payload.persona,
+    )
+    return ok((await _token_response(access_token, refresh_token, user, db)).model_dump())
+
+
 @router.post("/refresh")
 async def refresh(
     payload: RefreshRequest,
@@ -203,6 +317,7 @@ async def me(
 async def switch_branch(
     payload: BranchSwitchRequest,
     db: AsyncSession = Depends(get_identity_db),
+    current: TokenData = Depends(get_current_user),
     user: User = Depends(get_current_user_db),
 ) -> dict[str, Any]:
     auth_service = AuthService(db)
@@ -210,6 +325,8 @@ async def switch_branch(
         user,
         payload.branch_id,
         station_key=payload.station_key,
+        qa_persona=current.qa_persona,
+        qa_deadline=current.qa_deadline,
     )
     return ok((await _token_response(access_token, refresh_token, user, db)).model_dump())
 

@@ -44,6 +44,9 @@ class UserUpdateFull(BaseSchema):
     last_name: str | None = None
     display_name: str | None = None
     is_active: bool | None = None
+    reason: str | None = Field(default=None, max_length=500)
+    expected_credential_version: int | None = Field(default=None, ge=1)
+    request_id: uuid.UUID | None = None
 
 
 class UserDetailRead(BaseSchema):
@@ -58,6 +61,13 @@ class UserDetailRead(BaseSchema):
     is_active: bool
     is_superuser: bool
     last_login_at: datetime | None = None
+    credential_version: int = 1
+    mfa_enabled: bool = False
+    access_reviewed_at: datetime | None = None
+    access_review_due_at: datetime | None = None
+    access_review_outcome: str | None = None
+    deactivated_at: datetime | None = None
+    deactivation_reason: str | None = None
     created_at: datetime
     branches: list[UserBranchDetail]
 
@@ -68,14 +78,17 @@ class AssignBranchRequest(BaseSchema):
     branch_id: uuid.UUID
     role_id: uuid.UUID
     is_default: bool = False
+    reason: str = Field(default="Company Admin branch assignment", min_length=1, max_length=500)
 
 
 class RemoveBranchRequest(BaseSchema):
     branch_id: uuid.UUID
+    reason: str = Field(default="Company Admin branch removal", min_length=1, max_length=500)
 
 
 class ChangePasswordRequest(BaseSchema):
     new_password: str
+    reason: str = Field(default="Company Admin credential rotation", min_length=1, max_length=500)
 
 
 class RoleCreateFull(BaseSchema):

@@ -24,6 +24,7 @@ from app.models.stock import StockLocation
 from app.models.user import User, UserBranch
 from app.services.business_context_service import load_branch_business_context
 from app.services.company_owner_policy import CompanyOwnerPolicy
+from app.services.company_access_service import invalidate_user_access
 from app.schemas.role import PermissionRead
 from app.schemas.product import BranchProductReplacementRuleCreate, BranchProductReplacementRuleRead
 from app.schemas.user_mgmt import (
@@ -197,13 +198,59 @@ class AdminService:
         user_id: uuid.UUID,
         company_id: uuid.UUID,
         data: UserUpdateFull,
+        actor_id: uuid.UUID | None = None,
     ) -> User:
         user = await self._get_user(company_id, user_id)
+        values = data.model_dump(
+            exclude_unset=True,
+            exclude={"reason", "expected_credential_version", "request_id"},
+        )
+        state_change = "is_active" in values and values["is_active"] != user.is_active
+        if state_change:
+            if not data.reason or not data.reason.strip():
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Reason is required for account state changes")
+            if data.request_id is None:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Request ID is required for account state changes")
+            replay = await self.db.scalar(
+                select(AuditLog).where(
+                    AuditLog.company_id == company_id,
+                    AuditLog.action == "system.user.state.update",
+                    AuditLog.resource_id == str(user_id),
+                    AuditLog.new_value["request_id"].as_string() == str(data.request_id),
+                )
+            )
+            if replay is not None:
+                return user
+            if data.expected_credential_version != getattr(user, "credential_version", 1):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Access state changed; reload before retrying")
         if data.is_active is False and user.is_active:
             await CompanyOwnerPolicy(self.db).ensure_user_can_be_deactivated(company_id, user_id)
-        for field, value in data.model_dump(exclude_unset=True).items():
+        for field, value in values.items():
             setattr(user, field, value)
-        self._audit(company_id, None, "system.user.update", "User", user.id)
+        if state_change:
+            now = self._now()
+            if user.is_active:
+                user.deactivated_at = None
+                user.deactivated_by = None
+                user.deactivation_reason = None
+            else:
+                user.deactivated_at = now
+                user.deactivated_by = actor_id
+                user.deactivation_reason = data.reason
+            await invalidate_user_access(self.db, user, reason=data.reason or "account state changed", now=now)
+        self._audit(
+            company_id,
+            actor_id,
+            "system.user.state.update" if state_change else "system.user.update",
+            "User",
+            user.id,
+            new_value={
+                "request_id": str(data.request_id),
+                "reason": data.reason,
+                "is_active": user.is_active,
+                "credential_version": user.credential_version,
+            } if state_change else None,
+        )
         await self.db.commit()
         await self.db.refresh(user)
         return user
@@ -213,11 +260,20 @@ class AdminService:
         user_id: uuid.UUID,
         company_id: uuid.UUID,
         actor_id: uuid.UUID,
+        *,
+        reason: str,
+        expected_credential_version: int,
     ) -> User:
         user = await self._get_user(company_id, user_id)
+        if getattr(user, "credential_version", 1) != expected_credential_version:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Access state changed; reload before retrying")
         await CompanyOwnerPolicy(self.db).ensure_user_can_be_deactivated(company_id, user_id)
+        now = self._now()
         user.is_active = False
-        await self._revoke_refresh_tokens(user.id)
+        user.deactivated_at = now
+        user.deactivated_by = actor_id
+        user.deactivation_reason = reason
+        await invalidate_user_access(self.db, user, reason=reason, now=now)
         self._audit(company_id, actor_id, "system.user.deactivate", "User", user.id)
         await self.db.commit()
         await self.db.refresh(user)
@@ -228,8 +284,9 @@ class AdminService:
         user_id: uuid.UUID,
         company_id: uuid.UUID,
         data: AssignBranchRequest,
+        actor_id: uuid.UUID | None = None,
     ) -> UserBranch:
-        await self._get_user(company_id, user_id)
+        user = await self._get_user(company_id, user_id)
         await self._get_branch(company_id, data.branch_id)
         await self._get_role(company_id, data.role_id)
         context = await load_branch_business_context(self.db, company_id, data.branch_id)
@@ -270,7 +327,8 @@ class AdminService:
             )
             self.db.add(assignment)
 
-        self._audit(company_id, None, "system.user.branch_assigned", "User", user_id)
+        await invalidate_user_access(self.db, user, reason=data.reason)
+        self._audit(company_id, actor_id, "system.user.branch_assigned", "User", user_id)
         await self.db.commit()
         await self.db.refresh(assignment)
         return assignment
@@ -280,8 +338,10 @@ class AdminService:
         user_id: uuid.UUID,
         company_id: uuid.UUID,
         data: uuid.UUID | Branch | object,
+        actor_id: uuid.UUID | None = None,
     ) -> None:
         branch_id = data if isinstance(data, uuid.UUID) else getattr(data, "branch_id")
+        user = await self._get_user(company_id, user_id)
         assignment = await self.db.scalar(
             select(UserBranch)
             .join(Branch, Branch.id == UserBranch.branch_id)
@@ -318,7 +378,12 @@ class AdminService:
             next_assignment = next(item for item in active_assignments if item.id != assignment.id)
             next_assignment.is_default = True
 
-        self._audit(company_id, None, "system.user.branch_removed", "User", user_id)
+        await invalidate_user_access(
+            self.db,
+            user,
+            reason=getattr(data, "reason", "Company Admin branch removal"),
+        )
+        self._audit(company_id, actor_id, "system.user.branch_removed", "User", user_id)
         await self.db.commit()
 
     async def change_user_password(
@@ -331,7 +396,7 @@ class AdminService:
         user = await self._get_user(company_id, user_id)
         user.hashed_password = hash_password(data.new_password)
         user.password_changed_at = self._now()
-        await self._revoke_refresh_tokens(user.id)
+        await invalidate_user_access(self.db, user, reason=data.reason)
         self._audit(company_id, actor_id, "system.user.password_changed", "User", user.id)
         await self.db.commit()
 
@@ -432,6 +497,8 @@ class AdminService:
         role.permissions = next_permissions
         role.is_branch_assignable = next_branch_assignable
         role.allowed_scope_types = list(next_scope_types)
+
+        await self._invalidate_role_users(company_id, role.id, "Role permissions or scope changed")
 
         self._audit(company_id, None, "system.role.update", "Role", role.id)
         await self.db.commit()
@@ -949,6 +1016,13 @@ class AdminService:
             is_active=user.is_active,
             is_superuser=user.is_superuser,
             last_login_at=user.last_login_at,
+            credential_version=getattr(user, "credential_version", 1),
+            mfa_enabled=getattr(user, "mfa_enabled", False),
+            access_reviewed_at=getattr(user, "access_reviewed_at", None),
+            access_review_due_at=getattr(user, "access_review_due_at", None),
+            access_review_outcome=getattr(user, "access_review_outcome", None),
+            deactivated_at=getattr(user, "deactivated_at", None),
+            deactivation_reason=getattr(user, "deactivation_reason", None),
             created_at=user.created_at,
             branches=branches,
         )
@@ -1110,6 +1184,37 @@ class AdminService:
         for token in tokens:
             token.revoked_at = now
 
+    async def _invalidate_role_users(
+        self,
+        company_id: uuid.UUID,
+        role_id: uuid.UUID,
+        reason: str,
+    ) -> None:
+        legacy_ids = select(UserBranch.user_id).where(
+            UserBranch.role_id == role_id,
+            UserBranch.deleted_at.is_(None),
+        )
+        scoped_ids = select(StaffRoleAssignment.user_id).where(
+            StaffRoleAssignment.company_id == company_id,
+            StaffRoleAssignment.role_id == role_id,
+            StaffRoleAssignment.revoked_at.is_(None),
+        )
+        ids = set((await self.db.scalars(legacy_ids)).all())
+        ids.update((await self.db.scalars(scoped_ids)).all())
+        if not ids:
+            return
+        users = (
+            await self.db.scalars(
+                select(User).where(
+                    User.company_id == company_id,
+                    User.id.in_(ids),
+                    User.deleted_at.is_(None),
+                )
+            )
+        ).all()
+        for user in users:
+            await invalidate_user_access(self.db, user, reason=reason)
+
     async def _unset_default_branches(self, user_id: uuid.UUID) -> None:
         assignments = (
             await self.db.scalars(
@@ -1169,6 +1274,8 @@ class AdminService:
         action: str,
         resource: str,
         resource_id: uuid.UUID | None,
+        *,
+        new_value: dict | None = None,
     ) -> None:
         self.db.add(
             AuditLog(
@@ -1177,6 +1284,7 @@ class AdminService:
                 action=action,
                 resource=resource,
                 resource_id=str(resource_id) if resource_id else None,
+                new_value=new_value,
             )
         )
 

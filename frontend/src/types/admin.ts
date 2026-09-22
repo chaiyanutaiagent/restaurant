@@ -26,6 +26,13 @@ export interface UserDetail {
   is_active: boolean;
   is_superuser: boolean;
   last_login_at: string | null;
+  credential_version: number;
+  mfa_enabled: boolean;
+  access_reviewed_at: string | null;
+  access_review_due_at: string | null;
+  access_review_outcome: string | null;
+  deactivated_at: string | null;
+  deactivation_reason: string | null;
   created_at: string;
   branches: UserBranchDetail[];
 }

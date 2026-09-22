@@ -24,6 +24,7 @@ import type {
   PlatformTenantExport,
   PlatformTokenResponse
 } from "@/types/platform";
+import type { QaPersona } from "@/types/auth";
 
 type PlatformApiResponse<T> = {
   data: T;
@@ -97,6 +98,16 @@ export const platformApi = {
       password,
       mfa_code: mfaCode || null,
     }),
+  qaPersonas: (accessKey: string) =>
+    platformApiClient.get<PlatformApiResponse<QaPersona[]>>("/auth/qa/personas", {
+      headers: { "X-QA-Access-Key": accessKey },
+    }),
+  qaSession: (accessKey: string, persona: string) =>
+    platformApiClient.post<PlatformApiResponse<PlatformTokenResponse>>(
+      "/auth/qa/session",
+      { persona },
+      { headers: { "X-QA-Access-Key": accessKey } },
+    ),
   refresh: (csrfToken: string) =>
     platformApiClient.post<PlatformApiResponse<PlatformTokenResponse>>(
       "/auth/refresh",

@@ -41,8 +41,8 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP57 | Retail Hold/Resume, Return/Exchange/Void and Shift Operations | Software UAT and rollback passed; physical acceptance remains HOLD | Local/UAT only; Cash Pilot; Legacy identities fail closed |
 | WP58 | Retail Offline Recovery, Counter Readiness and Retail Phase Gate | Software UAT gate closed; physical acceptance remains HOLD | No cutover/physical pass implied |
 | WP59 | Platform Console identity, Team/RBAC and operator governance | Software UAT checkpoint passed; physical/real-operator acceptance remains HOLD | Platform Production unchanged |
-| WP60 | Company Admin maturity, access review and Company audit | In progress; discovery and contract freeze started | Tenant MFA/session decisions required; Production unchanged |
-| WP61 | Shared ERP operational and finance maturity | Planned | Real tax/provider/accountant gates remain |
+| WP60 | Company Admin maturity, access review and Company audit | Focused Local checkpoint passed; combined Batch B UAT deferred through WP61 | Tenant MFA/recovery remains HOLD; Production unchanged |
+| WP61 | Shared ERP operational and finance maturity | Ready to start after WP60 commit/push | Real tax/provider/accountant gates remain |
 | WP62 | Takeaway operational UI activation | Planned | Transactions remain gated until owner/canary approval |
 | WP63 | Central Kitchen and Supply Chain UI activation | Planned | Read-only/dark-launch until stock/QC gates pass |
 | WP64 | Public Customer Experience | Planned | Catalog/ecommerce owner decision required |
@@ -57,7 +57,7 @@ The execution contract is recorded in `FULL-UI-BATCH-EXECUTION-PLAN-02.md`. WP54
 | Batch | WP range | Checkpoint |
 |---|---|---|
 | A — Retail POS | WP55–WP58 | Combined software gate passed; physical/Production HOLD; Batch B may begin on Local/UAT |
-| B — Platform/Company/ERP | WP59–WP61 | WP59 checkpoint passed; WP60 in progress |
+| B — Platform/Company/ERP | WP59–WP61 | WP59 UAT passed; WP60 focused Local checkpoint passed; WP61 next; combined UAT pending |
 | C — Takeaway/Kitchen/Public | WP62–WP64 | Planned; unsafe writes remain gated |
 | D — Governance/full-system UAT | WP65 | Planned |
 
@@ -137,8 +137,8 @@ The superseded non-v2 Action Center file is not counted.
 | Area | Design authority | WP | Current state / boundary |
 |---|---|---|---|
 | Platform Console | `cto-non-hotel/01-PLATFORM-CONSOLE-CTO-SPEC.md` | WP59 | Software UAT checkpoint passed; server-authoritative RBAC, Team invitation, session/MFA visibility, access review and last-owner protection verified on UAT. |
-| Company Admin | `cto-non-hotel/02-COMPANY-ADMIN-CTO-SPEC.md` | WP60 | In progress; discovery and contract freeze started on top of WP42. |
-| Shared ERP | `cto-non-hotel/03-SHARED-ERP-CTO-SPEC.md` | WP61 | Planned; real tax/provider/accountant acceptance remains gated. |
+| Company Admin | `cto-non-hotel/02-COMPANY-ADMIN-CTO-SPEC.md` | WP60 | Focused Local checkpoint passed: lifecycle, access review, tenant sessions, Company Audit and explicit MFA HOLD. |
+| Shared ERP | `cto-non-hotel/03-SHARED-ERP-CTO-SPEC.md` | WP61 | Ready to start; real tax/provider/accountant acceptance remains gated. |
 | Restaurant advanced | `cto-non-hotel/04-RESTAURANT-ADVANCED-OPERATIONS-CTO-SPEC.md` | WP49–WP54 | Active sequence; Brand-profile-specific extras remain disabled until approved. |
 | Takeaway | `cto-non-hotel/05-TAKEAWAY-POS-CTO-SPEC.md` | WP62 | Engineering exists; real-data/canary/owner gates remain. |
 | Central Kitchen / Supply Chain | `cto-non-hotel/06-CENTRAL-KITCHEN-SUPPLY-CHAIN-CTO-SPEC.md` | WP63 | Read-only/dark-launch; opening lot, count, QC and recall gates remain. |

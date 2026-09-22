@@ -6,7 +6,7 @@ import axios, {
 import { useAuthStore } from "@/stores/auth.store";
 import { useDeviceStore } from "@/stores/device.store";
 import type { ApiResponse } from "@/types/api";
-import type { LoginRequest, MeResponse, TokenResponse } from "@/types/auth";
+import type { LoginRequest, MeResponse, QaPersona, TokenResponse } from "@/types/auth";
 import type { Branch, Permission, User, UserBranch } from "@/types/user";
 import type { SaasActionResponse, SaasBusiness, SaasMembership, SaasSignupResponse } from "@/types/membership";
 import type { SaasBillingSummary } from "@/types/billing";
@@ -29,6 +29,7 @@ import type {
   EffectiveAccess,
   OperationalStatus,
 } from "@/types/companyFoundation";
+import type { CompanyAuditPage } from "@/types/companyAccess";
 
 type RetryableConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -163,6 +164,14 @@ export const authApi = Object.assign(api, {
     }),
   uatAutoLogin: () =>
     api.post<ApiResponse<TokenResponse>>("/auth/uat/auto-login"),
+  qaPersonas: (accessKey: string) =>
+    api.get<ApiResponse<QaPersona[]>>("/auth/qa/personas", { headers: { "X-QA-Access-Key": accessKey } }),
+  qaSession: (accessKey: string, persona: string, branchId?: string | null) =>
+    api.post<ApiResponse<TokenResponse>>("/auth/qa/session", {
+      persona,
+      branch_id: branchId || null,
+      station_key: null,
+    }, { headers: { "X-QA-Access-Key": accessKey } }),
   refresh: (refreshToken: string) =>
     api.post<ApiResponse<TokenResponse>>("/auth/refresh", { refresh_token: refreshToken }),
   logout: (refreshToken: string) =>
@@ -292,6 +301,17 @@ export const companyFoundationApi = {
   moduleOverview: (moduleKey: string) =>
     api.get<ApiResponse<CompanyOverviewSection>>(`/company/overview/${encodeURIComponent(moduleKey)}`),
   operationalStatus: () => api.get<ApiResponse<OperationalStatus>>("/company/operational-status"),
+  audit: (params?: {
+    page?: number;
+    limit?: number;
+    actor_id?: string;
+    branch_id?: string;
+    action?: string;
+    resource?: string;
+    request_id?: string;
+    date_from?: string;
+    date_to?: string;
+  }) => api.get<ApiResponse<CompanyAuditPage>>("/company/audit", { params }),
 };
 
 export const privacySupportApi = {

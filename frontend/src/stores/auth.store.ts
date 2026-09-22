@@ -13,6 +13,8 @@ type JwtPayload = {
   scope_types?: string[];
   station_key?: string | null;
   permissions?: string[];
+  qa_mode?: boolean;
+  qa_persona?: string | null;
 };
 
 type AuthState = {
@@ -28,6 +30,8 @@ type AuthState = {
   scopeTypes: string[];
   stationKey: string | null;
   permissions: string[];
+  qaMode: boolean;
+  qaPersona: string | null;
   setSession: (tokens: TokenResponse, companyId: string) => void;
   setBranchId: (branchId: string) => void;
   clearSession: () => void;
@@ -65,6 +69,8 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
   scopeTypes: [],
   stationKey: null,
   permissions: [],
+  qaMode: false,
+  qaPersona: null,
   setSession: (tokens, companyId) => {
     const payload = parseJwtPayload(tokens.access_token);
     set((state) => {
@@ -80,6 +86,8 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
       state.scopeTypes = payload?.scope_types ?? [];
       state.stationKey = payload?.station_key ?? null;
       state.permissions = payload?.permissions ?? [];
+      state.qaMode = payload?.qa_mode ?? false;
+      state.qaPersona = payload?.qa_persona ?? null;
     });
   },
   setBranchId: (branchId) => {
@@ -101,6 +109,8 @@ const authStore: StateCreator<AuthState, [["zustand/persist", unknown], ["zustan
       state.scopeTypes = [];
       state.stationKey = null;
       state.permissions = [];
+      state.qaMode = false;
+      state.qaPersona = null;
     });
     window.localStorage.removeItem("erp-auth");
   },

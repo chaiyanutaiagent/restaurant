@@ -1,10 +1,14 @@
-# WP62 Local Checkpoint — Takeaway Operational UI
+# WP62 Checkpoint — Takeaway Operational UI
 
 Date: 2026-09-22
 
-Decision: **LOCAL ENGINEERING GATE PASS / UAT PENDING**
+Decision: **FOCUSED SOFTWARE UAT PASS / BATCH C REMAINS OPEN**
 
 Production decision: **NO-GO / unchanged**
+
+Closeout update: the Local and focused UAT requirements passed. Immutable
+release, backup, authenticated gate, rollback/restore and Production-isolation
+evidence is recorded in `WP62-UAT-EVIDENCE-03.md`.
 
 ## Result
 
@@ -29,17 +33,18 @@ credit, recipe and ERP acknowledgement writes remain closed by default.
 - Frontend image: `restaurant-pos-frontend:wp62-local`.
 - Diff whitespace gate: passed.
 
-## UAT checkpoint
+## UAT checkpoint result
 
-1. Commit and push the focused WP62 candidate.
-2. Capture current UAT images and database backup/checksums.
-3. Deploy immutable WP62 images to UAT with
-   `TAKEAWAY_UAT_TRANSACTION_WRITES_ENABLED=false`.
-4. Verify status contract, representative read routes, `409` on a safe
-   synthetic mutation attempt, preview exceptions and public-menu hold state.
-5. Verify rollback to the recorded WP61 images and restore WP62.
+- Commit `da889f9` was pushed to the restaurant repository and deployed only to
+  UAT using immutable WP62 Backend/Frontend images.
+- Pre-deploy database, Redis and uploads backup checksums passed.
+- Authenticated status/read routes returned 200, the safe open-shift attempt
+  returned 409 `takeaway_write_hold`, and dry-run/preview remained available.
+- Shift records were unchanged before and after the rejected mutation.
+- App-only rollback to WP61 and restore to WP62 passed; database services were
+  not recreated.
+- Production container identities and images remained unchanged.
 
-WP63 may begin after this focused UAT checkpoint unless a hard isolation,
-permission, migration, rollback or Server-authority blocker is found. Full
-persona/visual/regression/rollback acceptance remains the combined Batch C
-gate after WP64.
+No hard isolation, permission, migration, rollback or Server-authority blocker
+was found. WP63 may begin on Local/UAT. Full persona, visual, regression and
+rollback acceptance remains the combined Batch C gate after WP64.

@@ -25,6 +25,7 @@ import {
 } from "@/config/takeawayWorkspace";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth.store";
+import TakeawayReleaseBanner from "@/components/takeaway/TakeawayReleaseBanner";
 
 const icons: Record<string, typeof LayoutDashboard> = {
   overview: LayoutDashboard,
@@ -137,6 +138,7 @@ export default function TakeawayShell(): JSX.Element {
         </header>
         <main className="p-3 md:p-5 xl:p-7">
           <div className="app-page max-w-[1800px]">
+            <TakeawayReleaseBanner />
             <Outlet />
           </div>
         </main>

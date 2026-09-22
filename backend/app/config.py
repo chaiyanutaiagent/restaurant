@@ -128,6 +128,29 @@ def validate_takeaway_runtime_config(
         raise ValueError("Staging and production Takeaway databases cannot use localhost")
 
 
+def validate_takeaway_write_activation_config(
+    *,
+    environment: str,
+    enabled: bool,
+    feature_enabled: bool,
+    public_base_url: str,
+) -> None:
+    """Keep Takeaway mutations behind an explicit, UAT-only release gate."""
+    if not enabled:
+        return
+    if not feature_enabled:
+        raise ValueError("Takeaway transaction writes require TAKEAWAY_FEATURE_ENABLED=true")
+    parsed_url = urlsplit(public_base_url)
+    if environment != "development":
+        raise ValueError("Takeaway transaction writes are approved only in UAT development")
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.hostname is None
+        or not parsed_url.hostname.startswith("uat-")
+    ):
+        raise ValueError("Takeaway transaction writes require an HTTPS uat-* hostname")
+
+
 def validate_retail_runtime_config(
     *,
     environment: str,
@@ -257,6 +280,7 @@ class Settings(BaseSettings):
     )
     takeaway_service_database: Literal["disabled", "takeaway"] = "disabled"
     takeaway_feature_enabled: bool = False
+    takeaway_uat_transaction_writes_enabled: bool = False
     takeaway_import_trusted_keys_json: str = "{}"
     reference_projector_enabled: bool = False
     reference_projector_poll_seconds: float = Field(default=1.0, ge=0.1, le=60.0)
@@ -381,6 +405,12 @@ class Settings(BaseSettings):
             database_url=self.takeaway_database_url,
             identity_database=self.identity_database,
             reference_projector_enabled=self.reference_projector_enabled,
+        )
+        validate_takeaway_write_activation_config(
+            environment=self.environment,
+            enabled=self.takeaway_uat_transaction_writes_enabled,
+            feature_enabled=self.takeaway_feature_enabled,
+            public_base_url=self.saas_public_base_url,
         )
         validate_retail_runtime_config(
             environment=self.environment,

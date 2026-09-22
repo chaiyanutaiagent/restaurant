@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Loader2, Maximize2, Play, RefreshCw, Search, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "@/components/ui/use-toast";
+import { useTakeawayReleaseGate } from "@/hooks/useTakeawayReleaseGate";
 import { takeawayApi, type TakeawayRecord } from "@/lib/takeawayApi";
 import { useAuthStore } from "@/stores/auth.store";
 
@@ -37,7 +38,7 @@ function statusClass(value: unknown): string {
       : "bg-amber-100 text-amber-800";
 }
 
-function RecordList({ rows, section, onAction, busy, canManageCentral, canAcknowledgeErp }: { rows: TakeawayRecord[]; section: TakeawaySection; onAction: (row: TakeawayRecord, action: string) => void; busy: boolean; canManageCentral: boolean; canAcknowledgeErp: boolean }): JSX.Element {
+function RecordList({ rows, section, onAction, busy, writesEnabled, canManageCentral, canAcknowledgeErp }: { rows: TakeawayRecord[]; section: TakeawaySection; onAction: (row: TakeawayRecord, action: string) => void; busy: boolean; writesEnabled: boolean; canManageCentral: boolean; canAcknowledgeErp: boolean }): JSX.Element {
   if (!rows.length) return <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">ยังไม่มีรายการในส่วนนี้</div>;
   return <div className="grid gap-3">{rows.map((row) => {
     const status = row.status ?? row.fulfillment_status;
@@ -46,16 +47,16 @@ function RecordList({ rows, section, onAction, busy, canManageCentral, canAcknow
     return <article key={row.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="min-w-0"><p className="truncate font-black">{asText(title)}</p><p className="mt-1 truncate text-xs text-slate-500">{asText(secondary)} · {asText(row.created_at ?? row.business_date ?? row.planned_at)}</p></div>
       <div className="flex flex-wrap items-center gap-2">{status ? <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusClass(status)}`}>{asText(status)}</span> : null}
-        {section === "kitchen" && row.status === "queued" ? <button disabled={busy} onClick={() => onAction(row, "preparing")} className="rounded-xl bg-amber-400 px-3 py-2 text-sm font-bold">เริ่มทำ</button> : null}
-        {section === "kitchen" && row.status === "preparing" ? <button disabled={busy} onClick={() => onAction(row, "ready")} className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-bold">พร้อมรับ</button> : null}
-        {section === "pickup" && row.fulfillment_status === "ready" ? <button disabled={busy} onClick={() => onAction(row, "picked_up")} className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-bold">รับแล้ว</button> : null}
-        {section === "central" && canManageCentral && row.status === "submitted" ? <button disabled={busy} onClick={() => onAction(row, "approved")} className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-bold">อนุมัติ</button> : null}
-        {section === "central" && canManageCentral && row.status === "approved" ? <button disabled={busy} onClick={() => onAction(row, "in_production")} className="rounded-xl bg-violet-500 px-3 py-2 text-sm font-bold text-white">ส่งผลิต</button> : null}
-        {section === "central" && canManageCentral && row.status === "in_production" ? <button disabled={busy} onClick={() => onAction(row, "packed")} className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-bold text-white">แพ็กแล้ว</button> : null}
-        {section === "central" && canManageCentral && row.status === "packed" ? <button disabled={busy} onClick={() => onAction(row, "shipped")} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-bold text-white">ส่งแล้ว</button> : null}
-        {section === "transfers" && row.status === "draft" ? <button disabled={busy} onClick={() => onAction(row, "shipped")} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-bold text-white">ยืนยันส่ง</button> : null}
-        {section === "transfers" && row.status === "shipped" ? <button disabled={busy} onClick={() => onAction(row, "received")} className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-bold">ยืนยันรับ</button> : null}
-        {section === "erp" && canAcknowledgeErp && row.status === "pending" ? <button disabled={busy} onClick={() => onAction(row, "ack")} className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-bold">ERP รับแล้ว</button> : null}
+        {section === "kitchen" && row.status === "queued" ? <button disabled={busy || !writesEnabled} onClick={() => onAction(row, "preparing")} className="rounded-xl bg-amber-400 px-3 py-2 text-sm font-bold disabled:opacity-40">เริ่มทำ</button> : null}
+        {section === "kitchen" && row.status === "preparing" ? <button disabled={busy || !writesEnabled} onClick={() => onAction(row, "ready")} className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-bold disabled:opacity-40">พร้อมรับ</button> : null}
+        {section === "pickup" && row.fulfillment_status === "ready" ? <button disabled={busy || !writesEnabled} onClick={() => onAction(row, "picked_up")} className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-bold disabled:opacity-40">รับแล้ว</button> : null}
+        {section === "central" && canManageCentral && row.status === "submitted" ? <button disabled={busy || !writesEnabled} onClick={() => onAction(row, "approved")} className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-bold disabled:opacity-40">อนุมัติ</button> : null}
+        {section === "central" && canManageCentral && row.status === "approved" ? <button disabled={busy || !writesEnabled} onClick={() => onAction(row, "in_production")} className="rounded-xl bg-violet-500 px-3 py-2 text-sm font-bold text-white disabled:opacity-40">ส่งผลิต</button> : null}
+        {section === "central" && canManageCentral && row.status === "in_production" ? <button disabled={busy || !writesEnabled} onClick={() => onAction(row, "packed")} className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-bold text-white disabled:opacity-40">แพ็กแล้ว</button> : null}
+        {section === "central" && canManageCentral && row.status === "packed" ? <button disabled={busy || !writesEnabled} onClick={() => onAction(row, "shipped")} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-bold text-white disabled:opacity-40">ส่งแล้ว</button> : null}
+        {section === "transfers" && row.status === "draft" ? <button disabled={busy || !writesEnabled} onClick={() => onAction(row, "shipped")} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-bold text-white disabled:opacity-40">ยืนยันส่ง</button> : null}
+        {section === "transfers" && row.status === "shipped" ? <button disabled={busy || !writesEnabled} onClick={() => onAction(row, "received")} className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-bold disabled:opacity-40">ยืนยันรับ</button> : null}
+        {section === "erp" && canAcknowledgeErp && row.status === "pending" ? <button disabled={busy || !writesEnabled} onClick={() => onAction(row, "ack")} className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-bold disabled:opacity-40">ERP รับแล้ว</button> : null}
       </div>
     </article>;
   })}</div>;
@@ -64,6 +65,8 @@ function RecordList({ rows, section, onAction, busy, canManageCentral, canAcknow
 export default function TakeawayOperationsPage({ section, workspace = "central" }: { section: TakeawaySection; workspace?: "store" | "central" | "admin" }): JSX.Element {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const releaseGate = useTakeawayReleaseGate();
+  const writesEnabled = releaseGate.writesEnabled;
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const [fromDate, setFromDate] = useState(today());
   const [toDate, setToDate] = useState(today());
@@ -96,6 +99,7 @@ export default function TakeawayOperationsPage({ section, workspace = "central" 
   const erpQuery = useQuery({ queryKey: ["takeaway", "erp-reconciliation"], queryFn: async () => (await takeawayApi.erpReconciliation()).data.data, enabled: section === "erp" });
   const actionMutation = useMutation({
     mutationFn: ({ row, action }: { row: TakeawayRecord; action: string }) => {
+      if (!writesEnabled) throw new Error("Takeaway transactions are held by the server release gate");
       if (section === "kitchen") return takeawayApi.updateTicket(row.id, action as "preparing" | "ready");
       if (section === "pickup") return takeawayApi.markPickedUp(row.id);
       if (section === "central") return takeawayApi.updateCentralOrder(row.id, action);
@@ -108,6 +112,7 @@ export default function TakeawayOperationsPage({ section, workspace = "central" 
   });
   const createMutation = useMutation({
     mutationFn: async () => {
+      if (section !== "import" && !writesEnabled) throw new Error("รายการนี้ยังถูกล็อกในช่วง Dark launch");
       if (!context?.brand_id) throw new Error("ไม่พบแบรนด์ Takeaway");
       if (section === "central") {
         if (!context.branch_id) throw new Error("ไม่พบสาขา");
@@ -165,13 +170,14 @@ export default function TakeawayOperationsPage({ section, workspace = "central" 
     if (section === "credits") return [["credit_limit", "วงเงินใหม่ (บาท)"]];
     return [];
   }, [section]);
-  const showCreate = (
+  const hasCreatePermission = (
     (section === "central" && hasPermission("takeaway.central_order.create") && hasPermission("takeaway.central_order.manage"))
     || (section === "production" && hasPermission("takeaway.production.manage"))
     || (section === "stock" && hasPermission("takeaway.stock.manage"))
     || (section === "transfers" && hasPermission("takeaway.transfer.manage"))
     || (section === "credits" && hasPermission("takeaway.credit.manage"))
   );
+  const showCreate = hasCreatePermission && writesEnabled;
   const erpStats: Array<[string, unknown]> = [
     ["รอส่ง", erpQuery.data?.pending ?? 0],
     ["ERP รับแล้ว", erpQuery.data?.processed ?? 0],
@@ -186,8 +192,9 @@ export default function TakeawayOperationsPage({ section, workspace = "central" 
     {section === "erp" ? <div className="grid gap-3 sm:grid-cols-3">{erpStats.map(([label, value]) => <div key={label} className="rounded-2xl bg-white p-4 shadow-sm"><p className="text-sm text-slate-500">{label}</p><p className="mt-1 text-2xl font-black">{asText(value)}</p></div>)}</div> : null}
     {section === "import" ? <div className="grid gap-4 lg:grid-cols-[1fr_300px]"><div className="rounded-2xl bg-white p-4 shadow-sm"><label className="text-sm font-bold">แพ็กเกจทดสอบ JSON</label><textarea value={jsonText} onChange={(event) => setJsonText(event.target.value)} className="mt-3 h-96 w-full rounded-xl border bg-slate-950 p-4 font-mono text-xs text-slate-100" /><button onClick={() => createMutation.mutate()} className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 font-black"><ClipboardCheck className="h-5 w-5" /> ตรวจแบบไม่บันทึก</button></div><div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950"><AlertTriangle className="h-6 w-6" /><p className="mt-3 font-black">การนำเข้าจริงยังล็อกอยู่</p><p className="mt-2">ระหว่างสัญญาข้อมูลเป็นฉบับร่าง ระบบอนุญาตเฉพาะข้อมูล synthetic เท่านั้น ข้อมูล Chambo จริงต้องผ่าน dry-run และอนุมัติ cutover ก่อน</p></div></div> : null}
     {showCreate ? <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><h2 className="font-black">สร้างรายการใหม่</h2><div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{fields.map(([key, label]) => <label key={key} className="text-xs font-bold text-slate-600">{label}{["location_id", "from_location_id", "to_location_id"].includes(key) && (locationsQuery.data ?? []).length ? <select value={form[key] ?? ""} onChange={(event) => setForm({ ...form, [key]: event.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="">เลือกคลัง</option>{(locationsQuery.data ?? []).map((location) => <option key={location.id} value={location.id}>{asText(location.name)} · {asText(location.location_type)}</option>)}</select> : <input value={form[key] ?? ""} onChange={(event) => setForm({ ...form, [key]: event.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />}</label>)}</div><button disabled={createMutation.isPending} onClick={() => createMutation.mutate()} className="mt-4 flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white disabled:opacity-50">{createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} บันทึก</button></div> : null}
+    {hasCreatePermission && !writesEnabled ? <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-bold text-amber-950">โหมดอ่านอย่างเดียว — ฟอร์มสร้างรายการจะเปิดเมื่อ Server เปิด UAT synthetic transaction gate เท่านั้น</div> : null}
     {section === "central" && workspace === "store" && !showCreate ? <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">หน้านี้แสดงใบสั่งของสาขาตามสิทธิ์แล้ว ส่วนฟอร์มสั่งประจำ รายการเพิ่ม และรับของแบบละเอียดจะเชื่อมใน WP18</div> : null}
-    {!section.match(/^(reports|import)$/) ? query.isLoading ? <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-emerald-600" /></div> : <RecordList rows={visibleRows} section={section} busy={actionMutation.isPending} canManageCentral={hasPermission("takeaway.central_order.manage")} canAcknowledgeErp={hasPermission("takeaway.erp.acknowledge")} onAction={(row, action) => actionMutation.mutate({ row, action })} /> : null}
+    {!section.match(/^(reports|import)$/) ? query.isLoading ? <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-emerald-600" /></div> : <RecordList rows={visibleRows} section={section} busy={actionMutation.isPending} writesEnabled={writesEnabled} canManageCentral={hasPermission("takeaway.central_order.manage")} canAcknowledgeErp={hasPermission("takeaway.erp.acknowledge")} onAction={(row, action) => actionMutation.mutate({ row, action })} /> : null}
     {section === "stock" ? <div className="rounded-2xl bg-slate-950 p-4 text-sm text-slate-300"><CheckCircle2 className="inline h-4 w-4 text-emerald-400" /> ยอดวัตถุดิบกองกลางผูกกับ บริษัท + คลัง + สินค้า + ล็อต จึงให้หลายแบรนด์ตัดจากยอดเดียวกันได้</div> : null}
   </div>;
 }

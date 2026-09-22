@@ -54,15 +54,43 @@ async function installSession(page: Page, permissions: string[], scopeTypes: str
   }, { company: companyId, branch: branchId, sessionPermissions: permissions, sessionScopes: scopeTypes, accessToken: token });
 }
 
-async function mockTakeawayApi(page: Page): Promise<void> {
+async function mockTakeawayApi(page: Page, writesEnabled = true): Promise<void> {
   await page.route("**/api/v1/**", (route) => fulfill(route, []));
   await page.route("**/api/v1/takeaway/status", (route) => fulfill(route, {
     enabled: true,
+    writes_enabled: writesEnabled,
+    release_stage: writesEnabled ? "uat_synthetic" : "dark_launch",
+    hard_holds: writesEnabled ? [] : [
+      "real_takeaway_transactions",
+      "chambo_real_data",
+      "live_payment_tax_provider",
+      "production_activation",
+      "owner_canary_signoff",
+    ],
     company_id: companyId,
     brand_id: "33333333-3333-4333-8333-333333333333",
     branch_id: branchId,
   }));
 }
+
+test("dark launch is server-authoritative and keeps transactional controls disabled", async ({ page }) => {
+  await installSession(page, [
+    "takeaway.catalog.view",
+    "takeaway.sale.create",
+    "takeaway.shift.manage",
+  ], ["branch"]);
+  await mockTakeawayApi(page, false);
+  await page.route("**/api/v1/takeaway/catalog/categories**", (route) => fulfill(route, []));
+  await page.route("**/api/v1/takeaway/catalog/items**", (route) => fulfill(route, []));
+  await page.route("**/api/v1/takeaway/shifts", (route) => fulfill(route, []));
+  await page.route("**/api/v1/takeaway/orders**", (route) => fulfill(route, []));
+
+  await page.goto("/takeaway/store/orders");
+  await expect(page.getByTestId("takeaway-write-hold")).toBeVisible();
+  await expect(page.getByRole("button", { name: "เปิดกะ" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "QR ลูกค้าสั่งเอง" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "รอเปิด Transaction Gate" })).toBeDisabled();
+});
 
 test("branch cashier sees only the Store workspace and legacy counter redirects", async ({ page }) => {
   await installSession(page, [

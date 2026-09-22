@@ -6,6 +6,9 @@ export type TakeawayRecord = Record<string, unknown> & { id: string };
 
 export type TakeawayContext = {
   enabled: boolean;
+  writes_enabled: boolean;
+  release_stage: "dark_launch" | "uat_synthetic";
+  hard_holds: string[];
   company_id: string;
   brand_id: string | null;
   branch_id: string | null;
@@ -133,6 +136,8 @@ export type TakeawayPickupStatus = {
 export type TakeawayPublicMenu = {
   branch_name: string;
   expires_at: string;
+  writes_enabled: boolean;
+  release_stage: "dark_launch" | "uat_synthetic";
   categories: TakeawayRecord[];
   items: TakeawayCatalogRow[];
 };

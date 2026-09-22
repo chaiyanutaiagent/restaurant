@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Banknote, Clock3, Loader2, LockKeyhole, Play, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/ui/use-toast";
+import { useTakeawayReleaseGate } from "@/hooks/useTakeawayReleaseGate";
 import { takeawayApi, type TakeawayRecord } from "@/lib/takeawayApi";
 import { hasUnsyncedTakeawaySales } from "@/lib/takeawayOffline";
 
@@ -17,6 +18,8 @@ function amount(value: unknown): string {
 export default function TakeawayShiftPage(): JSX.Element {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const releaseGate = useTakeawayReleaseGate();
+  const writesEnabled = releaseGate.writesEnabled;
   const [openingCash, setOpeningCash] = useState("0");
   const [countedCash, setCountedCash] = useState("0");
   const [note, setNote] = useState("");
@@ -39,6 +42,7 @@ export default function TakeawayShiftPage(): JSX.Element {
   }, [countedCash, summaryQuery.data?.expected_cash]);
   const mutation = useMutation({
     mutationFn: async (action: "open" | "close") => {
+      if (!writesEnabled) throw new Error("การเปิด/ปิดกะยังถูกล็อกในช่วง Dark launch");
       if (action === "open") {
         return takeawayApi.openShift({ business_date: today(), opening_cash: openingCash || "0" });
       }
@@ -84,15 +88,15 @@ export default function TakeawayShiftPage(): JSX.Element {
               <label className="block text-xs font-bold text-slate-600">เงินสดที่นับได้<input value={countedCash} onChange={(event) => setCountedCash(event.target.value)} inputMode="decimal" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
               {summaryQuery.data ? <div className={`flex items-center gap-2 rounded-xl p-3 text-sm font-bold ${Number(countedCash || 0) - Number(summaryQuery.data.expected_cash) === 0 ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}><AlertTriangle className="h-4 w-4" />ผลต่างเงินสด ฿{amount(Number(countedCash || 0) - Number(summaryQuery.data.expected_cash))}</div> : null}
               <label className="block text-xs font-bold text-slate-600">หมายเหตุ<input value={note} onChange={(event) => setNote(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
-              <button disabled={mutation.isPending} onClick={() => mutation.mutate("close")} className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 font-bold text-white disabled:opacity-50">
+              <button disabled={!writesEnabled || mutation.isPending} onClick={() => mutation.mutate("close")} className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 font-bold text-white disabled:opacity-50">
                 {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LockKeyhole className="h-4 w-4" />} ปิดกะ
               </button>
             </div>
           ) : (
             <div className="mt-5 space-y-3">
-              <label className="block text-xs font-bold text-slate-600">เงินทอนเปิดกะ<input value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} inputMode="decimal" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
-              <button disabled={mutation.isPending} onClick={() => mutation.mutate("open")} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 font-black text-slate-950 disabled:opacity-50">
-                {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} เปิดกะวันนี้
+              <label className="block text-xs font-bold text-slate-600">เงินทอนเปิดกะ<input disabled={!writesEnabled} value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} inputMode="decimal" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm disabled:bg-slate-100" /></label>
+              <button disabled={!writesEnabled || mutation.isPending} onClick={() => mutation.mutate("open")} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 font-black text-slate-950 disabled:opacity-50">
+                {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} {writesEnabled ? "เปิดกะวันนี้" : "รอเปิด Transaction Gate"}
               </button>
             </div>
           )}

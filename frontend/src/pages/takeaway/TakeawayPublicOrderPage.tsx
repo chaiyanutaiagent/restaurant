@@ -24,11 +24,14 @@ export default function TakeawayPublicOrderPage(): JSX.Element {
     retry: 1,
   });
   const orderMutation = useMutation({
-    mutationFn: () => takeawayPublicApi.createOrder(token, {
-      idempotency_key: idempotencyKey,
-      customer_name: customerName || null,
-      items: cart.map((line) => ({ catalog_item_id: line.row.item.id, quantity: String(line.quantity) })),
-    }),
+    mutationFn: () => {
+      if (!menuQuery.data?.writes_enabled) throw new Error("ร้านยังไม่เปิดรับออเดอร์ออนไลน์");
+      return takeawayPublicApi.createOrder(token, {
+        idempotency_key: idempotencyKey,
+        customer_name: customerName || null,
+        items: cart.map((line) => ({ catalog_item_id: line.row.item.id, quantity: String(line.quantity) })),
+      });
+    },
     onSuccess: (response) => {
       if (response.data.data.pickup_token) {
         navigate(`/takeaway/pickup-status/${encodeURIComponent(response.data.data.pickup_token)}`);
@@ -47,9 +50,10 @@ export default function TakeawayPublicOrderPage(): JSX.Element {
   return <main className="min-h-screen bg-slate-100 pb-36">
     <header className="sticky top-0 z-10 bg-slate-950 px-5 py-4 text-white shadow-xl"><p className="text-xs font-black uppercase tracking-[0.25em] text-emerald-400">Foodchainservice Take away</p><h1 className="mt-1 text-xl font-black">{menuQuery.data?.branch_name ?? "กำลังโหลดเมนู…"}</h1></header>
     <div className="mx-auto max-w-5xl p-4">
+      {!menuQuery.isLoading && !menuQuery.data?.writes_enabled ? <div className="mb-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-bold text-amber-950">กำลังเปิดให้ดูเมนูเพื่อทดสอบหน้าจอ ร้านยังไม่เปิดรับออเดอร์จริง</div> : null}
       <div className="flex gap-2 overflow-x-auto py-2"><button onClick={() => setCategoryId(null)} className={`min-w-fit rounded-full px-4 py-2 text-sm font-bold ${categoryId === null ? "bg-emerald-500" : "bg-white"}`}>ทั้งหมด</button>{(menuQuery.data?.categories ?? []).map((category) => <button key={category.id} onClick={() => setCategoryId(category.id)} className={`min-w-fit rounded-full px-4 py-2 text-sm font-bold ${categoryId === category.id ? "bg-emerald-500" : "bg-white"}`}>{String(category.name)}</button>)}</div>
-      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3">{items.map((row) => <button key={row.item.id} onClick={() => adjust(row, 1)} className="min-h-36 rounded-2xl bg-white p-4 text-left shadow-sm"><p className="font-black">{row.item.name}</p><p className="mt-8 text-lg font-black text-emerald-700">{money(Number(row.effective_price))}</p></button>)}</div>
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3">{items.map((row) => <button key={row.item.id} disabled={!menuQuery.data?.writes_enabled} onClick={() => adjust(row, 1)} className="min-h-36 rounded-2xl bg-white p-4 text-left shadow-sm disabled:cursor-not-allowed disabled:opacity-70"><p className="font-black">{row.item.name}</p><p className="mt-8 text-lg font-black text-emerald-700">{money(Number(row.effective_price))}</p></button>)}</div>
     </div>
-    {cart.length ? <section className="fixed inset-x-0 bottom-0 z-20 border-t bg-white p-4 shadow-2xl"><div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3"><div className="flex flex-1 gap-2 overflow-x-auto">{cart.map((line) => <div key={line.row.item.id} className="flex min-w-fit items-center gap-2 rounded-xl bg-slate-100 px-3 py-2"><button onClick={() => adjust(line.row, -1)}><Minus className="h-4 w-4" /></button><span className="text-sm font-bold">{line.row.item.name} × {line.quantity}</span><button onClick={() => adjust(line.row, 1)}><Plus className="h-4 w-4" /></button></div>)}</div><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="ชื่อลูกค้า (ถ้ามี)" className="rounded-xl border px-3 py-3" /><button disabled={orderMutation.isPending} onClick={() => orderMutation.mutate()} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 font-black"><ShoppingCart className="h-5 w-5" />สั่ง {money(total)}</button></div>{orderMutation.isError ? <p className="mx-auto mt-2 max-w-5xl text-sm font-bold text-rose-600">ส่งออเดอร์ไม่สำเร็จ กรุณาตรวจรายการหรือติดต่อพนักงาน</p> : null}</section> : null}
+    {cart.length ? <section className="fixed inset-x-0 bottom-0 z-20 border-t bg-white p-4 shadow-2xl"><div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3"><div className="flex flex-1 gap-2 overflow-x-auto">{cart.map((line) => <div key={line.row.item.id} className="flex min-w-fit items-center gap-2 rounded-xl bg-slate-100 px-3 py-2"><button onClick={() => adjust(line.row, -1)}><Minus className="h-4 w-4" /></button><span className="text-sm font-bold">{line.row.item.name} × {line.quantity}</span><button onClick={() => adjust(line.row, 1)}><Plus className="h-4 w-4" /></button></div>)}</div><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="ชื่อลูกค้า (ถ้ามี)" className="rounded-xl border px-3 py-3" /><button disabled={!menuQuery.data?.writes_enabled || orderMutation.isPending} onClick={() => orderMutation.mutate()} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 font-black disabled:opacity-40"><ShoppingCart className="h-5 w-5" />{menuQuery.data?.writes_enabled ? `สั่ง ${money(total)}` : "ยังไม่เปิดรับออเดอร์"}</button></div>{orderMutation.isError ? <p className="mx-auto mt-2 max-w-5xl text-sm font-bold text-rose-600">ส่งออเดอร์ไม่สำเร็จ กรุณาตรวจรายการหรือติดต่อพนักงาน</p> : null}</section> : null}
   </main>;
 }

@@ -87,6 +87,32 @@ router = APIRouter(
 public_router = APIRouter(prefix="/api/public/takeaway", tags=["takeaway-public"])
 
 
+READ_ONLY_POST_PATHS = {
+    "/api/v1/takeaway/imports/dry-run",
+    "/api/v1/takeaway/cutover/preview",
+}
+
+
+async def require_takeaway_write_activation(request: Request) -> None:
+    if request.method.upper() in {"GET", "HEAD", "OPTIONS"}:
+        return
+    if request.url.path in READ_ONLY_POST_PATHS:
+        return
+    if not settings.takeaway_uat_transaction_writes_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "takeaway_write_hold",
+                "message": "Takeaway transactions are disabled until the UAT/canary owner gate passes",
+                "release_stage": "dark_launch",
+            },
+        )
+
+
+router.dependencies.append(Depends(require_takeaway_write_activation))
+public_router.dependencies.append(Depends(require_takeaway_write_activation))
+
+
 def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "data": jsonable_encoder(data),
@@ -158,6 +184,12 @@ async def public_ordering_menu(
         "data": {
             "branch_name": (branch_ref.payload.get("name") if branch_ref else None) or "Takeaway",
             "expires_at": token_row.expires_at,
+            "writes_enabled": settings.takeaway_uat_transaction_writes_enabled,
+            "release_stage": (
+                "uat_synthetic"
+                if settings.takeaway_uat_transaction_writes_enabled
+                else "dark_launch"
+            ),
             "categories": categories,
             "items": [
                 {
@@ -251,6 +283,19 @@ async def takeaway_status(
     return ok(
         {
             "enabled": settings.takeaway_feature_enabled,
+            "writes_enabled": settings.takeaway_uat_transaction_writes_enabled,
+            "release_stage": (
+                "uat_synthetic"
+                if settings.takeaway_uat_transaction_writes_enabled
+                else "dark_launch"
+            ),
+            "hard_holds": [
+                "real_takeaway_transactions",
+                "chambo_real_data",
+                "live_payment_tax_provider",
+                "production_activation",
+                "owner_canary_signoff",
+            ],
             "company_id": current.company_id,
             "brand_id": current.brand_id,
             "branch_id": current.branch_id,

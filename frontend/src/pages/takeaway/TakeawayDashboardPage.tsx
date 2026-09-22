@@ -26,7 +26,7 @@ export default function TakeawayDashboardPage(): JSX.Element {
           </div>
           <div className="rounded-2xl border border-slate-700 bg-slate-900 px-5 py-4">
             <p className="text-xs text-slate-400">สถานะบริการ</p>
-            <p className="mt-1 flex items-center gap-2 font-bold"><span className={`h-2.5 w-2.5 rounded-full ${context?.enabled ? "bg-emerald-400" : "bg-amber-400"}`} />{statusQuery.isLoading ? "กำลังตรวจ" : context?.enabled ? "พร้อมใช้งาน" : "ปิดไว้เพื่อความปลอดภัย"}</p>
+            <p className="mt-1 flex items-center gap-2 font-bold"><span className={`h-2.5 w-2.5 rounded-full ${context?.writes_enabled ? "bg-emerald-400" : "bg-amber-400"}`} />{statusQuery.isLoading ? "กำลังตรวจ" : context?.writes_enabled ? "UAT ข้อมูลทดสอบ" : "Dark launch · อ่านอย่างเดียว"}</p>
           </div>
         </div>
       </section>
@@ -36,10 +36,11 @@ export default function TakeawayDashboardPage(): JSX.Element {
             <div className={`inline-flex rounded-xl p-3 text-white ${card.color}`}><card.icon className="h-6 w-6" /></div>
             <h2 className="mt-4 font-black">{card.title}</h2>
             <p className="mt-1 min-h-10 text-sm text-slate-500">{card.detail}</p>
-            <span className="mt-4 flex items-center gap-1 text-sm font-bold text-emerald-700">เปิดใช้งาน <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
+            <span className="mt-4 flex items-center gap-1 text-sm font-bold text-emerald-700">{context?.writes_enabled ? "เปิดใช้งาน" : "เปิดดูหน้าจอ"} <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
           </Link>
         ))}
       </section>
+      {!statusQuery.isLoading && !context?.writes_enabled ? <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950"><p className="font-black">ขอบเขตที่ยัง HOLD</p><p className="mt-1">รายการขายจริง · ข้อมูล Chambo จริง · Payment/Tax Provider จริง · Production activation · Owner/Canary sign-off</p></section> : null}
       <section className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 text-sm md:grid-cols-3">
         <div><p className="font-bold">แยกขอบเขตข้อมูล</p><p className="mt-1 text-slate-500">Takeaway มีฐานปฏิบัติการของตัวเอง ไม่ปน Restaurant</p></div>
         <div><p className="font-bold">ใช้วัตถุดิบร่วม</p><p className="mt-1 text-slate-500">แบรนด์ต่างกันตัดยอดวัตถุดิบกองกลางเดียวกันได้</p></div>

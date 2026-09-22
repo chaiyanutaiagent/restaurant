@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, History, Loader2, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/components/ui/use-toast";
+import { useTakeawayReleaseGate } from "@/hooks/useTakeawayReleaseGate";
 import { takeawayApi, type TakeawayRecord } from "@/lib/takeawayApi";
 
 function display(value: unknown): string {
@@ -12,6 +13,8 @@ function display(value: unknown): string {
 export default function TakeawayCutoverPage(): JSX.Element {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const releaseGate = useTakeawayReleaseGate();
+  const writesEnabled = releaseGate.writesEnabled;
   const [packageText, setPackageText] = useState('{\n  "manifest": {},\n  "mapping": {},\n  "records": []\n}');
   const [preview, setPreview] = useState<TakeawayRecord | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -24,6 +27,7 @@ export default function TakeawayCutoverPage(): JSX.Element {
   });
   const executeMutation = useMutation({
     mutationFn: async () => {
+      if (!writesEnabled) throw new Error("Cutover execute ยังถูกล็อกในช่วง Dark launch");
       const bundle = JSON.parse(packageText) as Record<string, unknown>;
       return takeawayApi.executeCutover({
         ...bundle,
@@ -36,7 +40,7 @@ export default function TakeawayCutoverPage(): JSX.Element {
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["takeaway", "cutover-runs"] }); setConfirmed(false); toast({ title: "บันทึก cutover และ reconciliation แล้ว" }); },
     onError: (error) => toast({ title: "Cutover ไม่สำเร็จ", description: error instanceof Error ? error.message : "ตรวจ blocker และหลักฐานอนุมัติ", variant: "destructive" }),
   });
-  const canExecute = preview?.ready === true && confirmed && Object.values(evidence).every((value) => value.trim().length >= 3);
+  const canExecute = writesEnabled && preview?.ready === true && confirmed && Object.values(evidence).every((value) => value.trim().length >= 3);
   const blockers = Array.isArray(preview?.blockers) ? preview.blockers as TakeawayRecord[] : [];
 
   return <div className="space-y-5">
@@ -45,7 +49,7 @@ export default function TakeawayCutoverPage(): JSX.Element {
       <section className="rounded-2xl bg-white p-5 shadow-sm"><label className="text-sm font-black">Signed bundle payload</label><textarea value={packageText} onChange={(event) => { setPackageText(event.target.value); setPreview(null); setConfirmed(false); }} className="mt-3 h-[430px] w-full rounded-xl bg-slate-950 p-4 font-mono text-xs text-slate-100" /><button disabled={previewMutation.isPending} onClick={() => previewMutation.mutate()} className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 font-black disabled:opacity-50">{previewMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <ClipboardCheck className="h-5 w-5" />} Preview เท่านั้น</button></section>
       <section className="space-y-4">
         <div className={`rounded-2xl border p-5 ${preview?.ready ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>{preview?.ready ? <CheckCircle2 className="h-7 w-7 text-emerald-700" /> : <AlertTriangle className="h-7 w-7 text-amber-700" />}<h2 className="mt-3 font-black">{preview?.ready ? "พร้อมขออนุมัติ" : "ยังไม่พร้อม Execute"}</h2><p className="mt-2 break-all text-xs">Preview digest: {display(preview?.preview_digest)}</p><p className="mt-1 text-sm">ข้อมูล {display(preview?.total_records)} รายการ · Seal {display(preview?.seal_status)}</p>{blockers.length ? <ul className="mt-3 space-y-1 text-xs">{blockers.slice(0, 12).map((row, index) => <li key={`${row.code}-${index}`}>• {display(row.code)} — {display(row.path)}</li>)}</ul> : null}</div>
-        <div className="rounded-2xl border bg-white p-5"><h2 className="flex items-center gap-2 font-black"><ShieldCheck className="h-5 w-5" /> Approval evidence</h2>{(["approval_reference", "backup_reference", "rollback_reference"] as const).map((key) => <label key={key} className="mt-3 block text-xs font-bold text-slate-600">{key}<input value={evidence[key]} onChange={(event) => setEvidence({ ...evidence, [key]: event.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>)}<label className="mt-4 flex gap-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-900"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>ยืนยันว่า snapshot, owner approval, final backup และ rollback plan ได้รับอนุมัติจริงแล้ว</span></label><button disabled={!canExecute || executeMutation.isPending} onClick={() => executeMutation.mutate()} className="mt-4 w-full rounded-xl bg-rose-600 px-4 py-3 font-black text-white disabled:opacity-30">Execute approved cutover</button></div>
+        <div className="rounded-2xl border bg-white p-5"><h2 className="flex items-center gap-2 font-black"><ShieldCheck className="h-5 w-5" /> Approval evidence</h2>{(["approval_reference", "backup_reference", "rollback_reference"] as const).map((key) => <label key={key} className="mt-3 block text-xs font-bold text-slate-600">{key}<input value={evidence[key]} onChange={(event) => setEvidence({ ...evidence, [key]: event.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>)}<label className="mt-4 flex gap-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-900"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>ยืนยันว่า snapshot, owner approval, final backup และ rollback plan ได้รับอนุมัติจริงแล้ว</span></label>{!writesEnabled ? <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-950">Preview ใช้งานได้ แต่ Execute ถูกปิดทั้ง UI และ Server จนกว่าจะอนุมัติ Chambo real-data cutover</p> : null}<button disabled={!canExecute || executeMutation.isPending} onClick={() => executeMutation.mutate()} className="mt-4 w-full rounded-xl bg-rose-600 px-4 py-3 font-black text-white disabled:opacity-30">Execute approved cutover</button></div>
       </section>
     </div>
     <section className="rounded-2xl bg-white p-5 shadow-sm"><h2 className="flex items-center gap-2 font-black"><History className="h-5 w-5" /> ประวัติแบบ immutable</h2><div className="mt-3 space-y-2">{(history.data ?? []).map((run) => <div key={run.id} className="grid gap-2 rounded-xl border p-4 text-sm md:grid-cols-4"><strong>{display(run.status)}</strong><span>{display(run.source_snapshot)}</span><span className="truncate">{display(run.approval_reference)}</span><span>{display(run.executed_at)}</span></div>)}{history.data?.length === 0 ? <p className="text-sm text-slate-500">ยังไม่มี cutover run</p> : null}</div></section>

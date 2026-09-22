@@ -43,7 +43,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP59 | Platform Console identity, Team/RBAC and operator governance | Software UAT checkpoint passed; physical/real-operator acceptance remains HOLD | Platform Production unchanged |
 | WP60 | Company Admin maturity, access review and Company audit | Combined Batch B software UAT passed | Tenant MFA/recovery remains HOLD; Production unchanged |
 | WP61 | Shared ERP operational and finance maturity | Software UAT passed; combined Batch B gate closed | Real tax/provider/accountant gates remain |
-| WP62 | Takeaway operational UI activation | Planned | Transactions remain gated until owner/canary approval |
+| WP62 | Takeaway operational UI activation | Local gate passed; UAT pending | Server-authoritative Dark Launch; transactions remain gated until owner/canary approval |
 | WP63 | Central Kitchen and Supply Chain UI activation | Planned | Read-only/dark-launch until stock/QC gates pass |
 | WP64 | Public Customer Experience | Planned | Catalog/ecommerce owner decision required |
 | WP65 | Integration, Reporting, Reconciliation and Release Governance | Planned | Provider/retention/owner gates remain |
@@ -58,7 +58,7 @@ The execution contract is recorded in `FULL-UI-BATCH-EXECUTION-PLAN-02.md`. WP54
 |---|---|---|
 | A — Retail POS | WP55–WP58 | Combined software gate passed; physical/Production HOLD; Batch B may begin on Local/UAT |
 | B — Platform/Company/ERP | WP59–WP61 | Combined software UAT gate passed; Production/external acceptance HOLD |
-| C — Takeaway/Kitchen/Public | WP62–WP64 | Authorized on Local/UAT; unsafe writes remain gated |
+| C — Takeaway/Kitchen/Public | WP62–WP64 | In progress; WP62 Local gate passed and UAT pending; unsafe writes remain gated |
 | D — Governance/full-system UAT | WP65 | Planned |
 
 ## Image acceptance registry — Customer Company (10)
@@ -75,7 +75,7 @@ The superseded non-v2 Action Center file is not counted.
 | C06 | `customer-company/06-customer-company-erp-home.png` | WP42/WP61 | Implemented | Shared ERP readiness, exceptions, close state, permission states and control/HOLD visibility passed Desktop/Tablet UAT. |
 | C07 | `customer-company/07-customer-company-restaurant-pos-home.png` | WP42/WP49–WP54 | Adapted | Restaurant launcher exists; operating surfaces are delivered sequentially. |
 | C08 | `customer-company/08-customer-company-retail-pos-home.png` | WP42/WP55–WP58 | Adapted | Pilot/readiness shell only; Retail source cutover is not authorized. |
-| C09 | `customer-company/09-customer-company-takeaway-home.png` | WP42/WP62 | Read-only | Takeaway engineering exists; write activation remains gated. |
+| C09 | `customer-company/09-customer-company-takeaway-home.png` | WP42/WP62 | Implemented read-only | Operational UI is active behind a Server-authoritative Dark Launch gate; write activation remains gated. |
 | C10 | `customer-company/10-customer-company-central-kitchen-home.png` | WP42/WP63 | Read-only | Central Kitchen remains read-only/dark-launch. |
 
 ## Image acceptance registry — Design System and Restaurant (34)

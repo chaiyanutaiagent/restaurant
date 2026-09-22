@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Calculator, Loader2, PackagePlus, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useToast } from "@/components/ui/use-toast";
+import { useTakeawayReleaseGate } from "@/hooks/useTakeawayReleaseGate";
 import { takeawayApi, type TakeawayRecord } from "@/lib/takeawayApi";
 
 function text(value: unknown, fallback = "-"): string {
@@ -11,6 +12,8 @@ function text(value: unknown, fallback = "-"): string {
 export default function TakeawayCentralRecipesPage(): JSX.Element {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const releaseGate = useTakeawayReleaseGate();
+  const writesEnabled = releaseGate.writesEnabled;
   const [form, setForm] = useState({
     name: "",
     output_item_id: "",
@@ -52,6 +55,7 @@ export default function TakeawayCentralRecipesPage(): JSX.Element {
   );
   const recipeMutation = useMutation({
     mutationFn: async () => {
+      if (!writesEnabled) throw new Error("การแก้สูตรยังถูกล็อกในช่วง Dark launch");
       if (!context?.brand_id || !form.output_item_id || !form.ingredient_item_id) throw new Error("กรุณาเลือกสินค้าผลิตและวัตถุดิบ");
       const ingredient = itemById.get(form.ingredient_item_id);
       return takeawayApi.createRecipe({
@@ -79,6 +83,7 @@ export default function TakeawayCentralRecipesPage(): JSX.Element {
   });
   const policyMutation = useMutation({
     mutationFn: async () => {
+      if (!writesEnabled) throw new Error("การแก้กติกาเติมสินค้ายังถูกล็อกในช่วง Dark launch");
       if (!context?.brand_id || !form.branch_id || !form.output_item_id) throw new Error("กรุณาระบุสาขาและสินค้า");
       return takeawayApi.setReplenishmentPolicy({
         brand_id: context.brand_id,
@@ -109,7 +114,7 @@ export default function TakeawayCentralRecipesPage(): JSX.Element {
       <button onClick={() => void recipesQuery.refetch()} className="flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold"><RefreshCw className="h-4 w-4" /> รีเฟรช</button>
     </div>
     <div className="grid gap-4 xl:grid-cols-2">
-      <section className="rounded-2xl border bg-white p-5 shadow-sm">
+      <section className={`rounded-2xl border bg-white p-5 shadow-sm ${writesEnabled ? "" : "opacity-70"}`}>
         <h2 className="flex items-center gap-2 font-black"><Calculator className="h-5 w-5 text-emerald-600" /> สร้างสูตรเวอร์ชันใหม่</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="text-xs font-bold text-slate-600">ชื่อสูตร<input className={inputClass} value={form.name} onChange={(event) => set("name", event.target.value)} /></label>
@@ -120,9 +125,9 @@ export default function TakeawayCentralRecipesPage(): JSX.Element {
           <label className="text-xs font-bold text-slate-600">หน่วยผลผลิต<input className={inputClass} value={form.yield_unit} onChange={(event) => set("yield_unit", event.target.value)} /></label>
           <label className="text-xs font-bold text-slate-600">สูญเสีย %<input type="number" min="0" max="99.99" step="0.01" className={inputClass} value={form.loss_percent} onChange={(event) => set("loss_percent", event.target.value)} /></label>
         </div>
-        <button disabled={recipeMutation.isPending} onClick={() => recipeMutation.mutate()} className="mt-4 flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white disabled:opacity-50">{recipeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />} บันทึกสูตร</button>
+        <button disabled={!writesEnabled || recipeMutation.isPending} onClick={() => recipeMutation.mutate()} className="mt-4 flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white disabled:opacity-50">{recipeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />} {writesEnabled ? "บันทึกสูตร" : "รอเปิด Transaction Gate"}</button>
       </section>
-      <section className="rounded-2xl border bg-white p-5 shadow-sm">
+      <section className={`rounded-2xl border bg-white p-5 shadow-sm ${writesEnabled ? "" : "opacity-70"}`}>
         <h2 className="font-black">กติกาเติมสินค้ารายสาขา</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="text-xs font-bold text-slate-600">รหัสสาขา<input className={inputClass} value={form.branch_id} onChange={(event) => set("branch_id", event.target.value)} placeholder="เลือกจาก workspace หรือวางรหัสสาขา" /></label>
@@ -131,7 +136,7 @@ export default function TakeawayCentralRecipesPage(): JSX.Element {
           <label className="text-xs font-bold text-slate-600">ขั้นต่ำต่อครั้ง<input type="number" min="0" step="0.0001" className={inputClass} value={form.minimum_order_qty} onChange={(event) => set("minimum_order_qty", event.target.value)} /></label>
           <label className="text-xs font-bold text-slate-600">Lead time (วัน)<input type="number" min="0" className={inputClass} value={form.lead_time_days} onChange={(event) => set("lead_time_days", event.target.value)} /></label>
         </div>
-        <button disabled={policyMutation.isPending} onClick={() => policyMutation.mutate()} className="mt-4 rounded-xl bg-emerald-500 px-5 py-3 font-black disabled:opacity-50">บันทึกกติกา</button>
+        <button disabled={!writesEnabled || policyMutation.isPending} onClick={() => policyMutation.mutate()} className="mt-4 rounded-xl bg-emerald-500 px-5 py-3 font-black disabled:opacity-50">{writesEnabled ? "บันทึกกติกา" : "รอเปิด Transaction Gate"}</button>
         <p className="mt-4 text-xs text-slate-500">กติกาที่โหลด: {policiesQuery.data?.length ?? 0} รายการ</p>
       </section>
     </div>

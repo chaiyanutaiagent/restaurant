@@ -91,6 +91,7 @@ from app.models.takeaway import (
     TakeawayTransferItem,
     TakeawayUnit,
 )
+from app.utils.integration_security import encrypt_integration_secret
 from app.models.transfer import TransferOrder, TransferOrderItem
 from app.models.user import User
 from app.schemas.company_workspace import CompanyWorkspaceProvisionRequest
@@ -1582,6 +1583,8 @@ async def seed_accounting_and_channels_showcase(
             key,
             company_id=company_id,
             name=f"UI API Key {key}",
+            purpose="UI showcase",
+            owner_contact="uat@foodchainservice.local",
             key_prefix=f"UI{index:06d}"[:8],
             key_hash=digest(f"non-secret-ui-key-{key}"),
             scopes=["orders:read", "products:read"] if active else [],
@@ -1603,7 +1606,9 @@ async def seed_accounting_and_channels_showcase(
         name="UI Order Events",
         url="https://webhook.example.invalid/foodchainservice",
         events=["order.created", "order.completed", "stock.low"],
-        secret=digest("non-secret-ui-webhook"),
+        secret_ciphertext=encrypt_integration_secret(digest("non-secret-ui-webhook")),
+        secret_rotated_at=now,
+        incoming_source="ui-showcase",
         is_active=True,
         last_triggered_at=now - timedelta(minutes=15),
         failure_count=1,
@@ -1620,7 +1625,9 @@ async def seed_accounting_and_channels_showcase(
             payload={"demo": True, "sequence": index},
             response_status=status_code,
             response_body="OK" if status_code == 200 else "Demo failure" if status_code else None,
+            status="delivered" if status_code == 200 else "retry_scheduled" if status_code == 500 else "pending",
             attempt_count=index,
+            last_error_code="http_500" if status_code == 500 else None,
             delivered_at=now - timedelta(minutes=index) if status_code == 200 else None,
             failed_at=now - timedelta(minutes=index) if status_code == 500 else None,
             next_retry_at=now + timedelta(minutes=10) if status_code != 200 else None,

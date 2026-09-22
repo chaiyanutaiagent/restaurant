@@ -22,6 +22,8 @@
     "e2e:distribution": "playwright test --config=playwright.company-distribution.config.ts",
     "e2e:takeaway": "playwright test --config=playwright.takeaway.config.ts",
     "e2e:public": "playwright test --config=playwright.public.config.ts",
+    "e2e:integration": "playwright test --config=playwright.integration.config.ts",
+    "e2e:retail": "playwright test --config=playwright.retail.config.ts",
     "preview": "vite preview",
     "type-check": "tsc --noEmit"
   },

@@ -185,3 +185,43 @@ export type CompanyErpReadiness = {
   stale_after_seconds: number;
   generated_at: string;
 };
+
+export type CompanyGovernance = {
+  contract_version: string;
+  company_id: string;
+  branch_id: string | null;
+  scope: "company" | "branch";
+  environment: RuntimeEnvironment;
+  release_commit: string;
+  production_authorized: false;
+  areas: Array<{
+    key: string;
+    title: string;
+    state: "ready" | "attention" | "blocked" | "hold" | "disabled" | "planned" | "permission_denied";
+    mode: "read_only" | "shadow" | "disabled" | "planned";
+    source_system: string;
+    reason: string;
+    deep_link: string | null;
+    metrics: Array<{ key: string; label: string; value: number | string; severity: "info" | "warning" | "error" | "blocker" }>;
+    updated_at: string | null;
+    stale: boolean;
+  }>;
+  release_gates: Array<{
+    key: string;
+    title: string;
+    state: "pass" | "attention" | "hold" | "blocked" | "planned";
+    server_enforced: boolean;
+    reason: string;
+    evidence_reference: string | null;
+  }>;
+  coverage: Array<{
+    key: "platform" | "company" | "erp" | "restaurant" | "retail" | "takeaway" | "kitchen" | "supply_chain" | "public" | "integration_reporting";
+    title: string;
+    state: "available" | "read_only" | "hold" | "planned";
+    entry_route: string;
+    release_boundary: string;
+  }>;
+  summary: Record<"ready" | "attention" | "blocked" | "hold" | "planned", number>;
+  stale_after_seconds: number;
+  generated_at: string;
+};

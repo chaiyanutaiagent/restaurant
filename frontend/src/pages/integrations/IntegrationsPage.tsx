@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import CompanyStatePanel from "@/components/company/CompanyStatePanel";
 import PageHeader from "@/components/layout/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { integrationApi } from "@/lib/integrationApi";
+import { companyRequestState } from "@/lib/companyPresentation";
 import type { APIKey, ExternalOrder, WebhookEndpoint } from "@/types/integration";
 import CreateAPIKeyDialog from "./CreateAPIKeyDialog";
 import CreateWebhookDialog from "./CreateWebhookDialog";
@@ -72,8 +74,8 @@ function formatMoney(value: number): string {
 
 export default function IntegrationsPage(): JSX.Element {
   const { toast } = useToast();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [online, setOnline] = useState(() => navigator.onLine);
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const [webhookOpen, setWebhookOpen] = useState(false);
   const [deliveriesOpen, setDeliveriesOpen] = useState(false);
@@ -83,13 +85,22 @@ export default function IntegrationsPage(): JSX.Element {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
+  useEffect(() => {
+    const update = (): void => setOnline(navigator.onLine);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => { window.removeEventListener("online", update); window.removeEventListener("offline", update); };
+  }, []);
+
   const apiKeysQuery = useQuery({
     queryKey: ["integrations", "api-keys"],
-    queryFn: async () => (await integrationApi.listApiKeys()).data.data as APIKey[]
+    queryFn: async () => (await integrationApi.listApiKeys()).data.data as APIKey[],
+    retry: false,
   });
   const webhooksQuery = useQuery({
     queryKey: ["integrations", "webhooks"],
-    queryFn: async () => (await integrationApi.listWebhooks()).data.data as WebhookEndpoint[]
+    queryFn: async () => (await integrationApi.listWebhooks()).data.data as WebhookEndpoint[],
+    retry: false,
   });
   const externalOrdersQuery = useQuery({
     queryKey: ["integrations", "external-orders", statusFilter, sourceFilter],
@@ -99,7 +110,8 @@ export default function IntegrationsPage(): JSX.Element {
         source: sourceFilter.trim() || undefined,
         page: 1,
         limit: 100
-      })).data.data as ExternalOrder[]
+      })).data.data as ExternalOrder[],
+    retry: false,
   });
 
   const revokeMutation = useMutation({
@@ -122,6 +134,16 @@ export default function IntegrationsPage(): JSX.Element {
       toast({ title: "ลบ Webhook ไม่สำเร็จ", description: error.message, variant: "destructive" });
     }
   });
+  const rotateApiKeyMutation = useMutation({
+    mutationFn: async ({ id, reason, expiresAt }: { id: string; reason: string; expiresAt: string }) => integrationApi.rotateApiKey(id, { reason, expires_at: new Date(`${expiresAt}T23:59:59`).toISOString() }),
+    onSuccess: async (response) => { window.prompt("คัดลอก API Key ใหม่ตอนนี้ ระบบจะไม่แสดงอีก", response.data.data.full_key); toast({ title: "หมุนเวียน API Key แล้ว", description: "คีย์เดิมถูกยกเลิกทันที" }); await queryClient.invalidateQueries({ queryKey: ["integrations", "api-keys"] }); },
+    onError: (error: Error) => toast({ title: "หมุนเวียน API Key ไม่สำเร็จ", description: error.message, variant: "destructive" }),
+  });
+  const rotateWebhookMutation = useMutation({
+    mutationFn: async ({ id, secret, reason }: { id: string; secret: string; reason: string }) => integrationApi.rotateWebhookSecret(id, { secret, reason }),
+    onSuccess: async () => { toast({ title: "เปลี่ยน Webhook secret แล้ว" }); await queryClient.invalidateQueries({ queryKey: ["integrations", "webhooks"] }); },
+    onError: (error: Error) => toast({ title: "เปลี่ยน Secret ไม่สำเร็จ", description: error.message, variant: "destructive" }),
+  });
   const testWebhookMutation = useMutation({
     mutationFn: async (id: string) => integrationApi.testWebhook(id),
     onSuccess: async () => {
@@ -142,6 +164,11 @@ export default function IntegrationsPage(): JSX.Element {
       toast({ title: "เติมออเดอร์ไม่สำเร็จ", description: error.message, variant: "destructive" });
     }
   });
+  const reviewMutation = useMutation({
+    mutationFn: async ({ id, decision, reason }: { id: string; decision: "accept" | "reject"; reason: string }) => integrationApi.reviewExternalOrder(id, decision, reason),
+    onSuccess: async () => { toast({ title: "บันทึกผลตรวจออเดอร์แล้ว" }); await queryClient.invalidateQueries({ queryKey: ["integrations", "external-orders"] }); },
+    onError: (error: Error) => toast({ title: "ตรวจออเดอร์ไม่สำเร็จ", description: error.message, variant: "destructive" }),
+  });
 
   const filteredOrders = useMemo(() => {
     return (externalOrdersQuery.data ?? []).filter((order) => {
@@ -152,12 +179,19 @@ export default function IntegrationsPage(): JSX.Element {
     });
   }, [externalOrdersQuery.data, fromDate, toDate]);
 
+  const queries = [apiKeysQuery, webhooksQuery, externalOrdersQuery];
+  const firstError = queries.find((query) => query.error)?.error;
+  if (queries.some((query) => query.isLoading)) return <><PageHeader title="การเชื่อมต่อภายนอก" subtitle="API Keys + Webhooks + External Orders" /><CompanyStatePanel kind="loading" /></>;
+  if (firstError) return <><PageHeader title="การเชื่อมต่อภายนอก" subtitle="API Keys + Webhooks + External Orders" /><CompanyStatePanel kind={companyRequestState(firstError)} onRetry={() => void Promise.all(queries.map((query) => query.refetch()))} /></>;
+  if (!online) return <><PageHeader title="การเชื่อมต่อภายนอก" subtitle="การเปลี่ยนแปลงถูกปิดขณะออฟไลน์" /><CompanyStatePanel kind="offline" /></>;
+
   return (
     <>
       <PageHeader
         title="การเชื่อมต่อภายนอก"
-        subtitle="API Keys + Webhooks"
+        subtitle="API Keys, Webhooks และ External Orders ที่ Server เป็นผู้ตัดสิน"
       />
+      {queries.some((query) => query.isStale) ? <CompanyStatePanel kind="stale" compact onRetry={() => void Promise.all(queries.map((query) => query.refetch()))} /> : null}
 
       <Tabs defaultValue="api-keys" className="space-y-6">
         <TabsList>
@@ -180,6 +214,7 @@ export default function IntegrationsPage(): JSX.Element {
                 <TableHeader>
                   <TableRow>
                     <TableHead>ชื่อ</TableHead>
+                    <TableHead>ผู้รับผิดชอบ / วัตถุประสงค์</TableHead>
                     <TableHead>Prefix</TableHead>
                     <TableHead>Scopes</TableHead>
                     <TableHead>ใช้ล่าสุด</TableHead>
@@ -192,6 +227,7 @@ export default function IntegrationsPage(): JSX.Element {
                   {(apiKeysQuery.data ?? []).map((key) => (
                     <TableRow key={key.id}>
                       <TableCell>{key.name}</TableCell>
+                      <TableCell><div className="font-medium">{key.owner_contact}</div><div className="text-xs text-slate-500">{key.purpose}</div></TableCell>
                       <TableCell className="font-mono">{key.key_prefix}</TableCell>
                       <TableCell className="flex flex-wrap gap-2">
                         {key.scopes.map((scope) => <Badge key={scope} variant="secondary">{scope}</Badge>)}
@@ -207,6 +243,16 @@ export default function IntegrationsPage(): JSX.Element {
                         <Button
                           variant="outline"
                           size="sm"
+                          disabled={Boolean(key.revoked_at) || rotateApiKeyMutation.isPending}
+                          onClick={() => {
+                            const reason = window.prompt("เหตุผลในการหมุนเวียนคีย์");
+                            const expiresAt = window.prompt("วันหมดอายุคีย์ใหม่ (YYYY-MM-DD)");
+                            if (reason?.trim() && expiresAt) rotateApiKeyMutation.mutate({ id: key.id, reason: reason.trim(), expiresAt });
+                          }}
+                        >Rotate</Button>{" "}
+                        <Button
+                          variant="outline"
+                          size="sm"
                           className="text-red-600"
                           disabled={Boolean(key.revoked_at) || revokeMutation.isPending}
                           onClick={() => window.confirm(`ต้องการ revoke ${key.name} หรือไม่`) && revokeMutation.mutate(key.id)}
@@ -216,6 +262,7 @@ export default function IntegrationsPage(): JSX.Element {
                       </TableCell>
                     </TableRow>
                   ))}
+                  {(apiKeysQuery.data ?? []).length === 0 ? <TableRow><TableCell colSpan={8}><CompanyStatePanel kind="empty" compact /></TableCell></TableRow> : null}
                 </TableBody>
               </Table>
             </CardContent>
@@ -237,6 +284,7 @@ export default function IntegrationsPage(): JSX.Element {
                     <TableHead>ชื่อ</TableHead>
                     <TableHead>URL</TableHead>
                     <TableHead>Events</TableHead>
+                    <TableHead>ขาเข้า / Secret</TableHead>
                     <TableHead>ครั้งล่าสุด</TableHead>
                     <TableHead>ข้อผิดพลาด</TableHead>
                     <TableHead>สถานะ</TableHead>
@@ -251,6 +299,7 @@ export default function IntegrationsPage(): JSX.Element {
                       <TableCell className="flex flex-wrap gap-2">
                         {webhook.events.map((eventName) => <Badge key={eventName} variant="secondary">{eventName}</Badge>)}
                       </TableCell>
+                      <TableCell><div>{webhook.incoming_source ?? "ส่งออกเท่านั้น"}</div><div className="text-xs text-slate-500">{webhook.secret_configured ? `เข้ารหัส · เปลี่ยน ${formatDate(webhook.secret_rotated_at)}` : "ยังไม่มี Secret"}</div></TableCell>
                       <TableCell>{formatDate(webhook.last_triggered_at)}</TableCell>
                       <TableCell>
                         <Badge variant={webhook.failure_count > 0 ? "destructive" : "success"}>
@@ -262,6 +311,11 @@ export default function IntegrationsPage(): JSX.Element {
                       </TableCell>
                       <TableCell className="space-x-2">
                         <Button variant="outline" size="sm" onClick={() => testWebhookMutation.mutate(webhook.id)}>ทดสอบ</Button>
+                        <Button variant="outline" size="sm" onClick={() => {
+                          const secret = window.prompt("Secret ใหม่ (อย่างน้อย 32 ตัวอักษร)");
+                          const reason = window.prompt("เหตุผลในการเปลี่ยน Secret");
+                          if (secret && secret.length >= 32 && reason?.trim()) rotateWebhookMutation.mutate({ id: webhook.id, secret, reason: reason.trim() });
+                        }}>เปลี่ยน Secret</Button>
                         <Button
                           variant="outline"
                           size="sm"
@@ -283,6 +337,7 @@ export default function IntegrationsPage(): JSX.Element {
                       </TableCell>
                     </TableRow>
                   ))}
+                  {(webhooksQuery.data ?? []).length === 0 ? <TableRow><TableCell colSpan={9}><CompanyStatePanel kind="empty" compact /></TableCell></TableRow> : null}
                 </TableBody>
               </Table>
             </CardContent>
@@ -295,10 +350,10 @@ export default function IntegrationsPage(): JSX.Element {
               <div className="flex flex-col gap-3 md:flex-row">
                 <select className="h-10 rounded-md border border-gray-300 px-3" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
                   <option value="">ทุกสถานะ</option>
-                  <option value="pending">pending</option>
+                  <option value="needs_review">needs_review</option>
+                  <option value="accepted">accepted</option>
                   <option value="fulfilled">fulfilled</option>
-                  <option value="cancelled">cancelled</option>
-                  <option value="failed">failed</option>
+                  <option value="rejected">rejected</option>
                 </select>
                 <Input placeholder="source เช่น poolproject" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} />
                 <Input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
@@ -311,6 +366,7 @@ export default function IntegrationsPage(): JSX.Element {
                     <TableHead>แหล่งที่มา</TableHead>
                     <TableHead>ลูกค้า</TableHead>
                     <TableHead>ยอด</TableHead>
+                    <TableHead>ยอด Server</TableHead>
                     <TableHead>สถานะชำระ</TableHead>
                     <TableHead>สถานะ</TableHead>
                     <TableHead>Actions</TableHead>
@@ -323,16 +379,14 @@ export default function IntegrationsPage(): JSX.Element {
                       <TableCell>{order.source}</TableCell>
                       <TableCell>{order.customer_name || order.customer_phone || "-"}</TableCell>
                       <TableCell>{formatMoney(order.total_amount)}</TableCell>
+                      <TableCell>{order.server_total_amount == null ? "รอตรวจ" : formatMoney(order.server_total_amount)}</TableCell>
                       <TableCell>{order.payment_status || "-"}</TableCell>
                       <TableCell><Badge variant={order.status === "fulfilled" ? "success" : "secondary"}>{order.status}</Badge></TableCell>
                       <TableCell>
-                        {order.status === "pending" ? (
-                          <Button
-                            size="sm"
-                            onClick={() => navigate("/logistics", { state: { openCreateShipment: true, externalOrderId: order.id } })}
-                          >
-                            เติมออเดอร์
-                          </Button>
+                        {order.status === "needs_review" ? (
+                          <div className="flex flex-wrap gap-2"><Button size="sm" onClick={() => { const reason = window.prompt("เหตุผลที่ยืนยันใช้ราคา Server"); if (reason?.trim()) reviewMutation.mutate({ id: order.id, decision: "accept", reason: reason.trim() }); }}>ยอมรับราคา Server</Button><Button size="sm" variant="outline" onClick={() => { const reason = window.prompt("เหตุผลที่ปฏิเสธ"); if (reason?.trim()) reviewMutation.mutate({ id: order.id, decision: "reject", reason: reason.trim() }); }}>ปฏิเสธ</Button></div>
+                        ) : order.status === "accepted" ? (
+                          <Button size="sm" disabled={fulfillMutation.isPending} onClick={() => fulfillMutation.mutate(order.id)}>สร้างรายการขาย</Button>
                         ) : order.sale_order_id ? (
                           <Button asChild variant="outline" size="sm">
                             <Link to="/pos">ดูออเดอร์</Link>
@@ -343,6 +397,7 @@ export default function IntegrationsPage(): JSX.Element {
                       </TableCell>
                     </TableRow>
                   ))}
+                  {filteredOrders.length === 0 ? <TableRow><TableCell colSpan={9}><CompanyStatePanel kind="empty" compact /></TableCell></TableRow> : null}
                 </TableBody>
               </Table>
             </CardContent>
@@ -355,7 +410,7 @@ export default function IntegrationsPage(): JSX.Element {
               <CardContent className="space-y-3 p-5">
                 <h3 className="text-lg font-semibold">Authentication</h3>
                 <code className="block rounded-lg bg-slate-950 p-3 text-sm text-slate-100">X-API-Key: erppos_XXXXXXXX_...</code>
-                <code className="block rounded-lg bg-slate-950 p-3 text-sm text-slate-100">?api_key=erppos_XXXXXXXX_...</code>
+                <p className="text-sm text-slate-600">ระบบรับคีย์ผ่าน Header เท่านั้น ไม่รับผ่าน URL และไม่อนุญาต wildcard scope</p>
               </CardContent>
             </Card>
 
@@ -387,7 +442,7 @@ export default function IntegrationsPage(): JSX.Element {
               <CardContent className="space-y-3 p-5">
                 <h3 className="text-lg font-semibold">Scopes</h3>
                 <div className="flex flex-wrap gap-2">
-                  {["products:read", "orders:read", "orders:write", "*"].map((scope) => (
+                  {["products:read", "orders:read", "orders:write"].map((scope) => (
                     <Badge key={scope} variant="secondary">{scope}</Badge>
                   ))}
                 </div>
@@ -412,7 +467,7 @@ export default function IntegrationsPage(): JSX.Element {
               <CardContent className="space-y-3 p-5">
                 <h3 className="text-lg font-semibold">Incoming Orders</h3>
                 <p className="font-mono text-sm">POST /webhooks/poolproject/orders</p>
-                <p className="text-sm text-gray-500">Signature header: X-ERP-Signature</p>
+                <p className="text-sm text-gray-500">ต้องส่ง X-ERP-Signature และ X-ERP-Timestamp ภายใน 5 นาที ระบบจะตรวจ SKU/ราคา/ยอดด้วยข้อมูล Server ก่อนรับ</p>
                 <pre className="overflow-x-auto rounded-lg bg-slate-950 p-4 text-sm text-slate-100">
                   <code>{incomingOrderExample}</code>
                 </pre>

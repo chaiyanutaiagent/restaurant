@@ -247,3 +247,81 @@ class CompanyErpReadinessRead(BaseSchema):
     source_updated_at: datetime | None = None
     stale_after_seconds: int = 300
     generated_at: datetime
+
+
+GovernanceState = Literal[
+    "ready",
+    "attention",
+    "blocked",
+    "hold",
+    "disabled",
+    "planned",
+    "permission_denied",
+]
+GovernanceMode = Literal["read_only", "shadow", "disabled", "planned"]
+ReleaseGateState = Literal["pass", "attention", "hold", "blocked", "planned"]
+CoverageState = Literal["available", "read_only", "hold", "planned"]
+
+
+class CompanyGovernanceMetricRead(BaseSchema):
+    key: str
+    label: str
+    value: int | float | str
+    severity: WorkItemSeverity = "info"
+
+
+class CompanyGovernanceAreaRead(BaseSchema):
+    key: str
+    title: str
+    state: GovernanceState
+    mode: GovernanceMode
+    source_system: str
+    reason: str
+    deep_link: str | None = None
+    metrics: list[CompanyGovernanceMetricRead] = Field(default_factory=list)
+    updated_at: datetime | None = None
+    stale: bool = False
+
+
+class CompanyReleaseGateRead(BaseSchema):
+    key: str
+    title: str
+    state: ReleaseGateState
+    server_enforced: bool = True
+    reason: str
+    evidence_reference: str | None = None
+
+
+class CompanyCoverageAreaRead(BaseSchema):
+    key: Literal[
+        "platform",
+        "company",
+        "erp",
+        "restaurant",
+        "retail",
+        "takeaway",
+        "kitchen",
+        "supply_chain",
+        "public",
+        "integration_reporting",
+    ]
+    title: str
+    state: CoverageState
+    entry_route: str
+    release_boundary: str
+
+
+class CompanyGovernanceRead(BaseSchema):
+    contract_version: str = "2026-09-23.1"
+    company_id: uuid.UUID
+    branch_id: uuid.UUID | None = None
+    scope: Literal["company", "branch"]
+    environment: RuntimeEnvironment
+    release_commit: str
+    production_authorized: Literal[False] = False
+    areas: list[CompanyGovernanceAreaRead]
+    release_gates: list[CompanyReleaseGateRead]
+    coverage: list[CompanyCoverageAreaRead]
+    summary: dict[str, int]
+    stale_after_seconds: int = 300
+    generated_at: datetime

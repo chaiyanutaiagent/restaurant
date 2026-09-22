@@ -101,6 +101,32 @@ const overview = {
   generated_at: "2026-09-20T08:00:00Z",
 };
 
+const governance = {
+  contract_version: "2026-09-23.1",
+  company_id: companyId,
+  branch_id: null,
+  scope: "company",
+  environment: "uat",
+  release_commit: "wp65-local",
+  production_authorized: false,
+  areas: [
+    { key: "api_webhook_governance", title: "API Key และ Webhook", state: "attention", mode: "read_only", source_system: "legacy.integration", reason: "พบ delivery รอลองใหม่", deep_link: "/integrations", metrics: [{ key: "retry_pending", label: "รอลองใหม่", value: 1, severity: "warning" }], updated_at: "2026-09-23T08:00:00Z", stale: false },
+    { key: "incident_management", title: "Incident Management", state: "planned", mode: "planned", source_system: "no_tenant_incident_contract", reason: "ยังไม่มีสัญญาข้อมูล จึงไม่มี action ปลอม", deep_link: null, metrics: [], updated_at: null, stale: false },
+  ],
+  release_gates: [
+    { key: "software_uat", title: "Software UAT", state: "pass", server_enforced: true, reason: "มีหลักฐาน software gate", evidence_reference: "docs/scopes/BATCH-C-PHASE-GATE-03.md" },
+    { key: "production", title: "Production activation", state: "hold", server_enforced: true, reason: "WP65 อนุญาตเฉพาะ Local/UAT", evidence_reference: null },
+  ],
+  coverage: [
+    { key: "restaurant", title: "Restaurant POS", state: "available", entry_route: "/restaurant", release_boundary: "Software UAT passed; physical acceptance remains HOLD" },
+    { key: "retail", title: "Retail POS", state: "hold", entry_route: "/pos", release_boundary: "Cash Pilot only" },
+    { key: "integration_reporting", title: "Integration & Reporting", state: "read_only", entry_route: "/company/governance", release_boundary: "Server evidence only" },
+  ],
+  summary: { ready: 0, attention: 1, blocked: 0, hold: 1, planned: 1 },
+  stale_after_seconds: 300,
+  generated_at: "2026-09-23T08:00:00Z",
+};
+
 type MockOptions = {
   emptyActions?: boolean;
   overviewStatus?: number;
@@ -157,6 +183,7 @@ async function mockCompanyApi(page: Page, options: MockOptions = {}): Promise<vo
       summary: { online: 0, offline: 0, degraded: 1, pending_sync: 1, stale: 0, error: 0, disabled: 0 },
       generated_at: "2026-09-20T08:00:00Z",
     });
+    if (path.endsWith("/company/governance")) return fulfill(route, governance);
     if (path.endsWith("/system/me/branches")) return fulfill(route, [
       { branch_id: branchId, branch_name: "สาขากรุงเทพ", branch_code: "BKK", brand_id: brandId, business_type: "restaurant", target_database: "restaurant", role_name: "Owner", is_default: true, station_key: null },
       { branch_id: secondBranchId, branch_name: "สาขาเชียงใหม่", branch_code: "CNX", brand_id: brandId, business_type: "restaurant", target_database: "restaurant", role_name: "Owner", is_default: false, station_key: null },
@@ -237,19 +264,19 @@ test("loading, empty, offline and permission-denied states remain explicit", asy
   await page.unrouteAll({ behavior: "wait" });
   await mockCompanyApi(page, { emptyActions: true });
   await page.goto("/company/actions");
-  await expect(page.locator('[data-company-state="empty"]')).toBeVisible();
+  await expect(page.locator('[data-system-state="empty"]')).toBeVisible();
 
   await page.unrouteAll({ behavior: "wait" });
   await mockCompanyApi(page, { overviewStatus: 403 });
   await page.goto("/company");
-  await expect(page.locator('[data-company-state="permission_denied"]')).toBeVisible();
+  await expect(page.locator('[data-system-state="permission_denied"]')).toBeVisible();
 
 });
 
 test("dashboard keeps a recoverable error state when aggregate service fails", async ({ page }) => {
   await mockCompanyApi(page, { overviewStatus: 500 });
   await page.goto("/company");
-  await expect(page.locator('[data-company-state="error"]')).toBeVisible();
+  await expect(page.locator('[data-system-state="error"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "ลองอีกครั้ง" })).toBeVisible();
 });
 
@@ -262,4 +289,19 @@ test("context switch requests a signed branch token and replaces persisted branc
   const request = await switchRequest;
   expect((request.postDataJSON() as { branch_id: string }).branch_id).toBe(secondBranchId);
   await expect.poll(async () => page.evaluate(() => JSON.parse(window.localStorage.getItem("erp-auth") ?? "{}").state?.branchId)).toBe(secondBranchId);
+});
+
+test("governance shows real evidence, planned gaps and Production HOLD on desktop and tablet", async ({ page }) => {
+  await mockCompanyApi(page);
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 820, height: 1180 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/company/governance");
+    await expect(page.getByTestId("company-governance-page")).toBeVisible();
+    await expect(page.getByText("Production activation", { exact: true })).toBeVisible();
+    await expect(page.getByText("hold", { exact: true }).nth(1)).toBeVisible();
+    await expect(page.getByText("Incident Management", { exact: true })).toBeVisible();
+    await expect(page.getByText("planned", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Hotel PMS", { exact: true })).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+  }
 });

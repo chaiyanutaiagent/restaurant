@@ -17,6 +17,7 @@ from app.schemas.module_access import CompanyModuleKey
 from app.services.company_action_center_service import CompanyActionCenterService
 from app.services.company_context_service import CompanyContextService, scoped_branch_ids
 from app.services.company_erp_maturity_service import CompanyErpMaturityService
+from app.services.company_governance_service import CompanyGovernanceService
 from app.services.company_operational_status_service import CompanyOperationalStatusService
 from app.services.company_overview_service import CompanyOverviewService
 
@@ -125,6 +126,16 @@ async def get_company_erp_readiness(
     operational_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     result = await CompanyErpMaturityService(identity_db, operational_db).read(current)
+    return ok(result.model_dump(mode="json"))
+
+
+@router.get("/governance")
+async def get_company_governance(
+    current: TokenData = Depends(get_current_user),
+    identity_db: AsyncSession = Depends(get_identity_db),
+    operational_db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    result = await CompanyGovernanceService(identity_db, operational_db).read(current)
     return ok(result.model_dump(mode="json"))
 
 

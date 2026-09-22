@@ -110,6 +110,7 @@ import CompanyPeopleAccessPage from "@/pages/company/CompanyPeopleAccessPage";
 import CompanyAccessReviewPage from "@/pages/company/CompanyAccessReviewPage";
 import CompanyAuditPage from "@/pages/company/CompanyAuditPage";
 import CompanySecurityPage from "@/pages/company/CompanySecurityPage";
+import CompanyGovernancePage from "@/pages/company/CompanyGovernancePage";
 import RoleAwareLanding from "@/pages/company/RoleAwareLanding";
 import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
 import PlatformTeamPage from "@/pages/platform/PlatformTeamPage";
@@ -388,6 +389,7 @@ export default function App(): JSX.Element {
               </Route>
               <Route element={<ProtectedRoute permissions={["system.company.view", "system.company.edit", "accounting.report.view"]} />}>
                 <Route path="/company/audit" element={<CompanyAuditPage />} />
+                <Route path="/company/governance" element={<CompanyGovernancePage />} />
               </Route>
               <Route element={<ProtectedRoute permission="system.branch.view" />}>
                 <Route path="/company/organization" element={<BranchesPage />} />

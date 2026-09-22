@@ -13,9 +13,9 @@ type Props = {
 };
 
 function statusLabel(delivery: WebhookDelivery): { label: string; className: string } {
-  if (delivery.delivered_at) return { label: "✓ delivered", className: "text-green-600" };
-  if (delivery.next_retry_at) return { label: "⏳ pending retry", className: "text-amber-600" };
-  if (delivery.failed_at) return { label: "✗ failed", className: "text-red-600" };
+  if (delivery.status === "delivered") return { label: "✓ delivered", className: "text-green-600" };
+  if (delivery.status === "retry_scheduled") return { label: "⏳ pending retry", className: "text-amber-600" };
+  if (delivery.status === "dead_letter") return { label: "✗ dead letter", className: "text-red-600" };
   return { label: "-", className: "text-gray-500" };
 }
 
@@ -29,9 +29,9 @@ export default function DeliveriesDialog({ open, onOpenChange, webhook }: Props)
   });
 
   const retryMutation = useMutation({
-    mutationFn: async () => integrationApi.testWebhook(webhook!.id),
+    mutationFn: async (deliveryId: string) => integrationApi.retryDelivery(deliveryId),
     onSuccess: async () => {
-      toast({ title: "ส่ง test webhook แล้ว" });
+      toast({ title: "ส่ง delivery เดิมอีกครั้งแล้ว" });
       await queryClient.invalidateQueries({ queryKey: ["integrations", "deliveries", webhook?.id] });
       await queryClient.invalidateQueries({ queryKey: ["integrations", "webhooks"] });
     },
@@ -47,11 +47,6 @@ export default function DeliveriesDialog({ open, onOpenChange, webhook }: Props)
           <DialogTitle>{webhook?.name || "Deliveries"}</DialogTitle>
           <p className="text-sm text-gray-500">{webhook?.url}</p>
         </DialogHeader>
-        <div className="flex justify-end">
-          <Button onClick={() => retryMutation.mutate()} disabled={retryMutation.isPending || !webhook}>
-            {retryMutation.isPending ? "กำลังส่ง..." : "ทดสอบอีกครั้ง"}
-          </Button>
-        </div>
         <Table>
           <TableHeader>
             <TableRow>
@@ -60,6 +55,7 @@ export default function DeliveriesDialog({ open, onOpenChange, webhook }: Props)
               <TableHead>HTTP Status</TableHead>
               <TableHead>สถานะ</TableHead>
               <TableHead>Retry ครั้งที่</TableHead>
+              <TableHead>Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -72,6 +68,7 @@ export default function DeliveriesDialog({ open, onOpenChange, webhook }: Props)
                   <TableCell>{delivery.response_status ?? "-"}</TableCell>
                   <TableCell className={status.className}>{status.label}</TableCell>
                   <TableCell>{delivery.attempt_count}</TableCell>
+                  <TableCell><Button size="sm" variant="outline" disabled={delivery.status === "delivered" || retryMutation.isPending} onClick={() => retryMutation.mutate(delivery.id)}>ส่งซ้ำ</Button></TableCell>
                 </TableRow>
               );
             })}

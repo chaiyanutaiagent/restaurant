@@ -26,6 +26,8 @@ class APIKey(UUIDMixin, TimestampMixin, Base):
 
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("'integration'"))
+    owner_contact: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("'unassigned'"))
     key_prefix: Mapped[str] = mapped_column(String(8), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False, server_default=text("'[]'::json"))
@@ -35,6 +37,7 @@ class APIKey(UUIDMixin, TimestampMixin, Base):
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    rotated_from_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("api_keys.id"), nullable=True)
 
     company: Mapped["Company"] = relationship("Company")
     creator: Mapped["User"] = relationship("User", foreign_keys=[created_by])
@@ -43,17 +46,31 @@ class APIKey(UUIDMixin, TimestampMixin, Base):
 
 class WebhookEndpoint(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "webhook_endpoints"
+    __table_args__ = (
+        Index(
+            "uq_webhook_endpoints_incoming_source",
+            "incoming_source",
+            unique=True,
+            postgresql_where=text("incoming_source IS NOT NULL"),
+        ),
+    )
 
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     events: Mapped[list[str]] = mapped_column(JSON, nullable=False, server_default=text("'[]'::json"))
-    secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    secret_ciphertext: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    secret_rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    incoming_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failure_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
     company: Mapped["Company"] = relationship("Company")
+
+    @property
+    def secret_configured(self) -> bool:
+        return bool(self.secret_ciphertext)
 
 
 class WebhookDelivery(UUIDMixin, Base):
@@ -69,7 +86,9 @@ class WebhookDelivery(UUIDMixin, Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     response_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
     response_body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'pending'"), index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    last_error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -95,6 +114,8 @@ class ExternalOrder(UUIDMixin, TimestampMixin, Base):
     customer_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     items_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    server_total_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
+    review_reasons: Mapped[list[str]] = mapped_column(JSON, nullable=False, server_default=text("'[]'::json"))
     payment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
     payment_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sale_order_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("sale_orders.id"), nullable=True)
@@ -102,6 +123,8 @@ class ExternalOrder(UUIDMixin, TimestampMixin, Base):
     raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
     company: Mapped["Company"] = relationship("Company")
     sale_order: Mapped["SaleOrder | None"] = relationship("SaleOrder")

@@ -27,6 +27,7 @@ import type {
   CompanyOverview,
   CompanyOverviewSection,
   CompanyErpReadiness,
+  CompanyGovernance,
   EffectiveAccess,
   OperationalStatus,
 } from "@/types/companyFoundation";
@@ -303,6 +304,7 @@ export const companyFoundationApi = {
     api.get<ApiResponse<CompanyOverviewSection>>(`/company/overview/${encodeURIComponent(moduleKey)}`),
   operationalStatus: () => api.get<ApiResponse<OperationalStatus>>("/company/operational-status"),
   erpReadiness: () => api.get<ApiResponse<CompanyErpReadiness>>("/company/erp/readiness"),
+  governance: () => api.get<ApiResponse<CompanyGovernance>>("/company/governance"),
   audit: (params?: {
     page?: number;
     limit?: number;

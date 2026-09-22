@@ -30,27 +30,30 @@ async def verify_api_key(full_key: str, db: AsyncSession) -> APIKey | None:
         return None
 
     prefix = parts[1]
-    api_key = await db.scalar(
+    candidates = list((await db.scalars(
         select(APIKey).where(
             APIKey.key_prefix == prefix,
             APIKey.is_active.is_(True),
             APIKey.revoked_at.is_(None),
         )
-    )
-    if api_key is None:
-        return None
-    if not verify_password(full_key, api_key.key_hash):
-        return None
-    if api_key.expires_at and api_key.expires_at < datetime.now(timezone.utc):
-        return None
-    return api_key
+    )).all())
+    for api_key in candidates:
+        if not verify_password(full_key, api_key.key_hash):
+            continue
+        # Legacy unowned or non-expiring keys must be rotated before use.
+        if not api_key.expires_at or api_key.owner_contact.strip().lower() == "unassigned":
+            return None
+        if api_key.expires_at < datetime.now(timezone.utc):
+            return None
+        return api_key
+    return None
 
 
 async def get_api_key_auth(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> APIKey:
-    key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+    key = request.headers.get("X-API-Key")
     if not key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key required")
 
@@ -63,12 +66,15 @@ async def get_api_key_auth(
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded")
 
     api_key.last_used_at = datetime.now(timezone.utc)
+    await db.commit()
     return api_key
 
 
 def require_scope(scope: str):
     async def checker(api_key: APIKey = Depends(get_api_key_auth)) -> APIKey:
-        if scope not in api_key.scopes and "*" not in api_key.scopes:
+        # Legacy wildcard keys fail closed. They must be rotated into an
+        # explicitly-owned, expiring key before they can call an API.
+        if "*" in (api_key.scopes or []) or scope not in (api_key.scopes or []):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Scope required: {scope}")
         return api_key
 

@@ -54,6 +54,7 @@ from app.services.retail_reference_projector import (
 from app.services.platform_operations_service import collect_runtime_state
 from app.services.takeaway_reference_projector import run_takeaway_reference_projector
 from app.services.shared_reporting_worker import run_shared_reporting_projector
+from app.utils.webhook_dispatcher import run_webhook_retry_worker
 
 
 @asynccontextmanager
@@ -160,6 +161,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             name="shared-reporting-projector",
         )
 
+    webhook_retry_stop: asyncio.Event | None = None
+    webhook_retry_task: asyncio.Task[None] | None = None
+    if settings.webhook_retry_worker_enabled:
+        webhook_retry_stop = asyncio.Event()
+        webhook_retry_task = asyncio.create_task(
+            run_webhook_retry_worker(
+                webhook_retry_stop,
+                poll_seconds=settings.webhook_retry_poll_seconds,
+            ),
+            name="webhook-retry-worker",
+        )
+
     try:
         yield
     finally:
@@ -195,6 +208,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             except TimeoutError:  # pragma: no cover - shutdown timeout path
                 reporting_projector_task.cancel()
                 await asyncio.gather(reporting_projector_task, return_exceptions=True)
+        if webhook_retry_stop is not None:
+            webhook_retry_stop.set()
+        if webhook_retry_task is not None:
+            try:
+                await asyncio.wait_for(webhook_retry_task, timeout=5)
+            except TimeoutError:  # pragma: no cover - shutdown timeout path
+                webhook_retry_task.cancel()
+                await asyncio.gather(webhook_retry_task, return_exceptions=True)
 
 
 app = FastAPI(

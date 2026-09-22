@@ -16,6 +16,7 @@ from app.models.api_integration import APIKey, ExternalOrder
 from app.models.product import Product
 from app.models.stock import StockBalance
 from app.schemas.api_integration import ExternalOrderRead, PublicOrderCreate, PublicProductRead, PublicStockLocationRead, PublicStockRead
+from app.services.external_order_validation_service import validate_external_order
 from app.utils.api_key_auth import require_scope
 from app.utils.rate_limiter import is_webhook_rate_limited
 from app.utils.webhook_dispatcher import trigger_event
@@ -179,17 +180,20 @@ async def create_external_order(
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Duplicate external_order_id")
 
+    items, server_total, review_reasons = await validate_external_order(db, api_key.company_id, payload)
     row = ExternalOrder(
         company_id=api_key.company_id,
         source=source_value,
         external_order_id=payload.external_order_id,
-        status="pending",
+        status="needs_review" if review_reasons else "accepted",
         customer_name=payload.customer_name,
         customer_phone=payload.customer_phone,
         customer_email=payload.customer_email,
         customer_address=payload.customer_address,
-        items_json=[item.model_dump(mode="json") for item in payload.items],
+        items_json=items,
         total_amount=payload.total_amount,
+        server_total_amount=server_total,
+        review_reasons=review_reasons,
         payment_method=payload.payment_method,
         payment_status=payload.payment_status,
         notes=payload.notes,
@@ -212,7 +216,7 @@ async def create_external_order(
     except Exception:
         pass
     await db.commit()
-    return ok({"order_id": str(row.id), "status": "received"})
+    return ok({"order_id": str(row.id), "status": row.status, "requires_review": bool(row.review_reasons)})
 
 
 @router.get("/orders/{external_order_id}")

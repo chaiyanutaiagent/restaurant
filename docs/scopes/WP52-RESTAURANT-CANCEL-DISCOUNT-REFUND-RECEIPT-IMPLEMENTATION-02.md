@@ -1,7 +1,7 @@
 # WP52 — Restaurant Cancel, Discount, Refund and Receipt Center Implementation
 
-Date: 2026-09-21
-Status: **LOCAL/UAT ENGINEERING PASS — PAIRED-COUNTER VISUAL GATE PENDING**
+Date: 2026-09-22
+Status: **LOCAL/UAT PASS — PHASE GATE CLOSED**
 
 ## Delivered composition
 
@@ -35,14 +35,15 @@ Status: **LOCAL/UAT ENGINEERING PASS — PAIRED-COUNTER VISUAL GATE PENDING**
 
 - Immutable WP52 frontend and backend images are deployed to `restaurant-pos-uat-drill` only.
 - WP43, WP45 and WP46 Server/API smokes pass on UAT.
-- Formal `uat.branch-manager` browser UAT passes POS loading and the Discount workspace at 1440×900 and 1024×768.
+- Formal `uat.branch-manager` browser UAT passes POS loading, Discount, paired-Counter Bill Center, safe Void routing, Cancellation/Waste approval, Refund quote/approval and receipt states.
 - The first UAT smoke found and closed a legacy direct-offline-submit bypass; signed WP47 sync remains the only offline mutation path.
 - Application-only rollback to WP51 completed in 13 seconds and restore to WP52 completed in 12 seconds.
-- The current browser has no paired UAT Counter, so Bill Center/Void/Cancellation/Refund action UAT remains pending and is not claimed as passed.
+- The browser-compatibility correction replaced unsupported `prompt`/`confirm` device actions with accessible in-app dialogs and added a direct one-time pairing route.
+- The final frontend-only rollback/restore each completed in 1 second, with paired device and Staff session retained.
 
 ## UAT deployment
 
-- Frontend `restaurant-pos-frontend:wp52-44a1b36` was built with `VITE_REFUND_UAT_SIMULATOR=true`; the Docker default remains `false`.
+- Frontend `restaurant-pos-frontend:wp52-0d0e021` was built with `VITE_REFUND_UAT_SIMULATOR=true`; the Docker default remains `false`.
 - Backend `restaurant-pos-backend:wp52-e4e3ad9` includes the direct-offline-submit correction and final smoke harness.
 - Only `restaurant-pos-uat-drill` was updated with the existing WP43/WP45/WP46 UAT/Sandbox flags.
 - Production identities and flags remained unchanged.

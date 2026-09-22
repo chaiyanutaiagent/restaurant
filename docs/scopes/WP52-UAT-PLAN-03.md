@@ -33,5 +33,4 @@ Production: Not authorized
 
 - Restore WP51 backend/frontend from `/home/behappyaiagent/restaurant-uat-releases/b1a2701`.
 - Keep PostgreSQL, Redis, nginx and Cloudflare Tunnel unchanged.
-- Restore WP52 from `/home/behappyaiagent/restaurant-uat-releases/e4e3ad9` after health verification.
-
+- Restore final WP52 from `/home/behappyaiagent/restaurant-uat-releases/0d0e021` after health verification.

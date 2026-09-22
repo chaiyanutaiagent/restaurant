@@ -33,7 +33,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP49 | Restaurant order entry, Table and QR | Implemented; UAT gate closed | Production unchanged |
 | WP50 | Restaurant Shift Operations | Implemented; UAT gate closed | Production unchanged |
 | WP51 | Restaurant Hold Draft and Order Center UX | Implemented; UAT gate closed | Production unchanged |
-| WP52 | Restaurant Cancel, Discount, Refund, Receipt Center UX | In progress; Local/UAT API/rollback pass, paired-Counter visual gate pending | Sandbox/UAT only |
+| WP52 | Restaurant Cancel, Discount, Refund, Receipt Center UX | UAT phase gate closed; paired-Counter browser, API and rollback passed | Sandbox/UAT only |
 | WP53 | Restaurant Offline and Sync Recovery UX | Planned | Local/UAT only |
 | WP54 | Restaurant Counter Readiness and physical-UAT shell | Planned | No physical pass implied |
 | WP55 | Retail foundation and Scan-first sale | Planned | Legacy source unchanged |
@@ -94,15 +94,15 @@ The superseded non-v2 Action Center file is not counted.
 | D21 | `design-system/21-restaurant-pos-hold-bill-sheet.png` | WP51 | Implemented | Search/filter/sort, owner/Counter/shift/location, item detail and audit use the versioned Server contract. |
 | D22 | `design-system/22-restaurant-pos-held-bills-resume.png` | WP51 | Implemented | Claim/resume/release/discard/reassign/reopen, revalidation and conflict handling passed API smoke. |
 | D23 | `design-system/23-restaurant-pos-order-center.png` | WP51 | Implemented | Branch-scoped search/filter, canonical status/source and detail pane passed Desktop/tablet UAT. |
-| D24 | `design-system/24-restaurant-pos-cancel-discount-refund-flow-board.png` | WP52 | In progress | WP43/WP45/WP46 API smoke passes; paired-Counter browser acceptance remains. |
-| D25 | `design-system/25-restaurant-pos-cancel-item-sheet.png` | WP52 | In progress | Server preview/Waste/Audit smoke passes; formal action UI remains paired-Counter gated. |
+| D24 | `design-system/24-restaurant-pos-cancel-discount-refund-flow-board.png` | WP52 | Adapted | Price/discount, cancellation, refund and receipt paths passed paired-Counter UAT; exchange remains explicitly gated. |
+| D25 | `design-system/25-restaurant-pos-cancel-item-sheet.png` | WP52 | Adapted | Pending/after-kitchen preview, bill impact, recipe Waste, KDS/Audit disclosure and maker-checker passed UAT. |
 | D26 | `design-system/26-restaurant-pos-discount-sheet.png` | WP52 | Adapted | Server-authoritative amount/percent workspace passed Desktop/iPad UAT. |
-| D27 | `design-system/27-restaurant-pos-manager-approval.png` | WP52 | In progress | Maker-checker UI is implemented; formal paired-Counter action UAT remains. |
-| D28 | `design-system/28-restaurant-pos-refund-sheet.png` | WP52 | In progress | Sandbox provider/tax smoke passes; formal recovery UI remains paired-Counter gated. |
+| D27 | `design-system/27-restaurant-pos-manager-approval.png` | WP52 | Adapted | Bounded action/reason summaries and different-user maker-checker opened correctly for Cancellation and Refund. |
+| D28 | `design-system/28-restaurant-pos-refund-sheet.png` | WP52 | Adapted | Server quote, original-payment allocation, Sandbox boundary and non-fiscal tax state passed Desktop/iPad UAT. |
 | D29 | `design-system/29-restaurant-pos-held-bills-server-backed.png` | WP51 | Implemented | Server remains the source of truth; hold creates no payment, stock, tax or KDS side effect. |
 | D30 | `design-system/30-customer-qr-ordering-flow.png` | WP49/WP64 | Adapted | Session-scoped Restaurant QR works; broader Public Experience is WP64. |
 | D31 | `design-system/31-restaurant-kds-pickup-flow.png` | WP49/WP52 | Adapted | KDS works; final Order Center/Pickup cohesion is WP52. |
-| D32 | `design-system/32-restaurant-pos-bill-receipt-center.png` | WP52 | In progress | Two-pane current-shift center is implemented; paired-Counter browser acceptance remains. |
+| D32 | `design-system/32-restaurant-pos-bill-receipt-center.png` | WP52 | Adapted | Current-shift refresh/search/filter/detail, receipt, eligible/ineligible Void and Refund routing passed paired-Counter UAT. |
 | D33 | `design-system/33-restaurant-pos-offline-sync-recovery.png` | WP53 | Planned | Unknown/pending/review states must reconcile before retry. |
 | D34 | `design-system/34-restaurant-pos-counter-readiness-check.png` | WP54 | Planned | Browser capability is not a physical pass. |
 

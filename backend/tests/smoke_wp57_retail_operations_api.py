@@ -162,6 +162,18 @@ async def _disable_personas(context: dict[str, str]) -> None:
             )
         )
         await db.commit()
+
+    # The shared approval fixture creates its initial personas in the legacy
+    # source before projecting them into Platform/Retail. Keep those source
+    # identities fail-closed as well so a UAT smoke can never leave a usable
+    # credential in any configured identity copy.
+    async with AsyncSessionLocal() as legacy:
+        await legacy.execute(
+            update(User)
+            .where(User.id.in_(user_ids))
+            .values(is_active=False)
+        )
+        await legacy.commit()
     await project_retail_reference_snapshot(
         company_id=DEFAULT_COMPANY_ID,
         brand_ids=(uuid.UUID(context["brand_id"]),),

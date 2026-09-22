@@ -23,6 +23,7 @@ RETAIL_SCHEMA_TABLES = {
     "product_images",
     "price_lists",
     "price_list_items",
+    "price_calculations",
     "stock_locations",
     "stock_balances",
     "stock_movements",

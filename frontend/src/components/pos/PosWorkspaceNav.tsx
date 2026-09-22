@@ -17,6 +17,7 @@ import { useAuthStore } from "@/stores/auth.store";
 type PosWorkspaceNavProps = {
   mode?: "restaurant" | "retail";
   heldBillCount?: number;
+  holdEnabled?: boolean;
   onHeldBills?: () => void;
   onBillCenter?: () => void;
   onShift?: () => void;
@@ -35,6 +36,7 @@ type WorkspaceItem = {
 export default function PosWorkspaceNav({
   mode = "restaurant",
   heldBillCount,
+  holdEnabled = true,
   onHeldBills,
   onBillCenter,
   onShift,
@@ -107,7 +109,11 @@ export default function PosWorkspaceNav({
   if (mode === "retail") {
     const retailItems = [
       { label: "ขาย", icon: Store, onClick: () => open("/pos", "ขาย") },
-      { label: `พักบิล ${heldBillCount ?? 0}`, icon: ClipboardList, onClick: onHeldBills },
+      {
+        label: holdEnabled ? `พักบิล ${heldBillCount ?? 0}` : "พักบิล · WP57",
+        icon: ClipboardList,
+        onClick: holdEnabled ? onHeldBills : undefined,
+      },
       { label: "บิล / คืนสินค้า", icon: FileClock, onClick: onBillCenter },
       { label: "กะ", icon: Clock3, onClick: onShift },
       { label: "สถานะเครื่อง", icon: MonitorCog, onClick: onDeviceStatus },

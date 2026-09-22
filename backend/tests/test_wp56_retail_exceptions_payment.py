@@ -187,6 +187,22 @@ class RetailUxContractTests(unittest.TestCase):
         self.assertIn('catalog_scope: "retail_sale"', page)
         self.assertIn("signedRows.find((item) => item.id === result.product?.id)", page)
 
+    def test_retail_pricing_quote_schema_is_bounded_and_hold_waits_for_wp57(self) -> None:
+        page = (ROOT / "frontend/src/pages/pos/POSPage.tsx").read_text()
+        navigation = (ROOT / "frontend/src/components/pos/PosWorkspaceNav.tsx").read_text()
+        retail_env = (ROOT / "backend/alembic_retail/env.py").read_text()
+        migration = (
+            ROOT
+            / "backend/alembic_retail/versions/p10retail0004_add_server_authoritative_pricing.py"
+        ).read_text()
+
+        self.assertIn('enabled: Boolean(currentShift) && !isRetailMode', page)
+        self.assertIn('holdEnabled={!isRetailMode}', page)
+        self.assertIn('"พักบิล · WP57"', navigation)
+        self.assertIn('"price_calculations"', retail_env)
+        self.assertIn('down_revision: Union[str, None] = "p9retail0003"', migration)
+        self.assertIn('op.create_table(\n        "price_calculations"', migration)
+
 
 if __name__ == "__main__":
     unittest.main()

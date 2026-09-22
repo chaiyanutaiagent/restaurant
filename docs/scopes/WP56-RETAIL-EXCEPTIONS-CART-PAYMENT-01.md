@@ -43,6 +43,8 @@ WP56 moves Retail product selection from Client assumptions to an online Server-
 - The command reads the new password only from environment, revokes refresh tokens and writes an audit entry.
 - Added a separate bounded `uat.retail-cashier` persona command. It derives the canonical Cashier permission preset, resolves exactly one active Retail UAT Brand/Branch, writes signed `retail_pos` context, maps that UAT storefront to the isolated `UI-MAIN` showcase location with audit evidence, and can disable the user and revoke its sessions after QA.
 - Fixed the clean Docker regression fallback so runner-contract tests receive the repository `/scripts` directory.
+- Added additive Retail boundary migration `p10retail0004` for persistent Server-authoritative pricing quotes. The migration was rehearsed upgrade → downgrade → upgrade on an isolated PostgreSQL database.
+- Disabled Retail Hold Draft queries and controls until WP57 so the Retail shell cannot call the not-yet-migrated `pos_hold_drafts` contract.
 
 ## Intentional deferrals
 
@@ -59,9 +61,9 @@ WP56 moves Retail product selection from Client assumptions to an online Server-
 |---|---|
 | Python 3.12 compile | PASS |
 | Frontend type-check | PASS |
-| Focused WP55–WP56 tests | PASS — 16/16 |
-| Full backend regression | PASS — 486/486 before two final focused credential-guard cases; final focused suite 16/16 |
-| Schema/migration | None |
+| Focused Retail/Pricing/Shift tests | PASS — 36/36 |
+| Full backend regression | PASS — 492/492 |
+| Schema/migration | PASS — `p10retail0004`, upgrade → downgrade → upgrade; `price_calculations` 23 columns |
 | Production flags/data source | Unchanged |
 
 ## UAT acceptance still required

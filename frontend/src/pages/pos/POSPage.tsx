@@ -585,8 +585,8 @@ export default function POSPage(): JSX.Element {
       const remainingLocal = await db.heldBills.where("shift_id").equals(currentShift.id).toArray();
       return [...serverRows, ...remainingLocal].sort((left, right) => right.held_at - left.held_at);
     },
-    enabled: Boolean(currentShift),
-    refetchInterval: heldBillsOpen && isOnline ? 15_000 : false,
+    enabled: Boolean(currentShift) && !isRetailMode,
+    refetchInterval: !isRetailMode && heldBillsOpen && isOnline ? 15_000 : false,
   });
   const replacementRulesQuery = useQuery({
     queryKey: ["pos", "local-replacement-rules", branchId, replacementRulesVersion],
@@ -2472,7 +2472,8 @@ export default function POSPage(): JSX.Element {
         <PosWorkspaceNav
           mode={isRetailMode ? "retail" : "restaurant"}
           heldBillCount={activeHeldBillCount}
-          onHeldBills={() => setHeldBillsOpen(true)}
+          holdEnabled={!isRetailMode}
+          onHeldBills={!isRetailMode ? () => setHeldBillsOpen(true) : undefined}
           onBillCenter={() => setRecentSalesOpen(true)}
           onShift={() => setCloseShiftOpen(true)}
           onDeviceStatus={() => setDeviceStatusOpen(true)}
@@ -2948,23 +2949,27 @@ export default function POSPage(): JSX.Element {
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold text-slate-900">{isTakeawayMode ? "ตะกร้ารับกลับ" : "ตะกร้า"}</h2>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">{cart.items.length}</span>
-                <button
-                  type="button"
-                  className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
-                  onClick={() => setHeldBillsOpen(true)}
-                >
-                  พักไว้ {activeHeldBillCount}
-                </button>
+                {!isRetailMode ? (
+                  <button
+                    type="button"
+                    className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
+                    onClick={() => setHeldBillsOpen(true)}
+                  >
+                    พักไว้ {activeHeldBillCount}
+                  </button>
+                ) : null}
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="min-h-11 rounded-xl bg-amber-50 px-3 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-40"
-                  onClick={() => setHoldCreateOpen(true)}
-                  disabled={cart.items.length === 0 || !currentShift}
-                >
-                  พักบิล
-                </button>
+                {!isRetailMode ? (
+                  <button
+                    type="button"
+                    className="min-h-11 rounded-xl bg-amber-50 px-3 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-40"
+                    onClick={() => setHoldCreateOpen(true)}
+                    disabled={cart.items.length === 0 || !currentShift}
+                  >
+                    พักบิล
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="min-h-11 rounded-xl border border-red-100 px-3 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-40"
@@ -3673,7 +3678,7 @@ export default function POSPage(): JSX.Element {
         </DialogContent>
       </Dialog>
 
-      <HoldDraftWorkspaceDialog
+      {!isRetailMode ? <HoldDraftWorkspaceDialog
         open={heldBillsOpen}
         onOpenChange={setHeldBillsOpen}
         drafts={heldBills}
@@ -3700,9 +3705,9 @@ export default function POSPage(): JSX.Element {
         onDiscard={handleDeleteHeldBill}
         onReassign={handleReassignHeldBill}
         onReopen={handleReopenHeldBill}
-      />
+      /> : null}
 
-      <Dialog open={holdCreateOpen} onOpenChange={setHoldCreateOpen}>
+      {!isRetailMode ? <Dialog open={holdCreateOpen} onOpenChange={setHoldCreateOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>พักบิลปัจจุบัน</DialogTitle>
@@ -3725,7 +3730,7 @@ export default function POSPage(): JSX.Element {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog> : null}
 
       <Dialog open={Boolean(pendingResumeDraft)} onOpenChange={(open) => { if (!open) setPendingResumeDraft(null); }}>
         <DialogContent className="max-w-xl">

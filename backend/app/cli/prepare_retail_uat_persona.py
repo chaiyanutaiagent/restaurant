@@ -85,7 +85,6 @@ async def _load_scope(
                 Brand.slug == args.brand_slug.strip(),
                 Brand.business_type == "retail_pos",
                 Brand.is_active.is_(True),
-                Brand.deleted_at.is_(None),
                 BrandBranch.company_id == args.company_id,
                 BrandBranch.is_active.is_(True),
                 Branch.company_id == args.company_id,

@@ -284,6 +284,7 @@ export default function App(): JSX.Element {
           </Route>
           <Route element={<ProtectedRoute permission="pos.sale.create" />}>
             <Route path="/pos" element={<POSPage />} />
+            <Route path="/pos/offline-sync" element={<OfflineSyncCenterPage />} />
           </Route>
           <Route element={<ProtectedRoute permissions={["brand.store.order.create", "brand.store.shift.close", "brand.store.replenishment.submit", "brand.store.delivery.receive", "brand.store.stock.view", "brand.store.stock.adjust", "fb.order.create", "system.user.request"]} />}>
             <Route element={<RestaurantShell />}>

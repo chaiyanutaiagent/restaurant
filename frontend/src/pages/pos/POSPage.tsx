@@ -49,7 +49,6 @@ import {
   loadRestaurantMenu,
   markRestaurantLocalSlip,
   queueRestaurantOrder,
-  retryRestaurantNeedsReview,
   syncRestaurantPendingOrders,
   type RestaurantOutboxSummary,
 } from "@/lib/restaurantOffline";
@@ -1861,21 +1860,6 @@ export default function POSPage(): JSX.Element {
     }
   }
 
-  async function handleRetryTakeawayOutbox(): Promise<void> {
-    try {
-      await retryRestaurantNeedsReview();
-      const summary = await syncRestaurantPendingOrders();
-      setTakeawayOutboxSummary(summary);
-      toast({
-        title: summary.needsReview > 0 ? "ยังมีรายการต้องตรวจสอบ" : "ซิงก์รายการรับกลับแล้ว",
-        description: summary.latestError,
-        variant: summary.needsReview > 0 ? "destructive" : "default",
-      });
-    } catch (error) {
-      toast({ title: "ซิงก์รายการรับกลับไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
-    }
-  }
-
   async function handleCheckout(): Promise<void> {
     if (!currentShift || cart.items.length === 0) {
       return;
@@ -2097,18 +2081,22 @@ export default function POSPage(): JSX.Element {
               <span className={`rounded-full px-2.5 py-0.5 font-medium ${isOnline ? "bg-blue-50 text-blue-700" : "bg-red-100 text-red-700"}`}>
                 {isOnline ? "●" : "○"} {isOnline ? "ONLINE" : "OFFLINE"}
               </span>
-              {isTakeawayMode && takeawayOutboxSummary.pending + takeawayOutboxSummary.syncing > 0 ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700">
-                  <CloudUpload className="h-3.5 w-3.5" /> รอส่ง {takeawayOutboxSummary.pending + takeawayOutboxSummary.syncing}
-                </span>
-              ) : null}
-              {isTakeawayMode && takeawayOutboxSummary.needsReview > 0 ? (
+              {isTakeawayMode && takeawayOutboxSummary.pending + takeawayOutboxSummary.syncing + takeawayOutboxSummary.acknowledged + takeawayOutboxSummary.unknown > 0 ? (
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-0.5 font-medium text-red-700"
-                  onClick={() => void handleRetryTakeawayOutbox()}
+                  className="inline-flex min-h-11 items-center gap-1 rounded-full bg-blue-50 px-3 py-1 font-medium text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  onClick={() => openWorkspace("/pos/offline-sync", "ศูนย์ซิงก์รายการขาย")}
                 >
-                  <AlertTriangle className="h-3.5 w-3.5" /> ตรวจสอบ {takeawayOutboxSummary.needsReview}
+                  <CloudUpload className="h-3.5 w-3.5" /> รอผล {takeawayOutboxSummary.pending + takeawayOutboxSummary.syncing + takeawayOutboxSummary.acknowledged + takeawayOutboxSummary.unknown}
+                </button>
+              ) : null}
+              {isTakeawayMode && takeawayOutboxSummary.needsReview + takeawayOutboxSummary.rejected + takeawayOutboxSummary.quarantined > 0 ? (
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 items-center gap-1 rounded-full bg-red-50 px-3 py-1 font-medium text-red-700 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                  onClick={() => openWorkspace("/pos/offline-sync", "ศูนย์ซิงก์รายการขาย")}
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" /> ตรวจสอบ {takeawayOutboxSummary.needsReview + takeawayOutboxSummary.rejected + takeawayOutboxSummary.quarantined}
                 </button>
               ) : null}
             </div>

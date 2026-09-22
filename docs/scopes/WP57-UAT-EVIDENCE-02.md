@@ -57,6 +57,13 @@ The guarded harness ran only when the runtime proved development/UAT, Platform i
 - Commit `885ce67` makes the Legacy-copy disable part of the harness `finally` path so a failed or successful future run remains fail-closed.
 - The evidence retains operational audit rows but no usable UAT credential.
 
+## Independent QA
+
+- Independent QA returned **PASS** with no P0–P3 defect in the executed software scope.
+- QA independently confirmed the deployed image identities, final harness checksum, signed Retail context, Hold conflict/idempotency, cash Return maker-checker and exact-once Payment/stock effects, append-only evidence, shift blockers/close, no-journal Retail cash movement and fail-closed Exchange/provider/tax/offline boundaries.
+- QA found no 500 or schema error, confirmed final UAT readiness and verified that Production container identities did not change.
+- Browser access stopped at the authenticated login boundary and no physical hardware was exercised. Those are recorded limitations for WP58, not a software-gate pass for physical acceptance.
+
 ## Rollback and Production isolation
 
 - App-only rollback from WP57 to backend `wp56-81aba50` and frontend `wp56-f02c9a6` passed without schema downgrade.

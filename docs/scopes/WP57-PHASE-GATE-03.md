@@ -8,7 +8,7 @@ Production: NO-GO
 
 **Software gate: PASS. Physical gate: HOLD. Production gate: NO-GO.**
 
-WP57 implementation, regression, authenticated UAT, test-persona containment and app-only rollback/restore have passed. Retail remains an online Cash Pilot with Server-backed Hold/Resume, cash Return and Server-authoritative Shift Operations.
+WP57 implementation, regression, authenticated UAT, independent QA, test-persona containment and app-only rollback/restore have passed. Retail remains an online Cash Pilot with Server-backed Hold/Resume, cash Return and Server-authoritative Shift Operations.
 
 ## Accepted evidence
 
@@ -21,6 +21,7 @@ WP57 implementation, regression, authenticated UAT, test-persona containment and
 - Temporary personas were disabled in Platform, Retail and Legacy; active Platform refresh sessions were zero.
 - Rollback to WP56 and restore to WP57 passed without schema downgrade.
 - Production container identities remained unchanged.
+- Independent QA returned PASS with no P0–P3 defect in the executed software scope.
 
 ## Remaining acceptance
 

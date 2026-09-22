@@ -36,6 +36,7 @@ import { useOnlineStatus } from "@/lib/syncService";
 import type { WapMenu, WapOrder } from "@/lib/wapApi";
 import { useAuthStore } from "@/stores/auth.store";
 import { useDeviceStore } from "@/stores/device.store";
+import RetailOfflineSyncCenterPage from "@/pages/pos/RetailOfflineSyncCenterPage";
 
 const EMPTY_SUMMARY: RestaurantOutboxSummary = {
   pending: 0,
@@ -156,7 +157,7 @@ function staffName(user: ReturnType<typeof useAuthStore.getState>["user"]): stri
     || user.username;
 }
 
-export default function OfflineSyncCenterPage(): JSX.Element {
+function RestaurantOfflineSyncCenterPage(): JSX.Element {
   const { brandSlug } = useParams<{ brandSlug?: string }>();
   const location = useLocation();
   const isOnline = useOnlineStatus();
@@ -501,4 +502,11 @@ export default function OfflineSyncCenterPage(): JSX.Element {
       </div>
     </main>
   );
+}
+
+export default function OfflineSyncCenterPage(): JSX.Element {
+  const businessType = useAuthStore((state) => state.businessType);
+  return businessType === "retail_pos"
+    ? <RetailOfflineSyncCenterPage />
+    : <RestaurantOfflineSyncCenterPage />;
 }

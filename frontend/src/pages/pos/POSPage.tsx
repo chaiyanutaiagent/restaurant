@@ -658,7 +658,9 @@ export default function POSPage(): JSX.Element {
     void Promise.all([
       syncProductCatalog(catalogScope, catalogIsolationKey),
       syncStockBalances(branchId ?? undefined),
-      syncPendingSales(),
+      companyId && branchId && user && (businessType === "restaurant" || businessType === "retail_pos")
+        ? syncPendingSales({ companyId, branchId, userId: user.id, businessType })
+        : Promise.resolve({ synced: 0, failed: 0 }),
     ]).then(() => {
       if (!active) return;
       setCatalogRevision((current) => current + 1);
@@ -669,7 +671,7 @@ export default function POSPage(): JSX.Element {
       setLastSyncAt(new Date());
     }).catch(() => undefined);
     return () => { active = false; };
-  }, [branchId, catalogIsolationKey, catalogScope, isOnline, queryClient, retailContextValid]);
+  }, [branchId, businessType, catalogIsolationKey, catalogScope, companyId, isOnline, queryClient, retailContextValid, user]);
 
   useEffect(() => {
     if (!isTakeawayMode) return;
@@ -1927,6 +1929,12 @@ export default function POSPage(): JSX.Element {
     }
     const pendingSale: PendingSale = {
       client_order_id: generateClientOrderId(),
+      company_id: companyId ?? undefined,
+      brand_id: brandId,
+      branch_id: branchId,
+      user_id: user.id,
+      device_id: pairedDevice?.device_id ?? null,
+      business_type: "restaurant",
       shift_id: currentShift.id,
       location_id: currentShift.location_id,
       items: cart.items,
@@ -1945,7 +1953,10 @@ export default function POSPage(): JSX.Element {
       total_amount: finalTotal,
       change_amount: changeAmount,
       created_at: Date.now(),
+      updated_at: Date.now(),
       synced: false,
+      status: "pending",
+      attempt_count: 0,
     };
     await db.pendingSales.put(pendingSale);
     await db.transaction("rw", db.stockBalances, async () => {
@@ -2458,6 +2469,16 @@ export default function POSPage(): JSX.Element {
               ) : null}
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              {isRetailMode ? (
+                <Button size="sm" variant="outline" className="min-h-11" onClick={() => openWorkspace("/pos/offline-sync", "ศูนย์สถานะและการกู้คืน")}>
+                  <CloudUpload className="h-4 w-4" />สถานะซิงก์
+                </Button>
+              ) : null}
+              {isRetailMode && canViewDevices ? (
+                <Button size="sm" variant="outline" className="min-h-11" onClick={() => openWorkspace("/devices/uat-readiness", "Counter Readiness")}>
+                  <TabletSmartphone className="h-4 w-4" />ความพร้อม
+                </Button>
+              ) : null}
               <Button size="sm" variant="outline" onClick={() => setRecentSalesOpen(true)} disabled={!currentShift}>
                 ศูนย์บิล
               </Button>

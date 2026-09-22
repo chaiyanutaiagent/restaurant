@@ -24,7 +24,13 @@ AUTO_CHECKS = (
     ("sync_queue_zero", "system", "Server queue ไม่มี pending/unknown/review", True),
 )
 
-MANUAL_CHECKS = (
+RETAIL_AUTO_CHECKS = (
+    ("retail_offline_blocked", "system", "Retail รับชำระ Offline ถูกปิด", True),
+    ("retail_non_cash_blocked", "system", "Provider payment ที่ยังไม่อนุมัติถูกปิด", True),
+    ("retail_data_boundary", "system", "UAT ใช้ Retail boundary และไม่เปลี่ยน Production", True),
+)
+
+RESTAURANT_MANUAL_CHECKS = (
     ("tablet_interaction", "hardware", "Tablet orientation/touch/keyboard/kiosk/restart/cache", True),
     ("product_barcode", "hardware", "สแกน Product barcode จริง", True),
     ("table_qr", "hardware", "สแกน Table QR จริง", True),
@@ -41,6 +47,23 @@ MANUAL_CHECKS = (
     ("row_parity", "reconciliation", "Sale/Payment/Stock/Journal/Event/Tax/Loyalty parity", True),
     ("rollback_recovery", "recovery", "Kill switch/export/rollback/recovery evidence", True),
 )
+
+RETAIL_MANUAL_CHECKS = (
+    ("tablet_interaction", "hardware", "Tablet/Desktop touch/keyboard/kiosk/restart/cache", True),
+    ("product_barcode", "hardware", "สแกน Product barcode จริงและ focus ไม่หลุด", True),
+    ("customer_receipt", "hardware", "ใบเสร็จ Retail: ไทย/ยอด/VAT/Counter/feed/cut", True),
+    ("printer_recovery", "hardware", "Paper-out/disconnect/reconnect/reprint ไม่สร้างบิลซ้ำ", True),
+    ("cash_drawer", "hardware", "Cash drawer หรือ N/A ที่ Manager อนุมัติ", True),
+    ("retail_cash_e2e", "flow", "Scan → Server price → Cash → Receipt → Stock", True),
+    ("network_before_submit", "network", "ตัดเน็ตก่อน Submit แล้ว Retail บล็อกรับชำระ", True),
+    ("lost_ack", "network", "Lost acknowledgement ตรวจ Server ก่อน retry", True),
+    ("network_toggle", "network", "Wi-Fi reconnect/reload/restart/multi-device", True),
+    ("row_parity", "reconciliation", "Sale/Payment/Stock/Event/Receipt parity", True),
+    ("rollback_recovery", "recovery", "Backup/rollback/restore และ Production identity evidence", True),
+)
+
+# Backward-compatible name retained for existing WP54 contract tests.
+MANUAL_CHECKS = RESTAURANT_MANUAL_CHECKS
 NA_ALLOWED_CHECKS = {"cash_drawer"}
 
 SECRET_PATTERN = re.compile(
@@ -82,6 +105,9 @@ class PhysicalUATService:
             or device.revoked_at is not None
         ):
             raise HTTPException(status_code=409, detail="Active paired Counter in current Branch is required")
+        business_type = current.business_type or "restaurant"
+        auto_checks = (*AUTO_CHECKS, *RETAIL_AUTO_CHECKS) if business_type == "retail_pos" else AUTO_CHECKS
+        manual_checks = RETAIL_MANUAL_CHECKS if business_type == "retail_pos" else RESTAURANT_MANUAL_CHECKS
         session = PhysicalUATSession(
             company_id=current.company_id,
             branch_id=current.branch_id,
@@ -107,17 +133,21 @@ class PhysicalUATService:
                 "configured_release_commit": settings.uat_release_commit,
                 "network_profile": payload.network_profile,
                 "offline_mode_enabled": settings.pos_offline_mode_enabled,
+                "business_type": business_type,
+                "target_database": current.target_database,
+                "product_readiness": "cash_pilot" if business_type == "retail_pos" else "restaurant_pilot",
+                "production_data_source": "legacy_unchanged" if business_type == "retail_pos" else "unchanged",
             },
         )
         self.db.add(session)
         await self.db.flush()
-        for key, category, label, required in (*AUTO_CHECKS, *MANUAL_CHECKS):
+        for key, category, label, required in (*auto_checks, *manual_checks):
             self.db.add(PhysicalUATCheck(
                 session_id=session.id,
                 check_key=key,
                 category=category,
                 label=label,
-                source="automatic" if (key, category, label, required) in AUTO_CHECKS else "manual",
+                source="automatic" if (key, category, label, required) in auto_checks else "manual",
                 required=required,
                 result="pending",
                 evidence_snapshot={},
@@ -153,6 +183,7 @@ class PhysicalUATService:
             )
         ) or 0)
         configured_release = settings.uat_release_commit.strip().lower()
+        business_type = self._business_type(session)
         release_match = configured_release not in {"", "unreleased"} and (
             configured_release.startswith(session.release_commit)
             or session.release_commit.startswith(configured_release)
@@ -169,6 +200,21 @@ class PhysicalUATService:
             "network_api": ("pass", {"checked_at": datetime.now(timezone.utc).isoformat()}),
             "open_shift": ("pass" if open_shift_count > 0 else "fail", {"open_shift_count": open_shift_count}),
             "sync_queue_zero": ("pass" if active_queue_count == 0 else "fail", {"active_queue_count": active_queue_count}),
+            "retail_offline_blocked": (
+                "pass" if business_type == "retail_pos" else "fail",
+                {"authorization": "disabled", "code": "retail_offline_not_authorized"},
+            ),
+            "retail_non_cash_blocked": (
+                "pass" if business_type == "retail_pos" else "fail",
+                {"enabled_payment_methods": ["cash"], "provider_state": "disabled"},
+            ),
+            "retail_data_boundary": (
+                "pass" if session.environment_snapshot.get("target_database") == "retail_pos" else "fail",
+                {
+                    "uat_target_database": session.environment_snapshot.get("target_database"),
+                    "production_data_source": session.environment_snapshot.get("production_data_source"),
+                },
+            ),
         }
         rows = list((await self.db.scalars(
             select(PhysicalUATCheck).where(
@@ -306,12 +352,14 @@ class PhysicalUATService:
         assert_physical_uat_enabled()
         if current.branch_id is None:
             return []
-        return list((await self.db.scalars(
+        rows = list((await self.db.scalars(
             select(PhysicalUATSession).where(
                 PhysicalUATSession.company_id == current.company_id,
                 PhysicalUATSession.branch_id == current.branch_id,
             ).order_by(PhysicalUATSession.created_at.desc())
         )).all())
+        business_type = current.business_type or "restaurant"
+        return [row for row in rows if self._business_type(row) == business_type]
 
     async def serialize(self, session: PhysicalUATSession) -> dict:
         checks = await self._checks(session.id)
@@ -371,9 +419,15 @@ class PhysicalUATService:
             session is None
             or session.company_id != current.company_id
             or session.branch_id != current.branch_id
+            or self._business_type(session) != (current.business_type or "restaurant")
         ):
             raise HTTPException(status_code=404, detail="Physical UAT session not found")
         return session
+
+    @staticmethod
+    def _business_type(session: PhysicalUATSession) -> str:
+        value = session.environment_snapshot.get("business_type")
+        return str(value) if value in {"restaurant", "retail_pos"} else "restaurant"
 
     async def _checks(self, session_id: uuid.UUID) -> list[PhysicalUATCheck]:
         return list((await self.db.scalars(

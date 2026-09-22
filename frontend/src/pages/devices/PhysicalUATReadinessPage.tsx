@@ -196,7 +196,9 @@ export default function PhysicalUATReadinessPage(): JSX.Element {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const branchId = useAuthStore((state) => state.branchId);
+  const businessType = useAuthStore((state) => state.businessType);
   const hasPermission = useAuthStore((state) => state.hasPermission);
+  const isRetail = businessType === "retail_pos";
   const canManage = hasPermission("system.device.manage");
   const [selectedId, setSelectedId] = useState("");
   const [deviceId, setDeviceId] = useState("");
@@ -254,9 +256,9 @@ export default function PhysicalUATReadinessPage(): JSX.Element {
       <header className="rounded-[28px] border border-blue-100 bg-[linear-gradient(135deg,#eff6ff_0%,#ffffff_55%,#f0fdf4_100%)] p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="flex flex-wrap items-center gap-2"><Badge className="bg-blue-600 text-white">UAT ONLY</Badge><Badge variant="outline">Restaurant Pilot</Badge></div>
+            <div className="flex flex-wrap items-center gap-2"><Badge className="bg-blue-600 text-white">UAT ONLY</Badge><Badge variant="outline">{isRetail ? "Retail Cash Pilot" : "Restaurant Pilot"}</Badge>{isRetail ? <Badge className="border-amber-200 bg-amber-50 text-amber-800">Production ใช้ Legacy</Badge> : null}</div>
             <h1 className="mt-3 text-2xl font-black text-slate-950 md:text-3xl">ตรวจความพร้อมก่อนเปิดร้าน</h1>
-            <p className="mt-1 max-w-3xl text-sm text-slate-600">รวมผลที่ระบบตรวจได้กับหลักฐานจากอุปกรณ์จริง โดยไม่ถือว่า Browser smoke, Last seen หรือภาพหน้าจอแทน Physical UAT</p>
+            <p className="mt-1 max-w-3xl text-sm text-slate-600">{isRetail ? "ตรวจ Retail Counter โดยแยก Server policy, คิวกู้คืน และอุปกรณ์จริง; Retail Offline payment ยังถูกปิด" : "รวมผลที่ระบบตรวจได้กับหลักฐานจากอุปกรณ์จริง"} โดยไม่ถือว่า Browser smoke, Last seen หรือภาพหน้าจอแทน Physical UAT</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {session ? <SessionStatus session={session} /> : <Badge variant="outline">ยังไม่เลือกรอบทดสอบ</Badge>}
@@ -342,7 +344,7 @@ export default function PhysicalUATReadinessPage(): JSX.Element {
 
               <div className="rounded-[22px] border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
                 <p className="flex items-center gap-2 font-black"><MonitorCheck className="h-5 w-5" />ขอบเขตหน้านี้</p>
-                <ul className="mt-2 space-y-1 text-xs"><li>• ไม่เปิด Production flag</li><li>• ไม่ยืนยัน Printer/Drawer/Scanner จาก Browser</li><li>• ไม่สร้างเอกสารภาษีหรือธุรกรรมเงินจริง</li><li>• ห้ามแนบรหัสผ่าน PIN Token หรือ QR secret</li></ul>
+                <ul className="mt-2 space-y-1 text-xs"><li>• ไม่เปิด Production flag</li>{isRetail ? <li>• ไม่เปิด Retail Offline/Provider และไม่เปลี่ยน Production Legacy source</li> : null}<li>• ไม่ยืนยัน Printer/Drawer/Scanner จาก Browser</li><li>• ไม่สร้างเอกสารภาษีหรือธุรกรรมเงินจริง</li><li>• ห้ามแนบรหัสผ่าน PIN Token หรือ QR secret</li></ul>
               </div>
             </aside>
           </div>

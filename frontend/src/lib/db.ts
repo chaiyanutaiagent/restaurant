@@ -308,6 +308,36 @@ export class RestaurantDatabase extends Dexie {
         }
       });
     });
+
+    this.version(10).stores({
+      pendingTransactions: "++id, type, payload, createdAt, syncedAt",
+      offlineProducts: "id, data, updatedAt",
+      offlineSettings: "key, value",
+      products: "id, sku, barcode, category_id, is_active, synced_at",
+      categories: "id, parent_id, synced_at",
+      units: "id, code, synced_at",
+      stockBalances: "id, product_id, location_id, branch_id, synced_at",
+      lowStockAlerts: "id, product_id, branch_id, synced_at",
+      pendingSales: "client_order_id, [company_id+branch_id+business_type], status, synced, created_at, updated_at",
+      completedOrders: "id, shift_id, created_at, synced_at",
+      heldBills: "id, shift_id, location_id, held_at",
+      replacementRules: "id, branch_id, source_product_id, replacement_product_id, created_at",
+      restaurantMenuSnapshots: "key, company_id, branch_id, brand_slug, user_id, synced_at",
+      restaurantPendingOrders: "client_order_id, [company_id+branch_id+brand_slug], status, created_at, updated_at, next_retry_at, sequence_no",
+      offlineKeys: "key, created_at",
+      takeawayWorkspaceSnapshots: "key, [company_id+brand_id+branch_id], user_id, synced_at",
+      takeawayPendingSales: "client_sale_id, [company_id+brand_id+branch_id], status, created_at, updated_at"
+    }).upgrade(async (transaction) => {
+      await transaction.table("pendingSales").toCollection().modify((row: PendingSale) => {
+        row.updated_at = row.updated_at ?? row.created_at;
+        row.attempt_count = row.attempt_count ?? 0;
+        row.status = row.synced ? "synced" : "needs_review";
+        if (!row.synced && (!row.company_id || !row.branch_id || !row.business_type)) {
+          row.last_error_code = "legacy_context_missing";
+          row.last_error_message = "รายการเดิมไม่มี Company/Branch context และถูกกักไว้ ห้ามส่งอัตโนมัติ";
+        }
+      });
+    });
   }
 }
 

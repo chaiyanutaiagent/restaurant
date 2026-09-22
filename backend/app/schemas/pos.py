@@ -222,6 +222,7 @@ class SaleOrderItemRead(BaseSchema):
 class SaleOrderRead(BaseSchema):
     id: uuid.UUID
     order_number: str
+    client_order_id: str | None = None
     status: str
     branch_id: uuid.UUID
     location_id: uuid.UUID

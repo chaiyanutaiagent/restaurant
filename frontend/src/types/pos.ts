@@ -310,6 +310,7 @@ export interface ReplacementRuleDraft {
 export interface SaleOrder {
   id: string;
   order_number: string;
+  client_order_id?: string | null;
   status: OrderStatus;
   branch_id: string;
   location_id: string;
@@ -378,6 +379,12 @@ export interface PricingCalculation {
 
 export interface PendingSale {
   client_order_id: string;
+  company_id?: string;
+  brand_id?: string | null;
+  branch_id?: string;
+  user_id?: string;
+  device_id?: string | null;
+  business_type?: "restaurant" | "retail_pos";
   shift_id: string;
   location_id: string;
   items: CartItem[];
@@ -396,7 +403,18 @@ export interface PendingSale {
   total_amount: number;
   change_amount: number;
   created_at: number;
+  updated_at?: number;
   synced: boolean;
+  status?: "pending" | "syncing" | "needs_review" | "synced";
+  attempt_count?: number;
+  last_attempt_at?: number;
+  last_error_code?: string | null;
+  last_error_message?: string | null;
+  server_order_id?: string | null;
+  server_order_number?: string | null;
+  acknowledged_at?: number;
+  payload_hash?: string | null;
+  pricing_version?: string | null;
   approval_token?: string | null;
 }
 

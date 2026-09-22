@@ -3596,6 +3596,9 @@ export default function POSPage(): JSX.Element {
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>ใบเสร็จ</DialogTitle>
+            <DialogDescription>
+              รายละเอียดใบเสร็จจาก Server สำหรับตรวจสอบและพิมพ์ซ้ำ
+            </DialogDescription>
           </DialogHeader>
           {lastOrder ? (
             <ReceiptView

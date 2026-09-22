@@ -211,6 +211,7 @@ class RetailUxContractTests(unittest.TestCase):
         self.assertIn('Retail Return / Refund จะเปิดหลังผ่าน WP57', page)
         self.assertIn('"บิล / ใบเสร็จ · คืนสินค้า WP57"', navigation)
         self.assertIn('{!isRetailMode ? (', page)
+        self.assertIn('รายละเอียดใบเสร็จจาก Server สำหรับตรวจสอบและพิมพ์ซ้ำ', page)
         self.assertIn('"price_calculations"', retail_env)
         self.assertIn('down_revision: Union[str, None] = "p9retail0003"', migration)
         self.assertIn('op.create_table(\n        "price_calculations"', migration)

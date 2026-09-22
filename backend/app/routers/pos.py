@@ -344,6 +344,38 @@ def _sale_service(db: AsyncSession, current: TokenData) -> SaleService:
     return SaleService(db, legacy_side_effects_enabled=not retail_cutover)
 
 
+def _enforce_retail_payment_readiness(
+    current: TokenData,
+    payload: CreateSaleRequest,
+    *,
+    synchronized: bool = False,
+) -> None:
+    if current.business_type != "retail_pos":
+        return
+    if current.target_database != "retail_pos" or current.brand_id is None or current.branch_id is None:
+        raise pricing_error(
+            status.HTTP_403_FORBIDDEN,
+            "retail_context_required",
+            "Retail checkout requires a signed Retail Company, Brand and Branch context",
+        )
+    if synchronized or payload.is_offline:
+        raise pricing_error(
+            status.HTTP_409_CONFLICT,
+            "retail_offline_not_authorized",
+            "Retail offline checkout is disabled until a signed authorization lease is available",
+        )
+    methods = {payment.payment_method for payment in payload.payments}
+    if not methods:
+        methods = {payload.payment_method}
+    if methods != {"cash"}:
+        raise pricing_error(
+            status.HTTP_409_CONFLICT,
+            "retail_provider_not_ready",
+            "Retail non-cash payment is disabled until Provider UAT and reconciliation are complete",
+            payment_methods=sorted(methods),
+        )
+
+
 @router.post("/shifts/open", status_code=status.HTTP_201_CREATED)
 async def open_shift(
     payload: OpenShiftRequest,
@@ -913,6 +945,7 @@ async def create_sale(
 ) -> dict[str, Any]:
     if current.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch context required")
+    _enforce_retail_payment_readiness(current, payload)
     if not payload.client_order_id:
         raise pricing_error(
             status.HTTP_400_BAD_REQUEST,
@@ -971,6 +1004,7 @@ async def sync_sales(
     service = _sale_service(db, current)
     orders = []
     for sale_payload in payload.orders:
+        _enforce_retail_payment_readiness(current, sale_payload, synchronized=True)
         if not sale_payload.client_order_id:
             raise pricing_error(
                 status.HTTP_400_BAD_REQUEST,

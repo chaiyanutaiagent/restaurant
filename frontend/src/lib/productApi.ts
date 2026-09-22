@@ -1,5 +1,6 @@
 import api from "@/lib/api";
-import type { Category, PriceList, Product, Unit } from "@/types/product";
+import type { Category, PriceList, Product, RetailLookupResult, Unit } from "@/types/product";
+import type { ApiResponse } from "@/types/api";
 
 export const categoryApi = {
   list: (tree = false) => api.get(`/categories?tree=${tree}`),
@@ -50,7 +51,9 @@ export const productApi = {
   deleteVariant: (productId: string, variantId: string) =>
     api.delete(`/products/${productId}/variants/${variantId}`),
   getPrice: (productId: string, params?: { price_list_id?: string; variant_id?: string; qty?: number }) =>
-    api.get(`/products/${productId}/price`, { params })
+    api.get(`/products/${productId}/price`, { params }),
+  retailLookup: (params: { code: string; location_id: string; qty?: number }) =>
+    api.get<ApiResponse<RetailLookupResult>>("/products/retail/lookup", { params })
 };
 
 export const priceListApi = {

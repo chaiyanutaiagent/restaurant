@@ -36,8 +36,8 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP52 | Restaurant Cancel, Discount, Refund, Receipt Center UX | UAT phase gate closed; paired-Counter browser, API and rollback passed | Sandbox/UAT only |
 | WP53 | Restaurant Offline and Sync Recovery UX | Implemented on UAT; paired shell/rollback passed, stateful network gate carried to WP54 | Production unchanged |
 | WP54 | Restaurant Counter Readiness and physical-UAT shell | Delivery gate closed; evidence shell, release identity and rollback passed | Physical checks remain open; Production unchanged |
-| WP55 | Retail foundation and Scan-first sale | Implementation complete; Local checkpoint passed, UAT pending | Legacy source unchanged |
-| WP56 | Retail exceptions, cart/customer/discount and payment/receipt | Planned | Legacy source unchanged |
+| WP55 | Retail foundation and Scan-first sale | Implementation complete; Restaurant regression passed, authenticated Retail UAT open | Legacy source unchanged |
+| WP56 | Retail exceptions, cart/customer/discount and payment/receipt | Implementation complete; Local Engineering Gate passed, UAT pending | Cash Pilot only; Legacy source unchanged |
 | WP57 | Retail Hold/Resume, Return/Exchange/Void and Shift Operations | Planned | Legacy source unchanged |
 | WP58 | Retail Offline Recovery, Counter Readiness and Retail Phase Gate | Planned | No cutover/physical pass implied |
 | WP59 | Platform Console identity, Team/RBAC and operator governance | Planned | Platform Production unchanged |
@@ -56,7 +56,7 @@ The execution contract is recorded in `FULL-UI-BATCH-EXECUTION-PLAN-02.md`. WP54
 
 | Batch | WP range | Checkpoint |
 |---|---|---|
-| A — Retail POS | WP55–WP58 | WP55 UAT pending; combined Batch gate after WP58 |
+| A — Retail POS | WP55–WP58 | WP55 authenticated Retail UAT open; WP56 Local Gate passed; combined Batch gate after WP58 |
 | B — Platform/Company/ERP | WP59–WP61 | Planned |
 | C — Takeaway/Kitchen/Public | WP62–WP64 | Planned; unsafe writes remain gated |
 | D — Governance/full-system UAT | WP65 | Planned |
@@ -123,9 +123,9 @@ The superseded non-v2 Action Center file is not counted.
 |---:|---|---|---|---|
 | R01 | `retail-pos/01-retail-pos-foundation-flow-board.png` | WP55 | Implementation complete; UAT pending | Retail shell is selected by signed context; Legacy source remains unchanged. |
 | R02 | `retail-pos/02-retail-pos-scan-first-sale.png` | WP55 | Implementation complete; UAT pending | Brand-scoped scan-first Catalog, isolated cache and online-only checkout fail closed. |
-| R03 | `retail-pos/03-retail-pos-product-exception-states.png` | WP56 | Planned | Unknown barcode/price/stock exceptions fail closed. |
-| R04 | `retail-pos/04-retail-pos-cart-customer-discount.png` | WP56 | Planned | Loyalty atomicity and Server price policy are prerequisites. |
-| R05 | `retail-pos/05-retail-pos-payment-receipt.png` | WP56 | Planned | Payment/provider and hardware remain sandbox/physical-UAT gated. |
+| R03 | `retail-pos/03-retail-pos-product-exception-states.png` | WP56 | Implementation complete; UAT pending | Signed Server lookup returns persistent unknown/ambiguous/Variant/stock/price states and fails closed. |
+| R04 | `retail-pos/04-retail-pos-cart-customer-discount.png` | WP56 | Implementation complete; UAT pending | Server quote and masked customer data are active; Loyalty is disabled until atomic reservation exists. |
+| R05 | `retail-pos/05-retail-pos-payment-receipt.png` | WP56 | Implementation complete; UAT pending | Cash Pilot only; non-cash/offline fail closed and hardware remains physical-UAT gated. |
 | R06 | `retail-pos/06-retail-pos-hold-resume-bill-v2.png` | WP57 | Planned | Server-backed Hold semantics required. |
 | R07 | `retail-pos/07-retail-pos-return-exchange-void.png` | WP57 | Planned | Exchange/disposition policy needs owner decision; refund+new-sale is not assumed. |
 | R08 | `retail-pos/08-retail-pos-shift-operations.png` | WP57 | Planned | Retail shift uses its dedicated data source after authorized cutover only. |

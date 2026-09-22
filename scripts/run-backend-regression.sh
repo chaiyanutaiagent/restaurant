@@ -30,6 +30,7 @@ run_with_docker() {
   mkdir -p "$DOCKER_SRC"
   cp -R "$BACKEND_DIR" "$DOCKER_SRC/backend"
   cp -R "$ROOT_DIR/frontend" "$DOCKER_SRC/frontend"
+  cp -R "$ROOT_DIR/scripts" "$DOCKER_SRC/scripts"
   cp "$ROOT_DIR/.env.example" "$DOCKER_SRC/backend/.env"
 
   printf 'Local python3 is older than 3.10; running backend regression checks in python:3.11-slim.\n'

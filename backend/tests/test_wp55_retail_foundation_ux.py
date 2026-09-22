@@ -131,6 +131,7 @@ class RetailShellContractTests(unittest.TestCase):
     def test_regression_runner_mounts_frontend_contract_sources(self) -> None:
         runner = (ROOT / "scripts/run-backend-regression.sh").read_text()
         self.assertIn('cp -R "$ROOT_DIR/frontend" "$DOCKER_SRC/frontend"', runner)
+        self.assertIn('cp -R "$ROOT_DIR/scripts" "$DOCKER_SRC/scripts"', runner)
         self.assertIn('-v "$DOCKER_SRC:/workspace:ro"', runner)
 
     def test_restaurant_public_catalog_is_brand_scoped(self) -> None:

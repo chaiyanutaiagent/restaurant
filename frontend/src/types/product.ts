@@ -96,6 +96,40 @@ export interface ProductListItem {
   created_at: string;
 }
 
+export interface RetailLookupVariant {
+  id: string;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  server_price: string | number;
+  available_qty: string | number;
+  is_active: boolean;
+}
+
+export interface RetailLookupProduct {
+  id: string;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  product_type: ProductType | string;
+  vat_type: VatType;
+  vat_rate: string | number;
+  unit_code: string | null;
+  server_price: string | number;
+  available_qty: string | number;
+  selected_variant_id: string | null;
+  selected_variant_name: string | null;
+  variants: RetailLookupVariant[];
+}
+
+export interface RetailLookupResult {
+  result: "matched" | "not_found" | "variant_required" | "unavailable";
+  code: string;
+  product: RetailLookupProduct | null;
+  validation_time: string;
+  error_code: string | null;
+}
+
 export interface PriceList {
   id: string;
   company_id: string;

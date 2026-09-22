@@ -208,6 +208,40 @@ class ProductListItem(BaseSchema):
     brand_id: uuid.UUID | None = None
     created_at: datetime
 
+
+class RetailLookupVariant(BaseSchema):
+    id: uuid.UUID
+    name: str
+    sku: str
+    barcode: str | None = None
+    server_price: Decimal
+    available_qty: Decimal
+    is_active: bool
+
+
+class RetailLookupProduct(BaseSchema):
+    id: uuid.UUID
+    name: str
+    sku: str
+    barcode: str | None = None
+    product_type: str
+    vat_type: str
+    vat_rate: Decimal
+    unit_code: str | None = None
+    server_price: Decimal
+    available_qty: Decimal
+    selected_variant_id: uuid.UUID | None = None
+    selected_variant_name: str | None = None
+    variants: list[RetailLookupVariant] = Field(default_factory=list)
+
+
+class RetailLookupRead(BaseSchema):
+    result: Literal["matched", "not_found", "variant_required", "unavailable"]
+    code: str
+    product: RetailLookupProduct | None = None
+    validation_time: datetime
+    error_code: str | None = None
+
     model_config = ConfigDict(from_attributes=True)
 
 

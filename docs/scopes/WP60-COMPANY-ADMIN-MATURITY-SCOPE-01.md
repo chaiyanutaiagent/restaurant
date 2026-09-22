@@ -1,6 +1,6 @@
 # WP60 — Company Admin Maturity, Access Review and Company Audit
 
-Status: LOCAL + UAT ACCESS-READINESS PASSED — Batch B full persona QA deferred through WP61
+Status: SOFTWARE UAT PASSED — COMBINED BATCH B GATE CLOSED
 Environment: UAT release `747929b`; Production unchanged
 Production: HOLD
 
@@ -79,5 +79,5 @@ authenticated role journey, rollback/restore and Production identity proof.
   passed, both Platform and legacy migration graphs have one WP60 head.
 - UAT QA Access readiness passed with 8 Tenant personas, 3 Platform personas,
   short-lived audited sessions, missing-key 404 and legacy bypass 404.
-- Full Batch B journey coverage and restore rehearsal remain deferred to the
-  combined WP59–WP61 close as authorized.
+- Full Batch B journey coverage, session revocation and rollback/restore passed
+  at the combined WP59–WP61 close; see `BATCH-B-PHASE-GATE-03.md`.

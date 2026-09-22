@@ -1,6 +1,6 @@
 # WP59 — Platform Identity, Team/RBAC and Operator Governance
 
-Status: SOFTWARE UAT CHECKPOINT PASSED
+Status: SOFTWARE UAT PASSED — COMBINED BATCH B GATE CLOSED
 Environment: Local and UAT only
 Production: HOLD
 
@@ -48,4 +48,5 @@ Batch B gate.
   operators and sessions were disabled or revoked after verification.
 - App-only rollback to WP58 and restore to WP59 passed in 9 seconds each.
 - Production container identities remained unchanged.
-- Full repository regression remains assigned to the combined Batch B gate.
+- Full repository regression and the combined authenticated persona/rollback
+  gate passed at the WP61 Batch B close; see `BATCH-B-PHASE-GATE-03.md`.

@@ -6,6 +6,10 @@ Decision: LOCAL ENGINEERING GATE PASS; UAT and combined Batch B gate pending
 
 Production: NO-GO / unchanged
 
+Closeout update: the pending UAT and combined Batch B requirements later passed
+and are recorded in `WP61-UAT-EVIDENCE-02.md` and
+`BATCH-B-PHASE-GATE-03.md`.
+
 ## Delivered
 
 - Server-authoritative `GET /api/v1/company/erp/readiness` read model scoped by

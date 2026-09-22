@@ -6,7 +6,7 @@ Production: NO-GO
 
 ## Decision
 
-**WP59 software UAT checkpoint: PASS. Batch B: IN PROGRESS. Physical and Production gates: HOLD.**
+**WP59 software UAT checkpoint: PASS. Batch B: CLOSED. Physical and Production gates: HOLD.**
 
 WP59 now provides personal Platform operators, six deny-by-default roles,
 environment-scoped assignments, invitation acceptance, MFA/session visibility,
@@ -30,4 +30,5 @@ and permission-aware Platform navigation.
 WP60 may begin on Local. This checkpoint does not authorize Production work,
 real operator MFA acceptance, invitation email delivery, Takeaway/Central
 Kitchen writes, Retail source changes, real provider/refund/tax actions or
-physical-device sign-off. Full regression remains required at the Batch B gate.
+physical-device sign-off. The full regression requirement was fulfilled at the
+WP61 combined gate recorded in `BATCH-B-PHASE-GATE-03.md`.

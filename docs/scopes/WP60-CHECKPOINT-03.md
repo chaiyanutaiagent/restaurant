@@ -1,7 +1,7 @@
 # WP60 Focused Checkpoint — Company Admin Maturity
 
 Date: 2026-09-22
-Decision: Local checkpoint and UAT access-readiness PASS; full Batch B persona QA/restore deferred through WP61
+Decision: Local checkpoint and UAT access-readiness PASS; combined Batch B later closed at WP61
 Production: NO-GO / unchanged
 
 WP60 now has server-authoritative Company people lifecycle, access review,
@@ -26,9 +26,8 @@ Missing-key access fails as 404. Production container identities are unchanged.
 
 ## Holds carried forward
 
-- Full WP59–WP61 regression, UAT role journeys and restore rehearsal occur at
-  the Batch B close. A complete pre-migration UAT backup and rollback release
-  are already available.
+- Full WP59–WP61 regression, UAT role journeys and restore rehearsal passed at
+  the Batch B close recorded in `BATCH-B-PHASE-GATE-03.md`.
 - Tenant MFA enforcement/recovery, physical devices, live providers, real tax
   documents, Retail source cutover and Takeaway/Central Kitchen writes remain
   HOLD.

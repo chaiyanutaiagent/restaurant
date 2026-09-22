@@ -1,6 +1,6 @@
 # WP61 — Shared ERP Operational and Finance Maturity
 
-Status: LOCAL ENGINEERING GATE PASSED — UAT and combined Batch B gate pending
+Status: SOFTWARE UAT PASSED — COMBINED BATCH B GATE CLOSED
 Environment: Local/UAT only
 Production: HOLD
 
@@ -34,6 +34,16 @@ real fiscal/provider behavior or weakening Company/Branch authority.
 - Added Loading, Empty, Error, Offline, Stale and Permission-denied states plus
   responsive desktop/tablet layout and filters.
 - No schema migration or Production flag is introduced by WP61.
+
+## UAT closeout
+
+- Full backend regression, frontend type-check/build and immutable image build
+  passed.
+- Eight Tenant and three Platform QA personas passed the authenticated matrix;
+  deny-by-default 403 results matched role boundaries.
+- Desktop/Tablet visual UAT, session expiry/revocation, backup catalog/checksum,
+  app-only rollback/restore and Production identity isolation passed.
+- Evidence: `WP61-UAT-EVIDENCE-02.md` and `BATCH-B-PHASE-GATE-03.md`.
 
 ## Hard holds
 

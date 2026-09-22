@@ -25,16 +25,17 @@ Production: unchanged and not authorized
 - Focused WP55/WP56 checks passed 16/16 after the next-package changes and UAT credential guard hardening were applied.
 - Full backend regression passed 486/486 after fixing the Docker fallback runner to include `/scripts`.
 
-## Open authenticated Retail checkpoint
+## Authenticated Retail checkpoint — passed with WP56 candidate
 
-The current Branch Manager UAT identity has only a signed Restaurant assignment. Engineering did not fabricate Retail context and did not weaken the Server guard. The following checks remain open until a bounded Retail UAT account/session is provisioned:
+The bounded `uat.retail-cashier` identity was provisioned through the guarded UAT-only command. Engineering did not weaken the Server guard and did not store credentials or tokens in source or evidence. The authenticated checkpoint passed against the WP56 candidate:
 
-1. `/pos` opens with Server-signed `retail_pos` Company/Brand/Branch context.
-2. Retail-only navigation is visible and Restaurant Table/QR/Takeaway/KDS controls are absent.
-3. The Retail test SKU/barcode resolves only the assigned Retail Brand product.
-4. Cross-Company, cross-Brand, unsigned and stale-context requests fail closed.
+1. `/pos` opened with Server-signed `retail_pos` Company/Brand/Branch context.
+2. Retail-only navigation was visible and Restaurant Table/QR/Takeaway/KDS controls were absent.
+3. The assigned Retail SKU resolved from the signed Catalog and used the Server price.
+4. Unknown and unavailable barcodes produced persistent recovery states without losing the cart.
+5. Retail Hold and Return/Refund remained explicitly gated for WP57.
 
-No Retail order, payment, stock mutation or Production source cutover is required or authorized for WP55 acceptance.
+The controlled cash-only WP56 sale is recorded separately in `WP56-UAT-EVIDENCE-02.md`. Production source cutover remains unauthorized.
 
 ## QA finding and remediation
 
@@ -55,4 +56,4 @@ Production identities were unchanged during WP55 verification:
 
 ## Evidence conclusion
 
-WP55 implementation and the Restaurant regression checks pass. The package remains **conditional / UAT open** solely for the authenticated Retail context matrix. Production remains NO-GO.
+WP55 implementation, Restaurant regression and the authenticated Retail context matrix pass. The bounded UAT persona remains active only for the independent QA retest and must be disabled with sessions revoked afterward. Production remains NO-GO.

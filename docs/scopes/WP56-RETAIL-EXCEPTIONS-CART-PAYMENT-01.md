@@ -45,6 +45,7 @@ WP56 moves Retail product selection from Client assumptions to an online Server-
 - Fixed the clean Docker regression fallback so runner-contract tests receive the repository `/scripts` directory.
 - Added additive Retail boundary migrations `p10retail0004` and `p11retail0005` for persistent Server-authoritative pricing quotes and the bounded POS pricing/Sale/Payment compatibility columns. The migration chain was rehearsed upgrade → downgrade → upgrade on an isolated PostgreSQL database.
 - Disabled Retail Hold Draft queries and controls until WP57 so the Retail shell cannot call the not-yet-migrated `pos_hold_drafts` contract.
+- Disabled the Retail Return/Refund workspace and every mutating Refund API with the explicit `retail_return_not_ready` fail-closed response until WP57. Bill lookup, receipt viewing and printing remain available.
 
 ## Intentional deferrals
 
@@ -61,19 +62,21 @@ WP56 moves Retail product selection from Client assumptions to an online Server-
 |---|---|
 | Python 3.12 compile | PASS |
 | Frontend type-check | PASS |
-| Focused Retail/Pricing/Shift tests | PASS — 36/36 |
-| Full backend regression | PASS — 492/492 |
+| Focused Retail/Pricing/Shift tests | PASS — final WP55/WP56 contract set 21/21; earlier Retail/Pricing set 53/53 |
+| Full backend regression | PASS — 493/493 |
 | Schema/migration | PASS — `p10retail0004` → `p11retail0005`, upgrade → downgrade → upgrade; Hold Draft tables intentionally absent |
 | Production flags/data source | Unchanged |
 
-## UAT acceptance still required
+## UAT acceptance
 
-1. Provision the bounded Retail UAT identity without storing credentials in source or evidence, then disable it and revoke sessions after the QA round.
-2. Verify signed Retail Catalog, SKU/barcode, Variant and all persistent exception states on Desktop and tablet.
-3. Verify customer masking and that Loyalty cannot mutate points.
-4. Complete one controlled cash-only UAT sale and confirm Server price/stock/idempotency evidence.
-5. Verify non-cash, offline, unsigned and cross-tenant requests fail closed.
-6. Verify receipt UI without claiming printer/cash-drawer physical pass.
-7. Record immutable image identities, rollback/restore and Production before/after identities.
+1. [x] Provision the bounded Retail UAT identity without storing credentials in source or evidence.
+2. [x] Verify signed Retail Catalog, SKU/barcode and persistent unknown/out-of-stock exception states in the authenticated UAT browser.
+3. [x] Verify customer masking contract and that Loyalty remains disabled.
+4. [x] Complete one controlled cash-only UAT sale and confirm Server price, stock, consumed quote and outbox evidence.
+5. [x] Verify non-cash/offline checkout, Retail Hold and Retail Return/Refund fail closed.
+6. [x] Verify Bill Center and receipt UI without claiming printer/cash-drawer physical pass.
+7. [x] Record immutable image identities, app-only rollback/restore and Production before/after identities.
+8. [ ] Complete independent QA retest, then disable the bounded persona and revoke its sessions.
+9. [ ] Complete physical tablet, scanner, printer, cash drawer and network-loss UAT.
 
-WP56 implementation is complete at the Local Engineering Gate. UAT, rollback and authenticated Retail acceptance remain open; no Production readiness is claimed.
+WP56 implementation and authenticated software UAT are complete. The phase remains conditional pending independent QA and physical device/network acceptance; no Production readiness is claimed. Detailed evidence is in `WP56-UAT-EVIDENCE-02.md`.

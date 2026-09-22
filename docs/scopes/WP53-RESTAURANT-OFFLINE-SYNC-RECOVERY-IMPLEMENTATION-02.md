@@ -1,7 +1,7 @@
 # WP53 — Restaurant Offline and Sync Recovery UX
 
 Date: 2026-09-22  
-Scope: **Local/UAT only**  
+Scope: **Implemented on Local/UAT; stateful network UAT remains WP54**
 Production: **NO-GO / unchanged**
 
 ## Outcome
@@ -39,3 +39,5 @@ Dexie outbox and cached offline authorization; it does not use hard-coded queue 
 - Browser UAT does not constitute physical network-loss, restart, printer or cash-drawer acceptance;
   those remain WP54 gates.
 
+UAT evidence and decision: [WP53-UAT-EVIDENCE-04.md](./WP53-UAT-EVIDENCE-04.md) and
+[WP53-PHASE-GATE-05.md](./WP53-PHASE-GATE-05.md).

@@ -34,7 +34,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP50 | Restaurant Shift Operations | Implemented; UAT gate closed | Production unchanged |
 | WP51 | Restaurant Hold Draft and Order Center UX | Implemented; UAT gate closed | Production unchanged |
 | WP52 | Restaurant Cancel, Discount, Refund, Receipt Center UX | UAT phase gate closed; paired-Counter browser, API and rollback passed | Sandbox/UAT only |
-| WP53 | Restaurant Offline and Sync Recovery UX | Implemented locally; engineering gate passed, UAT pending | Production unchanged |
+| WP53 | Restaurant Offline and Sync Recovery UX | Implemented on UAT; paired shell/rollback passed, stateful network gate carried to WP54 | Production unchanged |
 | WP54 | Restaurant Counter Readiness and physical-UAT shell | Planned | No physical pass implied |
 | WP55 | Retail foundation and Scan-first sale | Planned | Legacy source unchanged |
 | WP56 | Retail exceptions, cart/customer/discount and payment/receipt | Planned | Legacy source unchanged |
@@ -103,7 +103,7 @@ The superseded non-v2 Action Center file is not counted.
 | D30 | `design-system/30-customer-qr-ordering-flow.png` | WP49/WP64 | Adapted | Session-scoped Restaurant QR works; broader Public Experience is WP64. |
 | D31 | `design-system/31-restaurant-kds-pickup-flow.png` | WP49/WP52 | Adapted | KDS works; final Order Center/Pickup cohesion is WP52. |
 | D32 | `design-system/32-restaurant-pos-bill-receipt-center.png` | WP52 | Adapted | Current-shift refresh/search/filter/detail, receipt, eligible/ineligible Void and Refund routing passed paired-Counter UAT. |
-| D33 | `design-system/33-restaurant-pos-offline-sync-recovery.png` | WP53 | Implemented; UAT pending | Real encrypted outbox drives pending/syncing/review/reconciled list-detail UX; Unknown is inquired before replay. |
+| D33 | `design-system/33-restaurant-pos-offline-sync-recovery.png` | WP53 | Implemented; conditional UAT | Real encrypted outbox drives list-detail UX; paired empty-state/tablet/rollback passed, stateful network paths remain WP54. |
 | D34 | `design-system/34-restaurant-pos-counter-readiness-check.png` | WP54 | Planned | Browser capability is not a physical pass. |
 
 ## Image acceptance registry — Retail POS R01–R10 (10)

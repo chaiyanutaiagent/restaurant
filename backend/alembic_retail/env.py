@@ -24,6 +24,7 @@ RETAIL_SCHEMA_TABLES = {
     "price_lists",
     "price_list_items",
     "price_calculations",
+    "price_override_audits",
     "stock_locations",
     "stock_balances",
     "stock_movements",

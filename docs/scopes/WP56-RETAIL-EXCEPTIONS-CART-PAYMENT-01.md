@@ -43,7 +43,7 @@ WP56 moves Retail product selection from Client assumptions to an online Server-
 - The command reads the new password only from environment, revokes refresh tokens and writes an audit entry.
 - Added a separate bounded `uat.retail-cashier` persona command. It derives the canonical Cashier permission preset, resolves exactly one active Retail UAT Brand/Branch, writes signed `retail_pos` context, maps that UAT storefront to the isolated `UI-MAIN` showcase location with audit evidence, and can disable the user and revoke its sessions after QA.
 - Fixed the clean Docker regression fallback so runner-contract tests receive the repository `/scripts` directory.
-- Added additive Retail boundary migration `p10retail0004` for persistent Server-authoritative pricing quotes. The migration was rehearsed upgrade → downgrade → upgrade on an isolated PostgreSQL database.
+- Added additive Retail boundary migrations `p10retail0004` and `p11retail0005` for persistent Server-authoritative pricing quotes and the bounded POS pricing/Sale/Payment compatibility columns. The migration chain was rehearsed upgrade → downgrade → upgrade on an isolated PostgreSQL database.
 - Disabled Retail Hold Draft queries and controls until WP57 so the Retail shell cannot call the not-yet-migrated `pos_hold_drafts` contract.
 
 ## Intentional deferrals
@@ -63,7 +63,7 @@ WP56 moves Retail product selection from Client assumptions to an online Server-
 | Frontend type-check | PASS |
 | Focused Retail/Pricing/Shift tests | PASS — 36/36 |
 | Full backend regression | PASS — 492/492 |
-| Schema/migration | PASS — `p10retail0004`, upgrade → downgrade → upgrade; `price_calculations` 23 columns |
+| Schema/migration | PASS — `p10retail0004` → `p11retail0005`, upgrade → downgrade → upgrade; Hold Draft tables intentionally absent |
 | Production flags/data source | Unchanged |
 
 ## UAT acceptance still required

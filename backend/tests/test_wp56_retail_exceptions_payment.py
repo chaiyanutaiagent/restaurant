@@ -203,6 +203,17 @@ class RetailUxContractTests(unittest.TestCase):
         self.assertIn('down_revision: Union[str, None] = "p9retail0003"', migration)
         self.assertIn('op.create_table(\n        "price_calculations"', migration)
 
+        compatibility = (
+            ROOT
+            / "backend/alembic_retail/versions/p11retail0005_add_pos_pricing_compatibility.py"
+        ).read_text()
+        self.assertIn('down_revision: Union[str, None] = "p10retail0004"', compatibility)
+        self.assertIn('op.add_column("branch_settings", column)', compatibility)
+        self.assertIn('op.add_column("sale_orders", column)', compatibility)
+        self.assertIn('op.add_column("sale_order_items", column)', compatibility)
+        self.assertIn('op.add_column("payments", column)', compatibility)
+        self.assertNotIn('op.create_table(\n        "pos_hold_drafts"', compatibility)
+
 
 if __name__ == "__main__":
     unittest.main()

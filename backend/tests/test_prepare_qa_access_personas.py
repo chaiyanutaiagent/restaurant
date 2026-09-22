@@ -42,8 +42,13 @@ class QaPersonaPreparationSafetyTests(unittest.TestCase):
                 "purchasing",
                 "warehouse",
                 "auditor",
+                "retail_cashier",
             },
         )
+        retail = next(item for item in TENANT_PERSONAS if item.key == "retail_cashier")
+        self.assertEqual(retail.business_type, "retail_pos")
+        self.assertEqual(retail.preset_key, "cashier")
+        self.assertEqual(retail.scope_type, "branch")
         self.assertEqual(
             {item.key for item in PLATFORM_PERSONAS},
             {"platform_admin", "platform_operator", "platform_auditor"},

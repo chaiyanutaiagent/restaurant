@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArchiveRestore, BellRing, CheckCircle2, DatabaseBackup, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { platformApi, platformErrorMessage } from "@/lib/platformApi";
+import { usePlatformAuthStore } from "@/stores/platform-auth.store";
 
 const labels: Record<string, string> = {
   legacy_database: "Legacy database",
@@ -21,6 +22,8 @@ function StateBadge({ value }: { value: string }): JSX.Element {
 
 export default function PlatformOperationsPage(): JSX.Element {
   const queryClient = useQueryClient();
+  const permissions = usePlatformAuthStore((state) => state.operator?.permissions ?? []);
+  const canManageOperations = permissions.includes("*") || permissions.includes("platform.operations.manage");
   const summary = useQuery({
     queryKey: ["platform", "operations", "summary"],
     queryFn: async () => (await platformApi.operationsSummary()).data.data,
@@ -45,7 +48,7 @@ export default function PlatformOperationsPage(): JSX.Element {
 
   const data = summary.data;
   return <div className="space-y-6">
-    <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-emerald-300">Protected operations</p><h2 className="mt-1 text-3xl font-bold">สถานะระบบและ Recovery</h2><p className="mt-2 text-sm text-slate-400">รายละเอียดนี้เห็นได้เฉพาะ Platform Owner และไม่มี connection string, path หรือ log</p></div><Button onClick={() => capture.mutate()} disabled={capture.isPending}><Activity className="h-4 w-4" />{capture.isPending ? "กำลังบันทึก..." : "บันทึก Runtime snapshot"}</Button></header>
+    <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-emerald-300">Protected operations</p><h2 className="mt-1 text-3xl font-bold">สถานะระบบและ Recovery</h2><p className="mt-2 text-sm text-slate-400">ข้อมูลสถานะสำหรับผู้มีสิทธิ์ดู Operations โดยไม่มี connection string, path หรือ log</p></div>{canManageOperations ? <Button onClick={() => capture.mutate()} disabled={capture.isPending}><Activity className="h-4 w-4" />{capture.isPending ? "กำลังบันทึก..." : "บันทึก Runtime snapshot"}</Button> : null}</header>
     {capture.error ? <p className="rounded-xl bg-red-950/40 p-3 text-sm text-red-200">{platformErrorMessage(capture.error)}</p> : null}
     <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       <article className="rounded-2xl border border-slate-800 bg-slate-900 p-5"><Activity className="h-5 w-5 text-sky-300" /><p className="mt-3 text-sm text-slate-400">Runtime</p><div className="mt-2"><StateBadge value={data.runtime.status} /></div><p className="mt-3 text-xs text-slate-500">Disk {data.runtime.disk_usage_percent ?? "ไม่ทราบ"}%</p></article>

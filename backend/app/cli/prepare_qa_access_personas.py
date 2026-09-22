@@ -33,6 +33,7 @@ class TenantPersona:
     username: str
     preset_key: str | None
     scope_type: str
+    business_type: str = "restaurant"
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ TENANT_PERSONAS = (
     TenantPersona("purchasing", "uat.purchasing", "purchasing", "company"),
     TenantPersona("warehouse", "qa.warehouse", "warehouse", "branch"),
     TenantPersona("auditor", "qa.auditor", "auditor", "company"),
+    TenantPersona("retail_cashier", "qa.retail-cashier", "cashier", "branch", "retail_pos"),
 )
 
 PLATFORM_PERSONAS = (
@@ -68,6 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--actor-username", required=True)
     parser.add_argument("--restaurant-brand-slug", required=True)
     parser.add_argument("--branch-code", required=True)
+    parser.add_argument("--retail-brand-slug", default="foodchain-retail-uat")
+    parser.add_argument("--retail-branch-code", default="RTL-01")
     parser.add_argument("--yes", action="store_true")
     return parser
 
@@ -96,6 +100,8 @@ def require_bounded_qa_uat(args: argparse.Namespace) -> None:
 async def _load_scope(
     db,
     args: argparse.Namespace,
+    *,
+    business_type: str = "restaurant",
 ) -> tuple[Company, User, Brand, Branch]:
     company = await db.get(Company, args.company_id)
     actor = await db.scalar(
@@ -107,6 +113,12 @@ async def _load_scope(
             User.deleted_at.is_(None),
         )
     )
+    brand_slug = (
+        args.restaurant_brand_slug
+        if business_type == "restaurant"
+        else args.retail_brand_slug
+    )
+    branch_code = args.branch_code if business_type == "restaurant" else args.retail_branch_code
     scope = (
         await db.execute(
             select(Brand, Branch)
@@ -115,13 +127,13 @@ async def _load_scope(
             .join(Branch, Branch.id == BrandBranch.branch_id)
             .where(
                 Brand.company_id == args.company_id,
-                Brand.slug == args.restaurant_brand_slug.strip(),
-                Brand.business_type == "restaurant",
+                Brand.slug == brand_slug.strip(),
+                Brand.business_type == business_type,
                 Brand.is_active.is_(True),
                 BrandBranch.company_id == args.company_id,
                 BrandBranch.is_active.is_(True),
                 Branch.company_id == args.company_id,
-                Branch.code == args.branch_code.strip(),
+                Branch.code == branch_code.strip(),
                 Branch.is_active.is_(True),
                 Branch.deleted_at.is_(None),
             )
@@ -133,7 +145,7 @@ async def _load_scope(
         raise RuntimeError("Active Company superuser actor was not found")
     if len(scope) != 1:
         raise RuntimeError(
-            "Restaurant QA Brand and Branch code must resolve to exactly one active Branch"
+            f"{business_type} QA Brand and Branch code must resolve to exactly one active Branch"
         )
     brand, branch = scope[0]
     return company, actor, brand, branch
@@ -288,8 +300,8 @@ async def _ensure_tenant_persona(
                 user_id=user.id,
                 branch_id=branch.id,
                 brand_id=brand.id,
-                business_type="restaurant",
-                target_database="restaurant",
+                business_type=persona.business_type,
+                target_database=persona.business_type,
                 role_id=role.id,
                 is_default=True,
             )
@@ -297,8 +309,8 @@ async def _ensure_tenant_persona(
     else:
         link.deleted_at = None
         link.brand_id = brand.id
-        link.business_type = "restaurant"
-        link.target_database = "restaurant"
+        link.business_type = persona.business_type
+        link.target_database = persona.business_type
         link.role_id = role.id
         link.is_default = True
 
@@ -339,6 +351,7 @@ async def _ensure_tenant_persona(
                 "username": persona.username,
                 "preset": persona.preset_key,
                 "scope": persona.scope_type,
+                "business_type": persona.business_type,
                 "created": created,
             },
         )
@@ -435,17 +448,31 @@ async def prepare(args: argparse.Namespace) -> dict[str, object]:
     require_bounded_qa_uat(args)
     async with PlatformSessionLocal() as db:
         company, actor, brand, branch = await _load_scope(db, args)
+        _, _, retail_brand, retail_branch = await _load_scope(
+            db,
+            args,
+            business_type="retail_pos",
+        )
         tenant_rows = []
         for persona in TENANT_PERSONAS:
+            persona_brand, persona_branch = (
+                (retail_brand, retail_branch)
+                if persona.business_type == "retail_pos"
+                else (brand, branch)
+            )
             await _ensure_tenant_persona(
                 db,
                 persona=persona,
                 company=company,
                 actor=actor,
-                brand=brand,
-                branch=branch,
+                brand=persona_brand,
+                branch=persona_branch,
             )
-            tenant_rows.append({"persona": persona.key, "username": persona.username})
+            tenant_rows.append({
+                "persona": persona.key,
+                "username": persona.username,
+                "business_type": persona.business_type,
+            })
 
         platform_rows = []
         for persona in PLATFORM_PERSONAS:

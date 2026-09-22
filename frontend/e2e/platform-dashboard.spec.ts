@@ -6,9 +6,16 @@ const operator = {
   username: "platform.owner",
   email: "owner@example.com",
   display_name: "Platform Owner",
+  is_active: true,
   is_superuser: true,
   mfa_enabled: false,
   last_login_at: "2026-08-03T08:00:00Z",
+  credential_version: 1,
+  role_codes: ["platform_owner"],
+  permissions: ["*"],
+  environment: "uat",
+  access_reviewed_at: null,
+  access_review_due_at: null,
 };
 
 const company = {
@@ -205,7 +212,7 @@ async function fulfill(route: Route, data: unknown, status = 200): Promise<void>
   });
 }
 
-async function installAuthenticatedSession(page: Page): Promise<void> {
+async function installAuthenticatedSession(page: Page, operatorValue = operator): Promise<void> {
   await page.addInitScript((operatorValue) => {
     window.sessionStorage.setItem(
       "restaurant-platform-auth",
@@ -219,7 +226,7 @@ async function installAuthenticatedSession(page: Page): Promise<void> {
         version: 0,
       }),
     );
-  }, operator);
+  }, operatorValue);
 }
 
 const populatedDashboard = response({
@@ -1000,6 +1007,99 @@ test("Platform Owner can review protected operations and capture a runtime snaps
   await expect(page.getByText("operator_runtime", { exact: true })).toBeVisible();
 });
 
+test("Platform Auditor can read dashboard and operations without mutation controls", async ({ page }) => {
+  const auditor = {
+    ...operator,
+    id: "99999999-9999-4999-8999-999999999991",
+    username: "qa.platform-auditor",
+    display_name: "Platform Auditor",
+    is_superuser: false,
+    role_codes: ["auditor"],
+    permissions: ["platform.company.view", "platform.operations.view", "platform.audit.view"],
+  };
+  await installAuthenticatedSession(page, auditor);
+  await page.route("**/api/v1/platform/dashboard", async (route) => {
+    await fulfill(route, populatedDashboard);
+  });
+  await page.route("**/api/v1/platform/operations/summary", async (route) => {
+    await fulfill(route, response({
+      generated_at: "2026-08-03T09:00:00Z",
+      runtime: {
+        status: "ok",
+        component_checks: { legacy_database: "ok", platform_database: "ok" },
+        projector_failed_events: 0,
+        projector_loop_errors: 0,
+        disk_usage_percent: 35,
+      },
+      latest_snapshot: null,
+      latest_backup: null,
+      latest_restore: null,
+      latest_alert: null,
+    }));
+  });
+  await page.route("**/api/v1/platform/operations/history", async (route) => {
+    await fulfill(route, response([]));
+  });
+
+  await page.goto("/platform/dashboard");
+  await expect(page.getByRole("heading", { name: "ภาพรวมระบบ" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /บันทึก Usage วันนี้/ })).toHaveCount(0);
+
+  await page.goto("/platform/operations");
+  await expect(page.getByRole("heading", { name: "สถานะระบบและ Recovery" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "บันทึก Runtime snapshot" })).toHaveCount(0);
+});
+
+test("Platform surface shows only its own QA session banner", async ({ page }) => {
+  const qaToken = (persona: string) => `header.${Buffer.from(JSON.stringify({
+    qa_mode: true,
+    qa_persona: persona,
+    exp: 4_102_444_800,
+  })).toString("base64url")}.signature`;
+  const platformAuditor = {
+    ...operator,
+    is_superuser: false,
+    role_codes: ["auditor"],
+    permissions: ["platform.company.view", "platform.operations.view", "platform.audit.view"],
+  };
+  await page.addInitScript(({ tenantToken, platformToken, platformOperator, tenantCompanyId }) => {
+    window.localStorage.setItem("erp-auth", JSON.stringify({
+      state: {
+        accessToken: tenantToken,
+        refreshToken: "tenant-refresh",
+        user: { id: "77777777-7777-4777-8777-777777777777", company_id: tenantCompanyId, username: "qa.auditor" },
+        companyId: tenantCompanyId,
+        branchId: null,
+        permissions: ["system.company.view"],
+      },
+      version: 0,
+    }));
+    window.sessionStorage.setItem("restaurant-platform-auth", JSON.stringify({
+      state: {
+        accessToken: platformToken,
+        csrfToken: "platform-csrf-token",
+        sessionId: "44444444-4444-4444-8444-444444444444",
+        operator: platformOperator,
+      },
+      version: 0,
+    }));
+  }, {
+    tenantToken: qaToken("tenant_auditor"),
+    platformToken: qaToken("platform_auditor"),
+    platformOperator: platformAuditor,
+    tenantCompanyId: companyId,
+  });
+  await page.route("**/api/v1/platform/dashboard", async (route) => {
+    await fulfill(route, populatedDashboard);
+  });
+
+  await page.goto("/platform/dashboard");
+  const banner = page.getByTestId("qa-mode-banner");
+  await expect(banner).toContainText("platform_auditor");
+  await expect(banner).toContainText("Platform");
+  await expect(banner).not.toContainText("tenant_auditor");
+});
+
 test("business slug opens only its canonical public storefront", async ({ page }) => {
   await page.route("**/api/public/storefront/businesses/alpha-cafe", async (route) => {
     await fulfill(route, response({
@@ -1062,7 +1162,7 @@ test("business slug opens only its canonical public storefront", async ({ page }
   await expect(page.getByText("Beta Bistro", { exact: true })).toHaveCount(0);
 });
 
-test("business admin resolves Company ID, hides UUID entry, and keeps the canonical URL", async ({ page }) => {
+test("business admin resolves Company ID, hides UUID entry, and opens the canonical company landing", async ({ page }) => {
   let loginCompanyHeader: string | undefined;
   await page.route("**/api/v1/membership/businesses/alpha-cafe", async (route) => {
     await fulfill(route, response({
@@ -1103,6 +1203,52 @@ test("business admin resolves Company ID, hides UUID entry, and keeps the canoni
   await page.route("**/api/v1/system/me/branches", async (route) => { await fulfill(route, response([])); });
   await page.route("**/api/v1/restaurant/me/brand-navigation", async (route) => { await fulfill(route, response([])); });
   await page.route("**/api/v1/membership/modules", async (route) => { await fulfill(route, response(companyModules())); });
+  await page.route("**/api/v1/company/access", async (route) => {
+    await fulfill(route, response({
+      contract_version: "2026-09-19.1",
+      company_id: companyId,
+      user_id: "77777777-7777-4777-8777-777777777777",
+      scope_types: ["company"],
+      assignment_ids: [],
+      permissions: [],
+      default_route: "/company",
+      modules: companyModules(),
+    }));
+  });
+  await page.route("**/api/v1/company/overview", async (route) => {
+    await fulfill(route, response({
+      contract_version: "2026-09-19.1",
+      context: {
+        contract_version: "2026-09-19.1",
+        environment: "uat",
+        company: { id: companyId, code: "ALPHA", name: "Alpha Cafe" },
+        brand: null,
+        branch: null,
+        station_or_device_id: null,
+        business_type: null,
+        target_database: "legacy",
+        timezone: "Asia/Bangkok",
+        currency: "THB",
+        tax: { scope: "company", configured: false, vat_registered: false, tax_id: null, tax_branch_code: null, price_vat_type: "inclusive", vat_rate: 7 },
+        all_scope_allowed: { brand: true, branch: true, station: false },
+        transport: { authoritative_source: "signed_token", company_header: "X-Company-ID", branch_header: "X-Branch-ID", client_context_is_trusted: false, switch_requires_new_token: true },
+        updated_at: "2026-09-22T08:00:00Z",
+      },
+      task_summary: { total: 0, unread: 0, blocker: 0, error: 0, warning: 0 },
+      sections: [{
+        module_key: "restaurant_pos",
+        title: "Restaurant POS",
+        readiness: "pilot",
+        data_source: "restaurant",
+        status: "online",
+        metrics: [{ key: "orders", label: "ออเดอร์", value: 0, severity: "info", deep_link: null }],
+        updated_at: "2026-09-22T08:00:00Z",
+        stale: false,
+        error_code: null,
+      }],
+      generated_at: "2026-09-22T08:00:00Z",
+    }));
+  });
 
   await page.goto("/alpha-cafe/admin");
   await expect(page).toHaveURL(/\/alpha-cafe\/login\?next=/);
@@ -1112,12 +1258,13 @@ test("business admin resolves Company ID, hides UUID entry, and keeps the canoni
   await page.getByLabel("Password").fill("Routing-Owner-Password!");
   await page.getByRole("button", { name: "เข้าสู่ระบบ" }).click();
 
-  await expect(page).toHaveURL(/\/alpha-cafe\/admin$/);
+  await expect(page).toHaveURL(/\/company$/);
   await expect.poll(() => loginCompanyHeader).toBe(companyId);
-  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
-  await expect(page.getByText("โมดูลของบริษัท", { exact: true })).toBeVisible();
-  await expect(page.getByText("Restaurant POS", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Company Admin" }).first()).toHaveAttribute("href", "/alpha-cafe/admin");
+  await expect(page.getByRole("heading", { name: "สวัสดี Alpha Owner" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ระบบของบริษัท" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Restaurant POS" }).first()).toBeVisible();
+  await expect(page).toHaveURL(/\/company$/);
+  await expect(page.getByRole("link", { name: "ดูแอปทั้งหมด" })).toHaveAttribute("href", "/company/apps");
 });
 
 test("business admin rejects a session belonging to another Tenant", async ({ page }) => {

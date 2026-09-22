@@ -19,6 +19,7 @@ import {
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { platformApi, platformErrorMessage } from "@/lib/platformApi";
+import { usePlatformAuthStore } from "@/stores/platform-auth.store";
 import type { PlatformAuditEvent } from "@/types/platform";
 
 const numberFormatter = new Intl.NumberFormat("th-TH");
@@ -90,6 +91,8 @@ function eventLabel(event: PlatformAuditEvent): string {
 
 export default function PlatformDashboardPage(): JSX.Element {
   const queryClient = useQueryClient();
+  const permissions = usePlatformAuthStore((state) => state.operator?.permissions ?? []);
+  const canManageOperations = permissions.includes("*") || permissions.includes("platform.operations.manage");
   const dashboard = useQuery({
     queryKey: ["platform", "dashboard"],
     queryFn: async () => (await platformApi.dashboard()).data.data,
@@ -147,10 +150,12 @@ export default function PlatformDashboardPage(): JSX.Element {
               จัดการบริษัทลูกค้า <ArrowRight className="h-4 w-4" />
             </Link>
           </Button>
-          <Button variant="outline" onClick={() => captureSnapshots.mutate()} disabled={captureSnapshots.isPending}>
-            <Database className="h-4 w-4" />
-            {captureSnapshots.isPending ? "กำลังบันทึก..." : "บันทึก Usage วันนี้"}
-          </Button>
+          {canManageOperations ? (
+            <Button variant="outline" onClick={() => captureSnapshots.mutate()} disabled={captureSnapshots.isPending}>
+              <Database className="h-4 w-4" />
+              {captureSnapshots.isPending ? "กำลังบันทึก..." : "บันทึก Usage วันนี้"}
+            </Button>
+          ) : null}
         </div>
       </header>
 

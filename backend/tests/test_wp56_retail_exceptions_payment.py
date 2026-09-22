@@ -9,6 +9,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 from app.cli.rotate_uat_user_password import require_bounded_uat
+from app.cli.prepare_retail_uat_persona import require_bounded_uat as require_retail_persona_uat
 from app.config import settings
 from app.dependencies import TokenData
 from app.routers.pos import _enforce_retail_payment_readiness
@@ -98,6 +99,48 @@ class UatCredentialRotationGuardTests(unittest.TestCase):
                 require_bounded_uat(confirmed=False, password="safe-temporary-password")
             with self.assertRaisesRegex(RuntimeError, "at least 12"):
                 require_bounded_uat(confirmed=True, password="short")
+
+
+class RetailUatPersonaGuardTests(unittest.TestCase):
+    def _args(self, *, confirmed: bool = True, disabled: bool = False):
+        return type("Args", (), {"yes": confirmed, "disable": disabled})()
+
+    def test_persona_requires_https_platform_identity_and_auth_bypass_off(self) -> None:
+        safe_values = {
+            "environment": "development",
+            "saas_public_base_url": "https://uat-pos.foodchainservice.com",
+            "identity_database": "platform_core",
+            "uat_auth_bypass_enabled": False,
+        }
+        with patch.multiple(settings, **safe_values):
+            require_retail_persona_uat(
+                self._args(),
+                password="safe-temporary-retail-password",
+            )
+
+        unsafe_values = (
+            {**safe_values, "saas_public_base_url": "http://uat-pos.foodchainservice.com"},
+            {**safe_values, "environment": "production"},
+            {**safe_values, "identity_database": "legacy"},
+            {**safe_values, "uat_auth_bypass_enabled": True},
+        )
+        for values in unsafe_values:
+            with self.subTest(values=values), patch.multiple(settings, **values):
+                with self.assertRaises(RuntimeError):
+                    require_retail_persona_uat(
+                        self._args(),
+                        password="safe-temporary-retail-password",
+                    )
+
+    def test_persona_disable_does_not_require_password(self) -> None:
+        safe_values = {
+            "environment": "development",
+            "saas_public_base_url": "https://uat-pos.foodchainservice.com",
+            "identity_database": "platform_core",
+            "uat_auth_bypass_enabled": False,
+        }
+        with patch.multiple(settings, **safe_values):
+            require_retail_persona_uat(self._args(disabled=True), password="")
 
 
 class RetailLookupGuardTests(unittest.IsolatedAsyncioTestCase):

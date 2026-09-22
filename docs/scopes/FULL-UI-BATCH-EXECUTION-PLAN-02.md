@@ -17,7 +17,7 @@ The following hard gates cannot be deferred: tenant/role isolation, Server autho
 | Batch | Work Packages | Scope | Current state |
 |---|---|---|---|
 | A | WP55–WP58 | Retail POS R01–R10: foundation, scan-first sale, exceptions, payment/receipt, Hold/Return/Shift, offline and Counter readiness | Combined software gate passed; physical UAT pending; Production remains NO-GO |
-| B | WP59–WP61 | Platform Console, Company Admin and Shared ERP | Planned |
+| B | WP59–WP61 | Platform Console, Company Admin and Shared ERP | In progress at WP59; Local focused checkpoint passed |
 | C | WP62–WP64 | Takeaway, Central Kitchen/Supply Chain and Public Customer Experience | Planned; write actions remain gated where contracts/readiness are absent |
 | D | WP65 | Integration, Reporting, Reconciliation, Release Governance and final full-system UAT | Planned |
 

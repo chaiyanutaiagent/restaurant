@@ -76,6 +76,26 @@ class PlatformOperator(UUIDMixin, TimestampMixin, Base):
         default=list,
         server_default=text("'[]'::json"),
     )
+    access_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    access_review_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    access_reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("platform_operators.id"),
+        nullable=True,
+    )
+    deactivated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    deactivated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("platform_operators.id"),
+        nullable=True,
+    )
+    deactivation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     @property
     def mfa_enabled(self) -> bool:
@@ -113,6 +133,89 @@ class PlatformSession(UUIDMixin, TimestampMixin, Base):
     revocation_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class PlatformOperatorRoleAssignment(UUIDMixin, TimestampMixin, Base):
+    """Environment-scoped, revocable Platform role assignment."""
+
+    __tablename__ = "platform_operator_role_assignments"
+    __table_args__ = (
+        CheckConstraint(
+            "role_code IN ('platform_owner', 'operations', 'support', 'billing', 'security', 'auditor')",
+            name="role_code_valid",
+        ),
+        CheckConstraint(
+            "environment IN ('uat', 'production')",
+            name="environment_valid",
+        ),
+        Index(
+            "uq_platform_operator_role_assignments_active",
+            "operator_id",
+            "environment",
+            "role_code",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+        Index(
+            "ix_platform_operator_roles_environment_active",
+            "environment",
+            "revoked_at",
+        ),
+    )
+
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("platform_operators.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    environment: Mapped[str] = mapped_column(String(20), nullable=False)
+    assigned_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform_operators.id"), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform_operators.id"), nullable=True
+    )
+    revocation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PlatformOperatorInvitation(UUIDMixin, TimestampMixin, Base):
+    """One-use invitation. Only the SHA-256 token digest is persisted."""
+
+    __tablename__ = "platform_operator_invitations"
+    __table_args__ = (
+        CheckConstraint(
+            "role_code IN ('platform_owner', 'operations', 'support', 'billing', 'security', 'auditor')",
+            name="role_code_valid",
+        ),
+        CheckConstraint(
+            "environment IN ('uat', 'production')",
+            name="environment_valid",
+        ),
+        Index("ix_platform_operator_invitations_email", "email"),
+        Index("ix_platform_operator_invitations_expires", "expires_at"),
+    )
+
+    username: Mapped[str] = mapped_column(String(100), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    role_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    environment: Mapped[str] = mapped_column(String(20), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
+    invited_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform_operators.id"), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_operator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform_operators.id"), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class PlatformTenantProfile(UUIDMixin, TimestampMixin, Base):

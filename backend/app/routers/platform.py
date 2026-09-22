@@ -16,7 +16,13 @@ from app.schemas.platform import (
     PlatformLoginRequest,
     PlatformMfaCodeRequest,
     PlatformMfaDisableRequest,
+    PlatformAccessReviewRequest,
+    PlatformOperatorInvitationAccept,
+    PlatformOperatorInviteRequest,
     PlatformOperatorRead,
+    PlatformOperatorSessionsRevokeRequest,
+    PlatformOperatorStateRequest,
+    PlatformRoleAssignmentRequest,
     PlatformOperationsEvidenceImport,
     PlatformPasswordChangeRequest,
     PlatformTenantControlsUpdate,
@@ -43,6 +49,8 @@ from app.services.company_module_access_service import CompanyModuleAccessServic
 from app.services.saas_privacy_support_service import SaasPrivacySupportService
 from app.services.platform_service import PlatformAuthService, PlatformTenantService
 from app.services.platform_operations_service import PlatformOperationsService
+from app.services.platform_access_service import require_platform_permission
+from app.services.platform_team_service import PlatformTeamService
 
 
 router = APIRouter(prefix="/api/v1/platform", tags=["platform"])
@@ -57,14 +65,6 @@ def ok(data: Any, *, pagination: dict[str, int] | None = None) -> dict[str, Any]
     if pagination is not None:
         meta["pagination"] = pagination
     return {"data": data, "meta": meta, "error": None}
-
-
-def _require_platform_owner(current: PlatformTokenData) -> None:
-    if not current.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Platform Owner access is required",
-        )
 
 
 def _client(request: Request) -> tuple[str | None, str | None]:
@@ -100,8 +100,9 @@ def _tenant_service(
     db: AsyncSession,
     restaurant_db: AsyncSession,
     current: PlatformTokenData,
+    permission: str = "platform.company.view",
 ) -> PlatformTenantService:
-    _require_platform_owner(current)
+    require_platform_permission(current, permission)
     return PlatformTenantService(
         db,
         restaurant_db=restaurant_db,
@@ -113,13 +114,14 @@ def _tenant_service(
 def _operations_service(
     db: AsyncSession,
     current: PlatformTokenData,
+    permission: str = "platform.operations.view",
 ) -> PlatformOperationsService:
-    _require_platform_owner(current)
+    require_platform_permission(current, permission)
     return PlatformOperationsService(db, operator_id=current.operator_id)
 
 
-def _billing_service(db: AsyncSession, current: PlatformTokenData) -> SaasBillingService:
-    _require_platform_owner(current)
+def _billing_service(db: AsyncSession, current: PlatformTokenData, permission: str = "platform.billing.view") -> SaasBillingService:
+    require_platform_permission(current, permission)
     return SaasBillingService(db, operator_id=current.operator_id)
 
 
@@ -128,8 +130,12 @@ def _privacy_support_service(
     current: PlatformTokenData,
     *,
     restaurant_db: AsyncSession | None = None,
+    permission: str | None = None,
 ) -> SaasPrivacySupportService:
-    _require_platform_owner(current)
+    require_platform_permission(
+        current,
+        permission or ("platform.support.view" if restaurant_db is not None else "platform.privacy.view"),
+    )
     return SaasPrivacySupportService(
         db,
         operator_id=current.operator_id,
@@ -154,6 +160,21 @@ async def login(
     )
     _set_refresh_cookie(response, refresh_token)
     return ok(result.model_dump(mode="json"))
+
+
+@router.post("/team/invitations/accept", status_code=status.HTTP_201_CREATED)
+async def accept_team_invitation(
+    payload: PlatformOperatorInvitationAccept,
+    request: Request,
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    ip_address, user_agent = _client(request)
+    operator = await PlatformTeamService(db, actor_id=None).accept_invitation(
+        payload,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(operator.model_dump(mode="json"))
 
 
 @router.post("/auth/refresh")
@@ -310,11 +331,220 @@ async def me(
     current: PlatformTokenData = Depends(get_current_platform_operator),
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
-    _require_platform_owner(current)
     operator = await db.get(PlatformOperator, current.operator_id)
     if operator is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Operator not found")
-    return ok(PlatformOperatorRead.model_validate(operator).model_dump(mode="json"))
+    return ok(
+        PlatformOperatorRead(
+            id=operator.id,
+            username=operator.username,
+            email=operator.email,
+            display_name=operator.display_name,
+            is_active=operator.is_active,
+            is_superuser=operator.is_superuser,
+            mfa_enabled=operator.mfa_enabled,
+            last_login_at=operator.last_login_at,
+            credential_version=operator.credential_version,
+            role_codes=current.role_codes,
+            permissions=current.permissions,
+            environment=current.environment,
+            access_reviewed_at=operator.access_reviewed_at,
+            access_review_due_at=operator.access_review_due_at,
+        ).model_dump(mode="json")
+    )
+
+
+def _same_platform_environment(current: PlatformTokenData, environment: str) -> None:
+    if current.environment != environment:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "cross_environment_access_denied",
+                "message": "Platform access assignments are isolated by environment",
+                "current_environment": current.environment,
+                "requested_environment": environment,
+            },
+        )
+
+
+@router.get("/team/roles")
+async def team_roles(
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.view")
+    return ok(PlatformTeamService.role_definitions())
+
+
+@router.get("/team/operators")
+async def team_operators(
+    environment: str | None = Query(default=None, pattern="^(uat|production)$"),
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.view")
+    environment = environment or current.environment
+    _same_platform_environment(current, environment)
+    rows = await PlatformTeamService(db, actor_id=current.operator_id).list_operators(
+        environment=environment
+    )
+    return ok([row.model_dump(mode="json") for row in rows])
+
+
+@router.get("/team/operators/{operator_id}")
+async def team_operator(
+    operator_id: uuid.UUID,
+    environment: str | None = Query(default=None, pattern="^(uat|production)$"),
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.view")
+    environment = environment or current.environment
+    _same_platform_environment(current, environment)
+    row = await PlatformTeamService(db, actor_id=current.operator_id).operator(
+        operator_id, environment=environment
+    )
+    return ok(row.model_dump(mode="json"))
+
+
+@router.get("/team/invitations")
+async def team_invitations(
+    environment: str | None = Query(default=None, pattern="^(uat|production)$"),
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.view")
+    environment = environment or current.environment
+    _same_platform_environment(current, environment)
+    rows = await PlatformTeamService(db, actor_id=current.operator_id).list_invitations(
+        environment=environment
+    )
+    return ok([row.model_dump(mode="json") for row in rows])
+
+
+@router.post("/team/invitations", status_code=status.HTTP_201_CREATED)
+async def invite_team_operator(
+    payload: PlatformOperatorInviteRequest,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.manage")
+    _same_platform_environment(current, payload.environment)
+    ip_address, user_agent = _client(request)
+    row = await PlatformTeamService(db, actor_id=current.operator_id).invite(
+        payload,
+        actor_roles=current.role_codes,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(row.model_dump(mode="json"))
+
+
+@router.post("/team/operators/{operator_id}/roles")
+async def assign_team_role(
+    operator_id: uuid.UUID,
+    payload: PlatformRoleAssignmentRequest,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.manage")
+    _same_platform_environment(current, payload.environment)
+    ip_address, user_agent = _client(request)
+    row = await PlatformTeamService(db, actor_id=current.operator_id).assign_role(
+        operator_id,
+        payload,
+        actor_roles=current.role_codes,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(row.model_dump(mode="json"))
+
+
+@router.delete("/team/operators/{operator_id}/roles")
+async def revoke_team_role(
+    operator_id: uuid.UUID,
+    payload: PlatformRoleAssignmentRequest,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.manage")
+    _same_platform_environment(current, payload.environment)
+    ip_address, user_agent = _client(request)
+    row = await PlatformTeamService(db, actor_id=current.operator_id).revoke_role(
+        operator_id,
+        payload,
+        actor_roles=current.role_codes,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(row.model_dump(mode="json"))
+
+
+@router.put("/team/operators/{operator_id}/state")
+async def set_team_operator_state(
+    operator_id: uuid.UUID,
+    payload: PlatformOperatorStateRequest,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.manage")
+    ip_address, user_agent = _client(request)
+    row = await PlatformTeamService(db, actor_id=current.operator_id).set_operator_state(
+        operator_id,
+        payload,
+        environment=current.environment,
+        actor_roles=current.role_codes,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(row.model_dump(mode="json"))
+
+
+@router.post("/team/operators/{operator_id}/access-review")
+async def certify_team_operator_access(
+    operator_id: uuid.UUID,
+    payload: PlatformAccessReviewRequest,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.manage")
+    ip_address, user_agent = _client(request)
+    row = await PlatformTeamService(db, actor_id=current.operator_id).certify_access(
+        operator_id,
+        payload,
+        environment=current.environment,
+        actor_roles=current.role_codes,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(row.model_dump(mode="json"))
+
+
+@router.post("/team/operators/{operator_id}/sessions/revoke")
+async def revoke_team_operator_sessions(
+    operator_id: uuid.UUID,
+    payload: PlatformOperatorSessionsRevokeRequest,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.security.session.revoke")
+    _same_platform_environment(current, payload.environment)
+    ip_address, user_agent = _client(request)
+    count = await PlatformTeamService(db, actor_id=current.operator_id).revoke_operator_sessions(
+        operator_id,
+        reason=payload.reason,
+        request_id=payload.request_id,
+        environment=payload.environment,
+        actor_roles=current.role_codes,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok({"operator_id": str(operator_id), "revoked_session_count": count})
 
 
 @router.get("/dashboard")
@@ -335,7 +565,7 @@ async def capture_usage_snapshots(
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    snapshots = await _tenant_service(db, restaurant_db, current).capture_usage_snapshots(
+    snapshots = await _tenant_service(db, restaurant_db, current, "platform.operations.manage").capture_usage_snapshots(
         ip_address=ip_address,
         user_agent=user_agent,
     )
@@ -359,7 +589,7 @@ async def upsert_billing_plan(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    result = await _billing_service(db, current).upsert_plan(
+    result = await _billing_service(db, current, "platform.billing.manage").upsert_plan(
         payload, ip_address=ip_address, user_agent=user_agent
     )
     return ok(result.model_dump(mode="json"))
@@ -373,7 +603,7 @@ async def import_billing_event(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    result = await _billing_service(db, current).apply_event(
+    result = await _billing_service(db, current, "platform.billing.manage").apply_event(
         payload, ip_address=ip_address, user_agent=user_agent
     )
     return ok(result.model_dump(mode="json"))
@@ -398,7 +628,7 @@ async def update_platform_privacy_request(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    row = await _privacy_support_service(db, current).update_privacy_request(request_id, payload, ip_address=ip_address, user_agent=user_agent)
+    row = await _privacy_support_service(db, current, permission="platform.privacy.manage").update_privacy_request(request_id, payload, ip_address=ip_address, user_agent=user_agent)
     return ok(row.model_dump(mode="json"))
 
 
@@ -421,7 +651,7 @@ async def create_retention_decision(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    row = await _privacy_support_service(db, current).create_retention_decision(request_id, payload, ip_address=ip_address, user_agent=user_agent)
+    row = await _privacy_support_service(db, current, permission="platform.privacy.manage").create_retention_decision(request_id, payload, ip_address=ip_address, user_agent=user_agent)
     return ok(row.model_dump(mode="json"))
 
 
@@ -434,7 +664,7 @@ async def update_retention_decision(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    row = await _privacy_support_service(db, current).update_retention_decision(decision_id, payload, ip_address=ip_address, user_agent=user_agent)
+    row = await _privacy_support_service(db, current, permission="platform.privacy.manage").update_retention_decision(decision_id, payload, ip_address=ip_address, user_agent=user_agent)
     return ok(row.model_dump(mode="json"))
 
 
@@ -444,7 +674,7 @@ async def platform_support_tickets(
     current: PlatformTokenData = Depends(get_current_platform_operator),
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
-    rows = await _privacy_support_service(db, current).tickets(limit=limit)
+    rows = await _privacy_support_service(db, current, permission="platform.support.view").tickets(limit=limit)
     return ok([row.model_dump(mode="json") for row in rows])
 
 
@@ -457,7 +687,7 @@ async def update_support_ticket(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    row = await _privacy_support_service(db, current).update_ticket(ticket_id, payload, ip_address=ip_address, user_agent=user_agent)
+    row = await _privacy_support_service(db, current, permission="platform.support.respond").update_ticket(ticket_id, payload, ip_address=ip_address, user_agent=user_agent)
     return ok(row.model_dump(mode="json"))
 
 
@@ -470,7 +700,7 @@ async def add_platform_support_message(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    row = await _privacy_support_service(db, current).add_message(ticket_id, payload, company_id=None, ip_address=ip_address, user_agent=user_agent)
+    row = await _privacy_support_service(db, current, permission="platform.support.respond").add_message(ticket_id, payload, company_id=None, ip_address=ip_address, user_agent=user_agent)
     return ok(row.model_dump(mode="json"))
 
 
@@ -483,7 +713,7 @@ async def request_support_access(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    row = await _privacy_support_service(db, current).request_access(ticket_id, payload, ip_address=ip_address, user_agent=user_agent)
+    row = await _privacy_support_service(db, current, permission="platform.support.request_access").request_access(ticket_id, payload, ip_address=ip_address, user_agent=user_agent)
     return ok(row.model_dump(mode="json"))
 
 
@@ -496,7 +726,7 @@ async def revoke_platform_support_access(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    row = await _privacy_support_service(db, current).revoke_access(grant_id, payload.reason, company_id=None, ip_address=ip_address, user_agent=user_agent)
+    row = await _privacy_support_service(db, current, permission="platform.support.request_access").revoke_access(grant_id, payload.reason, company_id=None, ip_address=ip_address, user_agent=user_agent)
     return ok(row.model_dump(mode="json"))
 
 
@@ -509,7 +739,7 @@ async def view_support_context(
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    row = await _privacy_support_service(db, current, restaurant_db=restaurant_db).support_context(grant_id, ip_address=ip_address, user_agent=user_agent)
+    row = await _privacy_support_service(db, current, restaurant_db=restaurant_db, permission="platform.support.view").support_context(grant_id, ip_address=ip_address, user_agent=user_agent)
     return ok(row.model_dump(mode="json"))
 
 
@@ -539,7 +769,7 @@ async def capture_operations(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    row = await _operations_service(db, current).capture_runtime(
+    row = await _operations_service(db, current, "platform.operations.manage").capture_runtime(
         ip_address=ip_address,
         user_agent=user_agent,
     )
@@ -554,7 +784,7 @@ async def import_operations_evidence(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    row = await _operations_service(db, current).import_evidence(
+    row = await _operations_service(db, current, "platform.operations.manage").import_evidence(
         payload,
         ip_address=ip_address,
         user_agent=user_agent,
@@ -594,7 +824,7 @@ async def create_company(
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    company = await _tenant_service(db, restaurant_db, current).create_company(
+    company = await _tenant_service(db, restaurant_db, current, "platform.company.manage").create_company(
         payload,
         ip_address=ip_address,
         user_agent=user_agent,
@@ -619,7 +849,7 @@ async def get_company_modules(
     current: PlatformTokenData = Depends(get_current_platform_operator),
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
-    _require_platform_owner(current)
+    require_platform_permission(current, "platform.module.view")
     modules = await CompanyModuleAccessService(
         db,
         operator_id=current.operator_id,
@@ -636,7 +866,7 @@ async def update_company_module(
     current: PlatformTokenData = Depends(get_current_platform_operator),
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
-    _require_platform_owner(current)
+    require_platform_permission(current, "platform.module.manage")
     ip_address, user_agent = _client(request)
     module = await CompanyModuleAccessService(
         db,
@@ -681,7 +911,7 @@ async def update_company_subscription(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    result = await _billing_service(db, current).update_subscription(
+    result = await _billing_service(db, current, "platform.billing.manage").update_subscription(
         company_id, payload, ip_address=ip_address, user_agent=user_agent
     )
     return ok(result.model_dump(mode="json"))
@@ -696,7 +926,7 @@ async def create_company_invoice(
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    result = await _billing_service(db, current).create_invoice(
+    result = await _billing_service(db, current, "platform.billing.manage").create_invoice(
         company_id, payload, ip_address=ip_address, user_agent=user_agent
     )
     return ok(result.model_dump(mode="json"))
@@ -727,7 +957,7 @@ async def suspend_company(
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    company = await _tenant_service(db, restaurant_db, current).suspend_company(
+    company = await _tenant_service(db, restaurant_db, current, "platform.company.lifecycle").suspend_company(
         company_id,
         payload,
         ip_address=ip_address,
@@ -746,7 +976,7 @@ async def reactivate_company(
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    company = await _tenant_service(db, restaurant_db, current).reactivate_company(
+    company = await _tenant_service(db, restaurant_db, current, "platform.company.lifecycle").reactivate_company(
         company_id,
         payload,
         ip_address=ip_address,
@@ -765,7 +995,7 @@ async def update_controls(
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    company = await _tenant_service(db, restaurant_db, current).update_controls(
+    company = await _tenant_service(db, restaurant_db, current, "platform.company.manage").update_controls(
         company_id,
         payload,
         ip_address=ip_address,
@@ -784,7 +1014,7 @@ async def export_company(
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
     ip_address, user_agent = _client(request)
-    artifact = await _tenant_service(db, restaurant_db, current).export_company(
+    artifact = await _tenant_service(db, restaurant_db, current, "platform.audit.export").export_company(
         company_id,
         payload,
         ip_address=ip_address,
@@ -796,13 +1026,15 @@ async def export_company(
 @router.get("/audit")
 async def audit_events(
     company_id: uuid.UUID | None = Query(default=None),
+    operator_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     current: PlatformTokenData = Depends(get_current_platform_operator),
     db: AsyncSession = Depends(get_identity_db),
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
-    rows = await _tenant_service(db, restaurant_db, current).list_audit_events(
+    rows = await _tenant_service(db, restaurant_db, current, "platform.audit.view").list_audit_events(
         company_id=company_id,
+        operator_id=operator_id,
         limit=limit,
     )
     return ok(rows)

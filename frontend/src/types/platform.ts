@@ -3,9 +3,48 @@ export type PlatformOperator = {
   username: string;
   email: string | null;
   display_name: string;
+  is_active: boolean;
   is_superuser: boolean;
   mfa_enabled: boolean;
   last_login_at: string | null;
+  credential_version: number;
+  role_codes: PlatformRoleCode[];
+  permissions: string[];
+  environment: PlatformEnvironment;
+  access_reviewed_at: string | null;
+  access_review_due_at: string | null;
+};
+
+export type PlatformRoleCode = "platform_owner" | "operations" | "support" | "billing" | "security" | "auditor";
+export type PlatformEnvironment = "uat" | "production";
+
+export type PlatformRoleDefinition = {
+  code: PlatformRoleCode;
+  label: string;
+  permissions: string[];
+};
+
+export type PlatformTeamOperator = PlatformOperator & {
+  active_session_count: number;
+  stale_access: boolean;
+  review_due: boolean;
+  deactivated_at: string | null;
+  deactivation_reason: string | null;
+  deep_links: { team: string; audit: string; security: string };
+};
+
+export type PlatformOperatorInvitation = {
+  id: string;
+  username: string;
+  email: string;
+  display_name: string;
+  role_code: PlatformRoleCode;
+  environment: PlatformEnvironment;
+  expires_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+  acceptance_token: string | null;
+  deep_link: string | null;
 };
 
 export type PlatformTokenResponse = {

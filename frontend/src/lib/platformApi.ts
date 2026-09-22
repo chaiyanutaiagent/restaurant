@@ -12,6 +12,10 @@ import type {
   PlatformMfaConfirm,
   PlatformMfaSetup,
   PlatformOperator,
+  PlatformOperatorInvitation,
+  PlatformRoleCode,
+  PlatformRoleDefinition,
+  PlatformTeamOperator,
   PlatformOperationsSnapshot,
   PlatformOperationsSummary,
   PlatformSession,
@@ -120,6 +124,27 @@ export const platformApi = {
       mfa_code: mfaCode || null,
     }),
   me: () => platformApiClient.get<PlatformApiResponse<PlatformOperator>>("/auth/me"),
+  platformRoles: () => platformApiClient.get<PlatformApiResponse<PlatformRoleDefinition[]>>("/team/roles"),
+  teamOperators: (environment?: "uat" | "production") =>
+    platformApiClient.get<PlatformApiResponse<PlatformTeamOperator[]>>("/team/operators", { params: environment ? { environment } : undefined }),
+  teamInvitations: (environment?: "uat" | "production") =>
+    platformApiClient.get<PlatformApiResponse<PlatformOperatorInvitation[]>>("/team/invitations", { params: environment ? { environment } : undefined }),
+  inviteTeamOperator: (payload: {
+    username: string; email: string; display_name: string; role_code: PlatformRoleCode;
+    environment: "uat" | "production"; reason: string; request_id: string;
+  }) => platformApiClient.post<PlatformApiResponse<PlatformOperatorInvitation>>("/team/invitations", payload),
+  acceptTeamInvitation: (token: string, password: string) =>
+    platformApiClient.post<PlatformApiResponse<PlatformOperator>>("/team/invitations/accept", { token, password }),
+  assignTeamRole: (operatorId: string, payload: { role_code: PlatformRoleCode; environment: "uat" | "production"; reason: string; request_id: string; expected_credential_version: number }) =>
+    platformApiClient.post<PlatformApiResponse<PlatformTeamOperator>>(`/team/operators/${operatorId}/roles`, payload),
+  revokeTeamRole: (operatorId: string, payload: { role_code: PlatformRoleCode; environment: "uat" | "production"; reason: string; request_id: string; expected_credential_version: number }) =>
+    platformApiClient.delete<PlatformApiResponse<PlatformTeamOperator>>(`/team/operators/${operatorId}/roles`, { data: payload }),
+  setTeamOperatorState: (operatorId: string, payload: { active: boolean; reason: string; request_id: string; expected_credential_version: number }) =>
+    platformApiClient.put<PlatformApiResponse<PlatformTeamOperator>>(`/team/operators/${operatorId}/state`, payload),
+  certifyTeamAccess: (operatorId: string, payload: { reason: string; request_id: string; expected_credential_version: number; next_review_due_at: string }) =>
+    platformApiClient.post<PlatformApiResponse<PlatformTeamOperator>>(`/team/operators/${operatorId}/access-review`, payload),
+  revokeTeamSessions: (operatorId: string, payload: { environment: "uat" | "production"; reason: string; request_id: string }) =>
+    platformApiClient.post<PlatformApiResponse<{ operator_id: string; revoked_session_count: number }>>(`/team/operators/${operatorId}/sessions/revoke`, payload),
   dashboard: () =>
     platformApiClient.get<PlatformApiResponse<PlatformDashboard>>("/dashboard"),
   captureUsageSnapshots: () =>
@@ -231,9 +256,9 @@ export const platformApi = {
       `/companies/${companyId}/export`,
       { reason }
     ),
-  audit: (companyId?: string) =>
+  audit: (companyId?: string, operatorId?: string) =>
     platformApiClient.get<PlatformApiResponse<PlatformAuditEvent[]>>("/audit", {
-      params: companyId ? { company_id: companyId } : undefined
+      params: { ...(companyId ? { company_id: companyId } : {}), ...(operatorId ? { operator_id: operatorId } : {}) }
     })
 };
 

@@ -40,7 +40,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP56 | Retail exceptions, cart/customer/discount and payment/receipt | Software Gate passed; physical acceptance remains HOLD | Cash Pilot only; Production/Legacy source unchanged |
 | WP57 | Retail Hold/Resume, Return/Exchange/Void and Shift Operations | Software UAT and rollback passed; physical acceptance remains HOLD | Local/UAT only; Cash Pilot; Legacy identities fail closed |
 | WP58 | Retail Offline Recovery, Counter Readiness and Retail Phase Gate | Software UAT gate closed; physical acceptance remains HOLD | No cutover/physical pass implied |
-| WP59 | Platform Console identity, Team/RBAC and operator governance | Planned | Platform Production unchanged |
+| WP59 | Platform Console identity, Team/RBAC and operator governance | In progress; Local checkpoint passed | UAT deployment pending; Platform Production unchanged |
 | WP60 | Company Admin maturity, access review and Company audit | Planned | Tenant MFA/session decisions required |
 | WP61 | Shared ERP operational and finance maturity | Planned | Real tax/provider/accountant gates remain |
 | WP62 | Takeaway operational UI activation | Planned | Transactions remain gated until owner/canary approval |
@@ -57,7 +57,7 @@ The execution contract is recorded in `FULL-UI-BATCH-EXECUTION-PLAN-02.md`. WP54
 | Batch | WP range | Checkpoint |
 |---|---|---|
 | A — Retail POS | WP55–WP58 | Combined software gate passed; physical/Production HOLD; Batch B may begin on Local/UAT |
-| B — Platform/Company/ERP | WP59–WP61 | Planned |
+| B — Platform/Company/ERP | WP59–WP61 | In progress at WP59 |
 | C — Takeaway/Kitchen/Public | WP62–WP64 | Planned; unsafe writes remain gated |
 | D — Governance/full-system UAT | WP65 | Planned |
 
@@ -136,7 +136,7 @@ The superseded non-v2 Action Center file is not counted.
 
 | Area | Design authority | WP | Current state / boundary |
 |---|---|---|---|
-| Platform Console | `cto-non-hotel/01-PLATFORM-CONSOLE-CTO-SPEC.md` | WP59 | Planned; operator MFA, Team/RBAC and last-owner protections required. |
+| Platform Console | `cto-non-hotel/01-PLATFORM-CONSOLE-CTO-SPEC.md` | WP59 | In progress; server-authoritative RBAC, Team invitation, session/MFA visibility, access review and last-owner protection implemented locally. |
 | Company Admin | `cto-non-hotel/02-COMPANY-ADMIN-CTO-SPEC.md` | WP60 | Planned maturity on top of WP42. |
 | Shared ERP | `cto-non-hotel/03-SHARED-ERP-CTO-SPEC.md` | WP61 | Planned; real tax/provider/accountant acceptance remains gated. |
 | Restaurant advanced | `cto-non-hotel/04-RESTAURANT-ADVANCED-OPERATIONS-CTO-SPEC.md` | WP49–WP54 | Active sequence; Brand-profile-specific extras remain disabled until approved. |

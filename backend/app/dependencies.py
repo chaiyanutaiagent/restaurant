@@ -30,6 +30,7 @@ from app.services.business_context_service import (
 )
 from app.services.staff_scope_policy import normalized_station_key
 from app.services.tenant_control_policy import TenantControlPolicy
+from app.services.platform_access_service import effective_platform_access, platform_environment
 from app.utils.security import decode_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -75,6 +76,9 @@ class PlatformTokenData:
     display_name: str
     is_superuser: bool
     mfa_verified: bool
+    role_codes: list[str] = field(default_factory=list)
+    permissions: list[str] = field(default_factory=list)
+    environment: str = "uat"
 
 
 def _device_unauthorized() -> HTTPException:
@@ -194,6 +198,12 @@ async def get_current_platform_operator(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Platform MFA verification is required",
         )
+    role_codes, permissions = await effective_platform_access(db, operator)
+    if not role_codes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform operator has no active role in this environment",
+        )
     return PlatformTokenData(
         operator_id=operator.id,
         session_id=session.id,
@@ -201,6 +211,9 @@ async def get_current_platform_operator(
         display_name=operator.display_name,
         is_superuser=operator.is_superuser,
         mfa_verified=session.mfa_verified_at is not None,
+        role_codes=role_codes,
+        permissions=permissions,
+        environment=platform_environment(),
     )
 
 

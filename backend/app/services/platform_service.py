@@ -55,6 +55,7 @@ from app.schemas.platform import (
     PlatformTokenResponse,
 )
 from app.services.platform_reference_projection import enqueue_reference_event
+from app.services.platform_access_service import effective_platform_access, platform_environment
 from app.services.company_module_access_service import synchronize_legacy_module_flags
 from app.services.business_directory_service import allocate_business_slug
 from app.services.saas_membership_service import SaasMembershipService
@@ -113,6 +114,13 @@ class PlatformAuthService:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",
+            )
+
+        role_codes, _ = await effective_platform_access(self.db, operator)
+        if not role_codes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Platform operator has no active role in this environment",
             )
 
         mfa_verified = False
@@ -218,7 +226,7 @@ class PlatformAuthService:
         session.last_seen_at = now
         session.ip_address = ip_address
         session.user_agent = user_agent
-        token_response = self._token_response(operator, session, next_csrf_token)
+        token_response = await self._token_response(operator, session, next_csrf_token)
         await self.db.commit()
         return token_response, refresh_token
 
@@ -367,7 +375,7 @@ class PlatformAuthService:
         await self.db.commit()
         return PlatformMfaConfirmRead(
             recovery_codes=recovery_codes,
-            operator=PlatformOperatorRead.model_validate(operator),
+            operator=await self._operator_read(operator),
         )
 
     async def regenerate_recovery_codes(
@@ -434,7 +442,7 @@ class PlatformAuthService:
             resource_id=operator_id,
         )
         await self.db.commit()
-        return PlatformOperatorRead.model_validate(operator)
+        return await self._operator_read(operator)
 
     async def change_password(
         self,
@@ -503,10 +511,10 @@ class PlatformAuthService:
         )
         self.db.add(session)
         await self.db.flush()
-        return self._token_response(operator, session, csrf_token), refresh_token
+        return await self._token_response(operator, session, csrf_token), refresh_token
 
-    @staticmethod
-    def _token_response(
+    async def _token_response(
+        self,
         operator: PlatformOperator,
         session: PlatformSession,
         csrf_token: str,
@@ -524,7 +532,29 @@ class PlatformAuthService:
             expires_in=max(int(claims["exp"] - now.timestamp()), 0),
             csrf_token=csrf_token,
             session_id=session.id,
-            operator=PlatformOperatorRead.model_validate(operator),
+            operator=await self._operator_read(operator),
+        )
+
+    async def _operator_read(self, operator: PlatformOperator) -> PlatformOperatorRead:
+        environment = platform_environment()
+        role_codes, permissions = await effective_platform_access(
+            self.db, operator, environment=environment
+        )
+        return PlatformOperatorRead(
+            id=operator.id,
+            username=operator.username,
+            email=operator.email,
+            display_name=operator.display_name,
+            is_active=getattr(operator, "is_active", True),
+            is_superuser=operator.is_superuser,
+            mfa_enabled=operator.mfa_enabled,
+            last_login_at=operator.last_login_at,
+            credential_version=getattr(operator, "credential_version", 1),
+            role_codes=role_codes,
+            permissions=permissions,
+            environment=environment,
+            access_reviewed_at=getattr(operator, "access_reviewed_at", None),
+            access_review_due_at=getattr(operator, "access_review_due_at", None),
         )
 
     async def _record_failed_login(
@@ -1444,11 +1474,14 @@ class PlatformTenantService:
         self,
         *,
         company_id: uuid.UUID | None,
+        operator_id: uuid.UUID | None = None,
         limit: int,
     ) -> list[dict[str, Any]]:
         statement = select(AuditLog).where(AuditLog.action.like("platform.%"))
         if company_id is not None:
             statement = statement.where(AuditLog.company_id == company_id)
+        if operator_id is not None:
+            statement = statement.where(AuditLog.user_id == operator_id)
         rows = (
             await self.db.scalars(
                 statement.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit)

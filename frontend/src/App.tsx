@@ -108,6 +108,8 @@ import CompanyHomePage from "@/pages/company/CompanyHomePage";
 import CompanyPeopleAccessPage from "@/pages/company/CompanyPeopleAccessPage";
 import RoleAwareLanding from "@/pages/company/RoleAwareLanding";
 import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
+import PlatformTeamPage from "@/pages/platform/PlatformTeamPage";
+import PlatformInvitationPage from "@/pages/platform/PlatformInvitationPage";
 import TakeawayCounterPage from "@/pages/takeaway/TakeawayCounterPage";
 import TakeawayCutoverPage from "@/pages/takeaway/TakeawayCutoverPage";
 import TakeawayCentralRecipesPage from "@/pages/takeaway/TakeawayCentralRecipesPage";
@@ -152,6 +154,7 @@ export default function App(): JSX.Element {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/platform/login" element={<PlatformLoginPage />} />
+          <Route path="/platform/invite" element={<PlatformInvitationPage />} />
           <Route element={<PlatformProtectedRoute />}>
             <Route element={<PlatformShell />}>
               <Route path="/platform" element={<Navigate to="/platform/dashboard" replace />} />
@@ -160,6 +163,7 @@ export default function App(): JSX.Element {
               <Route path="/platform/companies/:companyId" element={<PlatformCompanyDetailPage />} />
               <Route path="/platform/audit" element={<PlatformAuditPage />} />
               <Route path="/platform/security" element={<PlatformSecurityPage />} />
+              <Route path="/platform/team" element={<PlatformTeamPage />} />
               <Route path="/platform/operations" element={<PlatformOperationsPage />} />
               <Route path="/platform/billing" element={<PlatformBillingPage />} />
               <Route path="/platform/support" element={<PlatformSupportPage />} />

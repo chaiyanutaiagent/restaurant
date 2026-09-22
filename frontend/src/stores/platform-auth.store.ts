@@ -28,7 +28,7 @@ export const usePlatformAuthStore = create<PlatformAuthState>()(
       }),
       setOperator: (operator) => set({ operator }),
       clearSession: () => set({ accessToken: null, csrfToken: null, sessionId: null, operator: null }),
-      isAuthenticated: () => Boolean(get().accessToken && get().operator?.is_superuser)
+      isAuthenticated: () => Boolean(get().accessToken && get().operator?.is_active)
     }),
     {
       name: "restaurant-platform-auth",

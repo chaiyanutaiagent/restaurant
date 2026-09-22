@@ -19,12 +19,20 @@ export default function PlatformLoginPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const requested = new URLSearchParams(location.search).get("next");
-  const next = requested?.startsWith("/platform/") ? requested : "/platform/dashboard";
+  const next = requested?.startsWith("/platform/") ? requested : null;
   const login = useMutation({
     mutationFn: () => platformApi.login(username, password, mfaCode),
     onSuccess: (response) => {
       setSession(response.data.data);
-      navigate(next, { replace: true });
+      const permissions = response.data.data.operator.permissions;
+      const can = (permission: string) => permissions.includes("*") || permissions.includes(permission);
+      const landing = can("platform.company.view") ? "/platform/dashboard"
+        : can("platform.operations.view") ? "/platform/operations"
+          : can("platform.support.view") ? "/platform/support"
+            : can("platform.team.view") ? "/platform/team"
+              : can("platform.audit.view") ? "/platform/audit"
+                : "/platform/security";
+      navigate(next ?? landing, { replace: true });
     },
     onError: (error) => {
       if (axios.isAxiosError(error) && error.response?.status === 428) setMfaRequired(true);
@@ -46,7 +54,7 @@ export default function PlatformLoginPage(): JSX.Element {
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-300">
             {PLATFORM_BRAND.platformName}
           </p>
-          <h1 className="mt-2 text-3xl font-bold">Platform Owner</h1>
+          <h1 className="mt-2 text-3xl font-bold">Platform Console</h1>
           <p className="mt-2 text-sm text-slate-400">
             บัญชีนี้แยกจาก Company Owner และพนักงานร้านโดยสมบูรณ์
           </p>

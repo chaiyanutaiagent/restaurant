@@ -67,14 +67,141 @@ class PlatformLoginRequest(BaseSchema):
         return normalized
 
 
+PlatformRoleCode = Literal[
+    "platform_owner", "operations", "support", "billing", "security", "auditor"
+]
+PlatformEnvironment = Literal["uat", "production"]
+
+
 class PlatformOperatorRead(BaseSchema):
     id: uuid.UUID
     username: str
     email: str | None = None
     display_name: str
+    is_active: bool = True
     is_superuser: bool
     mfa_enabled: bool
     last_login_at: datetime | None = None
+    credential_version: int = 1
+    role_codes: list[PlatformRoleCode] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+    environment: PlatformEnvironment = "uat"
+    access_reviewed_at: datetime | None = None
+    access_review_due_at: datetime | None = None
+
+
+class PlatformRoleDefinitionRead(BaseSchema):
+    code: PlatformRoleCode
+    label: str
+    permissions: list[str]
+
+
+class PlatformTeamOperatorRead(PlatformOperatorRead):
+    active_session_count: int = 0
+    stale_access: bool = False
+    review_due: bool = False
+    deactivated_at: datetime | None = None
+    deactivation_reason: str | None = None
+    deep_links: dict[str, str] = Field(default_factory=dict)
+
+
+class PlatformOperatorInviteRequest(BaseSchema):
+    username: str
+    email: str = Field(min_length=3, max_length=255)
+    display_name: str = Field(min_length=1, max_length=200)
+    role_code: PlatformRoleCode
+    environment: PlatformEnvironment
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+
+    @field_validator("username")
+    @classmethod
+    def normalize_invite_username(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not USERNAME_PATTERN.fullmatch(normalized):
+            raise ValueError("username format is invalid")
+        return normalized
+
+    @field_validator("email")
+    @classmethod
+    def normalize_invite_email(cls, value: str) -> str:
+        return _required_text(value, field_name="email", max_length=255).lower()
+
+    @field_validator("display_name", "reason")
+    @classmethod
+    def normalize_invite_text(cls, value: str, info) -> str:
+        return _required_text(value, field_name=info.field_name, max_length=500)
+
+
+class PlatformOperatorInvitationRead(BaseSchema):
+    id: uuid.UUID
+    username: str
+    email: str
+    display_name: str
+    role_code: PlatformRoleCode
+    environment: PlatformEnvironment
+    expires_at: datetime
+    accepted_at: datetime | None = None
+    revoked_at: datetime | None = None
+    acceptance_token: str | None = None
+    deep_link: str | None = None
+
+
+class PlatformOperatorInvitationAccept(BaseSchema):
+    token: str = Field(min_length=32, max_length=500)
+    password: str = Field(min_length=12, max_length=128)
+
+
+class PlatformRoleAssignmentRequest(BaseSchema):
+    role_code: PlatformRoleCode
+    environment: PlatformEnvironment
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+    expected_credential_version: int = Field(ge=1)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_assignment_reason(cls, value: str) -> str:
+        return _required_text(value, field_name="reason", max_length=500)
+
+
+class PlatformRoleRevokeRequest(PlatformRoleAssignmentRequest):
+    pass
+
+
+class PlatformOperatorStateRequest(BaseSchema):
+    active: bool
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+    expected_credential_version: int = Field(ge=1)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_state_reason(cls, value: str) -> str:
+        return _required_text(value, field_name="reason", max_length=500)
+
+
+class PlatformAccessReviewRequest(BaseSchema):
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+    expected_credential_version: int = Field(ge=1)
+    next_review_due_at: datetime
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_review_reason(cls, value: str) -> str:
+        return _required_text(value, field_name="reason", max_length=500)
+
+
+class PlatformOperatorSessionsRevokeRequest(BaseSchema):
+    environment: PlatformEnvironment
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_session_reason(cls, value: str) -> str:
+        return _required_text(value, field_name="reason", max_length=500)
 
 
 class PlatformTokenResponse(BaseSchema):

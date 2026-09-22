@@ -1,7 +1,7 @@
 # WP60 — Company Admin Maturity, Access Review and Company Audit
 
-Status: FOCUSED LOCAL CHECKPOINT PASSED — Batch B combined UAT deferred through WP61
-Environment: Local checkpoint passed; QA Access Mode UAT enablement pending authenticated deploy channel
+Status: LOCAL + UAT ACCESS-READINESS PASSED — Batch B full persona QA deferred through WP61
+Environment: UAT release `747929b`; Production unchanged
 Production: HOLD
 
 ## Objective
@@ -77,5 +77,7 @@ authenticated role journey, rollback/restore and Production identity proof.
   remain visible but disabled/HOLD pending Product Owner decisions.
 - Focused backend suites passed 37/37, frontend type-check and production build
   passed, both Platform and legacy migration graphs have one WP60 head.
-- Full Batch B regression, UAT journey and rollback/restore remain deferred to
-  the combined WP59–WP61 close as authorized.
+- UAT QA Access readiness passed with 8 Tenant personas, 3 Platform personas,
+  short-lived audited sessions, missing-key 404 and legacy bypass 404.
+- Full Batch B journey coverage and restore rehearsal remain deferred to the
+  combined WP59–WP61 close as authorized.

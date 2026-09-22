@@ -1,7 +1,7 @@
 # WP60 Focused Checkpoint — Company Admin Maturity
 
 Date: 2026-09-22
-Decision: Local focused checkpoint PASS; combined Batch B UAT/rollback deferred through WP61
+Decision: Local checkpoint and UAT access-readiness PASS; full Batch B persona QA/restore deferred through WP61
 Production: NO-GO / unchanged
 
 WP60 now has server-authoritative Company people lifecycle, access review,
@@ -19,14 +19,16 @@ MFA remains an explicit read-only HOLD and no business policy was invented.
 - Git diff whitespace gate: pass.
 
 QA Access Mode was inserted before this checkpoint under Product Owner
-authorization. Its Local safety gate passed and its UAT activation is blocked
-only by the current Tailscale re-authentication prompt; no server or Production
-state was changed while the channel was unavailable.
+authorization. UAT now runs backend release `747929b` and frontend release
+`03639b4` with the legacy credentialless bypass disabled. The mode discovered
+all 8 Tenant and 3 Platform personas and issued all 11 short-lived sessions.
+Missing-key access fails as 404. Production container identities are unchanged.
 
 ## Holds carried forward
 
-- Full WP59–WP61 regression, UAT role journeys and rollback/restore occur at the
-  Batch B close.
+- Full WP59–WP61 regression, UAT role journeys and restore rehearsal occur at
+  the Batch B close. A complete pre-migration UAT backup and rollback release
+  are already available.
 - Tenant MFA enforcement/recovery, physical devices, live providers, real tax
   documents, Retail source cutover and Takeaway/Central Kitchen writes remain
   HOLD.

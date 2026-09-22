@@ -1,6 +1,6 @@
 # WP59 — Platform Identity, Team/RBAC and Operator Governance
 
-Status: IN PROGRESS
+Status: SOFTWARE UAT CHECKPOINT PASSED
 Environment: Local and UAT only
 Production: HOLD
 
@@ -38,3 +38,14 @@ existing bootstrap owner account.
 WP59 may be checkpointed after focused backend/frontend tests and a Local visual
 review. Full repository validation and migration rehearsal are required at the
 Batch B gate.
+
+## Checkpoint result
+
+- Local and immutable-image focused tests passed 18/18.
+- Immutable UAT release `57323f1` is healthy with Platform schema head
+  `p14platform0018`.
+- Authenticated API and desktop/tablet browser journeys passed; temporary
+  operators and sessions were disabled or revoked after verification.
+- App-only rollback to WP58 and restore to WP59 passed in 9 seconds each.
+- Production container identities remained unchanged.
+- Full repository regression remains assigned to the combined Batch B gate.

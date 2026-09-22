@@ -184,6 +184,8 @@ class RetailUxContractTests(unittest.TestCase):
         self.assertIn("pricedLine.authoritative_unit_price", page)
         self.assertIn("expected_price_version: line.priceVersion", page)
         self.assertIn("ใช้ราคา Server", page)
+        self.assertIn('catalog_scope: "retail_sale"', page)
+        self.assertIn("signedRows.find((item) => item.id === result.product?.id)", page)
 
 
 if __name__ == "__main__":

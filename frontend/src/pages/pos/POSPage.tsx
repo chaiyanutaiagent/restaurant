@@ -1298,7 +1298,18 @@ export default function POSPage(): JSX.Element {
         });
         return;
       }
-      const sourceProduct = source ?? eligibleProducts.find((item) => item.id === result.product?.id);
+      let sourceProduct = source ?? eligibleProducts.find((item) => item.id === result.product?.id);
+      if (!sourceProduct) {
+        const catalogResponse = await productApi.list({
+          search: code,
+          is_active: true,
+          catalog_scope: "retail_sale",
+          page: 1,
+          limit: 20,
+        });
+        const signedRows = catalogResponse.data.data as ProductListItem[];
+        sourceProduct = signedRows.find((item) => item.id === result.product?.id);
+      }
       if (!sourceProduct) {
         setRetailException({ kind: "permission", code, message: "สินค้าอยู่นอก Catalog ที่ Server ลงนามให้ Counter นี้" });
         return;

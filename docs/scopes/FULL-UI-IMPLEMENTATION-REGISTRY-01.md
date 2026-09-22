@@ -38,8 +38,8 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP54 | Restaurant Counter Readiness and physical-UAT shell | Delivery gate closed; evidence shell, release identity and rollback passed | Physical checks remain open; Production unchanged |
 | WP55 | Retail foundation and Scan-first sale | Authenticated Retail checkpoint passed | Legacy source unchanged |
 | WP56 | Retail exceptions, cart/customer/discount and payment/receipt | Software Gate passed; physical acceptance remains HOLD | Cash Pilot only; Production/Legacy source unchanged |
-| WP57 | Retail Hold/Resume, Return/Exchange/Void and Shift Operations | Local engineering gate passed; UAT pending | Local/UAT only; Cash Pilot; Legacy source unchanged |
-| WP58 | Retail Offline Recovery, Counter Readiness and Retail Phase Gate | Planned | No cutover/physical pass implied |
+| WP57 | Retail Hold/Resume, Return/Exchange/Void and Shift Operations | Software UAT and rollback passed; physical acceptance remains HOLD | Local/UAT only; Cash Pilot; Legacy identities fail closed |
+| WP58 | Retail Offline Recovery, Counter Readiness and Retail Phase Gate | Ready to start | No cutover/physical pass implied |
 | WP59 | Platform Console identity, Team/RBAC and operator governance | Planned | Platform Production unchanged |
 | WP60 | Company Admin maturity, access review and Company audit | Planned | Tenant MFA/session decisions required |
 | WP61 | Shared ERP operational and finance maturity | Planned | Real tax/provider/accountant gates remain |
@@ -56,7 +56,7 @@ The execution contract is recorded in `FULL-UI-BATCH-EXECUTION-PLAN-02.md`. WP54
 
 | Batch | WP range | Checkpoint |
 |---|---|---|
-| A — Retail POS | WP55–WP58 | WP55 authenticated checkpoint and WP56 Software Gate passed; WP56 physical/Production HOLD; WP57 Local gate passed and UAT pending; combined Batch gate after WP58 |
+| A — Retail POS | WP55–WP58 | WP55 authenticated checkpoint and WP56–WP57 Software Gates passed; physical/Production HOLD; combined Batch gate after WP58 |
 | B — Platform/Company/ERP | WP59–WP61 | Planned |
 | C — Takeaway/Kitchen/Public | WP62–WP64 | Planned; unsafe writes remain gated |
 | D — Governance/full-system UAT | WP65 | Planned |
@@ -126,9 +126,9 @@ The superseded non-v2 Action Center file is not counted.
 | R03 | `retail-pos/03-retail-pos-product-exception-states.png` | WP56 | Software Gate passed; physical HOLD | Signed Server lookup returns persistent unknown/ambiguous/Variant/stock/price states and fails closed. |
 | R04 | `retail-pos/04-retail-pos-cart-customer-discount.png` | WP56 | Software Gate passed; physical HOLD | Server quote and masked customer data are active; Loyalty is disabled until atomic reservation exists. |
 | R05 | `retail-pos/05-retail-pos-payment-receipt.png` | WP56 | Software Gate passed; physical HOLD | Cash Pilot only; non-cash/offline fail closed and hardware remains physical-UAT gated. |
-| R06 | `retail-pos/06-retail-pos-hold-resume-bill-v2.png` | WP57 | Local gate passed; UAT pending | Server-backed Hold, version/conflict/idempotency and signed Retail context passed Local contract tests. |
-| R07 | `retail-pos/07-retail-pos-return-exchange-void.png` | WP57 | Local gate passed; UAT pending | Cash Return is enabled; Exchange/provider/tax retry remain fail-closed and UAT side-effect evidence is pending. |
-| R08 | `retail-pos/08-retail-pos-shift-operations.png` | WP57 | Local gate passed; UAT pending | Retail shift authority is isolated to the dedicated data source; Production cutover remains unauthorized. |
+| R06 | `retail-pos/06-retail-pos-hold-resume-bill-v2.png` | WP57 | Software UAT passed; physical HOLD | Server-backed Hold, version/conflict/idempotency and signed Retail context passed authenticated UAT. |
+| R07 | `retail-pos/07-retail-pos-return-exchange-void.png` | WP57 | Software UAT passed; physical HOLD | Cash Return maker-checker and exact-once side effects passed; Exchange/provider/tax retry remain fail-closed. |
+| R08 | `retail-pos/08-retail-pos-shift-operations.png` | WP57 | Software UAT passed; physical HOLD | Retail shift authority stayed isolated to Retail and outside the shared journal; Production cutover remains unauthorized. |
 | R09 | `retail-pos/09-retail-pos-offline-sync-recovery.png` | WP58 | Planned | Retail offline sale remains disabled unless a signed contract is approved. |
 | R10 | `retail-pos/10-retail-pos-counter-readiness.png` | WP58 | Planned | Scanner/printer/drawer/payment terminal require physical UAT. |
 

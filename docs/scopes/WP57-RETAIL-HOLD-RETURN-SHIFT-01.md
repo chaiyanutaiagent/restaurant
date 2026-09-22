@@ -83,4 +83,4 @@ The migrations were rehearsed on an isolated PostgreSQL database using `upgrade 
 8. Rehearse app-only rollback/restore, verify public health and compare Production identities before/after.
 9. Disable UAT personas and revoke sessions/assignments after evidence capture.
 
-WP57 remains **UAT pending / Production NO-GO** until these steps pass. Physical scanner/printer/cash-drawer/network acceptance remains part of WP58 and is not implied by browser testing.
+WP57 software UAT, persona containment and rollback/restore are **PASS**. The physical gate and Production gate remain **HOLD / NO-GO**. Scanner, printer, cash drawer and stateful network acceptance remain part of WP58 and are not implied by browser/API testing.

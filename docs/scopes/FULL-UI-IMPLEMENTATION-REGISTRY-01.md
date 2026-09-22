@@ -35,7 +35,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP51 | Restaurant Hold Draft and Order Center UX | Implemented; UAT gate closed | Production unchanged |
 | WP52 | Restaurant Cancel, Discount, Refund, Receipt Center UX | UAT phase gate closed; paired-Counter browser, API and rollback passed | Sandbox/UAT only |
 | WP53 | Restaurant Offline and Sync Recovery UX | Implemented on UAT; paired shell/rollback passed, stateful network gate carried to WP54 | Production unchanged |
-| WP54 | Restaurant Counter Readiness and physical-UAT shell | Implemented locally; engineering/UAT gate pending | No physical pass implied; Production unchanged |
+| WP54 | Restaurant Counter Readiness and physical-UAT shell | Delivery gate closed; evidence shell, release identity and rollback passed | Physical checks remain open; Production unchanged |
 | WP55 | Retail foundation and Scan-first sale | Planned | Legacy source unchanged |
 | WP56 | Retail exceptions, cart/customer/discount and payment/receipt | Planned | Legacy source unchanged |
 | WP57 | Retail Hold/Resume, Return/Exchange/Void and Shift Operations | Planned | Legacy source unchanged |
@@ -49,6 +49,17 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP65 | Integration, Reporting, Reconciliation and Release Governance | Planned | Provider/retention/owner gates remain |
 
 Hotel PMS is out of scope and has no WP assignment.
+
+## Fast-track batch execution
+
+The execution contract is recorded in `FULL-UI-BATCH-EXECUTION-PLAN-02.md`. WP54 is closed at the delivery level with the physical acceptance gate intentionally open; Batch A may therefore begin without implying Production or hardware readiness.
+
+| Batch | WP range | Checkpoint |
+|---|---|---|
+| A — Retail POS | WP55–WP58 | WP55 next; combined Batch gate after WP58 |
+| B — Platform/Company/ERP | WP59–WP61 | Planned |
+| C — Takeaway/Kitchen/Public | WP62–WP64 | Planned; unsafe writes remain gated |
+| D — Governance/full-system UAT | WP65 | Planned |
 
 ## Image acceptance registry — Customer Company (10)
 
@@ -104,7 +115,7 @@ The superseded non-v2 Action Center file is not counted.
 | D31 | `design-system/31-restaurant-kds-pickup-flow.png` | WP49/WP52 | Adapted | KDS works; final Order Center/Pickup cohesion is WP52. |
 | D32 | `design-system/32-restaurant-pos-bill-receipt-center.png` | WP52 | Adapted | Current-shift refresh/search/filter/detail, receipt, eligible/ineligible Void and Refund routing passed paired-Counter UAT. |
 | D33 | `design-system/33-restaurant-pos-offline-sync-recovery.png` | WP53 | Implemented; conditional UAT | Real encrypted outbox drives list-detail UX; paired empty-state/tablet/rollback passed, stateful network paths remain WP54. |
-| D34 | `design-system/34-restaurant-pos-counter-readiness-check.png` | WP54 | Implemented; UAT pending | Automatic evidence and physical evidence are separated; Browser capability is not a physical pass. |
+| D34 | `design-system/34-restaurant-pos-counter-readiness-check.png` | WP54 | Implemented; delivery gate closed | Automatic evidence and physical evidence are separated; 15 physical checks remain open and Browser capability is not a physical pass. |
 
 ## Image acceptance registry — Retail POS R01–R10 (10)
 

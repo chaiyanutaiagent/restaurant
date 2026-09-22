@@ -55,10 +55,12 @@ from app.services.platform_operations_service import collect_runtime_state
 from app.services.takeaway_reference_projector import run_takeaway_reference_projector
 from app.services.shared_reporting_worker import run_shared_reporting_projector
 from app.utils.webhook_dispatcher import run_webhook_retry_worker
+from app.utils.access_log_redaction import install_access_log_secret_filter
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    install_access_log_secret_filter()
     await init_db()
     legacy_database_name, platform_database_name, restaurant_database_name = await asyncio.gather(
         current_database_name(AsyncSessionLocal),

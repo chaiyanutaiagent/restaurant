@@ -96,7 +96,9 @@ transaction was added.
 - Invalid, expired or replayed webhook signatures are rejected.
 - External price/total mismatch is quarantined.
 - Retry count is bounded and dead-letter is reconstructable.
-- Secret values and provider response bodies are absent from audit evidence.
+- Secret values and provider response bodies are absent from audit evidence;
+  sensitive query parameter values are redacted from Backend access logs even
+  when a caller submits a credential through a rejected URL.
 
 ## QA access cleanup
 

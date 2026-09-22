@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import logging
 import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
@@ -16,6 +17,7 @@ from app.schemas.api_integration import APIKeyCreate, PublicOrderCreate
 from app.services.company_governance_service import CompanyGovernanceService, coverage_matrix
 from app.services.external_order_validation_service import validate_external_order
 from app.utils.api_key_auth import get_api_key_auth, verify_api_key
+from app.utils.access_log_redaction import AccessLogSecretFilter, redact_access_path
 from app.utils.integration_security import (
     decrypt_integration_secret,
     encrypt_integration_secret,
@@ -42,6 +44,23 @@ class _ProductDb:
 
 
 class IntegrationSecurityTests(unittest.TestCase):
+    def test_access_log_redacts_rejected_query_credentials(self) -> None:
+        raw = "/api/public/v1/products?limit=1&api_key=erppos_ABCDEF12_sensitive&token=also-sensitive"
+        redacted = redact_access_path(raw)
+        self.assertNotIn("sensitive", redacted)
+        self.assertEqual(redacted.count("[REDACTED]"), 2)
+        record = logging.LogRecord(
+            "uvicorn.access",
+            logging.INFO,
+            __file__,
+            1,
+            '%s - "%s %s HTTP/%s" %d',
+            ("127.0.0.1:1", "GET", raw, "1.1", 401),
+            None,
+        )
+        self.assertTrue(AccessLogSecretFilter().filter(record))
+        self.assertNotIn("sensitive", str(record.args))
+
     def test_secret_is_encrypted_and_plaintext_fails_closed(self) -> None:
         secret = "s" * 40
         ciphertext = encrypt_integration_secret(secret)

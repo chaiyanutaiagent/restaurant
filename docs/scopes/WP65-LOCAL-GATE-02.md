@@ -14,8 +14,8 @@ closed in the WP65 candidate before this gate.
 
 ## Automated evidence
 
-- Backend regression: 563 passed, 1 skipped.
-- WP65 integration/governance contract tests: 10 passed.
+- Backend regression: 564 passed, 1 skipped.
+- WP65 integration/governance contract tests: 11 passed.
 - Frontend TypeScript: passed.
 - Frontend production build: passed; the existing non-blocking chunk-size warning
   remains.
@@ -35,7 +35,7 @@ closed in the WP65 candidate before this gate.
 
 The first full backend run mounted only `backend/` and failed tests that resolve
 fixtures from the repository root. Re-running the same suite with the complete
-repository mounted passed 563/563 runnable tests; this was a test-harness mount
+repository mounted passed 564/564 runnable tests; this was a test-harness mount
 error, not a product failure.
 
 ## Local backup and migration rehearsal

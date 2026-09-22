@@ -12,7 +12,12 @@ type SyncedProduct = ProductListItem & { synced_at: number };
 type SyncedCategory = Category & { synced_at: number };
 type SyncedUnit = Unit & { synced_at: number };
 type SyncedStockBalance = StockBalance & { synced_at: number };
-export async function syncProductCatalog(catalogScope: "all" | "restaurant_menu" = "all"): Promise<void> {
+export const POS_CATALOG_ISOLATION_KEY = "pos-catalog-isolation-key";
+
+export async function syncProductCatalog(
+  catalogScope: "all" | "restaurant_menu" | "retail_sale" = "all",
+  isolationKey?: string,
+): Promise<void> {
   try {
     const limit = 100;
     let page = 1;
@@ -49,6 +54,11 @@ export async function syncProductCatalog(catalogScope: "all" | "restaurant_menu"
       await db.categories.bulkPut(categories);
       await db.units.bulkPut(units);
     });
+    if (isolationKey) {
+      window.localStorage.setItem(POS_CATALOG_ISOLATION_KEY, isolationKey);
+    } else {
+      window.localStorage.removeItem(POS_CATALOG_ISOLATION_KEY);
+    }
   } catch {
     return;
   }

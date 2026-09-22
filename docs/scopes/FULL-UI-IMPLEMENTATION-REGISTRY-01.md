@@ -36,7 +36,7 @@ The filesystem contains 55 PNG files. `customer-company/05-customer-company-acti
 | WP52 | Restaurant Cancel, Discount, Refund, Receipt Center UX | UAT phase gate closed; paired-Counter browser, API and rollback passed | Sandbox/UAT only |
 | WP53 | Restaurant Offline and Sync Recovery UX | Implemented on UAT; paired shell/rollback passed, stateful network gate carried to WP54 | Production unchanged |
 | WP54 | Restaurant Counter Readiness and physical-UAT shell | Delivery gate closed; evidence shell, release identity and rollback passed | Physical checks remain open; Production unchanged |
-| WP55 | Retail foundation and Scan-first sale | Planned | Legacy source unchanged |
+| WP55 | Retail foundation and Scan-first sale | Implementation complete; Local checkpoint passed, UAT pending | Legacy source unchanged |
 | WP56 | Retail exceptions, cart/customer/discount and payment/receipt | Planned | Legacy source unchanged |
 | WP57 | Retail Hold/Resume, Return/Exchange/Void and Shift Operations | Planned | Legacy source unchanged |
 | WP58 | Retail Offline Recovery, Counter Readiness and Retail Phase Gate | Planned | No cutover/physical pass implied |
@@ -56,7 +56,7 @@ The execution contract is recorded in `FULL-UI-BATCH-EXECUTION-PLAN-02.md`. WP54
 
 | Batch | WP range | Checkpoint |
 |---|---|---|
-| A — Retail POS | WP55–WP58 | WP55 next; combined Batch gate after WP58 |
+| A — Retail POS | WP55–WP58 | WP55 UAT pending; combined Batch gate after WP58 |
 | B — Platform/Company/ERP | WP59–WP61 | Planned |
 | C — Takeaway/Kitchen/Public | WP62–WP64 | Planned; unsafe writes remain gated |
 | D — Governance/full-system UAT | WP65 | Planned |
@@ -121,8 +121,8 @@ The superseded non-v2 Action Center file is not counted.
 
 | # | Approved image | WP | Current state | Contract/readiness note |
 |---:|---|---|---|---|
-| R01 | `retail-pos/01-retail-pos-foundation-flow-board.png` | WP55 | Planned | Retail legacy source remains unchanged. |
-| R02 | `retail-pos/02-retail-pos-scan-first-sale.png` | WP55 | Planned | Scan-first sale must use the dedicated signed Retail context. |
+| R01 | `retail-pos/01-retail-pos-foundation-flow-board.png` | WP55 | Implementation complete; UAT pending | Retail shell is selected by signed context; Legacy source remains unchanged. |
+| R02 | `retail-pos/02-retail-pos-scan-first-sale.png` | WP55 | Implementation complete; UAT pending | Brand-scoped scan-first Catalog, isolated cache and online-only checkout fail closed. |
 | R03 | `retail-pos/03-retail-pos-product-exception-states.png` | WP56 | Planned | Unknown barcode/price/stock exceptions fail closed. |
 | R04 | `retail-pos/04-retail-pos-cart-customer-discount.png` | WP56 | Planned | Loyalty atomicity and Server price policy are prerequisites. |
 | R05 | `retail-pos/05-retail-pos-payment-receipt.png` | WP56 | Planned | Payment/provider and hardware remain sandbox/physical-UAT gated. |

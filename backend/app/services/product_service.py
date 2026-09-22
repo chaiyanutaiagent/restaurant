@@ -143,12 +143,15 @@ class ProductService:
         is_for_sale: bool | None = None,
         brand_id: uuid.UUID | None = None,
         include_company_wide: bool = False,
+        excluded_product_types: set[str] | None = None,
     ) -> tuple[list[Product], int]:
         filters = [Product.company_id == company_id, Product.deleted_at.is_(None)]
         if category_id:
             filters.append(Product.category_id == category_id)
         if product_type:
             filters.append(Product.product_type == product_type)
+        if excluded_product_types:
+            filters.append(Product.product_type.not_in(sorted(excluded_product_types)))
         if is_active is not None:
             filters.append(Product.is_active.is_(is_active))
         if is_for_sale is not None:

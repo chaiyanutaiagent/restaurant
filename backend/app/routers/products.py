@@ -173,7 +173,7 @@ async def list_products(
     product_type: str | None = Query(default=None),
     is_active: bool | None = Query(default=None),
     is_for_sale: bool | None = Query(default=None),
-    catalog_scope: Literal["all", "restaurant_menu"] = Query(default="all"),
+    catalog_scope: Literal["all", "restaurant_menu", "retail_sale"] = Query(default="all"),
     current: TokenData = Depends(require_permission("inventory.product.view")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -181,6 +181,7 @@ async def list_products(
     effective_is_for_sale = is_for_sale
     effective_brand_id: uuid.UUID | None = None
     include_company_wide = False
+    excluded_product_types: set[str] | None = None
     if catalog_scope == "restaurant_menu":
         if current.branch_id is None or current.brand_id is None or current.business_type != "restaurant":
             raise HTTPException(
@@ -191,6 +192,22 @@ async def list_products(
         effective_is_for_sale = True
         effective_brand_id = current.brand_id
         include_company_wide = True
+    elif catalog_scope == "retail_sale":
+        if (
+            current.branch_id is None
+            or current.brand_id is None
+            or current.business_type != "retail_pos"
+            or current.target_database != "retail_pos"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Retail catalog requires a signed Retail Brand and Branch context",
+            )
+        effective_product_type = None
+        effective_is_for_sale = True
+        effective_brand_id = current.brand_id
+        include_company_wide = False
+        excluded_product_types = {"menu_item", "raw_material"}
     service = ProductService(db)
     products, total = await service.list_products(
         current.company_id,
@@ -203,6 +220,7 @@ async def list_products(
         is_for_sale=effective_is_for_sale,
         brand_id=effective_brand_id,
         include_company_wide=include_company_wide,
+        excluded_product_types=excluded_product_types,
     )
     data = [ProductListItem.model_validate(product).model_dump() for product in products]
     return ok(data, meta={"total": total, "page": page, "limit": limit})

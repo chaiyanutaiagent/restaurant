@@ -29,7 +29,7 @@ export const productApi = {
     product_type?: string;
     is_active?: boolean;
     is_for_sale?: boolean;
-    catalog_scope?: "all" | "restaurant_menu";
+    catalog_scope?: "all" | "restaurant_menu" | "retail_sale";
   }) => api.get("/products", { params }),
   get: (id: string) => api.get(`/products/${id}`),
   create: (data: Partial<Product>) => api.post("/products", data),

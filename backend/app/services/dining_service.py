@@ -15,7 +15,7 @@ from app.models.audit import AuditLog
 from app.models.pos import CashierShift, SaleOrder
 from app.models.product import Product, Category
 from app.models.restaurant import (
-    BrandBranch, DiningOrder, DiningOrderItem, DiningSession, DiningTable, KitchenTicket,
+    Brand, BrandBranch, DiningOrder, DiningOrderItem, DiningSession, DiningTable, KitchenTicket,
 )
 from app.models.settings import BranchSettings
 from app.models.branch import Branch
@@ -54,6 +54,27 @@ class DiningService:
             return
         if new_status not in allowed.get(current_status, set()):
             raise ValueError(f"ไม่สามารถเปลี่ยนสถานะจาก {current_status} เป็น {new_status} ได้")
+
+    async def _resolve_restaurant_brand_id(
+        self,
+        company_id: uuid.UUID,
+        branch_id: uuid.UUID,
+    ) -> uuid.UUID | None:
+        rows = list((await self.db.scalars(
+            select(BrandBranch.brand_id)
+            .join(Brand, Brand.id == BrandBranch.brand_id)
+            .where(
+                BrandBranch.company_id == company_id,
+                BrandBranch.branch_id == branch_id,
+                BrandBranch.is_active.is_(True),
+                Brand.company_id == company_id,
+                Brand.business_type == "restaurant",
+                Brand.is_active.is_(True),
+            )
+            .limit(2)
+        )).all())
+        unique_ids = list(dict.fromkeys(rows))
+        return unique_ids[0] if len(unique_ids) == 1 else None
 
     @staticmethod
     def _merge_local_print_state(session: DiningSession, payload: WapPaidOrderRequest) -> bool:
@@ -328,13 +349,9 @@ class DiningService:
                     )
                 return existing
 
-        brand_id = await self.db.scalar(
-            select(BrandBranch.brand_id).where(
-                BrandBranch.company_id == company_id,
-                BrandBranch.branch_id == branch_id,
-                BrandBranch.is_active.is_(True),
-            )
-        )
+        brand_id = await self._resolve_restaurant_brand_id(company_id, branch_id)
+        if brand_id is None:
+            raise ValueError("Restaurant Brand ของสาขาไม่ชัดเจน กรุณาตรวจ Brand/Branch ก่อนรับออเดอร์")
         channel = "restaurant_quick_service" if session.table_id is None else (
             "restaurant_qr" if source == "qr_self" else "restaurant_table"
         )
@@ -1111,10 +1128,18 @@ class DiningService:
         if not settings or not settings.fb_table_qr_enabled:
             return None
 
+        brand_id = await self._resolve_restaurant_brand_id(
+            active_session.company_id,
+            active_session.branch_id,
+        )
+        if brand_id is None:
+            return None
+
         products_rows = (await self.db.scalars(
             select(Product)
             .where(
                 Product.company_id == active_session.company_id,
+                Product.brand_id == brand_id,
                 Product.product_type == "menu_item",
                 Product.is_active.is_(True),
                 Product.is_for_sale.is_(True),
@@ -1122,12 +1147,24 @@ class DiningService:
             .order_by(Product.name)
         )).all()
 
+        category_ids = {product.category_id for product in products_rows if product.category_id is not None}
         categories_raw = (await self.db.scalars(
-            select(Category).where(Category.company_id == active_session.company_id, Category.is_active.is_(True))
-        )).all()
+            select(Category).where(
+                Category.company_id == active_session.company_id,
+                Category.id.in_(category_ids),
+                Category.is_active.is_(True),
+            )
+        )).all() if category_ids else []
 
         cat_map = {c.id: c.name for c in categories_raw}
-        categories = [{"id": str(c.id), "name": c.name} for c in categories_raw]
+        categories: list[dict[str, str]] = []
+        seen_category_names: set[str] = set()
+        for category in categories_raw:
+            normalized_name = " ".join(category.name.split()).casefold()
+            if normalized_name in seen_category_names:
+                continue
+            seen_category_names.add(normalized_name)
+            categories.append({"id": str(category.id), "name": category.name})
 
         products = [
             PublicMenuProduct(

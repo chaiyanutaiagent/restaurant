@@ -1,6 +1,9 @@
 import {
   ChefHat,
   ClipboardList,
+  Clock3,
+  FileClock,
+  MonitorCog,
   QrCode,
   ShoppingBag,
   Store,
@@ -12,8 +15,12 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/stores/auth.store";
 
 type PosWorkspaceNavProps = {
+  mode?: "restaurant" | "retail";
   heldBillCount?: number;
   onHeldBills?: () => void;
+  onBillCenter?: () => void;
+  onShift?: () => void;
+  onDeviceStatus?: () => void;
   onNavigate?: (path: string, label: string) => void;
 };
 
@@ -26,8 +33,12 @@ type WorkspaceItem = {
 };
 
 export default function PosWorkspaceNav({
+  mode = "restaurant",
   heldBillCount,
   onHeldBills,
+  onBillCenter,
+  onShift,
+  onDeviceStatus,
   onNavigate,
 }: PosWorkspaceNavProps): JSX.Element {
   const location = useLocation();
@@ -91,6 +102,38 @@ export default function PosWorkspaceNav({
       return;
     }
     navigate(path);
+  }
+
+  if (mode === "retail") {
+    const retailItems = [
+      { label: "ขาย", icon: Store, onClick: () => open("/pos", "ขาย") },
+      { label: `พักบิล ${heldBillCount ?? 0}`, icon: ClipboardList, onClick: onHeldBills },
+      { label: "บิล / คืนสินค้า", icon: FileClock, onClick: onBillCenter },
+      { label: "กะ", icon: Clock3, onClick: onShift },
+      { label: "สถานะเครื่อง", icon: MonitorCog, onClick: onDeviceStatus },
+    ];
+    return (
+      <nav data-testid="retail-pos-workspace-bar" aria-label="พื้นที่ทำงาน Retail POS" className="shrink-0 border-b border-blue-100 bg-white px-3 py-2 text-slate-900 shadow-sm">
+        <div className="flex items-center gap-2 overflow-x-auto">
+          {retailItems.map((item, index) => {
+            const Icon = item.icon;
+            const isActive = index === 0 && location.pathname === "/pos";
+            return (
+              <button
+                key={item.label}
+                type="button"
+                disabled={!item.onClick}
+                aria-current={isActive ? "page" : undefined}
+                onClick={item.onClick}
+                className={`flex min-h-12 shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${isActive ? "bg-blue-600 font-semibold text-white shadow-sm" : "font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700"}`}
+              >
+                <Icon className="h-5 w-5" /> {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+    );
   }
 
   return (

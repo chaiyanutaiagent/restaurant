@@ -52,7 +52,7 @@ import {
   syncRestaurantPendingOrders,
   type RestaurantOutboxSummary,
 } from "@/lib/restaurantOffline";
-import { syncPendingSales, syncProductCatalog, syncStockBalances, useOfflineProducts, useOnlineStatus } from "@/lib/syncService";
+import { POS_CATALOG_ISOLATION_KEY, syncPendingSales, syncProductCatalog, syncStockBalances, useOfflineProducts, useOnlineStatus } from "@/lib/syncService";
 import { wapApi, type WapOrder } from "@/lib/wapApi";
 import { useAuthStore } from "@/stores/auth.store";
 import { useDeviceStore } from "@/stores/device.store";
@@ -315,13 +315,21 @@ export default function POSPage(): JSX.Element {
   const navigate = useNavigate();
   const logout = useLogout("/login?next=/pos");
   const location = useLocation();
-  const isTakeawayMode = new URLSearchParams(location.search).get("channel") === "takeaway";
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const isOnline = useOnlineStatus();
+  const companyId = useAuthStore((state) => state.companyId);
+  const brandId = useAuthStore((state) => state.brandId);
   const branchId = useAuthStore((state) => state.branchId);
+  const businessType = useAuthStore((state) => state.businessType);
+  const targetDatabase = useAuthStore((state) => state.targetDatabase);
   const user = useAuthStore((state) => state.user);
   const hasPermission = useAuthStore((state) => state.hasPermission);
+  const isRetailMode = businessType === "retail_pos";
+  const isTakeawayMode = !isRetailMode && new URLSearchParams(location.search).get("channel") === "takeaway";
+  const retailContextValid = !isRetailMode || Boolean(companyId && brandId && branchId && targetDatabase === "retail_pos");
+  const catalogScope = isRetailMode ? "retail_sale" as const : "restaurant_menu" as const;
+  const catalogIsolationKey = `${companyId ?? "missing-company"}:${brandId ?? "missing-brand"}:${branchId ?? "missing-branch"}:${businessType ?? "missing-type"}:${catalogScope}`;
   const pairedDevice = useDeviceStore((state) => state.device);
   const deviceSessionHydrated = useDeviceStore((state) => state.hydrated);
   const hydrateDeviceSession = useDeviceStore((state) => state.hydrate);
@@ -478,18 +486,18 @@ export default function POSPage(): JSX.Element {
   });
 
   const onlineSearchQuery = useQuery({
-    queryKey: ["pos", "products", searchTerm],
+    queryKey: ["pos", "products", catalogScope, catalogIsolationKey, searchTerm],
     queryFn: async () => {
       const response = await productApi.list({
         search: searchTerm,
         is_active: true,
-        catalog_scope: "restaurant_menu",
+        catalog_scope: catalogScope,
         page: 1,
         limit: 100,
       });
       return response.data.data as ProductListItem[];
     },
-    enabled: isOnline && searchTerm.trim().length > 0,
+    enabled: isOnline && retailContextValid && searchTerm.trim().length > 0,
   });
   const loyaltySettingsQuery = useQuery({
     queryKey: ["pos", "loyalty-settings"],
@@ -616,9 +624,9 @@ export default function POSPage(): JSX.Element {
 
   useEffect(() => {
     let active = true;
-    if (!isOnline) return () => { active = false; };
+    if (!isOnline || !retailContextValid) return () => { active = false; };
     void Promise.all([
-      syncProductCatalog("restaurant_menu"),
+      syncProductCatalog(catalogScope, catalogIsolationKey),
       syncStockBalances(branchId ?? undefined),
       syncPendingSales(),
     ]).then(() => {
@@ -631,7 +639,7 @@ export default function POSPage(): JSX.Element {
       setLastSyncAt(new Date());
     }).catch(() => undefined);
     return () => { active = false; };
-  }, [branchId, isOnline, queryClient]);
+  }, [branchId, catalogIsolationKey, catalogScope, isOnline, queryClient, retailContextValid]);
 
   useEffect(() => {
     if (!isTakeawayMode) return;
@@ -704,7 +712,10 @@ export default function POSPage(): JSX.Element {
   const locations = locationsQuery.data ?? [];
   const catalogCategories = categoriesQuery.data ?? [];
   const stockBalances = stockBalancesQuery.data ?? [];
-  const baseProducts = (isOnline && searchTerm.trim().length > 0 ? onlineSearchQuery.data : offlineProducts) ?? [];
+  const catalogCacheTrusted = window.localStorage.getItem(POS_CATALOG_ISOLATION_KEY) === catalogIsolationKey;
+  const baseProducts = (isOnline && searchTerm.trim().length > 0
+    ? onlineSearchQuery.data
+    : catalogCacheTrusted ? offlineProducts : []) ?? [];
   const takeawayMenuByProductId = useMemo(
     () => new Map((takeawayMenuQuery.data?.products ?? []).map((product) => [product.id, product])),
     [takeawayMenuQuery.data?.products],
@@ -713,8 +724,13 @@ export default function POSPage(): JSX.Element {
     () => baseProducts.filter((product) => product.product_type === "menu_item" && product.is_for_sale),
     [baseProducts],
   );
+  const retailProducts = useMemo(
+    () => baseProducts.filter((product) => !["menu_item", "raw_material"].includes(product.product_type) && product.is_for_sale),
+    [baseProducts],
+  );
+  const eligibleProducts = isRetailMode ? retailProducts : restaurantProducts;
   const products = useMemo(() => {
-    if (!isTakeawayMode) return restaurantProducts;
+    if (!isTakeawayMode) return eligibleProducts;
     if (!takeawayMenuQuery.data) return [];
     return restaurantProducts
       .filter((product) => takeawayMenuByProductId.get(product.id)?.is_available)
@@ -722,11 +738,11 @@ export default function POSPage(): JSX.Element {
         ...product,
         selling_price: Number(takeawayMenuByProductId.get(product.id)?.selling_price ?? product.selling_price),
       }));
-  }, [isTakeawayMode, restaurantProducts, takeawayMenuByProductId, takeawayMenuQuery.data]);
+  }, [eligibleProducts, isTakeawayMode, restaurantProducts, takeawayMenuByProductId, takeawayMenuQuery.data]);
   const categories = useMemo(() => {
     const categoryById = new Map(catalogCategories.map((category) => [category.id, category]));
     const groups = new Map<string, { key: string; name: string; ids: Set<string> }>();
-    for (const product of restaurantProducts) {
+    for (const product of eligibleProducts) {
       if (!product.category_id) continue;
       const category = categoryById.get(product.category_id);
       if (!category?.is_active) continue;
@@ -736,7 +752,7 @@ export default function POSPage(): JSX.Element {
       groups.set(key, group);
     }
     return [...groups.values()].sort((left, right) => left.name.localeCompare(right.name, "th"));
-  }, [catalogCategories, restaurantProducts]);
+  }, [catalogCategories, eligibleProducts]);
   const stockByProduct = useMemo(
     () => new Map(stockBalances.map((item) => [`${item.product_id}:${item.variant_id ?? "base"}`, item])),
     [stockBalances],
@@ -1045,6 +1061,14 @@ export default function POSPage(): JSX.Element {
   }
 
   function addToCart(product: ProductListItem, qty = 1): void {
+    if (isRetailMode && (!retailContextValid || !catalogCacheTrusted || ["menu_item", "raw_material"].includes(product.product_type))) {
+      toast({
+        title: "เพิ่มสินค้าไม่ได้",
+        description: "Catalog หรือ signed Retail context ไม่ตรงกับ Counter นี้",
+        variant: "destructive",
+      });
+      return;
+    }
     const available = getAvailableStock(product.id, null);
     if (available <= 0) {
       return;
@@ -1072,14 +1096,22 @@ export default function POSPage(): JSX.Element {
     if (!keyword) {
       return;
     }
+    if (isRetailMode && (!retailContextValid || !catalogCacheTrusted)) {
+      toast({
+        title: "ยังสแกนสินค้าไม่ได้",
+        description: "รอ Server ยืนยัน Retail Catalog ของ Company / Brand / Branch นี้ก่อน",
+        variant: "destructive",
+      });
+      return;
+    }
     let candidate =
       visibleProducts.find((item) => item.barcode?.toLowerCase() === keyword || item.sku.toLowerCase() === keyword) ??
-      restaurantProducts.find((item) => item.barcode?.toLowerCase() === keyword || item.sku.toLowerCase() === keyword);
+      eligibleProducts.find((item) => item.barcode?.toLowerCase() === keyword || item.sku.toLowerCase() === keyword);
     if (!candidate && isOnline) {
       const response = await productApi.list({
         search: keyword,
         is_active: true,
-        catalog_scope: "restaurant_menu",
+        catalog_scope: catalogScope,
         page: 1,
         limit: 20,
       });
@@ -1864,6 +1896,14 @@ export default function POSPage(): JSX.Element {
     if (!currentShift || cart.items.length === 0) {
       return;
     }
+    if (!retailContextValid) {
+      toast({
+        title: "Retail context ไม่ครบ",
+        description: "ต้องใช้ Company, Brand, Branch และ Retail target ที่ Server ลงนามก่อนขาย",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsSubmitting(true);
     try {
       if (isTakeawayMode) {
@@ -2054,19 +2094,21 @@ export default function POSPage(): JSX.Element {
               <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-base font-black text-white shadow-sm" aria-hidden="true">F</span>
               <span className="hidden whitespace-nowrap text-base font-black text-blue-700 xl:inline">{PLATFORM_BRAND.productName}</span>
               <span className="hidden h-7 w-px bg-slate-200 xl:block" aria-hidden="true" />
-              <span className="whitespace-nowrap text-base font-black text-slate-900">ขายหน้าร้าน</span>
+              <span className="whitespace-nowrap text-base font-black text-slate-900">{isRetailMode ? "Retail POS" : "ขายหน้าร้าน"}</span>
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto text-xs">
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-700">{branchName}</span>
-              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-600">{currentLocationName}</span>
+              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-600">
+                {isRetailMode ? (currentCounterDevice?.device_code ?? "Counter ยังไม่จับคู่") : currentLocationName}
+              </span>
               {currentShift ? (
                 <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 font-medium text-emerald-700">
                   {currentShift.shift_number}
                 </span>
               ) : null}
-              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${isTakeawayMode ? "bg-orange-100 text-orange-700" : "bg-emerald-50 text-emerald-700"}`}>
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${isTakeawayMode || isRetailMode ? "bg-amber-100 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>
                 {isTakeawayMode ? <ShoppingBag className="h-3.5 w-3.5" /> : null}
-                {isTakeawayMode ? "รับกลับ · ออกคิว/KDS" : "ขายหน้าร้าน"}
+                {isRetailMode ? "Pilot · Production ใช้ Legacy" : isTakeawayMode ? "รับกลับ · ออกคิว/KDS" : "ขายหน้าร้าน"}
               </span>
               {user ? (
                 <span className="hidden items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700 xl:inline-flex">
@@ -2121,8 +2163,12 @@ export default function POSPage(): JSX.Element {
         </div>
 
         <PosWorkspaceNav
+          mode={isRetailMode ? "retail" : "restaurant"}
           heldBillCount={activeHeldBillCount}
           onHeldBills={() => setHeldBillsOpen(true)}
+          onBillCenter={() => setRecentSalesOpen(true)}
+          onShift={() => setCloseShiftOpen(true)}
+          onDeviceStatus={() => setDeviceStatusOpen(true)}
           onNavigate={openWorkspace}
         />
 
@@ -2135,7 +2181,7 @@ export default function POSPage(): JSX.Element {
                   <input
                     ref={searchRef}
                     className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-4 text-sm shadow-sm"
-                    placeholder="ค้นหาสินค้า / สแกนบาร์โค้ด / ยิง QR"
+                    placeholder={isRetailMode ? "สแกนบาร์โค้ด / ค้นหาชื่อ / SKU" : "ค้นหาสินค้า / สแกนบาร์โค้ด / ยิง QR"}
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                     onKeyDown={(event) => {
@@ -2187,6 +2233,24 @@ export default function POSPage(): JSX.Element {
               </div>
             ) : null}
 
+            {isRetailMode ? (
+              <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${retailContextValid ? "border-blue-200 bg-blue-50 text-blue-900" : "border-red-200 bg-red-50 text-red-800"}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-semibold">Retail Scan-first · Pilot</div>
+                    <div className="mt-1 text-xs opacity-80">
+                      {retailContextValid
+                        ? "Catalog ถูกจำกัดด้วย signed Company / Brand / Branch · ระบบจริงยังใช้ Legacy data source"
+                        : "Signed Retail context ไม่ครบ — ปิดการขายและไม่อ่าน Catalog จาก cache อื่น"}
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold shadow-sm">
+                    {isOnline ? "Online" : "Offline"} · {catalogCacheTrusted ? "Catalog ตรงบริบท" : "รอ Catalog"}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
             <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
               <nav data-testid="pos-category-panel" aria-label="หมวดสินค้า" className="shrink-0 rounded-2xl border border-white/80 bg-white/80 p-2 shadow-sm lg:w-40 lg:overflow-y-auto">
                 <div className="hidden px-2 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 lg:block">หมวดสินค้า</div>
@@ -2212,6 +2276,25 @@ export default function POSPage(): JSX.Element {
               </nav>
 
               <section data-testid="pos-product-panel" aria-label="รายการสินค้า" className="flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-hidden">
+
+            {isRetailMode && !retailContextValid ? (
+              <div role="alert" className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-800">
+                <div className="font-semibold">Permission / Context denied</div>
+                <div className="mt-1">ออกจากระบบแล้วเข้า Retail POS ผ่าน Company App Launcher ใหม่ เพื่อรับ signed Brand และ Branch context</div>
+              </div>
+            ) : null}
+            {isRetailMode && retailContextValid && !catalogCacheTrusted ? (
+              <div role="status" className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+                <div className="font-semibold">{isOnline ? "กำลังโหลด Retail Catalog" : "Offline และไม่มี Catalog ของบริบทนี้"}</div>
+                <div className="mt-1">{isOnline ? "ระบบจะเปิดสินค้าเมื่อ Server ยืนยัน Company / Brand / Branch แล้ว" : "เชื่อมต่ออินเทอร์เน็ตเพื่อรับ Catalog ก่อนเริ่มขาย"}</div>
+              </div>
+            ) : null}
+            {isRetailMode && onlineSearchQuery.isError ? (
+              <div role="alert" className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-800">
+                <div className="font-semibold">โหลดผลค้นหาไม่สำเร็จ</div>
+                <button type="button" className="mt-2 min-h-11 rounded-xl border border-red-300 bg-white px-4 font-semibold" onClick={() => void onlineSearchQuery.refetch()}>ลองใหม่อย่างปลอดภัย</button>
+              </div>
+            ) : null}
 
             {exchangeContext && exchangeSuggestedProducts.length > 0 ? (
               <div className="mt-4 rounded-[28px] border border-amber-200 bg-amber-50/80 p-4 shadow-[0_16px_40px_rgba(180,83,9,0.08)]">
@@ -2335,6 +2418,12 @@ export default function POSPage(): JSX.Element {
             ) : null}
 
             {/* P5: Product Card Density — toggle bar */}
+            {isRetailMode && retailContextValid && catalogCacheTrusted && !onlineSearchQuery.isLoading && visibleProducts.length === 0 ? (
+              <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-white/80 px-6 py-10 text-center text-sm text-slate-600">
+                <div className="font-semibold text-slate-900">{searchTerm.trim() ? "ไม่พบสินค้าใน Retail Catalog" : "Retail Catalog ยังไม่มีสินค้าพร้อมขาย"}</div>
+                <div className="mt-1">{searchTerm.trim() ? "ตรวจบาร์โค้ด ชื่อ หรือ SKU แล้วลองใหม่" : "ให้ผู้ดูแลเพิ่มสินค้าของ Brand นี้ก่อนเริ่มขาย"}</div>
+              </div>
+            ) : null}
             <div className="mt-3 flex items-center justify-between gap-2">
               <span className="text-xs text-slate-400">{visibleProducts.length} รายการ</span>
               <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1">
@@ -2862,10 +2951,11 @@ export default function POSPage(): JSX.Element {
               ) : null}
 
               <Button
-                className="h-12 w-full rounded-2xl bg-green-600 text-base hover:bg-green-700"
+                className={`h-16 w-full rounded-2xl text-lg font-bold ${isRetailMode ? "bg-blue-600 hover:bg-blue-700" : "bg-green-600 hover:bg-green-700"}`}
                 disabled={
                   cart.items.length === 0 ||
                   !currentShift ||
+                  (isRetailMode && (!isOnline || !retailContextValid || !catalogCacheTrusted)) ||
                   (isTakeawayMode && !takeawayMenuQuery.data) ||
                   (paymentMethod === "cash" && currentPaidAmount < finalTotal) ||
                   isSubmitting
@@ -2873,8 +2963,19 @@ export default function POSPage(): JSX.Element {
                 onClick={() => void handleCheckout()}
               >
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {isTakeawayMode ? "รับเงินและออกคิว" : "ชำระเงิน"} {formatThaiCurrency(finalTotal)}
+                {isTakeawayMode ? "รับเงินและออกคิว" : isRetailMode ? "รับชำระ" : "ชำระเงิน"} {formatThaiCurrency(finalTotal)}
               </Button>
+              {isRetailMode ? (
+                <div className="text-center text-xs text-slate-500">
+                  {!retailContextValid
+                    ? "ปิดรับชำระ: signed Retail context ไม่ครบ"
+                    : !isOnline
+                      ? "ปิดรับชำระ Offline จนกว่าจะมี signed Retail offline policy"
+                      : !catalogCacheTrusted
+                        ? "ปิดรับชำระระหว่างรอ Server ยืนยัน Catalog"
+                        : "Server จะตรวจราคา สิทธิ์ สต๊อก และ idempotency ก่อนชำระ"}
+                </div>
+              ) : null}
             </div>
           </aside>
         </div>
@@ -2884,6 +2985,9 @@ export default function POSPage(): JSX.Element {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><MonitorCog className="h-5 w-5" />สถานะเครื่องขายและการพิมพ์</DialogTitle>
+            <DialogDescription>
+              ตรวจสถานะเครือข่าย Counter กล้อง และการพิมพ์ก่อนเริ่มขาย โดยสถานะ Browser ไม่ถือเป็นผลทดสอบอุปกรณ์จริง
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className={`rounded-2xl border p-4 ${isOnline ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>

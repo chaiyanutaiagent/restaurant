@@ -29,13 +29,14 @@ run_with_docker() {
   rm -rf "$DOCKER_SRC"
   mkdir -p "$DOCKER_SRC"
   cp -R "$BACKEND_DIR" "$DOCKER_SRC/backend"
+  cp -R "$ROOT_DIR/frontend" "$DOCKER_SRC/frontend"
   cp "$ROOT_DIR/.env.example" "$DOCKER_SRC/backend/.env"
 
   printf 'Local python3 is older than 3.10; running backend regression checks in python:3.11-slim.\n'
   docker run --rm \
     -e UPLOAD_DIR=/tmp/restaurant-pos-uploads \
-    -v "$DOCKER_SRC/backend:/backend:ro" \
-    -w /backend \
+    -v "$DOCKER_SRC:/workspace:ro" \
+    -w /workspace/backend \
     python:3.11-slim \
     sh -c '
       set -eu

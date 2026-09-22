@@ -2282,6 +2282,20 @@ async def _wap_get_menu_data(
     ):
         raise HTTPException(status_code=403, detail="Counter device Branch does not match staff Branch")
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
+    if brand is None and current.brand_id is not None:
+        brand = await db.scalar(
+            select(Brand).where(
+                Brand.id == current.brand_id,
+                Brand.company_id == current.company_id,
+                Brand.business_type == RESTAURANT,
+                Brand.is_active.is_(True),
+            )
+        )
+    if brand is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Restaurant menu requires a signed Restaurant Brand context",
+        )
     _require_brand_assignment(current, brand)
     brand_branch = await _ensure_brand_branch(db, current.company_id, current.branch_id, brand)
     if brand is not None and (brand_branch is None or brand_branch.store_location_id is None):
@@ -2343,12 +2357,22 @@ async def _wap_get_menu_data(
         for recipe in recipe_rows:
             if recipe.product_id not in menu_recipes:
                 menu_recipes[recipe.product_id] = recipe
+    category_ids = {item.category_id for item in products if item.category_id is not None}
     categories = list((await db.scalars(
         select(CategoryModel).where(
             CategoryModel.company_id == current.company_id,
+            CategoryModel.id.in_(category_ids),
             CategoryModel.is_active.is_(True),
         ).order_by(CategoryModel.sort_order, CategoryModel.name)
-    )).all())
+    )).all()) if category_ids else []
+    unique_categories: list[CategoryModel] = []
+    seen_category_names: set[str] = set()
+    for category in categories:
+        normalized_name = " ".join(category.name.split()).casefold()
+        if normalized_name in seen_category_names:
+            continue
+        seen_category_names.add(normalized_name)
+        unique_categories.append(category)
     cat_map = {item.id: item.name for item in categories}
     offline_enabled = counter_device is not None and offline_scope_enabled(
         current.company_id,
@@ -2416,7 +2440,7 @@ async def _wap_get_menu_data(
         "offline_authorization": offline_authorization,
         "offline_authorization_expires_at": offline_authorization_expires_at.isoformat() if offline_authorization_expires_at else None,
         "offline_device_id": str(counter_device.device_id) if counter_device else None,
-        "categories": [{"id": str(item.id), "name": item.name} for item in categories],
+        "categories": [{"id": str(item.id), "name": item.name} for item in unique_categories],
         "products": [
             {
                 "id": str(item.id),

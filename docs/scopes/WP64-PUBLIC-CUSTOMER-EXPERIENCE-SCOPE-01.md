@@ -82,10 +82,10 @@ Storefront into Ecommerce.
   `restaurant-pos-frontend:wp64-local`.
 - Built Backend image loaded 48 route groups.
 
-The broader Platform browser suite recorded 11/18 passing. Its seven failures
-are restricted to Platform login/console readiness outside the files and
-routes changed by WP64; they are not represented as a WP64 pass and remain a
-separate regression follow-up.
+The stale Platform fixtures found during the first broad run were corrected
+against the current Company Foundation contracts. The final Platform browser
+suite passed 20/20, including Company routing, cross-Tenant rejection,
+Platform Auditor read-only controls and surface-specific QA banners.
 
 ## Explicit exclusions
 
@@ -96,9 +96,15 @@ separate regression follow-up.
 - No real provider, real tax, Retail data-source change or Production flag.
 - No Production deployment.
 
-## Next checkpoint
+## UAT checkpoint
 
-Commit and push the WP64 Local candidate, then run the combined Batch C UAT
-for WP62–WP64. UAT must confirm Company/Brand/Branch isolation, Takeaway and
-Supply-chain write holds, public capability/freshness behavior, Restaurant QR
-regression, Production isolation and rollback to the accepted WP62 images.
+Combined Batch C software UAT passed on commit `f753bd3`. The UAT Storefront
+reported `catalog_locator` with checkout disabled; Restaurant QR menu/status
+remained healthy; Takeaway, Kitchen and Distribution write gates returned
+HTTP 409; signed Tenant A/B isolation and Auditor least privilege passed; and
+app-only rollback/restoration completed without replacing stateful UAT
+containers. Production was not changed.
+
+WP65 may begin on Local/UAT. Physical devices, real providers/tax documents,
+real Chambo data, transactional Takeaway/Supply-chain activation and
+Production remain HOLD.

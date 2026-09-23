@@ -92,7 +92,13 @@ def _set_refresh_cookie(response: Response, refresh_token: str, *, max_age: int 
 
 def _platform_qa_access_guard(request: Request, access_key: str | None) -> None:
     configured_host = urlsplit(settings.saas_public_base_url).hostname
-    request_host = (request.headers.get("host") or "").split(",", 1)[0].strip().split(":", 1)[0].lower()
+    request_host = (
+        (request.headers.get("host") or "")
+        .split(",", 1)[0]
+        .strip()
+        .split(":", 1)[0]
+        .lower()
+    )
     configured_key = settings.qa_access_key or ""
     if (
         not settings.qa_access_mode_enabled
@@ -174,6 +180,32 @@ async def login(
         payload.username,
         payload.password,
         mfa_code=payload.mfa_code,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    _set_refresh_cookie(response, refresh_token)
+    return ok(result.model_dump(mode="json"))
+
+
+@router.post("/auth/uat/auto-login", include_in_schema=False)
+async def uat_platform_auto_login(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    configured_host = urlsplit(settings.saas_public_base_url).hostname
+    request_host = (request.headers.get("host") or "").split(",", 1)[0].strip().split(":", 1)[0].lower()
+    if (
+        not settings.uat_auth_bypass_enabled
+        or settings.environment != "development"
+        or configured_host is None
+        or request_host != configured_host.lower()
+        or settings.uat_platform_auth_bypass_username is None
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    ip_address, user_agent = _client(request)
+    result, refresh_token = await PlatformAuthService(db).issue_uat_bypass_session(
+        settings.uat_platform_auth_bypass_username,
         ip_address=ip_address,
         user_agent=user_agent,
     )

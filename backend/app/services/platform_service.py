@@ -211,6 +211,52 @@ class PlatformAuthService:
         await self.db.commit()
         return token_response, refresh_token
 
+    async def issue_uat_bypass_session(
+        self,
+        username: str,
+        *,
+        ip_address: str | None,
+        user_agent: str | None,
+    ) -> tuple[PlatformTokenResponse, str]:
+        operator = await self.db.scalar(
+            select(PlatformOperator).where(
+                PlatformOperator.username == username,
+                PlatformOperator.is_active.is_(True),
+            )
+        )
+        if operator is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Configured UAT Platform user is unavailable",
+            )
+        role_codes, _ = await effective_platform_access(self.db, operator)
+        if not role_codes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Configured UAT Platform user has no active role",
+            )
+        token_response, refresh_token = await self._issue_session(
+            operator,
+            mfa_verified=True,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        self.db.add(
+            AuditLog(
+                company_id=None,
+                branch_id=None,
+                user_id=operator.id,
+                action="uat.platform.auth_bypass.session.issue",
+                resource="PlatformOperator",
+                resource_id=str(operator.id),
+                new_value={"session_id": str(token_response.session_id)},
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        )
+        await self.db.commit()
+        return token_response, refresh_token
+
     async def refresh(
         self,
         raw_refresh_token: str,

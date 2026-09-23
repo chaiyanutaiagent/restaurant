@@ -55,6 +55,7 @@ def validate_uat_auth_bypass_config(
     public_base_url: str,
     company_id: uuid.UUID | None,
     username: str | None,
+    platform_username: str | None,
 ) -> None:
     if not enabled:
         return
@@ -69,6 +70,8 @@ def validate_uat_auth_bypass_config(
         raise ValueError("UAT auth bypass requires an HTTPS hostname beginning with uat-")
     if company_id is None or not username or not username.strip():
         raise ValueError("UAT auth bypass requires an explicit Company ID and username")
+    if not platform_username or not platform_username.strip():
+        raise ValueError("UAT auth bypass requires an explicit Platform username")
 
 
 def validate_qa_access_mode_config(
@@ -364,6 +367,7 @@ class Settings(BaseSettings):
     uat_auth_bypass_enabled: bool = False
     uat_auth_bypass_company_id: uuid.UUID | None = None
     uat_auth_bypass_username: str | None = None
+    uat_platform_auth_bypass_username: str | None = None
     qa_access_mode_enabled: bool = False
     qa_access_key: str | None = None
     qa_access_company_id: uuid.UUID | None = None
@@ -411,6 +415,7 @@ class Settings(BaseSettings):
             public_base_url=self.saas_public_base_url,
             company_id=self.uat_auth_bypass_company_id,
             username=self.uat_auth_bypass_username,
+            platform_username=self.uat_platform_auth_bypass_username,
         )
         validate_qa_access_mode_config(
             environment=self.environment,
@@ -476,6 +481,8 @@ class Settings(BaseSettings):
         )
         if self.uat_auth_bypass_username is not None:
             self.uat_auth_bypass_username = self.uat_auth_bypass_username.strip() or None
+        if self.uat_platform_auth_bypass_username is not None:
+            self.uat_platform_auth_bypass_username = self.uat_platform_auth_bypass_username.strip() or None
         return self
 
     @computed_field  # type: ignore[prop-decorator]

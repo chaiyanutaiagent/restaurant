@@ -23,6 +23,7 @@ class UatAuthBypassConfigTests(unittest.TestCase):
             public_base_url="https://foodchainservice.com",
             company_id=None,
             username=None,
+            platform_username=None,
         )
 
     def test_enabled_bypass_accepts_only_https_uat_development(self) -> None:
@@ -32,6 +33,7 @@ class UatAuthBypassConfigTests(unittest.TestCase):
             public_base_url="https://uat-pos.foodchainservice.com",
             company_id=self.company_id,
             username="admin",
+            platform_username="qa.platform-admin",
         )
 
         invalid_cases = (
@@ -49,6 +51,7 @@ class UatAuthBypassConfigTests(unittest.TestCase):
                         public_base_url=public_base_url,
                         company_id=self.company_id,
                         username="admin",
+                        platform_username="qa.platform-admin",
                     )
 
 
@@ -134,8 +137,14 @@ class QaAccessModeConfigTests(unittest.TestCase):
                 self.assertEqual(raised.exception.status_code, 404)
 
     def test_enabled_bypass_requires_explicit_identity(self) -> None:
-        for company_id, username in ((None, "admin"), (self.company_id, None), (self.company_id, " ")):
-            with self.subTest(company_id=company_id, username=username):
+        for company_id, username, platform_username in (
+            (None, "admin", "qa.platform-admin"),
+            (self.company_id, None, "qa.platform-admin"),
+            (self.company_id, " ", "qa.platform-admin"),
+            (self.company_id, "admin", None),
+            (self.company_id, "admin", " "),
+        ):
+            with self.subTest(company_id=company_id, username=username, platform_username=platform_username):
                 with self.assertRaises(ValueError):
                     validate_uat_auth_bypass_config(
                         environment="development",
@@ -143,6 +152,7 @@ class QaAccessModeConfigTests(unittest.TestCase):
                         public_base_url="https://uat-pos.foodchainservice.com",
                         company_id=company_id,
                         username=username,
+                        platform_username=platform_username,
                     )
 
 

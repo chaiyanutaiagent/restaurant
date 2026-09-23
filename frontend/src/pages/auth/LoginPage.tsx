@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Capacitor } from "@capacitor/core";
 import { Eye, EyeOff, Loader2, LockKeyhole, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useLogin } from "@/hooks/useAuth";
+import { useLogin, useUatAutoLogin } from "@/hooks/useAuth";
 import QaAccessPanel from "@/components/auth/QaAccessPanel";
 import { membershipApi } from "@/lib/api";
 import { PLATFORM_BRAND } from "@/config/platformBrand";
@@ -35,6 +35,8 @@ export default function LoginPage(): JSX.Element {
   });
   const defaultDestination = canonicalSlug ? `/${canonicalSlug}/admin` : "/admin";
   const { login, isLoading, error } = useLogin(defaultDestination);
+  const { startAutoLogin, isLoading: isAutoLoginLoading } = useUatAutoLogin(defaultDestination);
+  const autoLoginRequested = useRef(false);
   const [showPassword, setShowPassword] = useState(false);
   const isNativeApp = Capacitor.isNativePlatform();
   const isUatPublicHost = !isNativeApp && (
@@ -55,6 +57,13 @@ export default function LoginPage(): JSX.Element {
       form.setValue("company_id", business.data.company_id, { shouldValidate: true });
     }
   }, [business.data, form]);
+
+  useEffect(() => {
+    if (window.location.hostname.startsWith("uat-") && !autoLoginRequested.current) {
+      autoLoginRequested.current = true;
+      startAutoLogin();
+    }
+  }, [startAutoLogin]);
 
   async function onSubmit(values: LoginFormValues): Promise<void> {
     await login(values);
@@ -77,6 +86,11 @@ export default function LoginPage(): JSX.Element {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {isAutoLoginLoading ? (
+            <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-center text-sm font-semibold text-amber-950">
+              กำลังเข้าสู่ระบบทดสอบอัตโนมัติ...
+            </div>
+          ) : null}
           {isUatPublicHost ? <QaAccessPanel defaultDestination={defaultDestination} /> : null}
           <form className="space-y-5" onSubmit={form.handleSubmit(onSubmit)}>
             <div className={isNativeApp || canonicalSlug ? "hidden" : "space-y-2"}>

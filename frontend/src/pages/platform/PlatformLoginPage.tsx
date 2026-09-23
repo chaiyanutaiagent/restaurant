@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import axios from "axios";
 import { LockKeyhole, ShieldCheck } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ export default function PlatformLoginPage(): JSX.Element {
   const location = useLocation();
   const requested = new URLSearchParams(location.search).get("next");
   const next = requested?.startsWith("/platform/") ? requested : null;
+  const autoLoginRequested = useRef(false);
   const login = useMutation({
     mutationFn: () => platformApi.login(username, password, mfaCode),
     onSuccess: (response) => {
@@ -39,6 +40,20 @@ export default function PlatformLoginPage(): JSX.Element {
       if (axios.isAxiosError(error) && error.response?.status === 428) setMfaRequired(true);
     },
   });
+  const autoLogin = useMutation({
+    mutationFn: async () => (await platformApi.uatAutoLogin()).data.data,
+    onSuccess: (session) => {
+      setSession(session);
+      navigate(next ?? "/platform/dashboard", { replace: true });
+    },
+  });
+
+  useEffect(() => {
+    if (window.location.hostname.startsWith("uat-") && !autoLoginRequested.current) {
+      autoLoginRequested.current = true;
+      autoLogin.mutate();
+    }
+  }, [autoLogin]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -60,6 +75,11 @@ export default function PlatformLoginPage(): JSX.Element {
             บัญชีนี้แยกจาก Company Owner และพนักงานร้านโดยสมบูรณ์
           </p>
         </div>
+        {autoLogin.isPending ? (
+          <div className="mb-5 rounded-xl border border-amber-500/60 bg-amber-950/40 p-4 text-center text-sm font-semibold text-amber-100">
+            กำลังเข้าสู่ Platform สำหรับระบบทดสอบอัตโนมัติ...
+          </div>
+        ) : null}
         {(
           window.location.hostname.startsWith("uat-")
           || ["localhost", "127.0.0.1"].includes(window.location.hostname)

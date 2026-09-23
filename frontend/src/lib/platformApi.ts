@@ -60,7 +60,9 @@ platformApiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const request = error.config;
-    const isAuthEndpoint = request?.url?.includes("/auth/login") || request?.url?.includes("/auth/refresh");
+    const isAuthEndpoint = request?.url?.includes("/auth/login")
+      || request?.url?.includes("/auth/refresh")
+      || request?.url?.includes("/auth/uat/auto-login");
     const alreadyRetried = Boolean((request as (typeof request & { _platformRetried?: boolean }) | undefined)?._platformRetried);
     if (error.response?.status === 401 && request && !isAuthEndpoint && !alreadyRetried) {
       const csrfToken = usePlatformAuthStore.getState().csrfToken;
@@ -98,6 +100,8 @@ export const platformApi = {
       password,
       mfa_code: mfaCode || null,
     }),
+  uatAutoLogin: () =>
+    platformApiClient.post<PlatformApiResponse<PlatformTokenResponse>>("/auth/uat/auto-login"),
   qaPersonas: (accessKey: string) =>
     platformApiClient.get<PlatformApiResponse<QaPersona[]>>("/auth/qa/personas", {
       headers: { "X-QA-Access-Key": accessKey },

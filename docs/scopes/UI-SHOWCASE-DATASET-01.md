@@ -53,3 +53,37 @@ python -m app.cli.seed_ui_showcase \
 - Production backend คงเดิมที่ `restaurant-pos-backend:4c1c2ba` และมีสถานะ healthy
 
 จำนวนหลักที่ตรวจจากฐานข้อมูลหลังรัน: Platform invoice 3, support ticket 3, device 4; Legacy sale 7, PO 5, customer 8, employee 6, shipment 5, production order 3 และ distribution demand 3; Retail product 16 และ sale 7; Takeaway catalog 16, order 7, central order 3 และ production batch 3
+
+## UAT refresh evidence — 2026-09-23
+
+- Final commit: `4f5c6e25d64841d5c0c877d7a7ac7ff1ec17f213`
+- Source archive SHA-256:
+  `9230d59cb891927f2607535bf577324b992573454f5fbd67490c9e30b517c33c`
+- Immutable release: `/home/behappyaiagent/restaurant-uat-releases/4f5c6e2`
+- Backend image: `restaurant-pos-backend:showcase-4f5c6e2`, image
+  `sha256:3fc279f6f69a0cc418e1b0bc8594c45bd7b3bf8529f956e5e207d4ad7cf819e4`
+- Pre-refresh rollback backup:
+  `/home/behappyaiagent/restaurant-uat-backups/ui-showcase-refresh-pre-20260923T022756Z`
+- Backup checksums and readability passed for Legacy, Platform Core,
+  Restaurant, Retail, Takeaway, uploads and Redis.
+- Focused showcase tests: 9/9 passed; Backend regression: 567/567 passed.
+- The seed ran twice after deployment. The second run reported zero cleanup,
+  zero projection work and the same business counts, proving idempotency.
+- The Company profile is explicitly synthetic and now includes Thai/English
+  names, demo tax ID, VAT state, demo address, phone, `example.invalid` email,
+  website, THB currency and Asia/Bangkok timezone.
+- Thirty obsolete `approval-smoke-*` Brands and thirty `APPROVAL-*` Branches
+  were deactivated, not deleted; 24 active smoke links were also deactivated.
+  The active Company structure is now three Brands and four Branches.
+- Verified database counts: Restaurant dining orders 4 and sales 7; suppliers
+  3, customers 8 and employees 6; Retail categories 4, products 16 and sales 7;
+  Takeaway categories 4, catalog items 16 and orders 7; SaaS demo invoices 3.
+- Browser verification passed on Company Dashboard, Restaurant POS, Takeaway
+  Store Orders and Retail POS. All three business contexts displayed their
+  synthetic catalog/order data and browser console errors were zero. The UAT
+  browser context was restored to Restaurant / Bangkok after verification.
+- Takeaway remains Dark launch / read-only and no Production, provider, tax or
+  supply-chain transaction flags were enabled.
+- Production Backend remained
+  `restaurant-pos-backend:auth-a0fdccf`
+  (`sha256:f93cb840b85a2258a18b7542c7e09ce74c3b67221dd25305738c22922ffaab89`).

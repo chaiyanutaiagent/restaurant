@@ -14,6 +14,7 @@ from app.cli.seed_ui_showcase import (
     build_parser,
     fixture_id,
     mirror_platform_references_to_legacy,
+    reference_for_business,
     require_uat,
 )
 
@@ -50,6 +51,37 @@ class SeedUiShowcaseGuardTests(unittest.TestCase):
         self.assertIn("[ข้อมูลตัวอย่าง]", SHOWCASE_COMPANY_PROFILE["address"])
         self.assertTrue(SHOWCASE_COMPANY_PROFILE["email"].endswith("@example.invalid"))
         self.assertEqual(len(SHOWCASE_COMPANY_PROFILE["tax_id"]), 13)
+
+    def test_business_reference_skips_inactive_smoke_brand(self) -> None:
+        active_brand_id = uuid.uuid4()
+        active_branch_id = uuid.uuid4()
+        references = {
+            "brands": [
+                {
+                    "id": uuid.uuid4(),
+                    "business_type": "retail_pos",
+                    "is_active": False,
+                },
+                {
+                    "id": active_brand_id,
+                    "business_type": "retail_pos",
+                    "is_active": True,
+                },
+            ],
+            "links": [
+                {
+                    "brand_id": active_brand_id,
+                    "branch_id": active_branch_id,
+                    "is_active": True,
+                }
+            ],
+            "branches": [{"id": active_branch_id, "is_active": True}],
+        }
+
+        brand, branch = reference_for_business(references, "retail")
+
+        self.assertEqual(brand["id"], active_brand_id)
+        self.assertEqual(branch["id"], active_branch_id)
 
     def test_persistent_seed_requires_yes(self) -> None:
         with patch("app.cli.seed_ui_showcase.settings", uat_settings()), patch(

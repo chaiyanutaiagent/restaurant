@@ -113,6 +113,8 @@ from app.utils.seed_logistics import seed_default_carriers, seed_default_shippin
 
 SHOWCASE_NAMESPACE = uuid.UUID("3e156ada-5c9e-4ba4-a060-824de21df13a")
 SHOWCASE_PREFIX = "UI-DEMO"
+OBSOLETE_SMOKE_BRAND_PREFIX = "approval-smoke-"
+OBSOLETE_SMOKE_BRANCH_PREFIX = "APPROVAL-"
 SHOWCASE_COMPANY_PROFILE: dict[str, Any] = {
     "name": "บริษัท ฟู้ดเชน เซอร์วิส เดโม จำกัด",
     "name_en": "Foodchainservice Demo Group Co., Ltd.",
@@ -220,6 +222,56 @@ async def seed_company_showcase_profile(company_id: uuid.UUID) -> Company:
         await db.commit()
         await db.refresh(company)
         return company
+
+
+async def deactivate_obsolete_smoke_references(company_id: uuid.UUID) -> dict[str, int]:
+    """Hide old generated approval fixtures without deleting their audit history."""
+
+    async with PlatformSessionLocal() as db:
+        brands = (
+            await db.scalars(
+                select(Brand).where(
+                    Brand.company_id == company_id,
+                    Brand.slug.startswith(OBSOLETE_SMOKE_BRAND_PREFIX),
+                    Brand.is_active.is_(True),
+                )
+            )
+        ).all()
+        branches = (
+            await db.scalars(
+                select(Branch).where(
+                    Branch.company_id == company_id,
+                    Branch.code.startswith(OBSOLETE_SMOKE_BRANCH_PREFIX),
+                    Branch.is_active.is_(True),
+                    Branch.deleted_at.is_(None),
+                )
+            )
+        ).all()
+        brand_ids = {row.id for row in brands}
+        branch_ids = {row.id for row in branches}
+        links = (
+            await db.scalars(
+                select(BrandBranch).where(
+                    BrandBranch.company_id == company_id,
+                    BrandBranch.is_active.is_(True),
+                )
+            )
+        ).all()
+        disabled_links = 0
+        for link in links:
+            if link.brand_id in brand_ids or link.branch_id in branch_ids:
+                link.is_active = False
+                disabled_links += 1
+        for brand in brands:
+            brand.is_active = False
+        for branch in branches:
+            branch.is_active = False
+        await db.commit()
+        return {
+            "brands_deactivated": len(brands),
+            "branches_deactivated": len(branches),
+            "links_deactivated": disabled_links,
+        }
 
 
 async def provision_restaurant_showcase_branch(company_id: uuid.UUID, user_id: uuid.UUID) -> None:
@@ -463,7 +515,15 @@ async def seed_platform_showcase(company_id: uuid.UUID, user_id: uuid.UUID) -> d
             )
             count(summary, "privacy_requests")
 
-        branches = (await db.scalars(select(Branch).where(Branch.company_id == company_id))).all()
+        branches = (
+            await db.scalars(
+                select(Branch).where(
+                    Branch.company_id == company_id,
+                    Branch.is_active.is_(True),
+                    Branch.deleted_at.is_(None),
+                )
+            )
+        ).all()
         device_rows = (
             ("counter-main", "counter", "เครื่องขายหน้าร้าน", None),
             ("kitchen-main", "kitchen", "จอครัว", "ครัวร้อน"),
@@ -2126,7 +2186,14 @@ def reference_for_business(
     references: dict[str, list[dict[str, Any]]], business_type: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     accepted_types = {business_type, f"{business_type}_pos"}
-    brand = next((row for row in references["brands"] if row["business_type"] in accepted_types), None)
+    brand = next(
+        (
+            row
+            for row in references["brands"]
+            if row["business_type"] in accepted_types and row["is_active"]
+        ),
+        None,
+    )
     if brand is None:
         raise RuntimeError(f"{business_type} Brand was not found")
     link = next((row for row in references["links"] if row["brand_id"] == brand["id"] and row["is_active"]), None)
@@ -2662,6 +2729,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     require_uat(args)
     company, user = await require_platform_context(args.company_id, args.username)
     company = await seed_company_showcase_profile(company.id)
+    cleanup = await deactivate_obsolete_smoke_references(company.id)
     await provision_restaurant_showcase_branch(company.id, user.id)
     projections = await project_references(company.id)
     references = await platform_reference_snapshot(company.id)
@@ -2681,6 +2749,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "company_name": company.name,
         "production_activated": False,
         "idempotent": True,
+        "cleanup": cleanup,
         "projections": projections,
         "platform": platform,
         "restaurant": restaurant,

@@ -38,3 +38,25 @@ while this legacy credentialless mode is enabled.
 To restore formal role/permission UAT, set `UAT_AUTH_BYPASS_ENABLED=false`, set
 `QA_ACCESS_MODE_ENABLED=true`, recreate only UAT Backend/Frontend and revoke the
 temporary automatic-login sessions.
+
+## Deployment evidence
+
+- Commit: `f556aea5a1d50da25a932d71c54ffadac2c37d15`
+- Source archive SHA-256:
+  `50e214b763ec037837f9ca185f38f72d46dda44c71de94c925122957827f6255`
+- Backend: `restaurant-pos-backend:uat-login-f556aea`, image
+  `sha256:3a166e733c98e96392ca41e88453f8b68ed663bf2cee72d25d7ca65808e7b837`
+- Frontend: `restaurant-pos-frontend:uat-login-f556aea`, image
+  `sha256:4507eb35827485d49346ded23b55498f8c93d338e2ec41d0a1f064f2cf90a1b1`
+- Backend regression: 564 passed, 1 skipped.
+- Frontend TypeScript and production PWA build: passed.
+- Tenant auto-login issued `admin` with Super Admin permission and returned a
+  signed Company context.
+- Platform auto-login issued `qa.platform-admin` with the active UAT
+  `platform_owner` role and opened Platform Dashboard.
+- Wrong-host requests and both QA-key endpoints returned HTTP 404.
+- Browser UAT opened `/admin`, `/pos`, `/takeaway`, `/company/governance`,
+  `/integrations` and `/platform` without credential entry; browser console
+  errors were zero.
+- UAT Postgres, Redis, Nginx and Cloudflared identities stayed unchanged.
+- All Production container identities and images stayed unchanged.

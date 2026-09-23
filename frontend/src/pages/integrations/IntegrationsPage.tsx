@@ -389,7 +389,7 @@ export default function IntegrationsPage(): JSX.Element {
                           <Button size="sm" disabled={fulfillMutation.isPending} onClick={() => fulfillMutation.mutate(order.id)}>สร้างรายการขาย</Button>
                         ) : order.sale_order_id ? (
                           <Button asChild variant="outline" size="sm">
-                            <Link to="/pos">ดูออเดอร์</Link>
+                            <Link to="/retail/pos">ดูออเดอร์</Link>
                           </Button>
                         ) : (
                           "-"

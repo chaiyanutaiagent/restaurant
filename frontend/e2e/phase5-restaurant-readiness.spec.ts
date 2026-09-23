@@ -138,7 +138,7 @@ test("mobile QR to tablet kitchen, checkout, and ERP report", async ({ browser, 
     await staff.screenshot({ path: `${artifactDir}/06-erp-reconciliation.png`, fullPage: true });
 
     await staff.setViewportSize({ width: 1024, height: 768 });
-    await staff.goto("/pos");
+    await staff.goto("/restaurant/pos");
     await expect(staff.getByTestId("pos-workspace-bar")).toBeVisible();
     await expect(staff.getByRole("button", { name: "เปิดโต๊ะ + QR" })).toBeVisible();
     await expect(staff.getByRole("button", { name: "ออเดอร์ QR" })).toBeVisible();
@@ -165,7 +165,7 @@ test("mobile QR to tablet kitchen, checkout, and ERP report", async ({ browser, 
     await staff.screenshot({ path: `${artifactDir}/07-tablet-pos-workspace.png`, fullPage: true });
 
     await staff.getByRole("button", { name: "รับกลับ" }).click();
-    await expect(staff).toHaveURL(/\/pos\?channel=takeaway$/);
+    await expect(staff).toHaveURL(/\/restaurant\/pos\?channel=takeaway$/);
     await expect(staff.getByRole("button", { name: "รับกลับ" })).toHaveAttribute("aria-current", "page");
     await expect(staff.getByText("โหมดรับกลับ — รับเงิน ออกเลขคิว และส่งรายการเข้า KDS")).toBeVisible();
     await expect(staff.getByRole("heading", { name: "ตะกร้ารับกลับ" })).toBeVisible();
@@ -174,7 +174,7 @@ test("mobile QR to tablet kitchen, checkout, and ERP report", async ({ browser, 
     await staff.screenshot({ path: `${artifactDir}/09-takeaway-workspace-theme.png`, fullPage: true });
 
     await staff.goto("/restaurant/wap");
-    await expect(staff).toHaveURL(/\/pos\?channel=takeaway$/);
+    await expect(staff).toHaveURL(/\/restaurant\/pos\?channel=takeaway$/);
     await expect(staff.getByRole("button", { name: "รับกลับ" })).toHaveAttribute("aria-current", "page");
 
     const operationalWorkspaces = [

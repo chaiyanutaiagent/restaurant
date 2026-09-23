@@ -7,7 +7,7 @@ import { useAuthStore } from "@/stores/auth.store";
 const adminItems = [
   {
     title: "ขายหน้าร้าน",
-    to: "/pos",
+    to: "/restaurant/pos",
     permission: "pos.sale.create",
     icon: ShoppingCart,
     tone: "bg-emerald-600",
@@ -51,7 +51,11 @@ const adminItems = [
 
 export default function POSAdminPage(): JSX.Element {
   const hasPermission = useAuthStore((state) => state.hasPermission);
-  const visibleItems = adminItems.filter((item) => hasPermission(item.permission));
+  const businessType = useAuthStore((state) => state.businessType);
+  const posPath = businessType === "retail_pos" ? "/retail/pos" : "/restaurant/pos";
+  const visibleItems = adminItems
+    .filter((item) => hasPermission(item.permission))
+    .map((item) => item.title === "ขายหน้าร้าน" ? { ...item, to: posPath } : item);
 
   return (
     <div>
@@ -61,7 +65,7 @@ export default function POSAdminPage(): JSX.Element {
         actions={
           hasPermission("pos.sale.create") ? (
             <Button asChild>
-              <Link to="/pos">เปิด POS</Link>
+              <Link to={posPath}>เปิด POS</Link>
             </Button>
           ) : null
         }

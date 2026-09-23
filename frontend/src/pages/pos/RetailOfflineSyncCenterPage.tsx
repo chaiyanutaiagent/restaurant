@@ -108,7 +108,7 @@ export default function RetailOfflineSyncCenterPage(): JSX.Element {
       <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 p-3 md:p-5">
         <header className="rounded-[28px] border border-white/80 bg-white/95 p-4 shadow-sm">
           <div className="flex flex-wrap items-center gap-3">
-            <Button asChild variant="outline" size="icon" aria-label="กลับหน้าขาย"><Link to="/pos"><ArrowLeft className="h-5 w-5" /></Link></Button>
+            <Button asChild variant="outline" size="icon" aria-label="กลับหน้าขาย"><Link to="/retail/pos"><ArrowLeft className="h-5 w-5" /></Link></Button>
             <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 font-black text-white">F</span>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">{PLATFORM_BRAND.productName} · Retail POS</p>
@@ -160,7 +160,7 @@ export default function RetailOfflineSyncCenterPage(): JSX.Element {
               <div className="rounded-2xl border border-slate-200"><div className="border-b border-slate-200 px-4 py-3 font-black">รายการสินค้า</div>{selected.items.map((item, index) => <div key={`${item.product_id}-${index}`} className="flex justify-between gap-4 border-b border-slate-100 px-4 py-3 text-sm last:border-0"><span>{item.qty} × {item.product_name}</span><span className="font-bold">฿{money(Number(item.unit_price) * item.qty)}</span></div>)}</div>
               {selected.last_error_message ? <div role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"><p className="font-black">{selected.last_error_code || "ต้องตรวจสอบ"}</p><p className="mt-1">{selected.last_error_message}</p></div> : null}
               <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">ห้ามลบรายการรับเงินจริง ห้ามเปลี่ยน Client ID และห้าม retry แบบ blind loop ก่อนยืนยันผลจาก Server</div>
-            </div><div className="border-t border-slate-200 p-4"><Button asChild variant="outline" className="min-h-11"><Link to="/pos">กลับหน้าขาย</Link></Button></div></>}
+            </div><div className="border-t border-slate-200 p-4"><Button asChild variant="outline" className="min-h-11"><Link to="/retail/pos">กลับหน้าขาย</Link></Button></div></>}
           </div>
         </section>
       </div>

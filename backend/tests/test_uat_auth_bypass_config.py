@@ -8,7 +8,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app.config import validate_qa_access_mode_config, validate_uat_auth_bypass_config
+from app.config import resolve_uat_auth_bypass_hosts, validate_qa_access_mode_config, validate_uat_auth_bypass_config
 from app.routers.auth import _qa_access_guard
 from app.routers.platform import _platform_qa_access_guard
 
@@ -34,6 +34,12 @@ class UatAuthBypassConfigTests(unittest.TestCase):
             company_id=self.company_id,
             username="admin",
             platform_username="qa.platform-admin",
+            allowed_hosts=[
+                "uat-app.foodchainservice.com",
+                "uat-restaurant.foodchainservice.com",
+                "uat-retail.foodchainservice.com",
+                "uat-takeaway.foodchainservice.com",
+            ],
         )
 
         invalid_cases = (
@@ -53,6 +59,32 @@ class UatAuthBypassConfigTests(unittest.TestCase):
                         username="admin",
                         platform_username="qa.platform-admin",
                     )
+
+    def test_bypass_host_allowlist_rejects_wildcards_and_public_hosts(self) -> None:
+        for host in ("*.foodchainservice.com", "restaurant.foodchainservice.com", "https://uat-retail.foodchainservice.com"):
+            with self.subTest(host=host), self.assertRaises(ValueError):
+                validate_uat_auth_bypass_config(
+                    environment="development",
+                    enabled=True,
+                    public_base_url="https://uat-pos.foodchainservice.com",
+                    company_id=self.company_id,
+                    username="admin",
+                    platform_username="qa.platform-admin",
+                    allowed_hosts=[host],
+                )
+
+    def test_bypass_host_allowlist_includes_primary_and_product_hosts(self) -> None:
+        self.assertEqual(
+            resolve_uat_auth_bypass_hosts(
+                "https://uat-pos.foodchainservice.com",
+                ["uat-app.foodchainservice.com", "uat-retail.foodchainservice.com"],
+            ),
+            {
+                "uat-pos.foodchainservice.com",
+                "uat-app.foodchainservice.com",
+                "uat-retail.foodchainservice.com",
+            },
+        )
 
 
 class QaAccessModeConfigTests(unittest.TestCase):

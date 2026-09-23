@@ -63,7 +63,12 @@ api.interceptors.request.use((config) => {
     config.headers["X-Branch-ID"] = branchId;
   }
   if (
-    (window.location.pathname.startsWith("/counter") || window.location.pathname.startsWith("/pos"))
+    (
+      window.location.pathname.startsWith("/counter")
+      || window.location.pathname.startsWith("/pos")
+      || window.location.pathname.startsWith("/restaurant/pos")
+      || window.location.pathname.startsWith("/retail/pos")
+    )
     && deviceState.isAuthenticated()
     && deviceState.device?.device_type === "counter"
     && deviceState.device.branch_id === branchId

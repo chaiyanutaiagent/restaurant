@@ -56,6 +56,7 @@ def validate_uat_auth_bypass_config(
     company_id: uuid.UUID | None,
     username: str | None,
     platform_username: str | None,
+    allowed_hosts: list[str] | None = None,
 ) -> None:
     if not enabled:
         return
@@ -72,6 +73,27 @@ def validate_uat_auth_bypass_config(
         raise ValueError("UAT auth bypass requires an explicit Company ID and username")
     if not platform_username or not platform_username.strip():
         raise ValueError("UAT auth bypass requires an explicit Platform username")
+    resolve_uat_auth_bypass_hosts(public_base_url, allowed_hosts or [])
+
+
+def resolve_uat_auth_bypass_hosts(public_base_url: str, allowed_hosts: list[str]) -> set[str]:
+    public_host = urlsplit(public_base_url).hostname
+    if public_host is None:
+        return set()
+    result = {public_host.lower()}
+    for value in allowed_hosts:
+        host = value.strip().lower()
+        if (
+            not host
+            or "*" in host
+            or "://" in host
+            or "/" in host
+            or not host.startswith("uat-")
+            or not host.endswith(".foodchainservice.com")
+        ):
+            raise ValueError("UAT auth bypass hosts must be exact uat-*.foodchainservice.com hostnames")
+        result.add(host)
+    return result
 
 
 def validate_qa_access_mode_config(
@@ -368,6 +390,7 @@ class Settings(BaseSettings):
     uat_auth_bypass_company_id: uuid.UUID | None = None
     uat_auth_bypass_username: str | None = None
     uat_platform_auth_bypass_username: str | None = None
+    uat_auth_bypass_hosts: list[str] = Field(default_factory=list)
     qa_access_mode_enabled: bool = False
     qa_access_key: str | None = None
     qa_access_company_id: uuid.UUID | None = None
@@ -416,6 +439,7 @@ class Settings(BaseSettings):
             company_id=self.uat_auth_bypass_company_id,
             username=self.uat_auth_bypass_username,
             platform_username=self.uat_platform_auth_bypass_username,
+            allowed_hosts=self.uat_auth_bypass_hosts,
         )
         validate_qa_access_mode_config(
             environment=self.environment,

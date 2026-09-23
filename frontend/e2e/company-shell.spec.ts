@@ -119,7 +119,7 @@ const governance = {
   ],
   coverage: [
     { key: "restaurant", title: "Restaurant POS", state: "available", entry_route: "/restaurant", release_boundary: "Software UAT passed; physical acceptance remains HOLD" },
-    { key: "retail", title: "Retail POS", state: "hold", entry_route: "/pos", release_boundary: "Cash Pilot only" },
+    { key: "retail", title: "Retail POS", state: "hold", entry_route: "/retail", release_boundary: "Cash Pilot only" },
     { key: "integration_reporting", title: "Integration & Reporting", state: "read_only", entry_route: "/company/governance", release_boundary: "Server evidence only" },
   ],
   summary: { ready: 0, attention: 1, blocked: 0, hold: 1, planned: 1 },

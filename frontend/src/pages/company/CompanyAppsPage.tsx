@@ -12,7 +12,6 @@ import {
   UtensilsCrossed,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import CompanyStatePanel from "@/components/company/CompanyStatePanel";
 import PageHeader from "@/components/layout/PageHeader";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth.store";
 import type { CompanyModuleAccess } from "@/types/moduleAccess";
+import { workspaceUrl, type ProductWorkspace } from "@/config/productRouting";
 
 const appDefinition: Record<CompanyModuleAccess["module_key"], {
   name: string;
@@ -41,7 +41,7 @@ const appDefinition: Record<CompanyModuleAccess["module_key"], {
   central_kitchen: { name: "ครัวกลาง", description: "Demand วัตถุดิบ การผลิต และการกระจายสินค้า", route: "/company-kitchen", icon: ChefHat, accent: "bg-violet-600" },
   restaurant_pos: { name: "Restaurant POS", description: "หน้าร้าน โต๊ะและ QR ครัว เมนู และรายงานร้านอาหาร", route: "/restaurant", icon: UtensilsCrossed, accent: "bg-emerald-600" },
   takeaway_pos: { name: "Takeaway POS", description: "เคาน์เตอร์ ครัว คิวรับสินค้า และคลังสาขา", route: "/takeaway", icon: ShoppingBag, accent: "bg-rose-600" },
-  retail_pos: { name: "Retail POS", description: "ขายปลีก สินค้า Barcode สต็อก และหน้าร้าน", route: "/pos", icon: Store, accent: "bg-orange-600" },
+  retail_pos: { name: "Retail POS", description: "ขายปลีก สินค้า Barcode สต็อก และหน้าร้าน", route: "/retail", icon: Store, accent: "bg-orange-600" },
   hotel_pms: { name: "Hotel PMS", description: "ระบบบริหารที่พักในแผนงานอนาคต", route: "", icon: Boxes, accent: "bg-slate-500" },
 };
 
@@ -140,6 +140,14 @@ export default function CompanyAppsPage(): JSX.Element {
               && Boolean(definition.route)
               && module.readiness !== "dark_launch"
               && module.allowed_actions.includes("view");
+            const productWorkspace: ProductWorkspace = module.module_key === "restaurant_pos"
+              ? "restaurant"
+              : module.module_key === "retail_pos"
+                ? "retail"
+                : module.module_key === "takeaway_pos"
+                  ? "takeaway"
+                  : "company";
+            const destination = workspaceUrl(productWorkspace, definition.route || "/company");
             const card = (
               <article className={cn(
                 "flex h-full min-h-72 flex-col rounded-2xl border bg-white p-5 shadow-sm transition",
@@ -170,9 +178,9 @@ export default function CompanyAppsPage(): JSX.Element {
               </article>
             );
             return canEnter ? (
-              <Link key={module.module_key} to={definition.route} className="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
+              <a key={module.module_key} href={destination} className="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
                 {card}
-              </Link>
+              </a>
             ) : <div key={module.module_key} aria-disabled="true">{card}</div>;
           })}
         </section>

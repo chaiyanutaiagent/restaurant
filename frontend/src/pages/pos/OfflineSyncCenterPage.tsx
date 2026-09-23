@@ -216,7 +216,11 @@ function RestaurantOfflineSyncCenterPage(): JSX.Element {
   const reviewCount = summary.needsReview + summary.rejected + summary.quarantined;
   const backPath = brandSlug
     ? `/store/${brandSlug}/orders`
-    : location.pathname.startsWith("/pos/") ? "/pos?channel=takeaway" : "/counter/orders";
+    : location.pathname.startsWith("/restaurant/")
+      ? "/restaurant/pos?channel=takeaway"
+      : location.pathname.startsWith("/retail/")
+        ? "/retail/pos"
+        : "/counter/orders";
   const authExpiresAt = menu?.offline_authorization_expires_at
     ? new Date(menu.offline_authorization_expires_at).getTime()
     : null;

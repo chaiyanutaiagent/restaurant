@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import TakeawayWorkspaceGuard from "@/components/auth/TakeawayWorkspaceGuard";
 import BusinessAdminGuard from "@/components/auth/BusinessAdminGuard";
+import ProductContextGuard from "@/components/auth/ProductContextGuard";
 import PlatformProtectedRoute from "@/components/auth/PlatformProtectedRoute";
 import DeviceProtectedRoute from "@/components/auth/DeviceProtectedRoute";
 import AppShell from "@/components/layout/AppShell";
@@ -131,6 +132,7 @@ import { TAKEAWAY_ENTRY_PERMISSIONS } from "@/config/takeawayWorkspace";
 import { useEffect } from "react";
 import { useAuthStore } from "@/stores/auth.store";
 import QaModeBanner from "@/components/auth/QaModeBanner";
+import { HostEntryRedirect, LegacyPosRedirect } from "@/components/navigation/ProductEntryRedirect";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } }
@@ -139,7 +141,7 @@ const queryClient = new QueryClient({
 function RestaurantTakeawayEntry(): JSX.Element {
   const hasPermission = useAuthStore((state) => state.hasPermission);
   return hasPermission("pos.sale.create")
-    ? <Navigate to="/pos?channel=takeaway" replace />
+    ? <Navigate to="/restaurant/pos?channel=takeaway" replace />
     : <Navigate to="/restaurant/wap/legacy" replace />;
 }
 
@@ -196,14 +198,18 @@ export default function App(): JSX.Element {
             <Route path="/pickup" element={<PickupDisplayPage />} />
           </Route>
           <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
-          <Route path="/" element={Capacitor.isNativePlatform() ? <Navigate to="/takeaway" replace /> : <ModuleSelectorPage />} />
+          <Route
+            path="/"
+            element={<HostEntryRedirect fallback={Capacitor.isNativePlatform() ? <Navigate to="/takeaway" replace /> : <ModuleSelectorPage />} />}
+          />
           <Route path="/store" element={<StorefrontPage />} />
           <Route path="/:businessSlug" element={<StorefrontPage />} />
           <Route path="/takeaway/pickup-status/:token" element={<TakeawayPickupStatusPage />} />
           <Route path="/takeaway/order/:token" element={<TakeawayPublicOrderPage />} />
           <Route path="/erp" element={<Navigate to="/company/erp" replace />} />
-          <Route element={<ProtectedRoute permissions={TAKEAWAY_ENTRY_PERMISSIONS} />}>
-            <Route element={<TakeawayShell />}>
+          <Route element={<ProductContextGuard businessType="takeaway" />}>
+            <Route element={<ProtectedRoute permissions={TAKEAWAY_ENTRY_PERMISSIONS} />}>
+              <Route element={<TakeawayShell />}>
               <Route path="/takeaway" element={<TakeawayWorkspaceIndexPage />} />
 
               <Route element={<TakeawayWorkspaceGuard area="store" />}>
@@ -291,14 +297,23 @@ export default function App(): JSX.Element {
               <Route path="/takeaway/reports" element={<TakeawayLegacyRedirect route="reports" />} />
               <Route path="/takeaway/import" element={<Navigate to="/takeaway/admin/import" replace />} />
               <Route path="/takeaway/erp" element={<Navigate to="/takeaway/admin/erp" replace />} />
+              </Route>
             </Route>
           </Route>
-          <Route element={<ProtectedRoute permission="pos.sale.create" />}>
-            <Route path="/pos" element={<POSPage />} />
-            <Route path="/pos/offline-sync" element={<OfflineSyncCenterPage />} />
+          <Route element={<ProtectedRoute />}>
+            <Route path="/pos" element={<LegacyPosRedirect />} />
+            <Route path="/pos/offline-sync" element={<LegacyPosRedirect offline />} />
           </Route>
-          <Route element={<ProtectedRoute permissions={["brand.store.order.create", "brand.store.shift.close", "brand.store.replenishment.submit", "brand.store.delivery.receive", "brand.store.stock.view", "brand.store.stock.adjust", "fb.order.create", "system.user.request"]} />}>
-            <Route element={<RestaurantShell />}>
+          <Route element={<ProductContextGuard businessType="retail_pos" />}>
+            <Route path="/retail" element={<Navigate to="/retail/pos" replace />} />
+            <Route element={<ProtectedRoute permission="pos.sale.create" />}>
+              <Route path="/retail/pos" element={<POSPage />} />
+              <Route path="/retail/offline-sync" element={<OfflineSyncCenterPage />} />
+            </Route>
+          </Route>
+          <Route element={<ProductContextGuard businessType="restaurant" />}>
+            <Route element={<ProtectedRoute permissions={["brand.store.order.create", "brand.store.shift.close", "brand.store.replenishment.submit", "brand.store.delivery.receive", "brand.store.stock.view", "brand.store.stock.adjust", "fb.order.create", "system.user.request"]} />}>
+              <Route element={<RestaurantShell />}>
               <Route element={<ProtectedRoute permissions={["brand.store.order.create", "fb.order.create"]} />}>
                 <Route path="/store/:brandSlug/orders" element={<WapOrderPage />} />
                 <Route path="/store/:brandSlug/sync" element={<OfflineSyncCenterPage />} />
@@ -317,9 +332,9 @@ export default function App(): JSX.Element {
                 <Route path="/store/:brandSlug/staff" element={<BranchStaffRequestsPage />} />
                 <Route path="/store/:brandSlug/branches/:branchCode/staff" element={<BranchStaffRequestsPage />} />
               </Route>
+              </Route>
             </Route>
-          </Route>
-          <Route element={<ProtectedRoute permissions={[
+            <Route element={<ProtectedRoute permissions={[
             "brand.central.raw_stock.view",
             "brand.central.raw_stock.manage",
             "brand.central.ready_stock.view",
@@ -330,8 +345,8 @@ export default function App(): JSX.Element {
             "fb.recipe.manage",
             "fb.report.view",
             "system.user.approve"
-          ]} />}>
-            <Route element={<RestaurantShell />}>
+            ]} />}>
+              <Route element={<RestaurantShell />}>
               <Route element={<ProtectedRoute permission="fb.kitchen.manage" />}>
                 <Route path="/central/:brandSlug/orders" element={<RestaurantCentralOrdersPage />} />
               </Route>
@@ -373,6 +388,7 @@ export default function App(): JSX.Element {
               </Route>
               <Route element={<ProtectedRoute permission="system.user.approve" />}>
                 <Route path="/central/:brandSlug/staff" element={<BrandStaffRequestsPage />} />
+              </Route>
               </Route>
             </Route>
           </Route>
@@ -493,19 +509,24 @@ export default function App(): JSX.Element {
           {/* Public routes — no login required */}
           <Route path="/menu/:token" element={<CustomerMenuPage />} />
           <Route path="/order/:token" element={<QuickServicePage />} />
-          {/* F&B setup wizard — no AppShell */}
-          <Route element={<ProtectedRoute permission="fb.settings.manage" />}>
-            <Route path="/restaurant/setup" element={<FBSetupWizard />} />
-          </Route>
-          {/* Kitchen & Pickup — fullscreen, no AppShell */}
-          <Route element={<ProtectedRoute permissions={["fb.kitchen.ticket.manage", "fb.kitchen.manage"]} />}>
-            <Route path="/restaurant/kitchen" element={<KitchenDisplayPage />} />
-          </Route>
-          <Route element={<ProtectedRoute permission="fb.kitchen.manage" />}>
-            <Route path="/restaurant/pickup" element={<PickupDisplayPage />} />
-          </Route>
-          <Route element={<ProtectedRoute permissions={["fb.menu.view", "fb.table.manage", "fb.order.create", "fb.kitchen.ticket.manage", "fb.kitchen.manage", "fb.recipe.manage", "fb.report.view", "fb.settings.manage"]} />}>
-            <Route element={<AppShell workspace="restaurant" />}>
+          <Route element={<ProductContextGuard businessType="restaurant" />}>
+            <Route element={<ProtectedRoute permission="pos.sale.create" />}>
+              <Route path="/restaurant/pos" element={<POSPage />} />
+              <Route path="/restaurant/offline-sync" element={<OfflineSyncCenterPage />} />
+            </Route>
+            {/* F&B setup wizard — no AppShell */}
+            <Route element={<ProtectedRoute permission="fb.settings.manage" />}>
+              <Route path="/restaurant/setup" element={<FBSetupWizard />} />
+            </Route>
+            {/* Kitchen & Pickup — fullscreen, no AppShell */}
+            <Route element={<ProtectedRoute permissions={["fb.kitchen.ticket.manage", "fb.kitchen.manage"]} />}>
+              <Route path="/restaurant/kitchen" element={<KitchenDisplayPage />} />
+            </Route>
+            <Route element={<ProtectedRoute permission="fb.kitchen.manage" />}>
+              <Route path="/restaurant/pickup" element={<PickupDisplayPage />} />
+            </Route>
+            <Route element={<ProtectedRoute permissions={["fb.menu.view", "fb.table.manage", "fb.order.create", "fb.kitchen.ticket.manage", "fb.kitchen.manage", "fb.recipe.manage", "fb.report.view", "fb.settings.manage"]} />}>
+              <Route element={<AppShell workspace="restaurant" />}>
               <Route path="/restaurant" element={<RestaurantIndexPage />} />
               <Route path="/restaurant/admin" element={<RestaurantAdminPage />} />
               <Route element={<ProtectedRoute permission="fb.table.manage" />}>
@@ -529,6 +550,7 @@ export default function App(): JSX.Element {
               </Route>
               <Route element={<ProtectedRoute permission="fb.report.view" />}>
                 <Route path="/restaurant/reports/ingredients" element={<IngredientReportPage />} />
+              </Route>
               </Route>
             </Route>
           </Route>

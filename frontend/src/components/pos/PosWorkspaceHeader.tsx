@@ -16,6 +16,7 @@ export default function PosWorkspaceHeader({ title }: PosWorkspaceHeaderProps): 
   const branchId = useAuthStore((state) => state.branchId);
   const stationKey = useAuthStore((state) => state.stationKey);
   const user = useAuthStore((state) => state.user);
+  const businessType = useAuthStore((state) => state.businessType);
   const isOnline = useOnlineStatus();
   const branchesQuery = useQuery({
     queryKey: ["system", "my-branches"],
@@ -44,7 +45,7 @@ export default function PosWorkspaceHeader({ title }: PosWorkspaceHeaderProps): 
           </span>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <Button size="sm" variant="outline" className="h-11 rounded-xl px-4" onClick={() => navigate("/pos")}>
+          <Button size="sm" variant="outline" className="h-11 rounded-xl px-4" onClick={() => navigate(businessType === "retail_pos" ? "/retail/pos" : "/restaurant/pos")}>
             <ArrowLeft className="mr-1 h-4 w-4" /> หน้าขาย
           </Button>
           <Button size="sm" variant="outline" className="h-11 w-11 rounded-xl p-0" aria-label="กลับหน้าผู้ดูแล" onClick={() => navigate("/admin")}>

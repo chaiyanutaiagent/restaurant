@@ -51,15 +51,15 @@ const RESULT_META: Record<PhysicalUATResult, { label: string; className: string;
 
 const ACTION_LINK: Record<string, { label: string; path: string }> = {
   counter_pairing: { label: "ดูอุปกรณ์", path: "/devices" },
-  sync_queue_zero: { label: "เปิดศูนย์ซิงก์", path: "/pos/offline-sync" },
-  product_barcode: { label: "เปิดหน้าขาย", path: "/pos" },
+  sync_queue_zero: { label: "เปิดศูนย์ซิงก์", path: "/restaurant/offline-sync" },
+  product_barcode: { label: "เปิดหน้าขาย", path: "/restaurant/pos" },
   table_qr: { label: "เปิดโต๊ะ + QR", path: "/restaurant/tables" },
-  customer_receipt: { label: "เปิดหน้าขาย", path: "/pos" },
+  customer_receipt: { label: "เปิดหน้าขาย", path: "/restaurant/pos" },
   kitchen_slip: { label: "เปิด KDS", path: "/restaurant/kitchen" },
   dine_in_e2e: { label: "เริ่ม Dine-in", path: "/restaurant/tables" },
-  takeaway_e2e: { label: "เริ่ม Takeaway", path: "/pos?channel=takeaway" },
-  offline_cash_reconnect: { label: "เปิดหน้าขายรับกลับ", path: "/pos?channel=takeaway" },
-  lost_ack: { label: "เปิดศูนย์ซิงก์", path: "/pos/offline-sync" },
+  takeaway_e2e: { label: "เริ่ม Takeaway", path: "/restaurant/pos?channel=takeaway" },
+  offline_cash_reconnect: { label: "เปิดหน้าขายรับกลับ", path: "/restaurant/pos?channel=takeaway" },
+  lost_ack: { label: "เปิดศูนย์ซิงก์", path: "/restaurant/offline-sync" },
 };
 
 const NA_ALLOWED_CHECKS = new Set(["cash_drawer"]);

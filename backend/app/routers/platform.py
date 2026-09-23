@@ -9,7 +9,7 @@ from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Re
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.config import settings
+from app.config import resolve_uat_auth_bypass_hosts, settings
 from app.database import get_identity_db, get_restaurant_service_db
 from app.dependencies import PlatformTokenData, get_current_platform_operator
 from app.models.platform import PlatformOperator
@@ -199,9 +199,14 @@ async def uat_platform_auto_login(
         not settings.uat_auth_bypass_enabled
         or settings.environment != "development"
         or configured_host is None
-        or request_host != configured_host.lower()
         or settings.uat_platform_auth_bypass_username is None
     ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    allowed_hosts = resolve_uat_auth_bypass_hosts(
+        settings.saas_public_base_url,
+        settings.uat_auth_bypass_hosts,
+    )
+    if request_host not in allowed_hosts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     ip_address, user_agent = _client(request)
     result, refresh_token = await PlatformAuthService(db).issue_uat_bypass_session(

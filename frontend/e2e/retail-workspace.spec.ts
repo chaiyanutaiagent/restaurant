@@ -149,7 +149,7 @@ test.beforeEach(async ({ page }) => {
 test("Retail workspace stays server-authoritative and usable on desktop and tablet", async ({ page }) => {
   for (const viewport of [{ width: 1440, height: 900 }, { width: 820, height: 1180 }]) {
     await page.setViewportSize(viewport);
-    await page.goto("/pos");
+    await page.goto("/retail/pos");
     await expect(page.getByText("Retail POS", { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/Pilot · Production ใช้ Legacy/)).toBeVisible();
     await expect(page.getByText(/Retail Scan-first · Pilot/)).toBeVisible();

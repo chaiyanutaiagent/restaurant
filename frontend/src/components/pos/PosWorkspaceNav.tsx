@@ -55,9 +55,9 @@ export default function PosWorkspaceNav({
   const items: WorkspaceItem[] = [
     {
       label: "ขายหน้าร้าน",
-      path: "/pos",
+      path: "/restaurant/pos",
       icon: Store,
-      active: (pathname, search) => pathname === "/pos" && new URLSearchParams(search).get("channel") !== "takeaway",
+      active: (pathname, search) => pathname === "/restaurant/pos" && new URLSearchParams(search).get("channel") !== "takeaway",
       visible: canCreatePosSale,
     },
     {
@@ -69,10 +69,10 @@ export default function PosWorkspaceNav({
     },
     {
       label: "รับกลับ",
-      path: canCreatePosSale ? "/pos?channel=takeaway" : "/restaurant/wap/legacy",
+      path: canCreatePosSale ? "/restaurant/pos?channel=takeaway" : "/restaurant/wap/legacy",
       icon: ShoppingBag,
       active: (pathname, search) => pathname === "/restaurant/wap/legacy"
-        || (pathname === "/pos" && new URLSearchParams(search).get("channel") === "takeaway"),
+        || (pathname === "/restaurant/pos" && new URLSearchParams(search).get("channel") === "takeaway"),
       visible: canCreateRestaurantOrder,
     },
     {
@@ -108,7 +108,7 @@ export default function PosWorkspaceNav({
 
   if (mode === "retail") {
     const retailItems = [
-      { label: "ขาย", icon: Store, onClick: () => open("/pos", "ขาย") },
+      { label: "ขาย", icon: Store, onClick: () => open("/retail/pos", "ขาย") },
       {
         label: holdEnabled ? `พักบิล ${heldBillCount ?? 0}` : "พักบิลยังไม่พร้อม",
         icon: ClipboardList,
@@ -123,7 +123,7 @@ export default function PosWorkspaceNav({
         <div className="flex items-center gap-2 overflow-x-auto">
           {retailItems.map((item, index) => {
             const Icon = item.icon;
-            const isActive = index === 0 && location.pathname === "/pos";
+            const isActive = index === 0 && location.pathname === "/retail/pos";
             return (
               <button
                 key={item.label}

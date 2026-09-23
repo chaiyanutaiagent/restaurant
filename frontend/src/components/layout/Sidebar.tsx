@@ -159,6 +159,7 @@ export default function Sidebar({
   const businessSlug = useAuthStore((state) => state.businessSlug);
   const logout = useLogout(businessSlug ? `/${businessSlug}` : "/login");
   const user = useAuthStore((state) => state.user);
+  const businessType = useAuthStore((state) => state.businessType);
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasFbAccess = fbPermissionCodes.some((code) => hasPermission(code));
   const lowStockCount = useLowStockCount();
@@ -197,6 +198,7 @@ export default function Sidebar({
   const brandSubtitle = workspace === "restaurant"
     ? `Restaurant${currentBrandBranch ? ` · ${currentBrandBranch.branch_name}` : ""}`
     : "Company Admin";
+  const canonicalPosPath = businessType === "retail_pos" ? "/retail/pos" : "/restaurant/pos";
 
   useEffect(() => {
     if (hasPermission("inventory.stock.view") || hasPermission("inventory.stock.adjust.request")) {
@@ -288,7 +290,7 @@ export default function Sidebar({
               <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">Switch</p>
               {[
                 { label: "ร้านอาหาร", to: "/restaurant/orders", icon: ShoppingCart, permissions: ["brand.store.order.create", "fb.order.create"] },
-                { label: "เปิด POS", to: "/pos", icon: ShoppingCart, permission: "pos.sale.create" },
+                { label: "เปิด POS", to: canonicalPosPath, icon: ShoppingCart, permission: "pos.sale.create" },
                 { label: "POS Admin", to: "/pos/admin", icon: Settings, permission: "pos.sale.view" },
                 { label: "ERP Admin", to: "/admin", icon: LayoutDashboard }
               ]
@@ -358,6 +360,7 @@ export default function Sidebar({
           {comingSoonItems
             .slice(0, 3)
             .filter((item) => canShowItem(item, hasPermission))
+            .map((item) => item.to === "/pos" ? { ...item, to: canonicalPosPath } : item)
             .map((item) => (
               <NavLink
                 key={item.to}

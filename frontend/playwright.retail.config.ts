@@ -13,5 +13,5 @@ export default defineConfig({
   outputDir: `${artifactDir}/test-results`,
   reporter: [["line"]],
   use: { baseURL: "http://127.0.0.1:4177", channel: "chrome", screenshot: "only-on-failure", trace: "retain-on-failure" },
-  webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4177", url: "http://127.0.0.1:4177/pos", reuseExistingServer: true, timeout: 120_000 },
+  webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4177", url: "http://127.0.0.1:4177/retail/pos", reuseExistingServer: true, timeout: 120_000 },
 });

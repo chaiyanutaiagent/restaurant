@@ -30,13 +30,14 @@ import {
 import { getDisplayName } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth.store";
 import type { CompanyOverviewSection, OperationalState } from "@/types/companyFoundation";
+import { workspaceUrl, type ProductWorkspace } from "@/config/productRouting";
 
 const moduleRoute: Record<CompanyOverviewSection["module_key"], string> = {
   erp: "/company/erp",
   central_kitchen: "/company-kitchen",
   restaurant_pos: "/restaurant",
   takeaway_pos: "/takeaway",
-  retail_pos: "/pos",
+  retail_pos: "/retail",
   hotel_pms: "",
 };
 
@@ -48,6 +49,13 @@ const moduleName: Record<CompanyOverviewSection["module_key"], string> = {
   retail_pos: "Retail POS",
   hotel_pms: "Hotel PMS",
 };
+
+function moduleWorkspace(moduleKey: CompanyOverviewSection["module_key"]): ProductWorkspace {
+  if (moduleKey === "restaurant_pos") return "restaurant";
+  if (moduleKey === "retail_pos") return "retail";
+  if (moduleKey === "takeaway_pos") return "takeaway";
+  return "company";
+}
 
 function statusAttention(summary: Partial<Record<OperationalState, number>>): number {
   return ["offline", "degraded", "pending_sync", "stale", "error"]
@@ -164,6 +172,7 @@ export default function CompanyHomePage(): JSX.Element {
           <div className="grid gap-3 p-4 md:grid-cols-2 2xl:grid-cols-3">
             {data.sections.filter((section) => section.module_key !== "hotel_pms").map((section) => {
               const route = moduleRoute[section.module_key];
+              const destination = route ? workspaceUrl(moduleWorkspace(section.module_key), route) : "";
               const disabled = !route || ["planned", "dark_launch"].includes(section.readiness);
               const card = (
                 <article className={disabled ? "h-full rounded-2xl border border-slate-200 bg-slate-50 p-4 opacity-80" : "h-full rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-blue-300 hover:shadow-md"}>
@@ -177,9 +186,9 @@ export default function CompanyHomePage(): JSX.Element {
                 </article>
               );
               return disabled ? <div key={section.module_key}>{card}</div> : (
-                <Link key={section.module_key} to={route} className="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
+                <a key={section.module_key} href={destination} className="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
                   {card}
-                </Link>
+                </a>
               );
             })}
           </div>

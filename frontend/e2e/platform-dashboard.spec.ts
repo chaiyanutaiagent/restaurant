@@ -863,7 +863,7 @@ test("Company Admin reviews tenant-safe shared sales in shadow mode", async ({ p
 });
 
 test("Restaurant, Retail, and Takeaway entry routes keep their existing authentication guards", async ({ page }) => {
-  for (const path of ["/restaurant", "/pos", "/takeaway"]) {
+  for (const path of ["/restaurant", "/retail", "/takeaway"]) {
     await page.goto(path);
     await expect(page).toHaveURL(new RegExp(`/login\\?next=${encodeURIComponent(path)}$`));
     await expect(page.getByText("Foodchainservice Company Admin", { exact: true })).toBeVisible();

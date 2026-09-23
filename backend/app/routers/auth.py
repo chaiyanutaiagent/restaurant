@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import resolve_uat_auth_bypass_hosts, settings
 from app.database import get_identity_db
 from app.dependencies import TokenData, get_current_user, get_current_user_db
 from app.models.user import User, UserBranch
@@ -127,10 +127,15 @@ async def uat_auto_login(
         not settings.uat_auth_bypass_enabled
         or settings.environment != "development"
         or configured_host is None
-        or request_host != configured_host.lower()
         or settings.uat_auth_bypass_company_id is None
         or settings.uat_auth_bypass_username is None
     ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    allowed_hosts = resolve_uat_auth_bypass_hosts(
+        settings.saas_public_base_url,
+        settings.uat_auth_bypass_hosts,
+    )
+    if request_host not in allowed_hosts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     user = await db.scalar(

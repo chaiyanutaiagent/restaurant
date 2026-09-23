@@ -124,7 +124,7 @@ export const PLATFORM_MODULES = [
     eyebrow: "ร้านค้าปลีกและบริการ",
     description: "ขายหน้าร้าน สแกนสินค้า เปิดกะ รับชำระเงิน และจัดการสต๊อกหน้าร้าน",
     group: "pos",
-    entryRoute: "/pos",
+    entryRoute: "/retail",
     availability: "active",
     registration: "closed",
     registrationRoute: null,

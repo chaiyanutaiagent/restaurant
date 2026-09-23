@@ -1732,7 +1732,7 @@ export default function POSPage(): JSX.Element {
     setLoyaltyDiscount(isRetailMode ? 0 : draft.loyalty_discount);
     setNote(draft.note);
     setExchangeContext(draft.exchange_context ?? null);
-    navigate(draft.sales_channel === "takeaway" ? "/pos?channel=takeaway" : "/pos", { replace: true });
+    navigate(isRetailMode ? "/retail/pos" : draft.sales_channel === "takeaway" ? "/restaurant/pos?channel=takeaway" : "/restaurant/pos", { replace: true });
   }
 
   async function resumeHeldBillNow(draft: HeldSaleDraft): Promise<void> {
@@ -2404,7 +2404,7 @@ export default function POSPage(): JSX.Element {
     if (cart.items.length > 0 && !window.confirm(`มีสินค้าอยู่ในตะกร้า กรุณาพักบิลก่อนออกจากหน้าขาย\nต้องการไปที่ ${label} ต่อหรือไม่`)) {
       return;
     }
-    if (cart.items.length > 0 && path.startsWith("/pos")) {
+    if (cart.items.length > 0 && (path.startsWith("/restaurant/pos") || path.startsWith("/retail/pos"))) {
       resetActiveSale();
     }
     navigate(path);
@@ -2453,7 +2453,7 @@ export default function POSPage(): JSX.Element {
                 <button
                   type="button"
                   className="inline-flex min-h-11 items-center gap-1 rounded-full bg-blue-50 px-3 py-1 font-medium text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                  onClick={() => openWorkspace("/pos/offline-sync", "ศูนย์ซิงก์รายการขาย")}
+                  onClick={() => openWorkspace("/restaurant/offline-sync", "ศูนย์ซิงก์รายการขาย")}
                 >
                   <CloudUpload className="h-3.5 w-3.5" /> รอผล {takeawayOutboxSummary.pending + takeawayOutboxSummary.syncing + takeawayOutboxSummary.acknowledged + takeawayOutboxSummary.unknown}
                 </button>
@@ -2462,7 +2462,7 @@ export default function POSPage(): JSX.Element {
                 <button
                   type="button"
                   className="inline-flex min-h-11 items-center gap-1 rounded-full bg-red-50 px-3 py-1 font-medium text-red-700 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-                  onClick={() => openWorkspace("/pos/offline-sync", "ศูนย์ซิงก์รายการขาย")}
+                  onClick={() => openWorkspace("/restaurant/offline-sync", "ศูนย์ซิงก์รายการขาย")}
                 >
                   <AlertTriangle className="h-3.5 w-3.5" /> ตรวจสอบ {takeawayOutboxSummary.needsReview + takeawayOutboxSummary.rejected + takeawayOutboxSummary.quarantined}
                 </button>
@@ -2470,7 +2470,7 @@ export default function POSPage(): JSX.Element {
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
               {isRetailMode ? (
-                <Button size="sm" variant="outline" className="min-h-11" onClick={() => openWorkspace("/pos/offline-sync", "ศูนย์สถานะและการกู้คืน")}>
+                <Button size="sm" variant="outline" className="min-h-11" onClick={() => openWorkspace("/retail/offline-sync", "ศูนย์สถานะและการกู้คืน")}>
                   <CloudUpload className="h-4 w-4" />สถานะซิงก์
                 </Button>
               ) : null}

@@ -10,6 +10,7 @@ import uuid
 from unittest.mock import patch
 
 from app.cli.seed_ui_showcase import (
+    SHOWCASE_COMPANY_PROFILE,
     build_parser,
     fixture_id,
     mirror_platform_references_to_legacy,
@@ -43,6 +44,12 @@ class SeedUiShowcaseGuardTests(unittest.TestCase):
         self.assertEqual(fixture_id("customer", "1"), fixture_id("customer", "1"))
         self.assertNotEqual(fixture_id("customer", "1"), fixture_id("customer", "2"))
         self.assertNotEqual(fixture_id("customer", "1"), fixture_id("employee", "1"))
+
+    def test_company_showcase_profile_is_explicitly_synthetic(self) -> None:
+        self.assertIn("เดโม", SHOWCASE_COMPANY_PROFILE["name"])
+        self.assertIn("[ข้อมูลตัวอย่าง]", SHOWCASE_COMPANY_PROFILE["address"])
+        self.assertTrue(SHOWCASE_COMPANY_PROFILE["email"].endswith("@example.invalid"))
+        self.assertEqual(len(SHOWCASE_COMPANY_PROFILE["tax_id"]), 13)
 
     def test_persistent_seed_requires_yes(self) -> None:
         with patch("app.cli.seed_ui_showcase.settings", uat_settings()), patch(

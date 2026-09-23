@@ -113,6 +113,22 @@ from app.utils.seed_logistics import seed_default_carriers, seed_default_shippin
 
 SHOWCASE_NAMESPACE = uuid.UUID("3e156ada-5c9e-4ba4-a060-824de21df13a")
 SHOWCASE_PREFIX = "UI-DEMO"
+SHOWCASE_COMPANY_PROFILE: dict[str, Any] = {
+    "name": "บริษัท ฟู้ดเชน เซอร์วิส เดโม จำกัด",
+    "name_en": "Foodchainservice Demo Group Co., Ltd.",
+    "tax_id": "0999999999999",
+    "vat_registered": True,
+    "address": "[ข้อมูลตัวอย่าง] 99 ถนนสุขุมวิท แขวงคลองตัน เขตคลองเตย กรุงเทพมหานคร 10110",
+    "address_en": "[Demo data] 99 Sukhumvit Road, Khlong Tan, Khlong Toei, Bangkok 10110",
+    "phone": "020000000",
+    "email": "demo-company@example.invalid",
+    "logo_url": None,
+    "website": "https://uat-pos.foodchainservice.com",
+    "currency": "THB",
+    "timezone": "Asia/Bangkok",
+    "fiscal_year_start": 1,
+    "is_active": True,
+}
 ModelT = TypeVar("ModelT")
 
 
@@ -192,6 +208,18 @@ async def require_platform_context(company_id: uuid.UUID, username: str) -> tupl
         if user is None or not user.is_superuser:
             raise RuntimeError("Active UAT superuser was not found")
         return company, user
+
+
+async def seed_company_showcase_profile(company_id: uuid.UUID) -> Company:
+    async with PlatformSessionLocal() as db:
+        company = await db.get(Company, company_id)
+        if company is None:
+            raise RuntimeError("UAT Company was not found")
+        for field, value in SHOWCASE_COMPANY_PROFILE.items():
+            setattr(company, field, value)
+        await db.commit()
+        await db.refresh(company)
+        return company
 
 
 async def provision_restaurant_showcase_branch(company_id: uuid.UUID, user_id: uuid.UUID) -> None:
@@ -516,16 +544,29 @@ async def mirror_platform_references_to_legacy(
 ) -> None:
     async with AsyncSessionLocal() as db:
         legacy_company = await db.get(Company, company.id)
+        company_values = {
+            "name": company.name,
+            "business_slug": company.business_slug,
+            "name_en": company.name_en,
+            "tax_id": company.tax_id,
+            "vat_registered": company.vat_registered,
+            "address": company.address,
+            "address_en": company.address_en,
+            "phone": company.phone,
+            "email": company.email,
+            "logo_url": company.logo_url,
+            "website": company.website,
+            "currency": company.currency,
+            "timezone": company.timezone,
+            "fiscal_year_start": company.fiscal_year_start,
+            "is_active": company.is_active,
+        }
         if legacy_company is None:
-            db.add(
-                Company(
-                    id=company.id,
-                    name=company.name,
-                    business_slug=company.business_slug,
-                    is_active=True,
-                )
-            )
+            db.add(Company(id=company.id, **company_values))
             await db.flush()
+        else:
+            for field, value in company_values.items():
+                setattr(legacy_company, field, value)
         for row in references["branches"]:
             branch = await db.get(Branch, row["id"])
             values = {key: value for key, value in row.items() if key != "id"}
@@ -2620,6 +2661,7 @@ async def seed_takeaway_showcase(
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     require_uat(args)
     company, user = await require_platform_context(args.company_id, args.username)
+    company = await seed_company_showcase_profile(company.id)
     await provision_restaurant_showcase_branch(company.id, user.id)
     projections = await project_references(company.id)
     references = await platform_reference_snapshot(company.id)

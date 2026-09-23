@@ -92,7 +92,11 @@ class SeedUiShowcaseGuardTests(unittest.TestCase):
         branch_id = uuid.uuid4()
         platform_link_id = uuid.uuid4()
         existing_link_id = uuid.uuid4()
-        company = SimpleNamespace(id=company_id, name="UAT", business_slug="uat")
+        company = SimpleNamespace(
+            id=company_id,
+            business_slug="uat",
+            **SHOWCASE_COMPANY_PROFILE,
+        )
         existing_link = SimpleNamespace(
             id=existing_link_id,
             company_id=company_id,

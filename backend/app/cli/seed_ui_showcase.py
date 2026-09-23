@@ -548,6 +548,18 @@ async def mirror_platform_references_to_legacy(
             link = await db.get(BrandBranch, row["id"])
             values = {key: value for key, value in row.items() if key != "id"}
             if link is None:
+                # Older UAT projections may have created the same brand/branch
+                # relationship with a database-local UUID.  Reconcile by the
+                # business key before inserting so rerunning this showcase seed
+                # remains idempotent across projector upgrades.
+                link = await db.scalar(
+                    select(BrandBranch).where(
+                        BrandBranch.company_id == company.id,
+                        BrandBranch.brand_id == row["brand_id"],
+                        BrandBranch.branch_id == row["branch_id"],
+                    )
+                )
+            if link is None:
                 db.add(BrandBranch(id=row["id"], company_id=company.id, **values))
             else:
                 for key, value in values.items():

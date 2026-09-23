@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from contextlib import redirect_stderr
 import io
 from types import SimpleNamespace
@@ -8,7 +9,12 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-from app.cli.seed_ui_showcase import build_parser, fixture_id, require_uat
+from app.cli.seed_ui_showcase import (
+    build_parser,
+    fixture_id,
+    mirror_platform_references_to_legacy,
+    require_uat,
+)
 
 
 def args(*, yes: bool = True) -> argparse.Namespace:
@@ -72,6 +78,71 @@ class SeedUiShowcaseGuardTests(unittest.TestCase):
             ), patch("app.cli.seed_ui_showcase.RetailSessionLocal", object()):
                 with self.assertRaises(RuntimeError):
                     require_uat(args())
+
+    def test_legacy_brand_branch_is_reused_by_business_key(self) -> None:
+        company_id = uuid.uuid4()
+        brand_id = uuid.uuid4()
+        branch_id = uuid.uuid4()
+        platform_link_id = uuid.uuid4()
+        existing_link_id = uuid.uuid4()
+        company = SimpleNamespace(id=company_id, name="UAT", business_slug="uat")
+        existing_link = SimpleNamespace(
+            id=existing_link_id,
+            company_id=company_id,
+            brand_id=brand_id,
+            branch_id=branch_id,
+            branch_type="franchise",
+            is_active=False,
+        )
+
+        class FakeSession:
+            async def get(self, model: object, object_id: uuid.UUID) -> object | None:
+                if getattr(model, "__name__", "") == "Company":
+                    return company
+                return None
+
+            async def scalar(self, _statement: object) -> object:
+                return existing_link
+
+            def add(self, _row: object) -> None:
+                self.fail("a duplicate BrandBranch must not be inserted")
+
+            async def flush(self) -> None:
+                return None
+
+            async def commit(self) -> None:
+                return None
+
+            def fail(self, message: str) -> None:
+                raise AssertionError(message)
+
+        class FakeContext:
+            async def __aenter__(self) -> FakeSession:
+                return FakeSession()
+
+            async def __aexit__(self, *_args: object) -> None:
+                return None
+
+        references = {
+            "branches": [],
+            "brands": [],
+            "links": [
+                {
+                    "id": platform_link_id,
+                    "brand_id": brand_id,
+                    "branch_id": branch_id,
+                    "branch_type": "company_owned",
+                    "is_active": True,
+                }
+            ],
+        }
+        with patch("app.cli.seed_ui_showcase.AsyncSessionLocal", return_value=FakeContext()):
+            asyncio.run(mirror_platform_references_to_legacy(company, references))
+
+        self.assertEqual(existing_link.id, existing_link_id)
+        self.assertNotEqual(existing_link.id, platform_link_id)
+        self.assertEqual(existing_link.branch_type, "company_owned")
+        self.assertTrue(existing_link.is_active)
 
 
 if __name__ == "__main__":

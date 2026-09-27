@@ -2,7 +2,7 @@
 
 วันที่: 2026-09-27
 
-สถานะ: **IN PROGRESS — UAT ONLY; Production unchanged**
+สถานะ: **UAT DEPLOYED — software gate passed; physical UAT pending; Production unchanged**
 
 ## เป้าหมาย
 
@@ -42,6 +42,8 @@ transactions ตรวจ Company/Brand/Branch จาก access token และ 
 - Backend regression: `582/582` ผ่าน
 - Frontend TypeScript type-check: ผ่าน
 - Frontend production build: ผ่าน
+- Takeaway browser regression: `6/6` ผ่าน
+- Retail desktop/tablet browser regression: `1/1` ผ่าน
 - WP82 backup SHA-256: ผ่านครบ 5 database dumps
 - UAT migration heads ก่อน deploy:
   - Legacy `wp65govern0026`
@@ -49,6 +51,35 @@ transactions ตรวจ Company/Brand/Branch จาก access token และ 
   - Restaurant `p6restaurant0007`
   - Retail `p13retail0007`
   - Takeaway `p6takeaway0008`
+
+## Deployment evidence
+
+- Release commit: `4cd3e2f57c48b8c6e2f77737f47f958a60af5514`
+- Backend image: `restaurant-pos-backend:wp83-4cd3e2f`
+  - Image ID: `sha256:b3f62af4ccc7972fc9f0deab29004b08f8acb52865d3b6ddb963c6b2cb213520`
+- Frontend image: `restaurant-pos-frontend:wp83-4cd3e2f`
+  - Image ID: `sha256:599e98076f7e48165556e6cbd4eb9ed353f90a31204036df20efefa4eedeeee2`
+- UAT Backend: `healthy`; UAT Frontend: `running`
+- Effective Takeaway write mode: `uat`
+- HTTP `200`: `uat-app`, `uat-restaurant`, `uat-retail`, `uat-takeaway`,
+  `/health` และ `/health/ready`
+- Canonical UAT contexts ยังคงครบ:
+  - Restaurant: `KPP-01`, `TLK-01`
+  - Retail: `TLM-01`
+  - Takeaway: `BKK-01`
+- WP82 order `TW-20260923-1F3972-0088` ยังคง `paid/picked_up`, cash
+  `35.31`
+- WP82 transfer `TT-20260927-0004` ยังคง `received` และไม่มี discrepancy
+- ไม่สร้างธุรกรรม UAT ใหม่ระหว่าง automated smoke
+
+## Fresh rollback evidence
+
+- Backup: `wp83-before-4cd3e2f`
+- สำรองครบ 5 database dumps, Redis, uploads, `.env.uat` และ container metadata
+- SHA-256 verification ผ่านทุก dump และ Redis snapshot
+- Restore + migration rehearsal ทำใน PostgreSQL container แยกและผ่านครบทั้ง 5 heads
+- PostgreSQL/container ชั่วคราวถูกลบหลัง rehearsal
+- Production Backend/Frontend image และ container ไม่เปลี่ยน
 
 ## UAT deployment boundary
 

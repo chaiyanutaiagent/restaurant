@@ -46,6 +46,51 @@ body {
   min-height: 100vh;
 }
 
+.native-app,
+.native-app body,
+.native-app #root {
+  min-height: 100dvh;
+}
+
+.native-app body {
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.native-app input,
+.native-app textarea,
+.native-app [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.native-app .takeaway-app-shell {
+  min-height: 100dvh;
+}
+
+.native-safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.native-safe-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+}
+
+.native-safe-screen {
+  min-height: 100dvh;
+  padding-top: max(2.5rem, env(safe-area-inset-top, 0px));
+  padding-bottom: max(2.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+.native-android button:not([role="switch"]),
+.native-android [role="button"],
+.native-android input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+.native-android select,
+.native-android textarea {
+  min-height: var(--app-touch-target);
+}
+
 button,
 a,
 input,

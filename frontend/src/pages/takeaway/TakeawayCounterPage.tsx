@@ -28,6 +28,12 @@ function money(value: number): string {
   return new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB" }).format(value);
 }
 
+function publicTakeawayUrl(path: string): string {
+  const configuredOrigin = import.meta.env.VITE_PUBLIC_APP_ORIGIN?.trim().replace(/\/$/, "");
+  const origin = configuredOrigin || window.location.origin;
+  return new URL(path, `${origin}/`).toString();
+}
+
 export default function TakeawayCounterPage(): JSX.Element {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -147,7 +153,7 @@ export default function TakeawayCounterPage(): JSX.Element {
       setLastReceipt(result.receipt);
       setLastClientSaleId(result.clientSaleId);
       if (pickupToken) {
-        const url = `${window.location.origin}/takeaway/pickup-status/${pickupToken}`;
+        const url = publicTakeawayUrl(`/takeaway/pickup-status/${encodeURIComponent(pickupToken)}`);
         setPickupQr(await QRCode.toDataURL(url, { width: 240, margin: 2, color: { dark: "#0f172a" } }));
       } else {
         setPickupQr("");
@@ -176,7 +182,7 @@ export default function TakeawayCounterPage(): JSX.Element {
       return takeawayApi.createOrderingLink(12);
     },
     onSuccess: async (response) => {
-      const url = `${window.location.origin}/takeaway/order/${response.data.data.token}`;
+      const url = publicTakeawayUrl(`/takeaway/order/${encodeURIComponent(response.data.data.token)}`);
       setOrderingQr(await QRCode.toDataURL(url, { width: 260, margin: 2, color: { dark: "#0f172a" } }));
     },
     onError: () => toast({ title: "สร้าง QR ไม่สำเร็จ", variant: "destructive" }),

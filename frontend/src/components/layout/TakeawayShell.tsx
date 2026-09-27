@@ -17,6 +17,7 @@ import {
   Users,
   Warehouse,
 } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
 import { NavLink, Outlet } from "react-router-dom";
 import {
   canAccessTakeawayArea,
@@ -79,6 +80,7 @@ export default function TakeawayShell(): JSX.Element {
   const scopeTypes = useAuthStore((state) => state.scopeTypes ?? []);
   const businessType = useAuthStore((state) => state.businessType);
   const branchId = useAuthStore((state) => state.branchId);
+  const isNativeApp = Capacitor.isNativePlatform();
 
   const visibleGroups = TAKEAWAY_NAVIGATION.map((group) => ({
     ...group,
@@ -88,7 +90,7 @@ export default function TakeawayShell(): JSX.Element {
   })).filter((group) => group.items.length > 0);
 
   return (
-    <div className="flex min-h-screen bg-[linear-gradient(180deg,#ecfdf5_0%,#f8fafc_30%,#eef2f7_100%)] text-slate-950">
+    <div className="takeaway-app-shell flex min-h-screen bg-[linear-gradient(180deg,#ecfdf5_0%,#f8fafc_30%,#eef2f7_100%)] text-slate-950">
       <aside className="sticky top-0 hidden h-screen w-[18rem] shrink-0 flex-col border-r border-slate-800 bg-slate-950 text-white xl:flex">
         <div className="border-b border-slate-800 px-5 py-5">
           <p className="text-xl font-black tracking-tight">Foodchainservice</p>
@@ -106,15 +108,17 @@ export default function TakeawayShell(): JSX.Element {
             </div>
           ))}
         </nav>
-        <div className="border-t border-slate-800 p-3">
-          <NavLink className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-700 px-3 text-sm font-semibold text-slate-200 hover:bg-slate-800" to="/admin">
-            <LayoutDashboard className="h-4 w-4" /> ERP กลาง
-          </NavLink>
-        </div>
+        {!isNativeApp ? (
+          <div className="border-t border-slate-800 p-3">
+            <NavLink className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-700 px-3 text-sm font-semibold text-slate-200 hover:bg-slate-800" to="/admin">
+              <LayoutDashboard className="h-4 w-4" /> ERP กลาง
+            </NavLink>
+          </div>
+        ) : null}
       </aside>
 
       <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950 text-white shadow-lg xl:hidden">
+        <header className="native-safe-top sticky top-0 z-30 border-b border-slate-800 bg-slate-950 text-white shadow-lg xl:hidden">
           <div className="flex min-h-16 items-center gap-4 border-b border-slate-800 px-3 md:px-5">
             <div className="min-w-fit">
               <p className="text-lg font-black tracking-tight">Foodchainservice</p>
@@ -123,9 +127,11 @@ export default function TakeawayShell(): JSX.Element {
             <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-xs text-slate-400">
               <span className="truncate rounded-full border border-slate-700 px-2.5 py-1">{branchId ? `สาขา ${branchId.slice(0, 8)}` : "ระดับบริษัท/แบรนด์"}</span>
             </div>
-            <NavLink className="min-w-fit rounded-xl border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800" to="/admin">
-              ERP กลาง
-            </NavLink>
+            {!isNativeApp ? (
+              <NavLink className="min-w-fit rounded-xl border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800" to="/admin">
+                ERP กลาง
+              </NavLink>
+            ) : null}
           </div>
           <nav aria-label="พื้นที่ทำงาน Takeaway" className="app-horizontal-scroll flex gap-3 overflow-x-auto px-3 py-2 md:px-5">
             {visibleGroups.map((group) => (
@@ -136,7 +142,7 @@ export default function TakeawayShell(): JSX.Element {
             ))}
           </nav>
         </header>
-        <main className="p-3 md:p-5 xl:p-7">
+        <main className="native-safe-bottom p-3 md:p-5 xl:p-7">
           <div className="app-page max-w-[1800px]">
             <TakeawayReleaseBanner />
             <Outlet />

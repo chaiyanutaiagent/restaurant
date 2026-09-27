@@ -492,7 +492,7 @@ export default function POSPage(): JSX.Element {
   const receiptPageHeightMm = useMemo(() => estimateReceiptPageHeightMm(lastOrder), [lastOrder]);
   const handlePrint = useReactToPrint({
     contentRef: receiptRef,
-    pageStyle: `@page { size: 80mm ${receiptPageHeightMm}mm; margin: 2mm 3mm; }`,
+    pageStyle: `@page { size: 80mm ${receiptPageHeightMm}mm; margin: 0; } @media print { html, body { margin: 0 !important; padding: 0 !important; } }`,
   });
   const printTakeawayCustomerSlip = useReactToPrint({ contentRef: takeawayCustomerSlipRef });
   const printTakeawayKitchenSlip = useReactToPrint({ contentRef: takeawayKitchenSlipRef });

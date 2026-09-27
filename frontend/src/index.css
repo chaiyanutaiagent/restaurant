@@ -270,7 +270,7 @@ a {
 
   .pos-print-receipt {
     position: fixed;
-    top: 0;
+    top: 2mm;
     right: 0;
     left: 0;
     width: 68mm;

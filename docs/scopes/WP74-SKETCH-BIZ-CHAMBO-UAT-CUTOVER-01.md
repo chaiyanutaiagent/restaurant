@@ -63,10 +63,20 @@ locations and 8 recipes, including the retained synthetic UAT examples.
 
 ## Runtime boundary
 
+- Commit: `f8b6d24`
+- Immutable release: `/home/behappyaiagent/restaurant-uat-releases/f8b6d24`
+- Source archive SHA-256: `a1c449ca172b7fd396bbbafabe31747faf74d0cea33ed990dd1dfa8e80be33f6`
+- Backend image: `restaurant-pos-backend:wp74-f8b6d24`
+- Backend image ID: `sha256:ae74be288f580b76f182b33dd906a5208d78e136437628acc458163a0124d9b3`
+- Backend health: healthy; public readiness: HTTP 200
 - `TAKEAWAY_UAT_TRANSACTION_WRITES_ENABLED=false`
 - Takeaway transactions remain `HOLD`.
 - No Production container, database, hostname, flag or data was changed.
 - No real provider, PromptPay, tax submission or fiscal document was executed.
+
+Only the UAT Backend container was recreated. UAT PostgreSQL, Redis, Frontend,
+Nginx and Cloudflared retained their container identities. Every Production
+container ID and image matched the pre-deploy snapshot.
 
 ## Deferred human gates
 

@@ -2,7 +2,7 @@
 
 วันที่: 2026-09-27
 
-สถานะ: **implemented_local — automated gate passed; UAT deployment pending**
+สถานะ: **uat_deployed — automated gate passed; physical UAT deferred**
 
 ## ขอบเขต
 
@@ -38,10 +38,29 @@
 
 ## Automated gate
 
-- Backend focused unit/policy tests: `30` ผ่าน
+- Backend focused unit/policy tests: `31` ผ่าน
 - Frontend type-check: ผ่าน
 - Takeaway browser tests: `6/6` ผ่าน
 - `git diff --check`: ผ่าน
+
+## UAT deployment evidence
+
+- Source commit: `78aee14`
+- Backend image: `restaurant-pos-backend:wp81-78aee14`
+- Frontend image: `restaurant-pos-frontend:wp81-78aee14`
+- Backend health: `healthy`
+- Public smoke: HTTP `200` สำหรับ readiness, Restaurant POS, Retail POS, Takeaway sale และ Takeaway fulfillment
+- Chambo: แบรนด์ `chambo`, สาขา `BKK-01` (โอโซนวัน), fulfillment mode `counter_combined`
+- Test staff: active `33` บัญชีทั้งบริษัท; Chambo active `6` บัญชี และบัญชีหน้าที่เดิม 5 บัญชีถูกปิดใช้งาน
+- Takeaway data retained: หมวดหมู่ `12`, สินค้า `45`, รายการสาขา `16`, จุดสต๊อก `5`, สูตร `8`
+- `TAKEAWAY_UAT_TRANSACTION_WRITES_ENABLED=false`; ไม่เปิด Production
+
+## Rollback
+
+- Backup path: `/home/behappyaiagent/restaurant-uat-deploy-backups/wp77-81-before-78aee14`
+- Custom-format dumps ครบ 5 ฐานข้อมูล; checksum และ `pg_restore --list` ผ่านทั้งหมด
+- Production containers และ UAT PostgreSQL/Redis/Nginx/Cloudflare Tunnel มี container ID เดิมหลัง deploy
+- Rollback ใช้ image เดิม `restaurant-pos-backend:wp74-f8b6d24` และ `restaurant-pos-frontend:wp72-b18b2ac` พร้อมฐานข้อมูลชุดสำรองข้างต้น
 
 ## Release boundary
 

@@ -604,17 +604,26 @@ class TakeawayImportService:
             source_id = str(record["source_id"])
             data = record["data"]
             assert isinstance(data, dict)
-            target = TakeawayUnit(
-                company_id=self.current.company_id,
-                code=str(data["code"]),
-                name=str(data["name"]),
-                name_en=data.get("name_en"),
-                decimal_places=int(data.get("decimal_places", 0)),
-                is_active=bool(data.get("is_active", True)),
+            target = await self.db.scalar(
+                select(TakeawayUnit).where(
+                    TakeawayUnit.company_id == self.current.company_id,
+                    TakeawayUnit.code == str(data["code"]),
+                )
             )
-            self.db.add(target)
-            await self.db.flush()
-            target_records[("unit", source_id)] = ("takeaway_unit", target.id, "imported")
+            record_status = "reused"
+            if target is None:
+                target = TakeawayUnit(
+                    company_id=self.current.company_id,
+                    code=str(data["code"]),
+                    name=str(data["name"]),
+                    name_en=data.get("name_en"),
+                    decimal_places=int(data.get("decimal_places", 0)),
+                    is_active=bool(data.get("is_active", True)),
+                )
+                self.db.add(target)
+                await self.db.flush()
+                record_status = "imported"
+            target_records[("unit", source_id)] = ("takeaway_unit", target.id, record_status)
 
         for record in records_by_type["category"]:
             source_id = str(record["source_id"])
@@ -791,22 +800,43 @@ class TakeawayImportService:
             source_id = str(record["source_id"])
             data = record["data"]
             assert isinstance(data, dict)
-            target = TakeawayCreditAccount(
-                company_id=self.current.company_id,
-                brand_id=target_brand,
-                branch_id=branch_map[str(data["branch_source_id"])],
-                credit_limit=Decimal(str(data["credit_limit"])),
-                balance=Decimal(str(data["balance"])),
-                status="active",
+            target_branch_id = branch_map[str(data["branch_source_id"])]
+            imported_limit = Decimal(str(data["credit_limit"]))
+            imported_balance = Decimal(str(data["balance"]))
+            target = await self.db.scalar(
+                select(TakeawayCreditAccount).where(
+                    TakeawayCreditAccount.company_id == self.current.company_id,
+                    TakeawayCreditAccount.brand_id == target_brand,
+                    TakeawayCreditAccount.branch_id == target_branch_id,
+                )
             )
-            self.db.add(target)
-            await self.db.flush()
-            if Decimal(str(data["balance"])) > 0:
+            record_status = "reused"
+            if target is not None and (
+                imported_limit not in {Decimal("0"), target.credit_limit}
+                or imported_balance not in {Decimal("0"), target.balance}
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Opening credit conflicts with the existing Takeaway account",
+                )
+            if target is None:
+                target = TakeawayCreditAccount(
+                    company_id=self.current.company_id,
+                    brand_id=target_brand,
+                    branch_id=target_branch_id,
+                    credit_limit=imported_limit,
+                    balance=imported_balance,
+                    status="active",
+                )
+                self.db.add(target)
+                await self.db.flush()
+                record_status = "imported"
+            if record_status == "imported" and imported_balance > 0:
                 self.db.add(
                     TakeawayCreditEntry(
                         account_id=target.id,
                         entry_type="adjustment",
-                        amount=Decimal(str(data["balance"])),
+                        amount=imported_balance,
                         reference_type="opening_import",
                         reference_id=batch.id,
                         idempotency_key=f"takeaway-import:{batch.id}:credit:{source_id}",
@@ -815,7 +845,7 @@ class TakeawayImportService:
             target_records[("opening_credit", source_id)] = (
                 "takeaway_credit_account",
                 target.id,
-                "imported",
+                record_status,
             )
 
         for record_type in sorted(HISTORICAL_TYPES):

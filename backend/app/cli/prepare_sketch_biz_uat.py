@@ -97,10 +97,10 @@ WORKSPACES = (
         business_type="takeaway",
         brand_slug="chambo",
         brand_name="Chambo",
-        branch_code="CHB-01",
+        branch_code="BKK-01",
         branch_name="Chambo สาขาโอโซนวัน",
         source_brand_slug="foodchain-takeaway-uat",
-        source_branch_code="TW-01",
+        source_branch_code="CHB-01",
         storefront_mode="food_stall",
     ),
 )
@@ -143,6 +143,73 @@ def validate_registration_id(value: str) -> None:
 
 def workspace_keys() -> tuple[str, ...]:
     return tuple(spec.key for spec in WORKSPACES)
+
+
+def legacy_archive_branch_code(code: str, branch_id: uuid.UUID) -> str:
+    """Return a deterministic code that fits the legacy Branch.code column."""
+    return f"LEG-{code[:7]}-{branch_id.hex[:8]}"
+
+
+async def archive_unlinked_legacy_branch_conflicts(
+    company_id: uuid.UUID,
+    references: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, str]]:
+    """Preserve old legacy rows before projecting a reused branch code.
+
+    A linked branch is business-owned and must be resolved manually.  An unlinked
+    legacy seed can be safely deactivated and renamed while retaining its UUID and
+    every historical foreign-key reference.
+    """
+    archived: list[dict[str, str]] = []
+    async with AsyncSessionLocal() as db:
+        for reference in references["branches"]:
+            conflict = await db.scalar(
+                select(Branch).where(
+                    Branch.company_id == company_id,
+                    Branch.code == reference["code"],
+                    Branch.id != reference["id"],
+                )
+            )
+            if conflict is None:
+                continue
+            active_link = await db.scalar(
+                select(BrandBranch.id).where(
+                    BrandBranch.company_id == company_id,
+                    BrandBranch.branch_id == conflict.id,
+                    BrandBranch.is_active.is_(True),
+                )
+            )
+            if active_link is not None:
+                raise RuntimeError(
+                    f"Legacy branch code {reference['code']} belongs to an active brand link; "
+                    "manual resolution is required"
+                )
+            old_code = conflict.code
+            archived_code = legacy_archive_branch_code(old_code, conflict.id)
+            conflict.code = archived_code
+            conflict.is_active = False
+            db.add(
+                AuditLog(
+                    company_id=company_id,
+                    branch_id=conflict.id,
+                    action="uat_branch_code_archived_for_projection",
+                    resource="branch",
+                    resource_id=str(conflict.id),
+                    old_value={"code": old_code, "is_active": True},
+                    new_value={"code": archived_code, "is_active": False},
+                    user_agent="prepare_sketch_biz_uat",
+                )
+            )
+            archived.append(
+                {
+                    "branch_id": str(conflict.id),
+                    "old_code": old_code,
+                    "archived_code": archived_code,
+                    "replacement_branch_id": str(reference["id"]),
+                }
+            )
+        await db.commit()
+    return archived
 
 
 async def _find_brand(db, company_id: uuid.UUID, spec: WorkspaceSpec) -> Brand | None:
@@ -672,6 +739,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     platform = await configure_platform(args.company_id, args.username)
     projections = await project_references(args.company_id)
     references = await platform_reference_snapshot(args.company_id)
+    legacy_archived_branch_conflicts = await archive_unlinked_legacy_branch_conflicts(
+        args.company_id,
+        references,
+    )
     async with PlatformSessionLocal() as db:
         company = await db.get(Company, args.company_id)
         if company is None:
@@ -686,6 +757,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "company": platform,
         "tax": tax,
         "projections": projections,
+        "legacy_archived_branch_conflicts": legacy_archived_branch_conflicts,
         "restaurant_examples": restaurant_examples,
         "android_business_code": "sketch-biz",
         "takeaway_brand": "chambo",

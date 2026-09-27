@@ -34,7 +34,7 @@ Decision: PASS — tenant structure and bounded smoke complete; Production HOLD
 | Restaurant | ครัวป่าปลาเขื่อน | KPP-01 | Active |
 | Restaurant | The Loft Kitchen | TLK-01 | Active |
 | Retail | The Loft Mini Mart | TLM-01 | Active |
-| Takeaway | Chambo | CHB-01 — โอโซนวัน | Active, transactions HOLD |
+| Takeaway | Chambo | BKK-01 — โอโซนวัน | Active, transactions HOLD |
 
 Verified company profile:
 
@@ -80,8 +80,8 @@ Verified company profile:
 - `TAKEAWAY_UAT_TRANSACTION_WRITES_ENABLED=false`
 - `UAT_AUTH_BYPASS_ENABLED=true`
 - Physical printer, cash, PromptPay and network-loss UAT remains deferred by the owner.
-- The final Chambo source snapshot and signed dry-run preview completed in WP73;
-  target apply remains gated and Takeaway transaction writes remain disabled.
+- The final Chambo source snapshot, signed preview and target apply/replay/reconciliation
+  completed in WP73–WP74; Takeaway transaction writes remain disabled.
 - Production deployment and Production flags were not changed.
 
 ## Production isolation

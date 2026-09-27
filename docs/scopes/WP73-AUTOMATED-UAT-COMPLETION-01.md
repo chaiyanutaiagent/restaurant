@@ -34,7 +34,7 @@ Source repository stayed read-only and unchanged:
 - Selected source branch: `BKK-01` / `สาขากรุงเทพ`, identified for this
   migration as the Ozone One branch by owner instruction
 - Excluded source branch: `BKK-02` / `สาขาบางนา`
-- Target: Sketch Biz / Chambo / `CHB-01` / `Chambo สาขาโอโซนวัน`
+- Target: Sketch Biz / Chambo / `BKK-01` / `Chambo สาขาโอโซนวัน`
 - Mapping policy: single branch only; no cross-branch consolidation
 - The idempotent UAT tenant preparation was reapplied successfully with the
   Ozone One branch name; Takeaway transactions remained `HOLD`.
@@ -95,6 +95,9 @@ committed or uploaded.
   orientation or operator acceptance test was claimed.
 
 ## Remaining human gates
+
+Items 1–3 below were subsequently completed in WP74 under the owner's UAT-only
+authorization. Items 4–5 remain pending.
 
 1. The owner-selected scope is `BKK-01` / Ozone One only; Data/Privacy approval
    of the sealed cutoff remains required before target execution.

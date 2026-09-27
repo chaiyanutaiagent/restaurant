@@ -13,7 +13,7 @@
       "source_id": "d83bb0c6-c986-46c0-8fac-46af04d2c385",
       "target_id": "1f397253-0479-4970-8288-f72d6cde6d7e",
       "source_code": "BKK-01",
-      "target_code": "CHB-01",
+      "target_code": "BKK-01",
       "source_name": "สาขากรุงเทพ",
       "target_name": "Chambo สาขาโอโซนวัน",
       "strategy": "single_branch"

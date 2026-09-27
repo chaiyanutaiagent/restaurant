@@ -2,7 +2,7 @@
 
 วันที่: 2026-09-17
 
-สถานะ: **signed source dry-run completed — target apply ยังรอ human approval gate**
+สถานะ: **UAT target apply/replay/reconciliation completed — formal Privacy/physical gates pending**
 
 ## ขั้นตอน
 
@@ -31,12 +31,13 @@ python3 scripts/validate-wp25-approved-dry-run.py <evidence.json>
 - unresolved = 0 หรือมี waiver ที่ตรวจได้
 - approval ระบุผู้รับผิดชอบและเวลา
 
-## ผลการรัน WP73
+## ผลการรัน WP73–WP74
 
 - อ่านฐาน Chambo จริงด้วย `READ ONLY` และ `REPEATABLE READ` สำเร็จ
 - open shift/order/production/transfer/top-up/stock count เป็นศูนย์ทั้งหมด
 - signed bundle ผ่าน hash, count, contract, security scan และ Ed25519 seal
-- cutover preview: `ready=true`, blocker 0, 54 records from Ozone One only
-- ยังไม่ execute target import, ไม่เปิด Takeaway transaction write และไม่เปลี่ยน Production
-- ขั้น execute/replay/reconciliation และการรับรองผลสุดท้ายต้องรอ Data Owner,
-  Privacy Owner และผู้ทดสอบจริงตาม Exit gate เดิม
+- final cutover preview: `ready=true`, blocker 0, 54 records from Ozone One only
+- target UAT import สำเร็จ 54/54, rejected 0 และ idempotent replay คืน cutover run เดิม
+- control totals ตรง, historical side effects = 0
+- ไม่เปิด Takeaway transaction write และไม่เปลี่ยน Production
+- การรับรอง Privacy อย่างเป็นทางการและ physical UAT ยังคงเป็น human gate

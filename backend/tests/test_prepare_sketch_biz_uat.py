@@ -17,6 +17,7 @@ from app.cli.prepare_sketch_biz_uat import (
     UAT_VAT_RATE,
     WORKSPACES,
     build_parser,
+    legacy_archive_branch_code,
     require_uat,
     validate_registration_id,
     workspace_keys,
@@ -60,6 +61,11 @@ class SketchBizUatContractTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(RuntimeError):
                 validate_registration_id(value)
 
+    def test_legacy_archive_branch_code_is_deterministic_and_fits_column(self) -> None:
+        branch_id = uuid.UUID("68485ba7-530c-42b3-b156-da54e19250f4")
+        self.assertEqual(legacy_archive_branch_code("BKK-01", branch_id), "LEG-BKK-01-68485ba7")
+        self.assertLessEqual(len(legacy_archive_branch_code("LONG-BRANCH-CODE", branch_id)), 20)
+
     def test_workspace_hierarchy_matches_approved_company_structure(self) -> None:
         self.assertEqual(
             workspace_keys(),
@@ -69,7 +75,7 @@ class SketchBizUatContractTests(unittest.TestCase):
         self.assertEqual(len({row.brand_slug for row in WORKSPACES}), 4)
         self.assertEqual(len({row.branch_code for row in WORKSPACES}), 4)
         chambo = next(row for row in WORKSPACES if row.key == "chambo")
-        self.assertEqual(chambo.branch_code, "CHB-01")
+        self.assertEqual(chambo.branch_code, "BKK-01")
         self.assertEqual(chambo.branch_name, "Chambo สาขาโอโซนวัน")
 
     def test_guard_accepts_only_pinned_complete_uat(self) -> None:

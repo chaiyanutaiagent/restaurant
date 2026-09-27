@@ -3,6 +3,7 @@ import type { TakeawayReceipt } from "@/lib/takeawayApi";
 import type { WapMenu, WapOrder } from "@/lib/wapApi";
 import {
   buildEscPosReceiptBytes,
+  buildEscPosCashDrawerPulse,
   buildEscPosTakeawayReceiptBytes,
   buildEscPosLongTestBytes,
   buildEscPosWapOrderSlipBytes,
@@ -159,5 +160,12 @@ export async function printConfiguredLongReceiptTest(): Promise<boolean> {
   if (!transport) return false;
   const bytes = buildEscPosLongTestBytes();
   await sendConfiguredBytes(bytes, transport);
+  return true;
+}
+
+export async function openConfiguredCashDrawer(drawer: 0 | 1 = 0): Promise<boolean> {
+  const transport = await configuredTransport();
+  if (!transport) return false;
+  await sendConfiguredBytes(buildEscPosCashDrawerPulse(drawer), transport);
   return true;
 }

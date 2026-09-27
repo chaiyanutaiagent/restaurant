@@ -684,6 +684,16 @@ export async function printEscPosBytes(bytes: Uint8Array): Promise<void> {
   });
 }
 
+export function buildEscPosCashDrawerPulse(drawer: 0 | 1 = 0): Uint8Array {
+  // ESC p m t1 t2: pulse drawer connector pin 2 (m=0) or pin 5 (m=1).
+  // PHOMARK JHP-A1 uses 2 ms units, so this sends 50 ms on / 500 ms off.
+  return new Uint8Array([0x1b, 0x70, drawer, 0x19, 0xfa]);
+}
+
+export async function openEscPosCashDrawer(drawer: 0 | 1 = 0): Promise<void> {
+  await printEscPosBytes(buildEscPosCashDrawerPulse(drawer));
+}
+
 export async function printEscPosReceipt(
   order: SaleOrder,
   company: EscPosReceiptCompany,

@@ -62,7 +62,7 @@ import {
 } from "@/lib/restaurantOffline";
 import { POS_CATALOG_ISOLATION_KEY, syncPendingSales, syncProductCatalog, syncStockBalances, useOfflineProducts, useOnlineStatus } from "@/lib/syncService";
 import { wapApi, type WapOrder } from "@/lib/wapApi";
-import { printConfiguredSaleReceipt, printConfiguredWapOrderSlip } from "@/lib/takeawayPrinter";
+import { openConfiguredCashDrawer, printConfiguredSaleReceipt, printConfiguredWapOrderSlip } from "@/lib/takeawayPrinter";
 import { useAuthStore } from "@/stores/auth.store";
 import { useDeviceStore } from "@/stores/device.store";
 import type { BranchReplacementRule, BranchSettings } from "@/types/admin";
@@ -1988,6 +1988,27 @@ export default function POSPage(): JSX.Element {
     }
   }
 
+  async function openCashDrawerAfterPayment(payments: PaymentDraft[]): Promise<void> {
+    const hasCash = payments.some((payment) => payment.payment_method === "cash" && Number(payment.amount) > 0);
+    if (!hasCash) return;
+    try {
+      const opened = await openConfiguredCashDrawer();
+      if (!opened) {
+        toast({
+          title: "ชำระเงินสำเร็จ แต่ลิ้นชักไม่เปิด",
+          description: "ยังไม่ได้เชื่อมเครื่องพิมพ์ ESC/POS กับอุปกรณ์นี้",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "ชำระเงินสำเร็จ แต่ลิ้นชักไม่เปิด",
+        description: describeEscPosError(error),
+        variant: "destructive",
+      });
+    }
+  }
+
   async function queueOfflineSale(): Promise<void> {
     if (!currentShift || !branchId || !user) {
       return;
@@ -2040,6 +2061,7 @@ export default function POSPage(): JSX.Element {
     const offlineOrder = buildOfflineOrder(pendingSale, branchId, user.id);
     setLastOrder(offlineOrder);
     setShowReceipt(true);
+    await openCashDrawerAfterPayment(pendingSale.payments ?? []);
     resetActiveSale();
     toast({ title: "บันทึกออฟไลน์แล้ว", description: "รายการขายถูกคิวไว้เพื่อ sync ภายหลัง" });
   }
@@ -2207,6 +2229,7 @@ export default function POSPage(): JSX.Element {
       const order = response.data.data as SaleOrder;
       setLastOrder(order);
       setShowReceipt(true);
+      await openCashDrawerAfterPayment(checkoutPayments);
       resetActiveSale();
       await db.completedOrders.put({ ...order, synced_at: Date.now() });
       await syncStockBalances(branchId ?? undefined);
@@ -2237,6 +2260,7 @@ export default function POSPage(): JSX.Element {
 
     setTakeawayOrder(result.order);
     setTakeawayResultOpen(true);
+    await openCashDrawerAfterPayment(checkoutPayments);
     resetActiveSale();
     setTakeawayOutboxSummary(await getRestaurantOutboxSummary());
     if (result.status === "reconciled") {

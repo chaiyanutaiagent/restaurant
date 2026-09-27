@@ -55,6 +55,33 @@ accept a client-provided business type.
    health and readiness for each hostname.
 5. Retain the previous UAT images and `uat-pos.foodchainservice.com` as rollback.
 
+## UAT deployment evidence — 2026-09-27
+
+- Source commit: `d70ab0c72febd3bd42a9400224b3c049f7afa293`.
+- Source archive SHA-256:
+  `9e995d8c621a8f2f746adaa5a297dc9f8031eb30ec225af293ae1b230d47faa5`.
+- Backend image: `restaurant-pos-backend:url-routing-d70ab0c`, image ID
+  `sha256:86787ab49226b7cec4f93c0ed354061617cd901c4f54bcf0d6c9ec4f65bf922a`;
+  final health was `healthy`.
+- Frontend image: `restaurant-pos-frontend:url-routing-d70ab0c`, image ID
+  `sha256:730d07c9af8094ad946b7d0b376bf6f561147661b00a5e417ee170d3bf9e42f3`.
+- App-only rollback checkpoint:
+  `/home/behappyaiagent/restaurant-uat-deploy-backups/wp66-70-before-d70ab0c`.
+- PostgreSQL, Redis, Nginx and Cloudflared were not recreated. No migration ran.
+- Tunnel `restaurant-uat` remained healthy and routes all four canonical UAT
+  hostnames to `http://nginx:80`.
+- HTTPS smoke returned HTTP 200 for Company `/company`, Restaurant
+  `/restaurant/pos`, Retail `/retail/pos` and Takeaway
+  `/takeaway/store/orders`.
+- A mistakenly created `uat-restaurant.contentfactoryagent.com` route and its
+  DNS record were deleted after explicit approval; the final tunnel contains
+  only the legacy UAT hostname and the four intended Product hostnames.
+- Production Backend, Frontend, PostgreSQL, Redis, Nginx and Cloudflared image
+  and container identities matched the pre-deployment checkpoint.
+- The UAT `APP_VERSION` environment label was retained from the preceding
+  showcase release; immutable image tags and IDs above are the deployment
+  identity for this release.
+
 ## Deferred by design
 
 - Production DNS, Production deployment and Production authentication changes.

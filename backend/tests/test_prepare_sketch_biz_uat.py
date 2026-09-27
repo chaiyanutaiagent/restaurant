@@ -12,6 +12,7 @@ from app.cli.prepare_sketch_biz_uat import (
     LEGAL_NAME_EN,
     LEGAL_NAME_TH,
     REGISTRATION_ID,
+    RESTAURANT_MENU_INVENTORY_ROLE,
     SKETCH_BIZ_COMPANY_ID,
     UAT_VAT_RATE,
     WORKSPACES,
@@ -52,6 +53,7 @@ class SketchBizUatContractTests(unittest.TestCase):
         self.assertEqual(REGISTRATION_ID, "0125568025206")
         validate_registration_id(REGISTRATION_ID)
         self.assertEqual(str(UAT_VAT_RATE), "7.00")
+        self.assertEqual(RESTAURANT_MENU_INVENTORY_ROLE, "not_stocked")
 
     def test_registration_id_rejects_invalid_values(self) -> None:
         for value in ("", "123", "012556802520A", "00125568025206"):

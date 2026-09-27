@@ -43,6 +43,7 @@ REGISTERED_ADDRESS = (
 )
 UAT_VAT_RATE = Decimal("7.00")
 UAT_VAT_EFFECTIVE_FROM = date(2026, 1, 1)
+RESTAURANT_MENU_INVENTORY_ROLE = "not_stocked"
 
 
 @dataclass(frozen=True)
@@ -594,7 +595,7 @@ async def seed_restaurant_examples(
                         sku=sku,
                         name=f"{product_name} · {row['brand_name']}",
                         product_type="menu_item",
-                        inventory_role="finished_good",
+                        inventory_role=RESTAURANT_MENU_INVENTORY_ROLE,
                         cost_price=(price * Decimal("0.40")).quantize(Decimal("0.01")),
                         selling_price=price,
                         vat_type="included",
@@ -609,6 +610,7 @@ async def seed_restaurant_examples(
                     product.brand_id = brand_id
                     product.category_id = category.id
                     product.name = f"{product_name} · {row['brand_name']}"
+                    product.inventory_role = RESTAURANT_MENU_INVENTORY_ROLE
                     product.selling_price = price
                     product.vat_type = "included"
                     product.vat_rate = UAT_VAT_RATE

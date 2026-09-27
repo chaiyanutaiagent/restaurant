@@ -20,7 +20,7 @@ import {
   UserRoundCheck,
   WifiOff,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,15 @@ import {
   generateClientOrderId,
 } from "@/lib/cartUtils";
 import { db } from "@/lib/db";
+import {
+  connectEscPosUsbPrinter,
+  describeEscPosError,
+  getEscPosPrinterStatus,
+  isEscPosUsbSupported,
+  printEscPosLongTest,
+  printEscPosReceipt,
+  type EscPosPrinterStatus,
+} from "@/lib/escPosPrinter";
 import { posApi } from "@/lib/posApi";
 import { productApi } from "@/lib/productApi";
 import {
@@ -476,6 +485,12 @@ export default function POSPage(): JSX.Element {
   const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(() => window.localStorage.getItem("pos-auto-print-receipt") === "true");
+  const [escPosPrinterStatus, setEscPosPrinterStatus] = useState<EscPosPrinterStatus>(() => ({
+    supported: isEscPosUsbSupported(),
+    paired: false,
+    printer: null,
+  }));
+  const [escPosPrinterBusy, setEscPosPrinterBusy] = useState<"connect" | "test" | "print" | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const cashInputRef = useRef<HTMLInputElement | null>(null);
   const receiptRef = useRef<HTMLDivElement | null>(null);
@@ -490,7 +505,7 @@ export default function POSPage(): JSX.Element {
   const autoPrintedOrderRef = useRef<string | null>(null);
   const offlineProducts = useOfflineProducts(searchTerm, catalogRevision);
   const receiptPageHeightMm = useMemo(() => estimateReceiptPageHeightMm(lastOrder), [lastOrder]);
-  const handlePrint = useReactToPrint({
+  const handleBrowserPrint = useReactToPrint({
     contentRef: receiptRef,
     pageStyle: `@page { size: 80mm ${receiptPageHeightMm}mm; margin: 0; } @media print { html, body { margin: 0 !important; padding: 0 !important; } }`,
   });
@@ -509,6 +524,15 @@ export default function POSPage(): JSX.Element {
   useEffect(() => {
     if (!deviceSessionHydrated) void hydrateDeviceSession();
   }, [deviceSessionHydrated, hydrateDeviceSession]);
+
+  useEffect(() => {
+    if (!deviceStatusOpen) return;
+    let active = true;
+    void getEscPosPrinterStatus()
+      .then((status) => { if (active) setEscPosPrinterStatus(status); })
+      .catch(() => { if (active) setEscPosPrinterStatus({ supported: isEscPosUsbSupported(), paired: false, printer: null }); });
+    return () => { active = false; };
+  }, [deviceStatusOpen]);
 
   const locationsQuery = useQuery({
     queryKey: ["pos", "locations", branchId],
@@ -726,17 +750,6 @@ export default function POSPage(): JSX.Element {
     // Reconnect or entering Takeaway mode is the trigger; order/query updates must not loop the sync.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline, isTakeawayMode]);
-
-  useEffect(() => {
-    if (!showReceipt || !lastOrder || !autoPrintReceipt || autoPrintedOrderRef.current === lastOrder.id) {
-      return;
-    }
-    autoPrintedOrderRef.current = lastOrder.id;
-    const timeout = window.setTimeout(() => {
-      void handlePrint();
-    }, 350);
-    return () => window.clearTimeout(timeout);
-  }, [autoPrintReceipt, handlePrint, lastOrder, showReceipt]);
 
   useEffect(() => {
     if (!takeawayPendingPrint || !takeawayOrder) return;
@@ -2329,6 +2342,79 @@ export default function POSPage(): JSX.Element {
   const canEditBranchSettings = hasPermission("system.branch.edit") || hasPermission("system.company.edit");
   const currentCounterDevice = pairedDevice?.branch_id === branchId && pairedDevice.device_type === "counter" ? pairedDevice : null;
   const cameraReady = typeof navigator.mediaDevices?.getUserMedia === "function";
+  const receiptCompany = useMemo(() => ({
+    name: branchSettings?.pos_receipt_header?.trim() || (isRetailMode ? "Retail POS" : "Restaurant POS"),
+    logo_url: branchSettings?.receipt_show_logo ? branchSettings.receipt_logo_url : undefined,
+  }), [branchSettings?.pos_receipt_header, branchSettings?.receipt_logo_url, branchSettings?.receipt_show_logo, isRetailMode]);
+  const receiptBranch = useMemo(() => ({ name: branchName }), [branchName]);
+  const receiptCashier = user?.display_name ?? user?.username ?? "Cashier";
+
+  const handleReceiptPrint = useCallback(async (order: SaleOrder | null = lastOrder) => {
+    if (!order) return;
+    let status: EscPosPrinterStatus | null = null;
+    try {
+      status = await getEscPosPrinterStatus();
+      setEscPosPrinterStatus(status);
+    } catch {
+      status = null;
+    }
+
+    if (status?.paired) {
+      setEscPosPrinterBusy("print");
+      try {
+        await printEscPosReceipt(order, receiptCompany, receiptBranch, receiptCashier);
+        toast({ title: "พิมพ์ใบเสร็จและตัดกระดาษแล้ว", description: "ความยาวกระดาษปรับตามจำนวนรายการอัตโนมัติ" });
+        return;
+      } catch (error) {
+        toast({
+          title: "ส่งตรงเข้าเครื่องพิมพ์ไม่สำเร็จ",
+          description: `${describeEscPosError(error)} — เปิดหน้าพิมพ์สำรองให้แทน`,
+          variant: "destructive",
+        });
+      } finally {
+        setEscPosPrinterBusy(null);
+      }
+    }
+    void handleBrowserPrint();
+  }, [handleBrowserPrint, lastOrder, receiptBranch, receiptCashier, receiptCompany, toast]);
+
+  const handleConnectEscPosPrinter = useCallback(async () => {
+    setEscPosPrinterBusy("connect");
+    try {
+      const printer = await connectEscPosUsbPrinter();
+      const status = await getEscPosPrinterStatus();
+      setEscPosPrinterStatus(status);
+      toast({ title: "เชื่อมเครื่องพิมพ์แล้ว", description: `${printer.name} พร้อมรับใบเสร็จแบบความยาวอัตโนมัติ` });
+    } catch (error) {
+      toast({ title: "เชื่อมเครื่องพิมพ์ไม่สำเร็จ", description: describeEscPosError(error), variant: "destructive" });
+    } finally {
+      setEscPosPrinterBusy(null);
+    }
+  }, [toast]);
+
+  const handleLongEscPosTest = useCallback(async () => {
+    setEscPosPrinterBusy("test");
+    try {
+      await printEscPosLongTest();
+      toast({ title: "ส่งบิลทดสอบ 60 รายการแล้ว", description: "ตรวจว่าข้อมูลต่อเนื่องและเครื่องตัดที่ท้ายใบเสร็จ" });
+    } catch (error) {
+      toast({ title: "ทดสอบพิมพ์ไม่สำเร็จ", description: describeEscPosError(error), variant: "destructive" });
+    } finally {
+      setEscPosPrinterBusy(null);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (!showReceipt || !lastOrder || !autoPrintReceipt || autoPrintedOrderRef.current === lastOrder.id) {
+      return;
+    }
+    autoPrintedOrderRef.current = lastOrder.id;
+    const timeout = window.setTimeout(() => {
+      void handleReceiptPrint(lastOrder);
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [autoPrintReceipt, handleReceiptPrint, lastOrder, showReceipt]);
+
   const discountAllowed = (branchSettings?.pos_allow_discount ?? true) && canApplyDiscount;
   const maxDiscountPct = branchSettings?.pos_max_discount_pct ?? 100;
   const maxDiscountAmount = (cart.subtotal * maxDiscountPct) / 100;
@@ -3558,10 +3644,20 @@ export default function POSPage(): JSX.Element {
               <div className={`mt-3 text-lg font-bold ${cameraReady ? "text-blue-700" : "text-amber-700"}`}>{cameraReady ? "พร้อมขอสิทธิ์กล้อง" : "อุปกรณ์นี้ไม่มีกล้องที่เว็บเข้าถึงได้"}</div>
               <div className="mt-1 text-xs text-slate-500">รองรับ QR, EAN, UPC, Code 39 และ Code 128</div>
             </div>
-            <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+            <div className={`rounded-2xl border p-4 ${escPosPrinterStatus.paired ? "border-emerald-200 bg-emerald-50" : "border-violet-200 bg-violet-50"}`}>
               <div className="flex items-center gap-2 text-sm font-semibold"><ClipboardList className="h-4 w-4" />ใบเสร็จและเครื่องพิมพ์</div>
-              <div className="mt-3 text-lg font-bold text-violet-700">พิมพ์ผ่านระบบของอุปกรณ์</div>
-              <div className="mt-1 text-xs text-slate-500">ตั้งไว้ {branchSettings?.receipt_copies ?? 1} สำเนา · สถานะเครื่องพิมพ์จริงต้องยืนยันบนอุปกรณ์</div>
+              <div className={`mt-3 text-lg font-bold ${escPosPrinterStatus.paired ? "text-emerald-700" : "text-violet-700"}`}>
+                {escPosPrinterStatus.paired
+                  ? `เชื่อมตรงแล้ว · ${escPosPrinterStatus.printer?.name ?? "POS-80"}`
+                  : escPosPrinterStatus.supported
+                    ? "ยังไม่ได้อนุญาตเครื่องพิมพ์โดยตรง"
+                    : "Browser นี้ไม่รองรับ USB โดยตรง"}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {escPosPrinterStatus.paired
+                  ? "ความยาวตามรายการจริง · ตัดกระดาษอัตโนมัติ"
+                  : `ตั้งไว้ ${branchSettings?.receipt_copies ?? 1} สำเนา · หากไม่เชื่อมตรงจะใช้หน้าพิมพ์สำรอง`}
+              </div>
             </div>
           </div>
           <button
@@ -3578,8 +3674,28 @@ export default function POSPage(): JSX.Element {
             <span><span className="block font-semibold text-slate-900">พิมพ์ใบเสร็จอัตโนมัติหลังชำระ</span><span className="block text-xs text-slate-500">ตั้งค่าเฉพาะเครื่องนี้และปิดไว้เป็นค่าเริ่มต้น</span></span>
             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${autoPrintReceipt ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{autoPrintReceipt ? "เปิด" : "ปิด"}</span>
           </button>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button
+              type="button"
+              variant={escPosPrinterStatus.paired ? "outline" : "default"}
+              disabled={!escPosPrinterStatus.supported || escPosPrinterBusy !== null}
+              onClick={() => void handleConnectEscPosPrinter()}
+            >
+              {escPosPrinterBusy === "connect" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
+              {escPosPrinterStatus.paired ? "เลือกเครื่องพิมพ์ใหม่" : "เชื่อมเครื่องพิมพ์ POS-80"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!escPosPrinterStatus.paired || escPosPrinterBusy !== null}
+              onClick={() => void handleLongEscPosTest()}
+            >
+              {escPosPrinterBusy === "test" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardList className="mr-2 h-4 w-4" />}
+              ทดสอบบิลยาว 60 รายการ
+            </Button>
+          </div>
           <div className="rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800">
-            เว็บตรวจได้เฉพาะความพร้อมของกล้อง การเชื่อมต่อ และการตั้งค่าใบเสร็จ การยืนยันสาย LAN/Bluetooth/USB และกระดาษต้องทำกับเครื่องพิมพ์จริงใน UAT
+            ครั้งแรก Chrome จะให้เลือกและอนุญาตเครื่องพิมพ์ หลังจากนั้นระบบจะพิมพ์ตรงโดยไม่เปิดหน้าพรีวิว และไม่จำกัดความสูงไว้ที่ 200 มม.
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
             <div className="flex flex-wrap gap-2">
@@ -3663,19 +3779,16 @@ export default function POSPage(): JSX.Element {
             <ReceiptView
               ref={receiptRef}
               order={lastOrder}
-              company={{
-                name: branchSettingsQuery.data?.pos_receipt_header?.trim()
-                  || (isRetailMode ? "Retail POS" : "Restaurant POS"),
-                logo_url: branchSettingsQuery.data?.receipt_show_logo
-                  ? branchSettingsQuery.data.receipt_logo_url
-                  : undefined,
-              }}
-              branch={{ name: branchName }}
-              cashier={user?.display_name ?? user?.username ?? "Cashier"}
+              company={receiptCompany}
+              branch={receiptBranch}
+              cashier={receiptCashier}
             />
           ) : null}
           <DialogFooter>
-            <Button variant="outline" onClick={() => void handlePrint()}>พิมพ์</Button>
+            <Button variant="outline" disabled={escPosPrinterBusy === "print"} onClick={() => void handleReceiptPrint()}>
+              {escPosPrinterBusy === "print" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              พิมพ์
+            </Button>
             <Button onClick={() => setShowReceipt(false)}>ขายต่อ</Button>
           </DialogFooter>
         </DialogContent>

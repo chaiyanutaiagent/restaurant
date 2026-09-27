@@ -13,7 +13,7 @@ class WP53OfflineSyncRecoveryUXTests(unittest.TestCase):
         pos_page = (ROOT / "frontend/src/pages/pos/POSPage.tsx").read_text()
 
         self.assertIn('path="/pos/offline-sync"', app)
-        self.assertIn('openWorkspace("/pos/offline-sync", "ศูนย์ซิงก์รายการขาย")', pos_page)
+        self.assertIn('openWorkspace("/restaurant/offline-sync", "ศูนย์ซิงก์รายการขาย")', pos_page)
         self.assertIn("takeawayOutboxSummary.acknowledged", pos_page)
         self.assertIn("takeawayOutboxSummary.unknown", pos_page)
         self.assertIn("takeawayOutboxSummary.quarantined", pos_page)

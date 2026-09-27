@@ -8,7 +8,7 @@ from typing import Any, Sequence
 import uuid
 from urllib.parse import urlsplit
 
-from app.config import settings
+from app.config import resolve_takeaway_write_mode, settings
 from app.database import active_takeaway_service_session_factory
 from app.dependencies import TokenData
 from app.services.takeaway_import_service import (
@@ -45,7 +45,10 @@ def require_uat(args: argparse.Namespace) -> None:
         raise RuntimeError("This import is restricted to the uat-* development environment")
     if not settings.takeaway_feature_enabled or settings.takeaway_service_database != "takeaway":
         raise RuntimeError("The dedicated Takeaway UAT database is required")
-    if settings.takeaway_uat_transaction_writes_enabled:
+    if resolve_takeaway_write_mode(
+        legacy_uat_enabled=settings.takeaway_uat_transaction_writes_enabled,
+        configured_mode=settings.takeaway_transaction_write_mode,
+    ) != "hold":
         raise RuntimeError("Takeaway transaction writes must remain disabled during import")
 
 

@@ -9,13 +9,14 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.business_context import TAKEAWAY
-from app.config import settings
+from app.config import parse_uuid_allowlist, resolve_takeaway_write_mode, settings
 from app.dependencies import (
     TokenData,
+    get_current_user,
     get_takeaway_operational_db,
     require_business_type,
     require_company_feature,
@@ -23,7 +24,6 @@ from app.dependencies import (
     require_permission,
 )
 from app.database import get_platform_db
-from app.models.restaurant import Brand
 from app.schemas.takeaway import (
     TakeawayBranchAvailabilityUpdate,
     TakeawayCatalogItemCreate,
@@ -95,24 +95,89 @@ READ_ONLY_POST_PATHS = {
 }
 
 
-async def require_takeaway_write_activation(request: Request) -> None:
+def takeaway_write_mode() -> str:
+    return resolve_takeaway_write_mode(
+        legacy_uat_enabled=settings.takeaway_uat_transaction_writes_enabled,
+        configured_mode=settings.takeaway_transaction_write_mode,
+    )
+
+
+def takeaway_write_allowed(
+    *,
+    company_id: uuid.UUID | None,
+    brand_id: uuid.UUID | None,
+    branch_id: uuid.UUID | None,
+) -> bool:
+    mode = takeaway_write_mode()
+    if mode == "hold":
+        return False
+    if mode in {"uat", "live"}:
+        return True
+    if company_id is None or brand_id is None or branch_id is None:
+        return False
+    try:
+        return (
+            company_id in parse_uuid_allowlist(settings.takeaway_transaction_company_allowlist)
+            and brand_id in parse_uuid_allowlist(settings.takeaway_transaction_brand_allowlist)
+            and branch_id in parse_uuid_allowlist(settings.takeaway_transaction_branch_allowlist)
+        )
+    except ValueError:
+        return False
+
+
+def takeaway_release_stage() -> str:
+    return {
+        "hold": "dark_launch",
+        "uat": "uat_synthetic",
+        "canary": "canary",
+        "live": "live",
+    }[takeaway_write_mode()]
+
+
+def takeaway_write_hold() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "takeaway_write_hold",
+            "message": "Takeaway transactions are disabled for this release context",
+            "release_stage": takeaway_release_stage(),
+        },
+    )
+
+
+async def require_takeaway_write_activation(
+    request: Request,
+    current: TokenData = Depends(get_current_user),
+) -> None:
     if request.method.upper() in {"GET", "HEAD", "OPTIONS"}:
         return
     if request.url.path in READ_ONLY_POST_PATHS:
         return
-    if not settings.takeaway_uat_transaction_writes_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "takeaway_write_hold",
-                "message": "Takeaway transactions are disabled until the UAT/canary owner gate passes",
-                "release_stage": "dark_launch",
-            },
-        )
+    if not takeaway_write_allowed(
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+    ):
+        raise takeaway_write_hold()
+
+
+async def require_public_takeaway_write_activation(
+    request: Request,
+    ordering_token: str,
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> None:
+    if request.method.upper() in {"GET", "HEAD", "OPTIONS"}:
+        return
+    token_row = await _ordering_token(ordering_token, db)
+    if not takeaway_write_allowed(
+        company_id=token_row.company_id,
+        brand_id=token_row.brand_id,
+        branch_id=token_row.branch_id,
+    ):
+        raise takeaway_write_hold()
 
 
 router.dependencies.append(Depends(require_takeaway_write_activation))
-public_router.dependencies.append(Depends(require_takeaway_write_activation))
 
 
 def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -186,12 +251,12 @@ async def public_ordering_menu(
         "data": {
             "branch_name": (branch_ref.payload.get("name") if branch_ref else None) or "Takeaway",
             "expires_at": token_row.expires_at,
-            "writes_enabled": settings.takeaway_uat_transaction_writes_enabled,
-            "release_stage": (
-                "uat_synthetic"
-                if settings.takeaway_uat_transaction_writes_enabled
-                else "dark_launch"
+            "writes_enabled": takeaway_write_allowed(
+                company_id=token_row.company_id,
+                brand_id=token_row.brand_id,
+                branch_id=token_row.branch_id,
             ),
+            "release_stage": takeaway_release_stage(),
             "categories": categories,
             "items": [
                 {
@@ -207,7 +272,11 @@ async def public_ordering_menu(
     }
 
 
-@public_router.post("/ordering/{ordering_token}/orders", status_code=status.HTTP_201_CREATED)
+@public_router.post(
+    "/ordering/{ordering_token}/orders",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_public_takeaway_write_activation)],
+)
 async def public_create_order(
     ordering_token: str,
     payload: TakeawayPublicOrderCreate,
@@ -292,14 +361,14 @@ async def takeaway_status(
 ) -> dict[str, Any]:
     fulfillment_mode = "counter_combined"
     if current.brand_id is not None:
-        brand = await platform_db.scalar(
-            select(Brand).where(
-                Brand.id == current.brand_id,
-                Brand.company_id == current.company_id,
-                Brand.is_active.is_(True),
-            )
+        theme_config = await platform_db.scalar(
+            text(
+                "SELECT theme_config FROM brands "
+                "WHERE id = :brand_id AND company_id = :company_id AND is_active = true"
+            ),
+            {"brand_id": current.brand_id, "company_id": current.company_id},
         )
-        theme_config = brand.theme_config or {} if brand else {}
+        theme_config = theme_config or {}
         branch_modes = theme_config.get("takeaway_branch_fulfillment_modes", {})
         configured_mode = (
             branch_modes.get(str(current.branch_id))
@@ -311,12 +380,12 @@ async def takeaway_status(
     return ok(
         {
             "enabled": settings.takeaway_feature_enabled,
-            "writes_enabled": settings.takeaway_uat_transaction_writes_enabled,
-            "release_stage": (
-                "uat_synthetic"
-                if settings.takeaway_uat_transaction_writes_enabled
-                else "dark_launch"
+            "writes_enabled": takeaway_write_allowed(
+                company_id=current.company_id,
+                brand_id=current.brand_id,
+                branch_id=current.branch_id,
             ),
+            "release_stage": takeaway_release_stage(),
             "hard_holds": [
                 "real_takeaway_transactions",
                 "chambo_real_data",

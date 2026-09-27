@@ -156,24 +156,83 @@ def validate_takeaway_runtime_config(
 def validate_takeaway_write_activation_config(
     *,
     environment: str,
-    enabled: bool,
+    legacy_uat_enabled: bool,
+    mode: str,
     feature_enabled: bool,
     public_base_url: str,
+    company_allowlist: str,
+    brand_allowlist: str,
+    branch_allowlist: str,
+    approval_reference: str | None,
 ) -> None:
-    """Keep Takeaway mutations behind an explicit, UAT-only release gate."""
-    if not enabled:
+    """Keep Takeaway mutations behind an explicit server-authoritative release gate."""
+    effective_mode = resolve_takeaway_write_mode(
+        legacy_uat_enabled=legacy_uat_enabled,
+        configured_mode=mode,
+    )
+    if effective_mode == "hold":
         return
     if not feature_enabled:
         raise ValueError("Takeaway transaction writes require TAKEAWAY_FEATURE_ENABLED=true")
     parsed_url = urlsplit(public_base_url)
-    if environment != "development":
-        raise ValueError("Takeaway transaction writes are approved only in UAT development")
+    if effective_mode == "uat":
+        if environment != "development":
+            raise ValueError("Takeaway UAT writes are approved only in UAT development")
+        if (
+            parsed_url.scheme != "https"
+            or parsed_url.hostname is None
+            or not parsed_url.hostname.startswith("uat-")
+        ):
+            raise ValueError("Takeaway UAT writes require an HTTPS uat-* hostname")
+        return
+
+    if legacy_uat_enabled:
+        raise ValueError("Legacy UAT write flag cannot be combined with canary/live mode")
+    if environment != "production":
+        raise ValueError("Takeaway canary/live mode requires ENVIRONMENT=production")
     if (
         parsed_url.scheme != "https"
         or parsed_url.hostname is None
-        or not parsed_url.hostname.startswith("uat-")
+        or parsed_url.hostname.startswith("uat-")
+        or parsed_url.hostname in {"localhost", "127.0.0.1"}
     ):
-        raise ValueError("Takeaway transaction writes require an HTTPS uat-* hostname")
+        raise ValueError("Takeaway canary/live mode requires a Production HTTPS hostname")
+    if not approval_reference or len(approval_reference.strip()) < 8:
+        raise ValueError("Takeaway canary/live mode requires an approval reference")
+    if effective_mode == "canary":
+        for label, raw_values in (
+            ("Company", company_allowlist),
+            ("Brand", brand_allowlist),
+            ("Branch", branch_allowlist),
+        ):
+            if not parse_uuid_allowlist(raw_values):
+                raise ValueError(f"Takeaway canary mode requires a {label} allowlist")
+
+
+def resolve_takeaway_write_mode(
+    *,
+    legacy_uat_enabled: bool,
+    configured_mode: str,
+) -> Literal["hold", "uat", "canary", "live"]:
+    """Map the legacy UAT flag without allowing it to unlock Production."""
+    if legacy_uat_enabled and configured_mode == "hold":
+        return "uat"
+    if configured_mode not in {"hold", "uat", "canary", "live"}:
+        raise ValueError("Invalid Takeaway transaction write mode")
+    return configured_mode  # type: ignore[return-value]
+
+
+def parse_uuid_allowlist(raw_values: str) -> set[uuid.UUID]:
+    """Parse a comma-separated UUID allowlist and fail closed on malformed entries."""
+    values: set[uuid.UUID] = set()
+    for raw_value in raw_values.split(","):
+        value = raw_value.strip()
+        if value:
+            try:
+                values.add(uuid.UUID(value))
+            except ValueError as exc:
+                raise ValueError("Takeaway transaction allowlists must contain UUIDs") from exc
+    return values
 
 
 def validate_company_supply_chain_write_activation_config(
@@ -329,6 +388,11 @@ class Settings(BaseSettings):
     takeaway_service_database: Literal["disabled", "takeaway"] = "disabled"
     takeaway_feature_enabled: bool = False
     takeaway_uat_transaction_writes_enabled: bool = False
+    takeaway_transaction_write_mode: Literal["hold", "uat", "canary", "live"] = "hold"
+    takeaway_transaction_company_allowlist: str = ""
+    takeaway_transaction_brand_allowlist: str = ""
+    takeaway_transaction_branch_allowlist: str = ""
+    takeaway_transaction_approval_reference: str | None = None
     takeaway_import_trusted_keys_json: str = "{}"
     reference_projector_enabled: bool = False
     reference_projector_poll_seconds: float = Field(default=1.0, ge=0.1, le=60.0)
@@ -462,9 +526,14 @@ class Settings(BaseSettings):
         )
         validate_takeaway_write_activation_config(
             environment=self.environment,
-            enabled=self.takeaway_uat_transaction_writes_enabled,
+            legacy_uat_enabled=self.takeaway_uat_transaction_writes_enabled,
+            mode=self.takeaway_transaction_write_mode,
             feature_enabled=self.takeaway_feature_enabled,
             public_base_url=self.saas_public_base_url,
+            company_allowlist=self.takeaway_transaction_company_allowlist,
+            brand_allowlist=self.takeaway_transaction_brand_allowlist,
+            branch_allowlist=self.takeaway_transaction_branch_allowlist,
+            approval_reference=self.takeaway_transaction_approval_reference,
         )
         validate_company_supply_chain_write_activation_config(
             environment=self.environment,

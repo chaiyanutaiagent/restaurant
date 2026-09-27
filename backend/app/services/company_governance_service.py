@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import resolve_takeaway_write_mode, settings
 from app.dependencies import TokenData
 from app.models.api_integration import APIKey, ExternalOrder, WebhookDelivery, WebhookEndpoint
 from app.models.audit import AuditLog
@@ -377,13 +377,17 @@ class CompanyGovernanceService:
 
     @staticmethod
     def _release_gates(*, physical_approved: bool, tax_blockers: int) -> list[CompanyReleaseGateRead]:
+        takeaway_write_mode = resolve_takeaway_write_mode(
+            legacy_uat_enabled=settings.takeaway_uat_transaction_writes_enabled,
+            configured_mode=settings.takeaway_transaction_write_mode,
+        )
         return [
             CompanyReleaseGateRead(key="software_uat", title="Software UAT", state="pass", reason="Batch A–C software gates and rollback evidence are recorded", evidence_reference="docs/scopes/BATCH-C-PHASE-GATE-03.md"),
             CompanyReleaseGateRead(key="qa_access", title="QA Access Mode", state="attention" if settings.qa_access_mode_enabled else "pass", reason=("เปิดเฉพาะ Local/UAT และต้อง revoke/delete หลัง Final QA sign-off" if settings.qa_access_mode_enabled else "QA Access Mode ปิดอยู่")),
             CompanyReleaseGateRead(key="physical_devices", title="Physical devices & network", state="pass" if physical_approved else "hold", reason=("มี approved evidence สำหรับ release ปัจจุบัน" if physical_approved else "ยังไม่มี approved physical evidence สำหรับ release ปัจจุบัน"), evidence_reference="/devices/uat-readiness"),
             CompanyReleaseGateRead(key="tax_provider", title="Payment / Refund / Tax provider", state="blocked" if tax_blockers else "hold", reason="Real provider, real tax/e-Tax และ fiscal document ยังไม่อนุมัติ"),
             CompanyReleaseGateRead(key="retail_cutover", title="Retail data-source cutover", state="hold", reason=f"UAT source={settings.retail_service_database}; Production cutover ไม่ได้รับอนุมัติ"),
-            CompanyReleaseGateRead(key="takeaway_writes", title="Takeaway transactions", state="hold" if not settings.takeaway_uat_transaction_writes_enabled else "attention", reason="Server write flag ต้องคงปิดจนกว่า real-data canary/Owner gate จะผ่าน"),
+            CompanyReleaseGateRead(key="takeaway_writes", title="Takeaway transactions", state="hold" if takeaway_write_mode == "hold" else "attention", reason=f"Server-authoritative write mode={takeaway_write_mode}; Production live ต้องผ่าน real-data canary/Owner gate"),
             CompanyReleaseGateRead(key="kitchen_writes", title="Central Kitchen transactions", state="hold" if not settings.company_kitchen_writes_enabled else "attention", reason="Stock/QC/recall writes ยังไม่อนุมัติ"),
             CompanyReleaseGateRead(key="distribution_writes", title="Distribution transactions", state="hold" if not settings.company_distribution_writes_enabled else "attention", reason="Dispatch/receive/reject/return writes ยังไม่อนุมัติ"),
             CompanyReleaseGateRead(key="chambo_data", title="Chambo real data", state="hold", reason="รอ approved dry run, reconciliation และ cutover evidence"),

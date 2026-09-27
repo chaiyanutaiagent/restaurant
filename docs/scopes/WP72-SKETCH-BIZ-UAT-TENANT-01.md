@@ -1,6 +1,6 @@
 # WP72 — Sketch Biz UAT Tenant
 
-Status: IMPLEMENTED LOCALLY — UAT APPLY PENDING
+Status: UAT READY — Production HOLD
 
 ## Objective
 

@@ -6,6 +6,10 @@ Environment: UAT only (`restaurant-pos-uat-drill`)
 
 Decision: **AUTOMATED IDENTITY GATE PASS / HUMAN LOGIN UX DEFERRED / PRODUCTION HOLD**
 
+> Superseded by WP76: the eight broad multi-workspace operational accounts were
+> deactivated and replaced by separate staff for each business. Five Company
+> shared-service accounts remain intentionally shared.
+
 ## Result
 
 One named fictional test user was created for every canonical role preset in

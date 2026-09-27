@@ -38,22 +38,57 @@ class TestStaffProfile:
     first_name: str
     last_name: str
     position_th: str
+    workspace_key: str | None = None
 
 
 TEST_STAFF_PROFILES = (
     TestStaffProfile("company-owner", "test.owner", "UAT-OWNER", "ณัฐวุฒิ", "ศรีสุข", "เจ้าของบริษัท"),
-    TestStaffProfile("brand-manager", "test.brand-manager", "UAT-BRAND-MGR", "พิมพ์ชนก", "วัฒนกิจ", "ผู้จัดการแบรนด์"),
-    TestStaffProfile("branch-manager", "test.branch-manager", "UAT-BRANCH-MGR", "ธนภัทร", "เจริญผล", "ผู้จัดการสาขา"),
     TestStaffProfile("accountant", "test.accountant", "UAT-ACCOUNT", "สุภาวดี", "มั่นคง", "เจ้าหน้าที่บัญชี"),
     TestStaffProfile("purchasing", "test.purchasing", "UAT-PURCHASE", "กิตติพงศ์", "วงศ์ดี", "เจ้าหน้าที่จัดซื้อ"),
-    TestStaffProfile("warehouse", "test.warehouse", "UAT-WAREHOUSE", "อนุชา", "ใจมั่น", "เจ้าหน้าที่คลังสินค้า"),
     TestStaffProfile("hr", "test.hr", "UAT-HR", "ชลธิชา", "พูนทรัพย์", "เจ้าหน้าที่ทรัพยากรบุคคล"),
     TestStaffProfile("auditor", "test.auditor", "UAT-AUDITOR", "รัชดา", "ธรรมรักษ์", "ผู้ตรวจสอบ"),
-    TestStaffProfile("area-manager", "test.area-manager", "UAT-AREA-MGR", "วรเมธ", "ตั้งใจ", "ผู้จัดการเขต"),
-    TestStaffProfile("service-staff", "test.service-staff", "UAT-SERVICE", "กัญญารัตน์", "ยิ้มแย้ม", "พนักงานบริการ"),
-    TestStaffProfile("kitchen-manager", "test.kitchen-manager", "UAT-KITCHEN-MGR", "สมชาย", "รสเลิศ", "ผู้จัดการครัว"),
-    TestStaffProfile("cashier", "test.cashier", "UAT-CASHIER", "ปวีณา", "เงินดี", "พนักงานขายและแคชเชียร์"),
-    TestStaffProfile("kitchen-staff", "test.kitchen-staff", "UAT-KITCHEN", "เอกชัย", "ครัวดี", "พนักงานครัว"),
+    TestStaffProfile("brand-manager", "test.kpp.brand-manager", "KPP-BRAND", "อรทัย", "ภูผา", "ผู้จัดการแบรนด์", "krua-pa-pla-khuen"),
+    TestStaffProfile("area-manager", "test.kpp.area-manager", "KPP-AREA", "ชาญชัย", "ลำน้ำ", "ผู้จัดการเขต", "krua-pa-pla-khuen"),
+    TestStaffProfile("branch-manager", "test.kpp.branch-manager", "KPP-BRANCH", "นภัสกร", "เขื่อนทอง", "ผู้จัดการสาขา", "krua-pa-pla-khuen"),
+    TestStaffProfile("warehouse", "test.kpp.warehouse", "KPP-WAREHOUSE", "ประเสริฐ", "ทองคลัง", "เจ้าหน้าที่คลังสินค้า", "krua-pa-pla-khuen"),
+    TestStaffProfile("service-staff", "test.kpp.service", "KPP-SERVICE", "รุ่งนภา", "ยิ้มรับ", "พนักงานบริการ", "krua-pa-pla-khuen"),
+    TestStaffProfile("kitchen-manager", "test.kpp.kitchen-manager", "KPP-KITCHEN-MGR", "วิทยา", "ครัวไทย", "ผู้จัดการครัว", "krua-pa-pla-khuen"),
+    TestStaffProfile("cashier", "test.kpp.cashier", "KPP-CASHIER", "มนัสวี", "เงินงาม", "พนักงานขายและแคชเชียร์", "krua-pa-pla-khuen"),
+    TestStaffProfile("kitchen-staff", "test.kpp.kitchen", "KPP-KITCHEN", "สมพงษ์", "รสมือ", "พนักงานครัว", "krua-pa-pla-khuen"),
+    TestStaffProfile("brand-manager", "test.tlk.brand-manager", "TLK-BRAND", "ศิรินทร์", "วัฒนศิลป์", "ผู้จัดการแบรนด์", "the-loft-kitchen"),
+    TestStaffProfile("area-manager", "test.tlk.area-manager", "TLK-AREA", "ภูริณัฐ", "เมืองนนท์", "ผู้จัดการเขต", "the-loft-kitchen"),
+    TestStaffProfile("branch-manager", "test.tlk.branch-manager", "TLK-BRANCH", "ชยพล", "พัฒนกิจ", "ผู้จัดการสาขา", "the-loft-kitchen"),
+    TestStaffProfile("warehouse", "test.tlk.warehouse", "TLK-WAREHOUSE", "จิรายุ", "เก็บทรัพย์", "เจ้าหน้าที่คลังสินค้า", "the-loft-kitchen"),
+    TestStaffProfile("service-staff", "test.tlk.service", "TLK-SERVICE", "พัชรี", "ต้อนรับ", "พนักงานบริการ", "the-loft-kitchen"),
+    TestStaffProfile("kitchen-manager", "test.tlk.kitchen-manager", "TLK-KITCHEN-MGR", "ธีรภัทร", "รสเยี่ยม", "ผู้จัดการครัว", "the-loft-kitchen"),
+    TestStaffProfile("cashier", "test.tlk.cashier", "TLK-CASHIER", "ณิชารีย์", "บัญชีดี", "พนักงานขายและแคชเชียร์", "the-loft-kitchen"),
+    TestStaffProfile("kitchen-staff", "test.tlk.kitchen", "TLK-KITCHEN", "อาทิตย์", "ปรุงดี", "พนักงานครัว", "the-loft-kitchen"),
+    TestStaffProfile("brand-manager", "test.tlm.brand-manager", "TLM-BRAND", "กมลชนก", "ค้าดี", "ผู้จัดการแบรนด์", "the-loft-mini-mart"),
+    TestStaffProfile("area-manager", "test.tlm.area-manager", "TLM-AREA", "ศุภกร", "ตลาดใหม่", "ผู้จัดการเขต", "the-loft-mini-mart"),
+    TestStaffProfile("branch-manager", "test.tlm.branch-manager", "TLM-BRANCH", "ธนากร", "ชูทรัพย์", "ผู้จัดการสาขา", "the-loft-mini-mart"),
+    TestStaffProfile("warehouse", "test.tlm.warehouse", "TLM-WAREHOUSE", "วีระพล", "คลังทอง", "เจ้าหน้าที่คลังสินค้า", "the-loft-mini-mart"),
+    TestStaffProfile("service-staff", "test.tlm.service", "TLM-SERVICE", "ลลิตา", "บริการดี", "พนักงานขาย", "the-loft-mini-mart"),
+    TestStaffProfile("cashier", "test.tlm.cashier", "TLM-CASHIER", "ชุติมา", "เงินตรง", "พนักงานแคชเชียร์", "the-loft-mini-mart"),
+    TestStaffProfile("brand-manager", "test.chambo.brand-manager", "CHB-BRAND", "ชนินทร์", "ปิ่นทอง", "ผู้จัดการแบรนด์", "chambo"),
+    TestStaffProfile("area-manager", "test.chambo.area-manager", "CHB-AREA", "ภัทรดนัย", "เมืองกรุง", "ผู้จัดการเขต", "chambo"),
+    TestStaffProfile("branch-manager", "test.chambo.branch-manager", "CHB-BRANCH", "กานต์พิชชา", "ศรีโอโซน", "ผู้จัดการสาขา", "chambo"),
+    TestStaffProfile("warehouse", "test.chambo.warehouse", "CHB-WAREHOUSE", "ณรงค์ฤทธิ์", "พร้อมส่ง", "เจ้าหน้าที่คลังสินค้า", "chambo"),
+    TestStaffProfile("service-staff", "test.chambo.service", "CHB-SERVICE", "ธัญชนก", "รับออเดอร์", "พนักงานรับออเดอร์", "chambo"),
+    TestStaffProfile("kitchen-manager", "test.chambo.kitchen-manager", "CHB-KITCHEN-MGR", "บวรชัย", "เตาถ่าน", "ผู้จัดการครัว", "chambo"),
+    TestStaffProfile("cashier", "test.chambo.cashier", "CHB-CASHIER", "สิริมา", "เงินครบ", "พนักงานขายและแคชเชียร์", "chambo"),
+    TestStaffProfile("kitchen-staff", "test.chambo.kitchen", "CHB-KITCHEN", "พงศกร", "หมักดี", "พนักงานครัว", "chambo"),
+)
+
+
+SUPERSEDED_BROAD_USERNAMES = (
+    "test.brand-manager",
+    "test.branch-manager",
+    "test.warehouse",
+    "test.area-manager",
+    "test.service-staff",
+    "test.kitchen-manager",
+    "test.cashier",
+    "test.kitchen-staff",
 )
 
 
@@ -114,17 +149,28 @@ async def _load_workspaces(db, company_id: uuid.UUID) -> list[WorkspaceRow]:
 
 
 def _desired_scopes(
+    profile: TestStaffProfile,
     policy: RolePresetPolicy,
     company_id: uuid.UUID,
     workspaces: list[WorkspaceRow],
 ) -> list[tuple[str, str, uuid.UUID | None, uuid.UUID | None, str | None]]:
-    if policy.default_scope == "company":
+    if profile.workspace_key is None:
+        if policy.default_scope != "company":
+            raise RuntimeError(f"Shared profile must use Company scope: {profile.username}")
         return [("company", str(company_id), None, None, None)]
+    matched = [row for row in workspaces if row.spec.key == profile.workspace_key]
+    if len(matched) != 1:
+        raise RuntimeError(f"Profile workspace is unavailable: {profile.workspace_key}")
+    row = matched[0]
+    if policy.default_scope == "company":
+        raise RuntimeError(f"Company role cannot be branch-specific: {profile.username}")
     if policy.default_scope == "brand":
-        return [("brand", str(row.brand.id), row.brand.id, None, None) for row in workspaces]
+        return [("brand", str(row.brand.id), row.brand.id, None, None)]
     if policy.default_scope == "branch":
-        return [("branch", str(row.branch.id), row.brand.id, row.branch.id, None) for row in workspaces]
+        return [("branch", str(row.branch.id), row.brand.id, row.branch.id, None)]
     if policy.default_scope == "station":
+        if row.spec.business_type not in {"restaurant", "takeaway"}:
+            raise RuntimeError(f"Kitchen station role cannot target {row.spec.business_type}")
         return [
             (
                 "station",
@@ -139,8 +185,6 @@ def _desired_scopes(
                 row.branch.id,
                 "kitchen",
             )
-            for row in workspaces
-            if row.spec.business_type in {"restaurant", "takeaway"}
         ]
     raise RuntimeError(f"Unsupported role scope: {policy.default_scope}")
 
@@ -170,6 +214,48 @@ async def prepare(args: argparse.Namespace) -> dict[str, Any]:
                 )
             ).all()
         }
+        superseded_users = (
+            await db.scalars(
+                select(User).where(
+                    User.company_id == args.company_id,
+                    User.username.in_(SUPERSEDED_BROAD_USERNAMES),
+                    User.is_active.is_(True),
+                    User.deleted_at.is_(None),
+                )
+            )
+        ).all()
+        for superseded in superseded_users:
+            superseded.is_active = False
+            superseded.credential_version += 1
+            for link in (
+                await db.scalars(
+                    select(UserBranch).where(
+                        UserBranch.user_id == superseded.id,
+                        UserBranch.deleted_at.is_(None),
+                    )
+                )
+            ).all():
+                link.deleted_at = now
+                link.is_default = False
+            for assignment in (
+                await db.scalars(
+                    select(StaffRoleAssignment).where(
+                        StaffRoleAssignment.company_id == args.company_id,
+                        StaffRoleAssignment.user_id == superseded.id,
+                        StaffRoleAssignment.revoked_at.is_(None),
+                    )
+                )
+            ).all():
+                assignment.revoked_at = now
+                assignment.revoked_by = actor.id
+                assignment.revocation_reason = "Superseded by workspace-specific UAT staff"
+            await enqueue_reference_event(
+                db,
+                aggregate_type="user",
+                aggregate_id=superseded.id,
+                company_id=args.company_id,
+                payload={"source": "prepare_sketch_biz_test_staff", "change": "deactivate_broad_user"},
+            )
         prepared: list[dict[str, Any]] = []
         for profile in TEST_STAFF_PROFILES:
             policy = policies[profile.preset_key]
@@ -211,6 +297,11 @@ async def prepare(args: argparse.Namespace) -> dict[str, Any]:
                     user.password_changed_at = now
                     user.credential_version += 1
 
+            intended_workspaces = (
+                workspaces
+                if profile.workspace_key is None
+                else [row for row in workspaces if row.spec.key == profile.workspace_key]
+            )
             active_links = (
                 await db.scalars(
                     select(UserBranch).where(
@@ -220,12 +311,12 @@ async def prepare(args: argparse.Namespace) -> dict[str, Any]:
                 )
             ).all()
             link_by_branch = {link.branch_id: link for link in active_links}
-            intended_branch_ids = {row.branch.id for row in workspaces}
+            intended_branch_ids = {row.branch.id for row in intended_workspaces}
             for link in active_links:
                 if link.branch_id not in intended_branch_ids:
                     link.deleted_at = now
                     link.is_default = False
-            for index, row in enumerate(workspaces):
+            for index, row in enumerate(intended_workspaces):
                 link = link_by_branch.get(row.branch.id)
                 if link is None:
                     link = UserBranch(user_id=user.id, branch_id=row.branch.id, role_id=role.id)
@@ -237,7 +328,7 @@ async def prepare(args: argparse.Namespace) -> dict[str, Any]:
                 link.is_default = index == 0
                 link.deleted_at = None
 
-            desired_scopes = _desired_scopes(policy, args.company_id, workspaces)
+            desired_scopes = _desired_scopes(profile, policy, args.company_id, workspaces)
             desired_keys = {(role.id, scope_type, scope_key) for scope_type, scope_key, _, _, _ in desired_scopes}
             active_assignments = (
                 await db.scalars(
@@ -295,6 +386,7 @@ async def prepare(args: argparse.Namespace) -> dict[str, Any]:
                         "username": profile.username,
                         "position": profile.position_th,
                         "preset": profile.preset_key,
+                        "workspace": profile.workspace_key or "shared-company",
                         "scope_count": len(desired_scopes),
                         "created": created,
                     },
@@ -309,6 +401,7 @@ async def prepare(args: argparse.Namespace) -> dict[str, Any]:
                     "role": policy.name,
                     "scope": policy.default_scope,
                     "scope_count": len(desired_scopes),
+                    "workspace": profile.workspace_key or "shared-company",
                     "created": created,
                 }
             )
@@ -318,8 +411,10 @@ async def prepare(args: argparse.Namespace) -> dict[str, Any]:
         "company_id": str(args.company_id),
         "user_count": len(prepared),
         "password_verified": len(prepared),
-        "default_branch": "KPP-01",
-        "station_login_note": "test.kitchen-staff uses station_key=kitchen",
+        "shared_company_users": sum(profile.workspace_key is None for profile in TEST_STAFF_PROFILES),
+        "workspace_users": sum(profile.workspace_key is not None for profile in TEST_STAFF_PROFILES),
+        "superseded_broad_users": len(superseded_users),
+        "station_login_note": "Workspace kitchen users use station_key=kitchen",
         "users": prepared,
         "production_activated": False,
     }

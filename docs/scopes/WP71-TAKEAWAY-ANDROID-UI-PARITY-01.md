@@ -63,11 +63,25 @@ Physical Android installation, orientation, session recovery, Bluetooth
 printer and network interruption remain pending and must not be inferred from
 the local build result.
 
-## WP72 follow-up build note
+## WP72 replacement build result
 
-The later Sketch Biz multi-company login and public QR-origin changes pass the
-TypeScript check, Android UAT web build and Capacitor sync. A replacement APK
-must be assembled before distribution because the APK hash above predates those
-two changes. This Mac currently has no Java runtime, so the replacement APK and
-its new SHA-256 remain pending; the older artifact must not be treated as the
-WP72 candidate.
+The later Sketch Biz multi-company login and public QR-origin changes are now
+packaged as `1.1.0-uat.2` (`versionCode 10101`). The build used Java 21 and
+Android SDK 35. Package inspection confirms:
+
+- application ID `com.foodchainservice.takeaway.uat`
+- version `1.1.0-uat.2`
+- minimum/target SDK 23 / 35
+- debug signature verification with APK signature schemes v1 and v2
+- embedded UAT host `uat-takeaway.foodchainservice.com`
+- embedded Takeaway route and `sketch-biz` business-code support
+
+Artifact:
+`releases/uat/foodchainservice-takeaway-1.1.0-uat.2.apk`
+
+SHA-256:
+`06fccc9e8f8bb182ecf12479aa096552c31d87f240d44dbcf9255b2331e213a1`
+
+The artifact remains an internal debug-signed UAT build. Physical Android
+installation, orientation, session recovery, Bluetooth printer and network
+interruption remain pending; no Production release has been signed.

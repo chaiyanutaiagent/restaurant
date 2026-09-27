@@ -1,0 +1,28 @@
+{
+  "company": {
+    "source_id": "9790f996-1078-4634-9876-c5a828cbb263",
+    "target_id": "1b8a1818-44d6-4d5f-9d22-e5e17b23c081"
+  },
+  "brand": {
+    "source_id": "425fd147-25ae-4862-a011-4af6c9fafbd0",
+    "target_id": "d6391cbe-ee53-4873-b95b-219c9bc23e7c",
+    "business_type": "takeaway"
+  },
+  "branches": [
+    {
+      "source_id": "d83bb0c6-c986-46c0-8fac-46af04d2c385",
+      "target_id": "1f397253-0479-4970-8288-f72d6cde6d7e",
+      "source_code": "BKK-01",
+      "target_code": "CHB-01",
+      "strategy": "consolidate"
+    },
+    {
+      "source_id": "34561eac-548e-4bfe-a8fe-56339db375c6",
+      "target_id": "1f397253-0479-4970-8288-f72d6cde6d7e",
+      "source_code": "BKK-02",
+      "target_code": "CHB-01",
+      "strategy": "consolidate"
+    }
+  ],
+  "locations": []
+}

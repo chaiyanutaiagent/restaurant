@@ -80,7 +80,8 @@ Verified company profile:
 - `TAKEAWAY_UAT_TRANSACTION_WRITES_ENABLED=false`
 - `UAT_AUTH_BYPASS_ENABLED=true`
 - Physical printer, cash, PromptPay and network-loss UAT remains deferred by the owner.
-- Final Chambo source snapshot/import remains `not_started`; the mapping contract is dry-run only.
+- The final Chambo source snapshot and signed dry-run preview completed in WP73;
+  target apply remains gated and Takeaway transaction writes remain disabled.
 - Production deployment and Production flags were not changed.
 
 ## Production isolation

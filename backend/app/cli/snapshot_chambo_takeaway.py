@@ -481,7 +481,7 @@ def _extract_records(
 
     sales = _fetch_all(
         cursor,
-        "SELECT * FROM sale_orders WHERE company_id=%s::uuid AND branch_id=ANY(%s::uuid[]) ORDER BY business_at,id",
+        "SELECT * FROM sale_orders WHERE company_id=%s::uuid AND branch_id=ANY(%s::uuid[]) ORDER BY created_at,id",
         (company_id, branch_ids),
     )
     for row in sales:
@@ -502,7 +502,7 @@ def _extract_records(
                 {
                     "branch_source_id": str(row["branch_id"]),
                     "legacy_document_number": row["order_number"],
-                    "business_at": _utc(row.get("business_at")),
+                    "business_at": _utc(row.get("business_at") or row.get("created_at")),
                     "status": row["status"],
                     "subtotal": _decimal(row.get("subtotal")),
                     "discount_amount": _decimal(row.get("discount_amount")),

@@ -23,7 +23,7 @@ Prepare the existing primary UAT tenant as `บริษัท สเก็ต�
 | Restaurant POS | ครัวป่าปลาเขื่อน | KPP-01 | Test data only |
 | Restaurant POS | The Loft Kitchen | TLK-01 | Test data only |
 | Retail POS | The Loft Mini Mart | TLM-01 | Test data only |
-| Takeaway POS | Chambo | CHB-01 | HOLD / dark launch |
+| Takeaway POS | Chambo | CHB-01 — โอโซนวัน | HOLD / dark launch |
 
 The setup reuses the approved primary UAT Company ID so existing test personas and automatic UAT access remain valid. It is idempotent and can be rerun after a UAT restore.
 

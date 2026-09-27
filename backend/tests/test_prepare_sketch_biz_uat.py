@@ -68,6 +68,9 @@ class SketchBizUatContractTests(unittest.TestCase):
         self.assertEqual([row.business_type for row in WORKSPACES], ["restaurant", "restaurant", "retail_pos", "takeaway"])
         self.assertEqual(len({row.brand_slug for row in WORKSPACES}), 4)
         self.assertEqual(len({row.branch_code for row in WORKSPACES}), 4)
+        chambo = next(row for row in WORKSPACES if row.key == "chambo")
+        self.assertEqual(chambo.branch_code, "CHB-01")
+        self.assertEqual(chambo.branch_name, "Chambo สาขาโอโซนวัน")
 
     def test_guard_accepts_only_pinned_complete_uat(self) -> None:
         with patch("app.cli.prepare_sketch_biz_uat.settings", uat_settings()), patch(

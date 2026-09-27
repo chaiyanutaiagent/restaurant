@@ -14,14 +14,9 @@
       "target_id": "1f397253-0479-4970-8288-f72d6cde6d7e",
       "source_code": "BKK-01",
       "target_code": "CHB-01",
-      "strategy": "consolidate"
-    },
-    {
-      "source_id": "34561eac-548e-4bfe-a8fe-56339db375c6",
-      "target_id": "1f397253-0479-4970-8288-f72d6cde6d7e",
-      "source_code": "BKK-02",
-      "target_code": "CHB-01",
-      "strategy": "consolidate"
+      "source_name": "สาขากรุงเทพ",
+      "target_name": "Chambo สาขาโอโซนวัน",
+      "strategy": "single_branch"
     }
   ],
   "locations": []

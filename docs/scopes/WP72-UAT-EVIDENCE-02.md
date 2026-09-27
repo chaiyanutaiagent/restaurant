@@ -34,7 +34,7 @@ Decision: PASS — tenant structure and bounded smoke complete; Production HOLD
 | Restaurant | ครัวป่าปลาเขื่อน | KPP-01 | Active |
 | Restaurant | The Loft Kitchen | TLK-01 | Active |
 | Retail | The Loft Mini Mart | TLM-01 | Active |
-| Takeaway | Chambo | CHB-01 | Active, transactions HOLD |
+| Takeaway | Chambo | CHB-01 — โอโซนวัน | Active, transactions HOLD |
 
 Verified company profile:
 

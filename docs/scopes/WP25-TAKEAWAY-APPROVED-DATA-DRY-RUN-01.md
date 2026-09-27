@@ -36,7 +36,7 @@ python3 scripts/validate-wp25-approved-dry-run.py <evidence.json>
 - อ่านฐาน Chambo จริงด้วย `READ ONLY` และ `REPEATABLE READ` สำเร็จ
 - open shift/order/production/transfer/top-up/stock count เป็นศูนย์ทั้งหมด
 - signed bundle ผ่าน hash, count, contract, security scan และ Ed25519 seal
-- cutover preview: `ready=true`, blocker 0, 62 records
+- cutover preview: `ready=true`, blocker 0, 54 records from Ozone One only
 - ยังไม่ execute target import, ไม่เปิด Takeaway transaction write และไม่เปลี่ยน Production
 - ขั้น execute/replay/reconciliation และการรับรองผลสุดท้ายต้องรอ Data Owner,
   Privacy Owner และผู้ทดสอบจริงตาม Exit gate เดิม

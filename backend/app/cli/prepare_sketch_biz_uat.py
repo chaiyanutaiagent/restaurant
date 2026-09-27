@@ -418,6 +418,32 @@ async def _ensure_tax_configuration(
     }
 
 
+async def configure_legacy_tax(
+    company_id: uuid.UUID,
+    platform_summary: dict[str, Any],
+) -> dict[str, Any]:
+    configured: list[tuple[WorkspaceSpec, Brand, Branch, BrandBranch]] = []
+    specs_by_key = {spec.key: spec for spec in WORKSPACES}
+    async with AsyncSessionLocal() as db:
+        for row in platform_summary["workspaces"]:
+            spec = specs_by_key[row["key"]]
+            brand = await db.get(Brand, uuid.UUID(row["brand_id"]))
+            branch = await db.get(Branch, uuid.UUID(row["branch_id"]))
+            link = await db.scalar(
+                select(BrandBranch).where(
+                    BrandBranch.company_id == company_id,
+                    BrandBranch.brand_id == uuid.UUID(row["brand_id"]),
+                    BrandBranch.branch_id == uuid.UUID(row["branch_id"]),
+                )
+            )
+            if brand is None or branch is None or link is None:
+                raise RuntimeError(f"Projected Legacy references are incomplete for {spec.key}")
+            configured.append((spec, brand, branch, link))
+        tax = await _ensure_tax_configuration(db, company_id, configured)
+        await db.commit()
+        return tax
+
+
 async def configure_platform(company_id: uuid.UUID, username: str) -> dict[str, Any]:
     validate_registration_id(REGISTRATION_ID)
     async with PlatformSessionLocal() as db:
@@ -464,7 +490,6 @@ async def configure_platform(company_id: uuid.UUID, username: str) -> dict[str, 
             configured,
             roles["branch-manager"],
         )
-        tax = await _ensure_tax_configuration(db, company_id, configured)
         db.add(
             AuditLog(
                 company_id=company_id,
@@ -489,7 +514,6 @@ async def configure_platform(company_id: uuid.UUID, username: str) -> dict[str, 
             "created_workspaces": created_workspaces,
             "created_roles": created_roles,
             "created_admin_branch_access": created_access,
-            "tax": tax,
             "workspaces": [
                 {
                     **asdict(spec),
@@ -651,12 +675,14 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         if company is None:
             raise RuntimeError("Sketch Biz UAT Company disappeared during projection")
         await mirror_platform_references_to_legacy(company, references)
+    tax = await configure_legacy_tax(args.company_id, platform)
     restaurant_examples = await seed_restaurant_examples(args.company_id, platform)
     return {
         "status": "ready_for_controlled_uat",
         "dataset": "sketch_biz_uat",
         "environment": settings.environment,
         "company": platform,
+        "tax": tax,
         "projections": projections,
         "restaurant_examples": restaurant_examples,
         "android_business_code": "sketch-biz",

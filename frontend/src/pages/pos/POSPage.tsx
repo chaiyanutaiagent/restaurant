@@ -78,6 +78,32 @@ import { PLATFORM_BRAND } from "@/config/platformBrand";
 const SHIFT_CACHE_KEY = "restaurant-pos-current-shift";
 const BARCODE_FORMATS = ["ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e", "qr_code"] as const;
 
+function estimateReceiptPageHeightMm(order: SaleOrder | null): number {
+  if (!order) return 200;
+
+  const wrappedLines = (value: string | null | undefined, charsPerLine: number): number => {
+    if (!value?.trim()) return 0;
+    return value.split("\n").reduce(
+      (total, line) => total + Math.max(1, Math.ceil(line.trim().length / charsPerLine)),
+      0,
+    );
+  };
+
+  const itemLines = order.items.reduce((total, item) => total
+    + Math.max(1, wrappedLines(item.product_name, 20))
+    + wrappedLines(item.variant_name, 22)
+    + (Number(item.refunded_qty ?? 0) > 0 ? 1 : 0), 0);
+  const paymentLines = (order.payments ?? []).reduce(
+    (total, payment) => total + 1 + (payment.reference_no ? 1 : 0),
+    0,
+  );
+  const noteLines = wrappedLines(order.note, 30);
+  const customerLines = 1 + (order.customer_phone ? 1 : 0) + (order.customer_tax_id ? 1 : 0);
+  const estimatedMm = 100 + itemLines * 5 + paymentLines * 4 + noteLines * 4 + customerLines * 4;
+
+  return Math.min(300, Math.max(110, Math.ceil(estimatedMm / 10) * 10));
+}
+
 type BranchOption = {
   branch_id: string;
   branch_name: string;
@@ -463,7 +489,11 @@ export default function POSPage(): JSX.Element {
   const scannerFrameRef = useRef<number | null>(null);
   const autoPrintedOrderRef = useRef<string | null>(null);
   const offlineProducts = useOfflineProducts(searchTerm, catalogRevision);
-  const handlePrint = useReactToPrint({ contentRef: receiptRef });
+  const receiptPageHeightMm = useMemo(() => estimateReceiptPageHeightMm(lastOrder), [lastOrder]);
+  const handlePrint = useReactToPrint({
+    contentRef: receiptRef,
+    pageStyle: `@page { size: 80mm ${receiptPageHeightMm}mm; margin: 2mm 3mm; }`,
+  });
   const printTakeawayCustomerSlip = useReactToPrint({ contentRef: takeawayCustomerSlipRef });
   const printTakeawayKitchenSlip = useReactToPrint({ contentRef: takeawayKitchenSlipRef });
 

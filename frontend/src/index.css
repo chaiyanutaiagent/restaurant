@@ -270,14 +270,23 @@ a {
 
   .pos-print-receipt {
     position: fixed;
-    inset: 0;
+    top: 0;
+    right: 0;
+    left: 0;
     width: 68mm;
     max-width: 68mm !important;
     height: fit-content;
-    margin: 0;
+    margin: 0 auto;
     background: #ffffff;
     box-shadow: none !important;
+    font-size: 11px;
+    line-height: 1.2;
     overflow-wrap: anywhere;
+  }
+
+  .pos-print-receipt .text-xs {
+    font-size: 10px;
+    line-height: 1.2;
   }
 
   .qr-dialog-actions {

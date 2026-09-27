@@ -3634,8 +3634,8 @@ export default function POSPage(): JSX.Element {
               ref={receiptRef}
               order={lastOrder}
               company={{
-                name: "Restaurant POS",
-                phone: "0812345678",
+                name: branchSettingsQuery.data?.pos_receipt_header?.trim()
+                  || (isRetailMode ? "Retail POS" : "Restaurant POS"),
                 logo_url: branchSettingsQuery.data?.receipt_show_logo
                   ? branchSettingsQuery.data.receipt_logo_url
                   : undefined,

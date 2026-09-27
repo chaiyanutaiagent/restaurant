@@ -65,7 +65,7 @@ const ReceiptView = forwardRef<HTMLDivElement, ReceiptViewProps>(function Receip
 
   return (
     <>
-      <div ref={ref} className="mx-auto max-w-sm bg-white p-4 text-sm text-gray-900 print:max-w-none print:p-0">
+      <div ref={ref} className="pos-print-receipt mx-auto max-w-sm bg-white p-4 text-sm text-gray-900 print:max-w-none print:p-0">
         <div className="space-y-1 text-center">
           {company.logo_url ? (
             <img src={company.logo_url} alt={`โลโก้ ${company.name}`} className="mx-auto mb-2 h-32 max-w-80 object-contain grayscale contrast-200" />

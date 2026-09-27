@@ -240,6 +240,8 @@ a {
 
   .qr-print-card,
   .qr-print-card *,
+  .pos-print-receipt,
+  .pos-print-receipt *,
   .wap-print-slip,
   .wap-print-slip * {
     visibility: visible;
@@ -260,6 +262,17 @@ a {
     position: fixed;
     inset: 0;
     width: 80mm;
+    height: fit-content;
+    margin: 0;
+    background: #ffffff;
+    box-shadow: none !important;
+  }
+
+  .pos-print-receipt {
+    position: fixed;
+    inset: 0;
+    width: 74mm;
+    max-width: 74mm !important;
     height: fit-content;
     margin: 0;
     background: #ffffff;

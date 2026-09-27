@@ -1,6 +1,5 @@
 import {
   BarChart3,
-  ChefHat,
   ClipboardList,
   Clock3,
   Construction,
@@ -18,6 +17,7 @@ import {
   Warehouse,
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
+import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet } from "react-router-dom";
 import {
   canAccessTakeawayArea,
@@ -27,13 +27,13 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth.store";
 import TakeawayReleaseBanner from "@/components/takeaway/TakeawayReleaseBanner";
+import { takeawayApi } from "@/lib/takeawayApi";
 
 const icons: Record<string, typeof LayoutDashboard> = {
   overview: LayoutDashboard,
   "store-orders": ShoppingBag,
   "store-shifts": Clock3,
-  "store-kitchen": ChefHat,
-  "store-pickup": PackageCheck,
+  "store-fulfillment": PackageCheck,
   "store-central-orders": ClipboardList,
   "store-stock": Warehouse,
   "store-transfers": Truck,
@@ -81,11 +81,19 @@ export default function TakeawayShell(): JSX.Element {
   const businessType = useAuthStore((state) => state.businessType);
   const branchId = useAuthStore((state) => state.branchId);
   const isNativeApp = Capacitor.isNativePlatform();
+  const statusQuery = useQuery({
+    queryKey: ["takeaway", "status"],
+    queryFn: async () => (await takeawayApi.status()).data.data,
+  });
+  const fulfillmentMode = statusQuery.data?.fulfillment_mode ?? "counter_combined";
 
   const visibleGroups = TAKEAWAY_NAVIGATION.map((group) => ({
     ...group,
     items: canAccessTakeawayArea(group.area, scopeTypes, hasPermission)
-      ? group.items.filter((item) => item.permissions.some(hasPermission))
+      ? group.items.filter((item) => (
+        item.permissions.some(hasPermission)
+        && (!item.fulfillmentModes || item.fulfillmentModes.includes(fulfillmentMode))
+      ))
       : [],
   })).filter((group) => group.items.length > 0);
 

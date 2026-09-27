@@ -10,7 +10,7 @@ from app.models.role import Permission
 from app.schemas.role import RolePresetRead, RoleScope
 
 
-ROLE_PRESET_POLICY_VERSION = "2026-09-21.4"
+ROLE_PRESET_POLICY_VERSION = "2026-09-27.1"
 
 TAKEAWAY_OWNER_PERMISSIONS = (
     "takeaway.catalog.view",
@@ -501,9 +501,6 @@ ROLE_PRESET_POLICIES = (
             "inventory.product.view",
             "inventory.stock.view",
             "inventory.stock.adjust.request",
-            "takeaway.catalog.view",
-            "takeaway.kitchen.manage",
-            "takeaway.stock.view",
         ),
     ),
     RolePresetPolicy(
@@ -539,6 +536,26 @@ ROLE_PRESET_POLICIES = (
         ),
     ),
     RolePresetPolicy(
+        key="takeaway-store-operator",
+        name="Takeaway Store Operator",
+        description="Combined Takeaway counter, preparation, handoff, shift, replenishment, and receiving operations.",
+        default_scope="branch",
+        allowed_scopes=("branch",),
+        is_branch_assignable=True,
+        permission_codes=(
+            "system.branch.view",
+            "takeaway.catalog.view",
+            "takeaway.sale.view",
+            "takeaway.sale.create",
+            "takeaway.shift.manage",
+            "takeaway.kitchen.manage",
+            "takeaway.pickup.manage",
+            "takeaway.central_order.create",
+            "takeaway.stock.view",
+            "takeaway.transfer.manage",
+        ),
+    ),
+    RolePresetPolicy(
         key="kitchen-staff",
         name="Kitchen Staff",
         description="Kitchen display visibility and ticket status updates only.",
@@ -548,7 +565,6 @@ ROLE_PRESET_POLICIES = (
         permission_codes=(
             "fb.menu.view",
             "fb.kitchen.ticket.manage",
-            "takeaway.kitchen.manage",
         ),
     ),
 )

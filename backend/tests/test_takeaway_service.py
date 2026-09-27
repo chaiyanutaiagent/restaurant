@@ -181,5 +181,19 @@ class TakeawayRouterPermissionTests(unittest.IsolatedAsyncioTestCase):
             await checker(token(permissions=["takeaway.central_order.manage"]))
         self.assertEqual(denied.exception.status_code, 403)
 
+    async def test_combined_counter_operator_can_prepare_and_handoff(self) -> None:
+        fulfillment = self.permission_dependency(takeaway.update_fulfillment_order)
+        handoff = self.permission_dependency(takeaway.mark_picked_up)
+        operator = token(permissions=["takeaway.sale.create"])
+        legacy_station = token(permissions=["takeaway.kitchen.manage", "takeaway.pickup.manage"])
+
+        self.assertIs(await fulfillment(operator), operator)
+        self.assertIs(await handoff(operator), operator)
+        self.assertIs(await fulfillment(legacy_station), legacy_station)
+        self.assertIs(await handoff(legacy_station), legacy_station)
+
+        with self.assertRaises(HTTPException):
+            await fulfillment(token(permissions=["takeaway.catalog.view"]))
+
 if __name__ == "__main__":
     unittest.main()

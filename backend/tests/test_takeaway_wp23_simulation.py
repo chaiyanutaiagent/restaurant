@@ -21,7 +21,7 @@ class TakeawayWP23SimulationContractTests(unittest.TestCase):
         brand = self.permissions["brand-manager"]
         branch = self.permissions["branch-manager"]
         cashier = self.permissions["cashier"]
-        kitchen = self.permissions["kitchen-staff"]
+        operator = self.permissions["takeaway-store-operator"]
 
         self.assertIn("takeaway.import.apply", owner)
         self.assertIn("takeaway.production.manage", brand)
@@ -30,10 +30,10 @@ class TakeawayWP23SimulationContractTests(unittest.TestCase):
         self.assertNotIn("takeaway.central_order.manage", branch)
         self.assertIn("takeaway.sale.create", cashier)
         self.assertNotIn("takeaway.stock.manage", cashier)
-        self.assertEqual(
-            {permission for permission in kitchen if permission.startswith("takeaway.")},
-            {"takeaway.kitchen.manage"},
+        self.assertTrue(
+            {"takeaway.sale.create", "takeaway.kitchen.manage", "takeaway.pickup.manage"}.issubset(operator)
         )
+        self.assertNotIn("takeaway.production.manage", operator)
 
     def test_shared_erp_report_has_exactly_three_business_dimensions(self) -> None:
         self.assertEqual(

@@ -642,11 +642,12 @@ def run() -> None:
             "service-staff",
             "kitchen-manager",
             "cashier",
+            "takeaway-store-operator",
             "kitchen-staff",
         ]:
             raise RuntimeError("Phase 2 role preset order is invalid")
         if any(
-            preset["policy_version"] != "2026-09-20.3"
+            preset["policy_version"] != "2026-09-27.1"
             or not preset["is_available"]
             for preset in presets
         ):
@@ -662,7 +663,6 @@ def run() -> None:
         if set(preset_by_key["kitchen-staff"]["permission_codes"]) != {
             "fb.menu.view",
             "fb.kitchen.ticket.manage",
-            "takeaway.kitchen.manage",
         }:
             raise RuntimeError("Kitchen Staff escaped the station kitchen boundary")
 

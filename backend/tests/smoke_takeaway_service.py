@@ -236,9 +236,9 @@ async def run() -> None:
                     select(TakeawayKitchenTicket).where(TakeawayKitchenTicket.order_id == order.id)
                 )
             )
-            for ticket in tickets:
-                await service_a.update_kitchen_ticket(ticket.id, "preparing")
-                await service_a.update_kitchen_ticket(ticket.id, "ready")
+            assert tickets
+            await service_a.update_fulfillment_order(order.id, "preparing")
+            await service_a.update_fulfillment_order(order.id, "ready")
             await service_a.mark_picked_up(order.id)
             completed_public_status = await public_pickup_status(
                 pickup_token,
@@ -296,9 +296,8 @@ async def run() -> None:
                 )
             )
             assert qr_tickets
-            for ticket in qr_tickets:
-                await service_a.update_kitchen_ticket(ticket.id, "preparing")
-                await service_a.update_kitchen_ticket(ticket.id, "ready")
+            await service_a.update_fulfillment_order(qr_order.id, "preparing")
+            await service_a.update_fulfillment_order(qr_order.id, "ready")
             await service_a.mark_picked_up(qr_order.id)
             qr_status = await public_pickup_status(
                 qr_pickup_token,

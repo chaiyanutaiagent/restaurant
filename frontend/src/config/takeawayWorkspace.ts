@@ -6,6 +6,7 @@ export type TakeawayNavigationItem = {
   to: string;
   permissions: string[];
   description: string;
+  fulfillmentModes?: Array<"counter_combined" | "separate_stations">;
 };
 
 export type TakeawayNavigationGroup = {
@@ -38,10 +39,9 @@ export const TAKEAWAY_NAVIGATION: TakeawayNavigationGroup[] = [
     shortLabel: "STORE",
     allowedScopes: ["company", "branch", "station"],
     items: [
-      { key: "store-orders", label: "ขายหน้าร้าน", to: "/takeaway/store/orders", permissions: ["takeaway.sale.create"], description: "รับเงิน ออกคิว และส่งครัว" },
+      { key: "store-orders", label: "ขายและเตรียมสินค้า", to: "/takeaway/store/orders", permissions: ["takeaway.sale.create"], description: "รับเงิน เตรียมสินค้า เรียกคิว และส่งมอบ" },
       { key: "store-shifts", label: "กะขาย", to: "/takeaway/store/shifts", permissions: ["takeaway.shift.manage"], description: "เปิด ปิด และตรวจเงินในกะ" },
-      { key: "store-kitchen", label: "ครัว", to: "/takeaway/store/kitchen", permissions: ["takeaway.kitchen.manage"], description: "คิวรอทำ กำลังทำ และพร้อมรับ" },
-      { key: "store-pickup", label: "จุดรับสินค้า", to: "/takeaway/store/pickup", permissions: ["takeaway.pickup.manage"], description: "เรียกคิวและยืนยันส่งมอบ" },
+      { key: "store-fulfillment", label: "จุดเตรียมสินค้า", to: "/takeaway/store/fulfillment", permissions: ["takeaway.sale.create", "takeaway.kitchen.manage", "takeaway.pickup.manage"], description: "หน้าจอเสริมสำหรับสาขาที่แยกจุดเตรียม", fulfillmentModes: ["separate_stations"] },
       { key: "store-central-orders", label: "สั่งส่วนกลาง", to: "/takeaway/store/central-orders", permissions: ["takeaway.central_order.create"], description: "ใบสั่งประจำ รายการเพิ่ม และรับของ" },
       { key: "store-stock", label: "สต๊อกร้าน", to: "/takeaway/store/stock", permissions: ["takeaway.stock.view"], description: "ยอดคงเหลือและความเคลื่อนไหวสาขา" },
       { key: "store-transfers", label: "รับโอนสินค้า", to: "/takeaway/store/transfers", permissions: ["takeaway.transfer.manage"], description: "รายการส่งจากส่วนกลางและยอดรับจริง" },

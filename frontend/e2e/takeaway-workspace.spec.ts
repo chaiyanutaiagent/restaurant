@@ -54,7 +54,7 @@ async function installSession(page: Page, permissions: string[], scopeTypes: str
   }, { company: companyId, branch: branchId, sessionPermissions: permissions, sessionScopes: scopeTypes, accessToken: token });
 }
 
-async function mockTakeawayApi(page: Page, writesEnabled = true): Promise<void> {
+async function mockTakeawayApi(page: Page, writesEnabled = true, fulfillmentMode: "counter_combined" | "separate_stations" = "counter_combined"): Promise<void> {
   await page.route("**/api/v1/**", (route) => fulfill(route, []));
   await page.route("**/api/v1/takeaway/status", (route) => fulfill(route, {
     enabled: true,
@@ -70,6 +70,7 @@ async function mockTakeawayApi(page: Page, writesEnabled = true): Promise<void> 
     company_id: companyId,
     brand_id: "33333333-3333-4333-8333-333333333333",
     branch_id: branchId,
+    fulfillment_mode: fulfillmentMode,
   }));
 }
 
@@ -106,20 +107,21 @@ test("branch cashier sees only the Store workspace and legacy counter redirects"
   await expect(navigation.getByText("STORE", { exact: true })).toBeVisible();
   await expect(navigation.getByText("CENTRAL", { exact: true })).toHaveCount(0);
   await expect(navigation.getByText("ADMIN", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "ขายหน้าร้าน" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "ขายและเตรียมสินค้า" })).toBeVisible();
   await expect(page.getByRole("link", { name: "กะขาย" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "จุดเตรียมสินค้า" })).toHaveCount(0);
 
   await page.goto("/takeaway/counter");
   await expect(page).toHaveURL(/\/takeaway\/store\/orders$/);
 });
 
-test("kitchen-only station lands on the first permitted Store page instead of 403", async ({ page }) => {
-  await installSession(page, ["takeaway.kitchen.manage"], ["station"]);
-  await mockTakeawayApi(page);
+test("large takeaway branch can enable a separate preparation workspace", async ({ page }) => {
+  await installSession(page, ["takeaway.catalog.view", "takeaway.sale.create", "takeaway.kitchen.manage"], ["branch"]);
+  await mockTakeawayApi(page, true, "separate_stations");
 
-  await page.goto("/takeaway");
-  await expect(page).toHaveURL(/\/takeaway\/store\/kitchen$/);
-  await expect(page.getByRole("heading", { name: "คิวครัว" })).toBeVisible();
+  await page.goto("/takeaway/store/fulfillment");
+  await expect(page.getByRole("heading", { name: "จุดเตรียมและส่งมอบสินค้า" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "จุดเตรียมสินค้า" })).toBeVisible();
   await expect(page.getByText("CENTRAL", { exact: true })).toHaveCount(0);
 });
 
@@ -197,7 +199,7 @@ test("counter keeps a paid-first sale in the local outbox when network drops", a
     window.dispatchEvent(new Event("offline"));
   });
   await page.getByRole("button", { name: /หมูย่างทดสอบ/ }).click();
-  await page.getByRole("button", { name: "รับเงินสดและส่งครัว" }).click();
+  await page.getByRole("button", { name: "รับเงินสดและเตรียมสินค้า" }).click();
   await expect(page.getByText("เก็บรายการไว้ในเครื่องแล้ว", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /ใบลูกค้า/ })).toBeVisible();
   await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toBeVisible();

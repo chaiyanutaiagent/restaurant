@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import uuid
 
 from fastapi import HTTPException
@@ -59,11 +59,31 @@ class TakeawayReleaseGateTests(unittest.IsolatedAsyncioTestCase):
             patch("app.routers.takeaway.settings.takeaway_feature_enabled", True),
             patch("app.routers.takeaway.settings.takeaway_uat_transaction_writes_enabled", False),
         ):
-            result = await takeaway_status(current)
+            platform_db = AsyncMock()
+            platform_db.scalar.return_value = None
+            result = await takeaway_status(current, platform_db)
         self.assertTrue(result["data"]["enabled"])
         self.assertFalse(result["data"]["writes_enabled"])
         self.assertEqual(result["data"]["release_stage"], "dark_launch")
+        self.assertEqual(result["data"]["fulfillment_mode"], "counter_combined")
         self.assertIn("owner_canary_signoff", result["data"]["hard_holds"])
+
+    async def test_status_uses_branch_fulfillment_mode(self) -> None:
+        branch_id = uuid.uuid4()
+        current = TokenData(
+            user_id=uuid.uuid4(), company_id=uuid.uuid4(), brand_id=uuid.uuid4(),
+            branch_id=branch_id, business_type="takeaway", target_database="takeaway",
+            permissions=["takeaway.sale.create"],
+        )
+        platform_db = AsyncMock()
+        platform_db.scalar.return_value = SimpleNamespace(
+            theme_config={
+                "takeaway_fulfillment_mode": "counter_combined",
+                "takeaway_branch_fulfillment_modes": {str(branch_id): "separate_stations"},
+            }
+        )
+        result = await takeaway_status(current, platform_db)
+        self.assertEqual(result["data"]["fulfillment_mode"], "separate_stations")
 
     def test_every_takeaway_route_carries_server_release_gate(self) -> None:
         for current_router in (router, public_router):

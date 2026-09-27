@@ -36,10 +36,11 @@ class RolePresetPolicyTests(unittest.TestCase):
                 "service-staff",
                 "kitchen-manager",
                 "cashier",
+                "takeaway-store-operator",
                 "kitchen-staff",
             ],
         )
-        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-09-21.4")
+        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-09-27.1")
 
     def test_every_preset_uses_registered_permissions_without_duplicates(self) -> None:
         for policy in ROLE_PRESET_POLICIES:
@@ -84,8 +85,21 @@ class RolePresetPolicyTests(unittest.TestCase):
             {
                 "fb.menu.view",
                 "fb.kitchen.ticket.manage",
-                "takeaway.kitchen.manage",
             },
+        )
+
+    def test_takeaway_operator_combines_counter_preparation_handoff_and_receiving(self) -> None:
+        policy = self.policies["takeaway-store-operator"]
+        self.assertEqual(policy.default_scope, "branch")
+        self.assertTrue(
+            {
+                "takeaway.sale.create",
+                "takeaway.kitchen.manage",
+                "takeaway.pickup.manage",
+                "takeaway.central_order.create",
+                "takeaway.stock.view",
+                "takeaway.transfer.manage",
+            }.issubset(policy.permission_codes)
         )
 
     def test_device_management_is_limited_to_manager_presets(self) -> None:

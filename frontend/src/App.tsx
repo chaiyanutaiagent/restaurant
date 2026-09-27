@@ -220,11 +220,10 @@ export default function App(): JSX.Element {
                 <Route element={<ProtectedRoute permission="takeaway.shift.manage" />}>
                   <Route path="/takeaway/store/shifts" element={<TakeawayShiftPage />} />
                 </Route>
-                <Route element={<ProtectedRoute permission="takeaway.kitchen.manage" />}>
-                  <Route path="/takeaway/store/kitchen" element={<TakeawayOperationsPage section="kitchen" workspace="store" />} />
-                </Route>
-                <Route element={<ProtectedRoute permission="takeaway.pickup.manage" />}>
-                  <Route path="/takeaway/store/pickup" element={<TakeawayOperationsPage section="pickup" workspace="store" />} />
+                <Route element={<ProtectedRoute permissions={["takeaway.sale.create", "takeaway.kitchen.manage", "takeaway.pickup.manage"]} />}>
+                  <Route path="/takeaway/store/fulfillment" element={<TakeawayOperationsPage section="fulfillment" workspace="store" />} />
+                  <Route path="/takeaway/store/kitchen" element={<Navigate to="/takeaway/store/fulfillment" replace />} />
+                  <Route path="/takeaway/store/pickup" element={<Navigate to="/takeaway/store/fulfillment" replace />} />
                 </Route>
                 <Route element={<ProtectedRoute permission="takeaway.central_order.create" />}>
                   <Route path="/takeaway/store/central-orders" element={<TakeawayStoreCentralOrdersPage />} />
@@ -287,8 +286,8 @@ export default function App(): JSX.Element {
               </Route>
 
               <Route path="/takeaway/counter" element={<Navigate to="/takeaway/store/orders" replace />} />
-              <Route path="/takeaway/kitchen" element={<Navigate to="/takeaway/store/kitchen" replace />} />
-              <Route path="/takeaway/pickup" element={<Navigate to="/takeaway/store/pickup" replace />} />
+              <Route path="/takeaway/kitchen" element={<Navigate to="/takeaway/store/fulfillment" replace />} />
+              <Route path="/takeaway/pickup" element={<Navigate to="/takeaway/store/fulfillment" replace />} />
               <Route path="/takeaway/central-orders" element={<TakeawayLegacyRedirect route="central-orders" />} />
               <Route path="/takeaway/production" element={<Navigate to="/takeaway/central/production" replace />} />
               <Route path="/takeaway/stock" element={<TakeawayLegacyRedirect route="stock" />} />

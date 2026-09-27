@@ -103,7 +103,7 @@ export const PLATFORM_MODULES = [
     key: "takeaway_pos",
     title: "Takeaway POS",
     eyebrow: "รับสินค้าจากส่วนกลาง",
-    description: "ขายแบบชำระก่อนผลิต ออกเลขคิว ส่งครัว และใช้สต๊อกร่วมหลายแบรนด์",
+    description: "รับสินค้าจากส่วนกลาง ขาย เตรียม เรียกคิว และส่งมอบ พร้อมใช้สต๊อกร่วมหลายแบรนด์",
     group: "pos",
     entryRoute: "/takeaway",
     availability: "dark_launch",

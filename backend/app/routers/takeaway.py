@@ -22,6 +22,8 @@ from app.dependencies import (
     require_any_permission,
     require_permission,
 )
+from app.database import get_platform_db
+from app.models.restaurant import Brand
 from app.schemas.takeaway import (
     TakeawayBranchAvailabilityUpdate,
     TakeawayCatalogItemCreate,
@@ -278,8 +280,34 @@ async def public_pickup_status(
 
 @router.get("/status")
 async def takeaway_status(
-    current: TokenData = Depends(require_permission("takeaway.catalog.view")),
+    current: TokenData = Depends(
+        require_any_permission(
+            "takeaway.catalog.view",
+            "takeaway.sale.create",
+            "takeaway.kitchen.manage",
+            "takeaway.pickup.manage",
+        )
+    ),
+    platform_db: AsyncSession = Depends(get_platform_db),
 ) -> dict[str, Any]:
+    fulfillment_mode = "counter_combined"
+    if current.brand_id is not None:
+        brand = await platform_db.scalar(
+            select(Brand).where(
+                Brand.id == current.brand_id,
+                Brand.company_id == current.company_id,
+                Brand.is_active.is_(True),
+            )
+        )
+        theme_config = brand.theme_config or {} if brand else {}
+        branch_modes = theme_config.get("takeaway_branch_fulfillment_modes", {})
+        configured_mode = (
+            branch_modes.get(str(current.branch_id))
+            if current.branch_id is not None and isinstance(branch_modes, dict)
+            else None
+        ) or theme_config.get("takeaway_fulfillment_mode")
+        if configured_mode in {"counter_combined", "separate_stations"}:
+            fulfillment_mode = configured_mode
     return ok(
         {
             "enabled": settings.takeaway_feature_enabled,
@@ -299,6 +327,7 @@ async def takeaway_status(
             "company_id": current.company_id,
             "brand_id": current.brand_id,
             "branch_id": current.branch_id,
+            "fulfillment_mode": fulfillment_mode,
         }
     )
 
@@ -522,6 +551,18 @@ async def update_kitchen_ticket(
     return ok(await TakeawayService(db, current).update_kitchen_ticket(ticket_id, next_status))
 
 
+@router.post("/fulfillment/orders/{order_id}/{next_status}")
+async def update_fulfillment_order(
+    order_id: uuid.UUID,
+    next_status: str,
+    current: TokenData = Depends(
+        require_any_permission("takeaway.sale.create", "takeaway.kitchen.manage")
+    ),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).update_fulfillment_order(order_id, next_status))
+
+
 @router.get("/kitchen/tickets")
 async def list_kitchen_tickets(
     branch_id: uuid.UUID | None = None,
@@ -544,7 +585,9 @@ async def list_kitchen_tickets(
 @router.post("/orders/{order_id}/picked-up")
 async def mark_picked_up(
     order_id: uuid.UUID,
-    current: TokenData = Depends(require_permission("takeaway.pickup.manage")),
+    current: TokenData = Depends(
+        require_any_permission("takeaway.sale.create", "takeaway.pickup.manage")
+    ),
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
     return ok(await TakeawayService(db, current).mark_picked_up(order_id))

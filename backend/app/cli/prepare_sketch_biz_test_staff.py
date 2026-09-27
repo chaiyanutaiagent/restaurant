@@ -72,11 +72,9 @@ TEST_STAFF_PROFILES = (
     TestStaffProfile("brand-manager", "test.chambo.brand-manager", "CHB-BRAND", "ชนินทร์", "ปิ่นทอง", "ผู้จัดการแบรนด์", "chambo"),
     TestStaffProfile("area-manager", "test.chambo.area-manager", "CHB-AREA", "ภัทรดนัย", "เมืองกรุง", "ผู้จัดการเขต", "chambo"),
     TestStaffProfile("branch-manager", "test.chambo.branch-manager", "CHB-BRANCH", "กานต์พิชชา", "ศรีโอโซน", "ผู้จัดการสาขา", "chambo"),
-    TestStaffProfile("warehouse", "test.chambo.warehouse", "CHB-WAREHOUSE", "ณรงค์ฤทธิ์", "พร้อมส่ง", "เจ้าหน้าที่คลังสินค้า", "chambo"),
-    TestStaffProfile("service-staff", "test.chambo.service", "CHB-SERVICE", "ธัญชนก", "รับออเดอร์", "พนักงานรับออเดอร์", "chambo"),
-    TestStaffProfile("kitchen-manager", "test.chambo.kitchen-manager", "CHB-KITCHEN-MGR", "บวรชัย", "เตาถ่าน", "ผู้จัดการครัว", "chambo"),
-    TestStaffProfile("cashier", "test.chambo.cashier", "CHB-CASHIER", "สิริมา", "เงินครบ", "พนักงานขายและแคชเชียร์", "chambo"),
-    TestStaffProfile("kitchen-staff", "test.chambo.kitchen", "CHB-KITCHEN", "พงศกร", "หมักดี", "พนักงานครัว", "chambo"),
+    TestStaffProfile("takeaway-store-operator", "test.chambo.operator01", "CHB-OP-01", "ธัญชนก", "รับออเดอร์", "พนักงานหน้าร้าน Takeaway", "chambo"),
+    TestStaffProfile("takeaway-store-operator", "test.chambo.operator02", "CHB-OP-02", "สิริมา", "เงินครบ", "พนักงานหน้าร้าน Takeaway", "chambo"),
+    TestStaffProfile("takeaway-store-operator", "test.chambo.operator03", "CHB-OP-03", "พงศกร", "พร้อมขาย", "พนักงานหน้าร้าน Takeaway", "chambo"),
 )
 
 
@@ -89,6 +87,11 @@ SUPERSEDED_BROAD_USERNAMES = (
     "test.kitchen-manager",
     "test.cashier",
     "test.kitchen-staff",
+    "test.chambo.warehouse",
+    "test.chambo.service",
+    "test.chambo.kitchen-manager",
+    "test.chambo.cashier",
+    "test.chambo.kitchen",
 )
 
 
@@ -414,7 +417,7 @@ async def prepare(args: argparse.Namespace) -> dict[str, Any]:
         "shared_company_users": sum(profile.workspace_key is None for profile in TEST_STAFF_PROFILES),
         "workspace_users": sum(profile.workspace_key is not None for profile in TEST_STAFF_PROFILES),
         "superseded_broad_users": len(superseded_users),
-        "station_login_note": "Workspace kitchen users use station_key=kitchen",
+        "station_login_note": "Restaurant kitchen users remain station-scoped; Takeaway uses branch-scoped store operators",
         "users": prepared,
         "production_activated": False,
     }

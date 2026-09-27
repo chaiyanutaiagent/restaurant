@@ -1,12 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Factory, PackageCheck, ShoppingBag, Warehouse } from "lucide-react";
+import { ArrowRight, Factory, ShoppingBag, Warehouse } from "lucide-react";
 import { Link } from "react-router-dom";
 import { takeawayApi } from "@/lib/takeawayApi";
 import { useAuthStore } from "@/stores/auth.store";
 
 const cards = [
-  { to: "/takeaway/store/orders", permission: "takeaway.sale.create", title: "ขายและชำระก่อนผลิต", detail: "รับเงิน ออกเลขคิว ส่งครัว และออกใบเสร็จในรายการเดียว", icon: ShoppingBag, color: "bg-emerald-500" },
-  { to: "/takeaway/store/kitchen", permission: "takeaway.kitchen.manage", title: "ครัวและจุดรับสินค้า", detail: "เรียงคิวจากชำระแล้วจนถึงพร้อมรับและรับสินค้า", icon: PackageCheck, color: "bg-amber-400" },
+  { to: "/takeaway/store/orders", permission: "takeaway.sale.create", title: "ขาย เตรียม และส่งมอบ", detail: "รับเงิน ออกเลขคิว เตรียมสินค้า และส่งมอบในหน้าจอเดียว", icon: ShoppingBag, color: "bg-emerald-500" },
   { to: "/takeaway/central/production", permission: "takeaway.production.manage", title: "ผลิตหลายแบรนด์", detail: "สูตรและล็อตผลิตแยกแบรนด์ แต่ตัดวัตถุดิบกองกลางร่วมกัน", icon: Factory, color: "bg-violet-500" },
   { to: "/takeaway/central/stock", permission: "takeaway.stock.manage", title: "สต๊อกส่วนกลาง", detail: "ยอดเดียวต่อสินค้าและตำแหน่ง พร้อมประวัติรับ จ่าย โอน และของเสีย", icon: Warehouse, color: "bg-sky-500" },
 ];
@@ -22,7 +21,7 @@ export default function TakeawayDashboardPage(): JSX.Element {
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-400">Phase 6 workspace</p>
             <h1 className="mt-2 text-3xl font-black md:text-4xl">Take away POS</h1>
-            <p className="mt-2 max-w-2xl text-sm text-slate-300">ร้านรับสินค้าจากส่วนกลาง ขายหน้าร้านแบบชำระก่อนผลิต และส่งยอดแยกธุรกิจกลับ ERP กลาง</p>
+            <p className="mt-2 max-w-2xl text-sm text-slate-300">ร้านรับสินค้าจากส่วนกลาง พนักงานหน้าร้านขาย เตรียม และส่งมอบสินค้า พร้อมส่งยอดแยกธุรกิจกลับ ERP กลาง</p>
           </div>
           <div className="rounded-2xl border border-slate-700 bg-slate-900 px-5 py-4">
             <p className="text-xs text-slate-400">สถานะบริการ</p>

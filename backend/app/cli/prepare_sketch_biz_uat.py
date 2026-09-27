@@ -255,6 +255,11 @@ async def _ensure_workspace(
         "tenant": "sketch-biz",
         "uat": True,
         "production_transactions_enabled": False if spec.business_type == "takeaway" else None,
+        **(
+            {"takeaway_fulfillment_mode": "counter_combined"}
+            if spec.business_type == "takeaway"
+            else {}
+        ),
     }
     brand.is_active = True
 
@@ -271,6 +276,12 @@ async def _ensure_workspace(
     branch.is_warehouse = False
     branch.is_active = True
     branch.deleted_at = None
+    if spec.business_type == "takeaway":
+        theme_config = dict(brand.theme_config or {})
+        branch_modes = dict(theme_config.get("takeaway_branch_fulfillment_modes", {}))
+        branch_modes[str(branch.id)] = "counter_combined"
+        theme_config["takeaway_branch_fulfillment_modes"] = branch_modes
+        brand.theme_config = theme_config
 
     conflicting_links = (
         await db.scalars(

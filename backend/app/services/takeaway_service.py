@@ -1294,6 +1294,60 @@ class TakeawayService:
         await self.db.refresh(ticket)
         return ticket
 
+    async def update_fulfillment_order(self, order_id: uuid.UUID, next_status: str) -> TakeawayOrder:
+        """Advance every preparation item for a combined-counter Takeaway order."""
+        order = await self.db.scalar(
+            select(TakeawayOrder)
+            .where(TakeawayOrder.id == order_id, TakeawayOrder.company_id == self.current.company_id)
+            .with_for_update()
+        )
+        if order is None:
+            raise HTTPException(status_code=404, detail="Takeaway order not found")
+        assert_takeaway_scope(self.current, brand_id=order.brand_id, branch_id=order.branch_id)
+        transitions = {"queued": "preparing", "preparing": "ready"}
+        if transitions.get(order.fulfillment_status) != next_status:
+            raise HTTPException(status_code=409, detail="Invalid Takeaway fulfillment transition")
+        tickets = list(
+            await self.db.scalars(
+                select(TakeawayKitchenTicket)
+                .where(
+                    TakeawayKitchenTicket.order_id == order.id,
+                    TakeawayKitchenTicket.company_id == self.current.company_id,
+                )
+                .with_for_update()
+            )
+        )
+        if not tickets:
+            raise HTTPException(status_code=409, detail="Takeaway order has no preparation items")
+        now = datetime.now(timezone.utc)
+        for ticket in tickets:
+            ticket.status = next_status
+            if next_status == "ready":
+                ticket.ready_at = now
+        order.fulfillment_status = next_status
+        metadata = dict(order.source_metadata or {})
+        history = list(metadata.get("fulfillment_history", []))
+        history.append({"status": next_status, "user_id": str(self.current.user_id), "at": now.isoformat()})
+        metadata["fulfillment_history"] = history
+        order.source_metadata = metadata
+        if next_status == "ready":
+            self._outbox(
+                event_type="takeaway.order.ready.v1",
+                aggregate_type="order",
+                aggregate_id=order.id,
+                idempotency_key=f"order:{order.id}:ready",
+                payload={
+                    "order_number": order.order_number,
+                    "queue_number": order.queue_number,
+                    "operated_by": str(self.current.user_id),
+                },
+                brand_id=order.brand_id,
+                branch_id=order.branch_id,
+            )
+        await self.db.commit()
+        await self.db.refresh(order)
+        return order
+
     async def mark_picked_up(self, order_id: uuid.UUID) -> TakeawayOrder:
         order = await self.db.scalar(
             select(TakeawayOrder)
@@ -1307,12 +1361,25 @@ class TakeawayService:
             raise HTTPException(status_code=409, detail="Only a ready Takeaway order can be picked up")
         order.fulfillment_status = "picked_up"
         order.picked_up_at = datetime.now(timezone.utc)
+        metadata = dict(order.source_metadata or {})
+        history = list(metadata.get("fulfillment_history", []))
+        history.append({
+            "status": "picked_up",
+            "user_id": str(self.current.user_id),
+            "at": order.picked_up_at.isoformat(),
+        })
+        metadata["fulfillment_history"] = history
+        order.source_metadata = metadata
         self._outbox(
             event_type="takeaway.order.picked_up.v1",
             aggregate_type="order",
             aggregate_id=order.id,
             idempotency_key=f"order:{order.id}:picked-up",
-            payload={"order_number": order.order_number, "queue_number": order.queue_number},
+            payload={
+                "order_number": order.order_number,
+                "queue_number": order.queue_number,
+                "operated_by": str(self.current.user_id),
+            },
             brand_id=order.brand_id,
             branch_id=order.branch_id,
         )

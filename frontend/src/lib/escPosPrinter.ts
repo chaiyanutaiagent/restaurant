@@ -111,10 +111,14 @@ function isTargetPrinter(device: UsbDeviceLike): boolean {
   return device.vendorId === PHOMARK_VENDOR_ID && device.productId === PHOMARK_PRODUCT_ID;
 }
 
+function cleanUsbDescriptor(value: string | undefined): string {
+  return value?.replace(/[\u0000-\u001f\u007f]/g, "").trim() ?? "";
+}
+
 function printerInfo(device: UsbDeviceLike): EscPosPrinterInfo {
   return {
-    name: device.productName?.trim() || device.manufacturerName?.trim() || "PHOMARK POS-80",
-    serialNumber: device.serialNumber?.trim() || null,
+    name: cleanUsbDescriptor(device.productName) || cleanUsbDescriptor(device.manufacturerName) || "PHOMARK POS-80",
+    serialNumber: cleanUsbDescriptor(device.serialNumber) || null,
   };
 }
 
@@ -137,7 +141,7 @@ async function pairedDevice(): Promise<UsbDeviceLike | null> {
   const devices = (await manager.getDevices()).filter(isTargetPrinter);
   if (devices.length === 0) return null;
   const serialNumber = savedSerialNumber();
-  return devices.find((device) => device.serialNumber === serialNumber) ?? devices[0];
+  return devices.find((device) => cleanUsbDescriptor(device.serialNumber) === serialNumber) ?? devices[0];
 }
 
 export function isEscPosUsbSupported(): boolean {

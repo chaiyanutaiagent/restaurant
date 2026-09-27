@@ -4,9 +4,15 @@ import { useState } from "react";
 import { useToast } from "@/components/ui/use-toast";
 import { loadTakeawayRelease } from "@/lib/takeawayAppUpdate";
 import {
+  connectEscPosUsbPrinter,
+  describeEscPosError,
+  getEscPosPrinterStatus,
+  printEscPosLongTest,
+} from "@/lib/escPosPrinter";
+import {
   isNativeTakeawayPrinterAvailable,
   pairedTakeawayPrinters,
-  printTakeawayRaw,
+  printConfiguredLongReceiptTest,
   saveTakeawayPrinter,
   savedTakeawayPrinter,
   type TakeawayPrinterDevice,
@@ -25,7 +31,7 @@ export default function TakeawayDeviceSettingsPage(): JSX.Element {
     mutationFn: async () => {
       if (!selected) throw new Error("กรุณาเลือกเครื่องพิมพ์");
       saveTakeawayPrinter(selected);
-      await printTakeawayRaw(selected.address, "FOODCHAINSERVICE TAKEAWAY\nPRINTER TEST OK\n\n\n");
+      if (!await printConfiguredLongReceiptTest()) throw new Error("ยังไม่ได้เชื่อมเครื่องพิมพ์");
     },
     onSuccess: () => toast({ title: "ส่งใบพิมพ์ทดสอบแล้ว" }),
     onError: (error) => toast({ title: "ทดสอบพิมพ์ไม่สำเร็จ", description: error instanceof Error ? error.message : "ตรวจการจับคู่เครื่องพิมพ์", variant: "destructive" }),
@@ -36,15 +42,41 @@ export default function TakeawayDeviceSettingsPage(): JSX.Element {
     retry: false,
   });
   const native = isNativeTakeawayPrinterAvailable();
+  const webPrinterQuery = useQuery({
+    queryKey: ["takeaway", "web-usb-printer"],
+    queryFn: getEscPosPrinterStatus,
+    enabled: !native,
+  });
+  const connectWebPrinterMutation = useMutation({
+    mutationFn: connectEscPosUsbPrinter,
+    onSuccess: async (printer) => {
+      await webPrinterQuery.refetch();
+      toast({ title: "เชื่อมเครื่องพิมพ์แล้ว", description: `${printer.name} พร้อมพิมพ์แบบความยาวอัตโนมัติ` });
+    },
+    onError: (error) => toast({ title: "เชื่อมเครื่องพิมพ์ไม่สำเร็จ", description: describeEscPosError(error), variant: "destructive" }),
+  });
+  const testWebPrinterMutation = useMutation({
+    mutationFn: printEscPosLongTest,
+    onSuccess: () => toast({ title: "ส่งบิลทดสอบ 60 รายการแล้ว" }),
+    onError: (error) => toast({ title: "ทดสอบพิมพ์ไม่สำเร็จ", description: describeEscPosError(error), variant: "destructive" }),
+  });
 
   return <div className="space-y-5">
-    <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">device workspace</p><h1 className="mt-1 text-2xl font-black">อุปกรณ์ Takeaway</h1><p className="mt-1 text-sm text-slate-500">ตั้งค่าเครื่องพิมพ์ Bluetooth และตรวจเวอร์ชันแอปที่ลงลายเซ็น</p></div>
+    <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">device workspace</p><h1 className="mt-1 text-2xl font-black">อุปกรณ์ Takeaway</h1><p className="mt-1 text-sm text-slate-500">ตั้งค่าเครื่องพิมพ์ ESC/POS สำหรับ Web USB หรือ Android Bluetooth และตรวจเวอร์ชันแอป</p></div>
     <div className="grid gap-4 xl:grid-cols-2">
       <section className="rounded-2xl border bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between gap-3"><h2 className="flex items-center gap-2 font-black"><Bluetooth className="h-5 w-5 text-blue-600" /> เครื่องพิมพ์ Bluetooth</h2><button disabled={!native || scanMutation.isPending} onClick={() => scanMutation.mutate()} className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-bold disabled:opacity-40">{scanMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} อ่านอุปกรณ์ที่จับคู่</button></div>
-        {!native ? <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">การพิมพ์ Bluetooth ใช้ได้ในแอป Android เท่านั้น บนเว็บจะใช้หน้าต่างพิมพ์ของเบราว์เซอร์</p> : null}
-        <div className="mt-4 space-y-2">{devices.map((device) => <button key={device.address} onClick={() => { setSelected(device); saveTakeawayPrinter(device); }} className={`flex w-full items-center justify-between rounded-xl border p-4 text-left ${selected?.address === device.address ? "border-emerald-500 bg-emerald-50" : "border-slate-200"}`}><span><strong className="block">{device.name}</strong><span className="text-xs text-slate-500">{device.address}</span></span>{selected?.address === device.address ? <CheckCircle2 className="h-5 w-5 text-emerald-600" /> : null}</button>)}</div>
-        {selected ? <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm"><p className="font-bold">เครื่องที่เลือก: {selected.name}</p><button disabled={!native || testMutation.isPending} onClick={() => testMutation.mutate()} className="mt-3 flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 font-bold text-white disabled:opacity-40"><Printer className="h-4 w-4" /> ทดสอบพิมพ์และตัดกระดาษ</button></div> : null}
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 font-black">{native ? <Bluetooth className="h-5 w-5 text-blue-600" /> : <Printer className="h-5 w-5 text-blue-600" />} {native ? "เครื่องพิมพ์ Bluetooth" : "เครื่องพิมพ์ USB ESC/POS"}</h2>
+          {native ? <button disabled={scanMutation.isPending} onClick={() => scanMutation.mutate()} className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-bold disabled:opacity-40">{scanMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} อ่านอุปกรณ์ที่จับคู่</button> : <button disabled={!webPrinterQuery.data?.supported || connectWebPrinterMutation.isPending} onClick={() => connectWebPrinterMutation.mutate()} className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-bold disabled:opacity-40">{connectWebPrinterMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} {webPrinterQuery.data?.paired ? "เลือกเครื่องใหม่" : "เชื่อมเครื่องพิมพ์"}</button>}
+        </div>
+        {native ? <>
+          <div className="mt-4 space-y-2">{devices.map((device) => <button key={device.address} onClick={() => { setSelected(device); saveTakeawayPrinter(device); }} className={`flex w-full items-center justify-between rounded-xl border p-4 text-left ${selected?.address === device.address ? "border-emerald-500 bg-emerald-50" : "border-slate-200"}`}><span><strong className="block">{device.name}</strong><span className="text-xs text-slate-500">{device.address}</span></span>{selected?.address === device.address ? <CheckCircle2 className="h-5 w-5 text-emerald-600" /> : null}</button>)}</div>
+          {selected ? <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm"><p className="font-bold">เครื่องที่เลือก: {selected.name}</p><button disabled={testMutation.isPending} onClick={() => testMutation.mutate()} className="mt-3 flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 font-bold text-white disabled:opacity-40"><Printer className="h-4 w-4" /> ทดสอบพิมพ์และตัดกระดาษ</button></div> : null}
+        </> : <div className={`mt-4 rounded-xl p-4 text-sm ${webPrinterQuery.data?.paired ? "bg-emerald-50 text-emerald-900" : "bg-amber-50 text-amber-900"}`}>
+          <p className="font-bold">{webPrinterQuery.data?.paired ? `เชื่อมแล้ว: ${webPrinterQuery.data.printer?.name ?? "ESC/POS"}` : webPrinterQuery.data?.supported ? "ยังไม่ได้เชื่อมเครื่องพิมพ์" : "Browser นี้ไม่รองรับ Web USB"}</p>
+          <p className="mt-1 text-xs">ใบเสร็จและสลิปจะยาวตามรายการจริงและตัดท้ายงานอัตโนมัติ</p>
+          {webPrinterQuery.data?.paired ? <button disabled={testWebPrinterMutation.isPending} onClick={() => testWebPrinterMutation.mutate()} className="mt-3 flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 font-bold text-white disabled:opacity-40"><Printer className="h-4 w-4" /> ทดสอบบิลยาว 60 รายการ</button> : null}
+        </div>}
       </section>
       <section className="rounded-2xl border bg-white p-5 shadow-sm">
         <h2 className="flex items-center gap-2 font-black"><ShieldCheck className="h-5 w-5 text-emerald-600" /> Signed app update</h2>

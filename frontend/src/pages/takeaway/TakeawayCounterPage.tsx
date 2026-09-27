@@ -100,12 +100,12 @@ export default function TakeawayCounterPage(): JSX.Element {
     try {
       if (await printTakeawayReceipt(receipt, copyType)) {
         setLastReceipt(await markTakeawayReceiptPrinted(clientSaleId, receipt.order_id, copyType));
-        toast({ title: "พิมพ์ใบเสร็จผ่าน Bluetooth แล้ว" });
+        toast({ title: "พิมพ์ใบเสร็จและตัดกระดาษแล้ว" });
         return;
       }
     } catch (error) {
       toast({
-        title: "เครื่องพิมพ์ Bluetooth ไม่พร้อม",
+        title: "เครื่องพิมพ์ ESC/POS ไม่พร้อม",
         description: error instanceof Error ? error.message : "กำลังเปิดหน้าต่างพิมพ์แทน",
         variant: "destructive",
       });

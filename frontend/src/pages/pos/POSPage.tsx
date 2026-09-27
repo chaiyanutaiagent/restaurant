@@ -47,7 +47,6 @@ import {
   getEscPosPrinterStatus,
   isEscPosUsbSupported,
   printEscPosLongTest,
-  printEscPosReceipt,
   type EscPosPrinterStatus,
 } from "@/lib/escPosPrinter";
 import { posApi } from "@/lib/posApi";
@@ -63,6 +62,7 @@ import {
 } from "@/lib/restaurantOffline";
 import { POS_CATALOG_ISOLATION_KEY, syncPendingSales, syncProductCatalog, syncStockBalances, useOfflineProducts, useOnlineStatus } from "@/lib/syncService";
 import { wapApi, type WapOrder } from "@/lib/wapApi";
+import { printConfiguredSaleReceipt, printConfiguredWapOrderSlip } from "@/lib/takeawayPrinter";
 import { useAuthStore } from "@/stores/auth.store";
 import { useDeviceStore } from "@/stores/device.store";
 import type { BranchReplacementRule, BranchSettings } from "@/types/admin";
@@ -753,16 +753,38 @@ export default function POSPage(): JSX.Element {
 
   useEffect(() => {
     if (!takeawayPendingPrint || !takeawayOrder) return;
+    let cancelled = false;
     const timeout = window.setTimeout(() => {
-      if (takeawayPendingPrint === "customer") {
-        void printTakeawayCustomerSlip();
-      } else {
-        void printTakeawayKitchenSlip();
-      }
-      setTakeawayPendingPrint(null);
+      void (async () => {
+        const type = takeawayPendingPrint;
+        let printedDirectly = false;
+        try {
+          printedDirectly = await printConfiguredWapOrderSlip(
+            takeawayOrder,
+            type,
+            user?.display_name ?? user?.username ?? "Cashier",
+            takeawayMenuQuery.data ?? null,
+            type === "customer" && takeawayOrder.payment_method === "promptpay" ? qrDataUrl : null,
+          );
+        } catch (error) {
+          toast({
+            title: "พิมพ์ตรงไม่สำเร็จ",
+            description: `${describeEscPosError(error)} — เปิดหน้าพิมพ์สำรองให้แทน`,
+            variant: "destructive",
+          });
+        }
+        if (!printedDirectly) {
+          if (type === "customer") void printTakeawayCustomerSlip();
+          else void printTakeawayKitchenSlip();
+        }
+        if (!cancelled) setTakeawayPendingPrint(null);
+      })();
     }, 150);
-    return () => window.clearTimeout(timeout);
-  }, [printTakeawayCustomerSlip, printTakeawayKitchenSlip, takeawayOrder, takeawayPendingPrint]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [printTakeawayCustomerSlip, printTakeawayKitchenSlip, qrDataUrl, takeawayMenuQuery.data, takeawayOrder, takeawayPendingPrint, toast, user?.display_name, user?.username]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2351,29 +2373,26 @@ export default function POSPage(): JSX.Element {
 
   const handleReceiptPrint = useCallback(async (order: SaleOrder | null = lastOrder) => {
     if (!order) return;
-    let status: EscPosPrinterStatus | null = null;
     try {
-      status = await getEscPosPrinterStatus();
-      setEscPosPrinterStatus(status);
+      setEscPosPrinterStatus(await getEscPosPrinterStatus());
     } catch {
-      status = null;
+      setEscPosPrinterStatus({ supported: isEscPosUsbSupported(), paired: false, printer: null });
     }
 
-    if (status?.paired) {
-      setEscPosPrinterBusy("print");
-      try {
-        await printEscPosReceipt(order, receiptCompany, receiptBranch, receiptCashier);
+    setEscPosPrinterBusy("print");
+    try {
+      if (await printConfiguredSaleReceipt(order, receiptCompany, receiptBranch, receiptCashier)) {
         toast({ title: "พิมพ์ใบเสร็จและตัดกระดาษแล้ว", description: "ความยาวกระดาษปรับตามจำนวนรายการอัตโนมัติ" });
         return;
-      } catch (error) {
-        toast({
-          title: "ส่งตรงเข้าเครื่องพิมพ์ไม่สำเร็จ",
-          description: `${describeEscPosError(error)} — เปิดหน้าพิมพ์สำรองให้แทน`,
-          variant: "destructive",
-        });
-      } finally {
-        setEscPosPrinterBusy(null);
       }
+    } catch (error) {
+      toast({
+        title: "ส่งตรงเข้าเครื่องพิมพ์ไม่สำเร็จ",
+        description: `${describeEscPosError(error)} — เปิดหน้าพิมพ์สำรองให้แทน`,
+        variant: "destructive",
+      });
+    } finally {
+      setEscPosPrinterBusy(null);
     }
     void handleBrowserPrint();
   }, [handleBrowserPrint, lastOrder, receiptBranch, receiptCashier, receiptCompany, toast]);
@@ -3682,7 +3701,7 @@ export default function POSPage(): JSX.Element {
               onClick={() => void handleConnectEscPosPrinter()}
             >
               {escPosPrinterBusy === "connect" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
-              {escPosPrinterStatus.paired ? "เลือกเครื่องพิมพ์ใหม่" : "เชื่อมเครื่องพิมพ์ POS-80"}
+              {escPosPrinterStatus.paired ? "เลือกเครื่องพิมพ์ใหม่" : "เชื่อมเครื่องพิมพ์ ESC/POS"}
             </Button>
             <Button
               type="button"

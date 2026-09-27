@@ -28,6 +28,7 @@ import {
   type RestaurantOutboxSummary,
 } from "@/lib/restaurantOffline";
 import { useOnlineStatus } from "@/lib/syncService";
+import { printConfiguredWapOrderSlip } from "@/lib/takeawayPrinter";
 import { wapApi, type WapMenu, type WapMenuProduct, type WapOrder } from "@/lib/wapApi";
 import { useAuthStore } from "@/stores/auth.store";
 
@@ -264,16 +265,38 @@ export default function WapOrderPage(): JSX.Element {
 
   useEffect(() => {
     if (!pendingPrint || !currentOrder) return;
+    let cancelled = false;
     const printTimer = window.setTimeout(() => {
-      if (pendingPrint === "customer") {
-        customerPrint();
-      } else {
-        kitchenPrint();
-      }
-      setPendingPrint(null);
+      void (async () => {
+        const type = pendingPrint;
+        let printedDirectly = false;
+        try {
+          printedDirectly = await printConfiguredWapOrderSlip(
+            currentOrder,
+            type,
+            employeeName,
+            menuQuery.data ?? null,
+            type === "customer" && currentOrder.payment_method === "promptpay" ? promptpayQrDataUrl : null,
+          );
+        } catch (error) {
+          toast({
+            title: "พิมพ์ตรงไม่สำเร็จ",
+            description: `${getErrorMessage(error)} — เปิดหน้าพิมพ์สำรองให้แทน`,
+            variant: "destructive",
+          });
+        }
+        if (!printedDirectly) {
+          if (type === "customer") customerPrint();
+          else kitchenPrint();
+        }
+        if (!cancelled) setPendingPrint(null);
+      })();
     }, 150);
-    return () => window.clearTimeout(printTimer);
-  }, [currentOrder, customerPrint, kitchenPrint, pendingPrint]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(printTimer);
+    };
+  }, [currentOrder, customerPrint, employeeName, kitchenPrint, menuQuery.data, pendingPrint, promptpayQrDataUrl, toast]);
 
   const createOrderMutation = useMutation({
     mutationFn: async (method: "cash" | "promptpay") => {

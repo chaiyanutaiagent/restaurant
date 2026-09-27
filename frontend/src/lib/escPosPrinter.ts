@@ -6,6 +6,8 @@ import {
   receiptPaymentLabels,
 } from "@/lib/receiptFormat";
 import type { SaleOrder } from "@/types/pos";
+import type { TakeawayReceipt } from "@/lib/takeawayApi";
+import type { WapMenu, WapOrder } from "@/lib/wapApi";
 
 const PHOMARK_VENDOR_ID = 0x0418;
 const PHOMARK_PRODUCT_ID = 0x5011;
@@ -59,7 +61,7 @@ type UsbDeviceLike = {
 
 type UsbManagerLike = {
   getDevices(): Promise<UsbDeviceLike[]>;
-  requestDevice(options: { filters: Array<{ vendorId: number; productId: number }> }): Promise<UsbDeviceLike>;
+  requestDevice(options: { filters: Array<{ vendorId?: number; productId?: number; classCode?: number }> }): Promise<UsbDeviceLike>;
 };
 
 type NavigatorWithUsb = Navigator & { usb?: UsbManagerLike };
@@ -67,6 +69,8 @@ type NavigatorWithUsb = Navigator & { usb?: UsbManagerLike };
 export type EscPosPrinterInfo = {
   name: string;
   serialNumber: string | null;
+  vendorId: number;
+  productId: number;
 };
 
 export type EscPosPrinterStatus = {
@@ -107,8 +111,11 @@ function usbManager(): UsbManagerLike | null {
   return (navigator as NavigatorWithUsb).usb ?? null;
 }
 
-function isTargetPrinter(device: UsbDeviceLike): boolean {
-  return device.vendorId === PHOMARK_VENDOR_ID && device.productId === PHOMARK_PRODUCT_ID;
+function isEscPosPrinterDevice(device: UsbDeviceLike): boolean {
+  if (device.vendorId === PHOMARK_VENDOR_ID && device.productId === PHOMARK_PRODUCT_ID) return true;
+  return device.configurations.some((configuration) => configuration.interfaces.some((usbInterface) =>
+    usbInterface.alternates.some((alternate) => alternate.interfaceClass === 7
+      && alternate.endpoints.some((endpoint) => endpoint.direction === "out" && endpoint.type === "bulk"))));
 }
 
 function cleanUsbDescriptor(value: string | undefined): string {
@@ -119,13 +126,14 @@ function printerInfo(device: UsbDeviceLike): EscPosPrinterInfo {
   return {
     name: cleanUsbDescriptor(device.productName) || cleanUsbDescriptor(device.manufacturerName) || "PHOMARK POS-80",
     serialNumber: cleanUsbDescriptor(device.serialNumber) || null,
+    vendorId: device.vendorId,
+    productId: device.productId,
   };
 }
 
-function savedSerialNumber(): string | null {
+function savedPrinterInfo(): Partial<EscPosPrinterInfo> | null {
   try {
-    const value = JSON.parse(window.localStorage.getItem(SAVED_PRINTER_KEY) ?? "null") as { serialNumber?: string | null } | null;
-    return value?.serialNumber ?? null;
+    return JSON.parse(window.localStorage.getItem(SAVED_PRINTER_KEY) ?? "null") as Partial<EscPosPrinterInfo> | null;
   } catch {
     return null;
   }
@@ -138,10 +146,13 @@ function savePrinter(device: UsbDeviceLike): void {
 async function pairedDevice(): Promise<UsbDeviceLike | null> {
   const manager = usbManager();
   if (!manager) return null;
-  const devices = (await manager.getDevices()).filter(isTargetPrinter);
+  const devices = (await manager.getDevices()).filter(isEscPosPrinterDevice);
   if (devices.length === 0) return null;
-  const serialNumber = savedSerialNumber();
-  return devices.find((device) => cleanUsbDescriptor(device.serialNumber) === serialNumber) ?? devices[0];
+  const saved = savedPrinterInfo();
+  return devices.find((device) =>
+    (!saved?.vendorId || device.vendorId === saved.vendorId)
+    && (!saved?.productId || device.productId === saved.productId)
+    && (!saved?.serialNumber || cleanUsbDescriptor(device.serialNumber) === saved.serialNumber)) ?? devices[0];
 }
 
 export function isEscPosUsbSupported(): boolean {
@@ -215,7 +226,10 @@ export async function connectEscPosUsbPrinter(): Promise<EscPosPrinterInfo> {
   const manager = usbManager();
   if (!manager) throw new Error("Chrome เครื่องนี้ไม่รองรับการเชื่อมเครื่องพิมพ์ USB โดยตรง");
   const device = await manager.requestDevice({
-    filters: [{ vendorId: PHOMARK_VENDOR_ID, productId: PHOMARK_PRODUCT_ID }],
+    filters: [
+      { classCode: 7 },
+      { vendorId: PHOMARK_VENDOR_ID, productId: PHOMARK_PRODUCT_ID },
+    ],
   });
   await withPrinter(device, async () => undefined);
   savePrinter(device);
@@ -503,6 +517,105 @@ async function renderSaleReceipt(
   return drawOperations(composer);
 }
 
+async function renderTakeawayReceipt(
+  receipt: TakeawayReceipt,
+  copyType: "customer" | "merchant",
+): Promise<HTMLCanvasElement> {
+  const payload = receipt.payload;
+  const composer = new ReceiptComposer(createMeasureContext());
+  composer.centered("Foodchainservice Takeaway", 27, 700, 34);
+  composer.centered(copyType === "customer" ? "ใบเสร็จลูกค้า" : "สำเนาร้าน", 22, 700, 29);
+  composer.centered(String(payload.queue_number ?? "OFF"), 50, 800, 58);
+  composer.centered(receipt.receipt_number, 20, 500, 26);
+  composer.centered(new Date(receipt.issued_at).toLocaleString("th-TH"), 19, 400, 25);
+  composer.rule();
+
+  payload.items.forEach((item) => {
+    const startY = composer.y;
+    const lines = wrapText(composer.measureContext, `${Number(item.quantity)} × ${item.name}`, 365, 20, 400);
+    lines.forEach((line, index) => composer.textAt(line, CONTENT_LEFT, startY + 20 + index * 25, { size: 20 }));
+    composer.textAt(formatThaiCurrency(Number(item.line_total)), CONTENT_RIGHT, startY + 20, { align: "right", size: 20 });
+    composer.y = startY + Math.max(25, lines.length * 25);
+    composer.text(item.sku, { size: 17, color: "#333333", lineHeight: 22 });
+    composer.spacer(3);
+  });
+
+  composer.rule();
+  composer.pair("ก่อนภาษี", formatThaiCurrency(Number(payload.subtotal)));
+  composer.pair("ส่วนลด", formatThaiCurrency(Number(payload.discount_amount)));
+  composer.pair("ภาษี", formatThaiCurrency(Number(payload.tax_amount)));
+  composer.rule();
+  composer.pair("สุทธิ", formatThaiCurrency(Number(payload.total_amount)), { size: 24, weight: 700 });
+  composer.pair("ชำระโดย", receiptPaymentLabels[payload.payment_method] ?? payload.payment_method);
+  composer.rule();
+  composer.centered("นำเลขคิวไปรับสินค้าที่เคาน์เตอร์", 20, 500, 27);
+  if (receipt.print_count > 0) composer.centered(`พิมพ์ซ้ำครั้งที่ ${receipt.print_count + 1}`, 17, 400, 22);
+  return drawOperations(composer);
+}
+
+async function renderWapOrderSlip(
+  order: WapOrder,
+  type: "customer" | "kitchen",
+  employeeName: string,
+  menu: WapMenu | null,
+  promptpayQrDataUrl?: string | null,
+): Promise<HTMLCanvasElement> {
+  const isKitchen = type === "kitchen";
+  const shopName = menu?.brand_name?.trim() || "Restaurant POS";
+  const branchName = menu?.branch_name?.trim() || "ไม่ระบุสาขา";
+  const branchLabel = branchName.startsWith("สาขา") ? branchName : `สาขา ${branchName}`;
+  const composer = new ReceiptComposer(createMeasureContext());
+
+  composer.centered(isKitchen ? "สลิปครัว" : "สลิปลูกค้า", 28, 800, 35);
+  composer.centered(order.queue_display ?? "-", 52, 800, 61);
+  composer.centered(shopName, 24, 700, 31);
+  composer.centered(branchLabel, 20, 400, 26);
+  composer.centered(`เลขขาย ${order.sale_order_number}`, 19, 400, 25);
+  composer.centered(`พนักงาน ${employeeName}`, 19, 400, 25);
+  if (order.created_at) composer.centered(new Date(order.created_at).toLocaleString("th-TH"), 18, 400, 24);
+  composer.rule();
+
+  if (order.customer_name) composer.wrapped(`ลูกค้า: ${order.customer_name}`, CONTENT_WIDTH, { size: 19, lineHeight: 25 });
+  if (order.customer_phone) composer.text(`โทร: ${order.customer_phone}`, { size: 19, lineHeight: 25 });
+  if (order.customer_name || order.customer_phone) composer.spacer(4);
+
+  order.items.forEach((item) => {
+    const startY = composer.y;
+    const maxNameWidth = isKitchen ? CONTENT_WIDTH : 375;
+    const lines = wrapText(composer.measureContext, `${formatReceiptQuantity(Number(item.qty), null)} × ${item.product_name}`, maxNameWidth, 21, isKitchen ? 700 : 400);
+    lines.forEach((line, index) => composer.textAt(line, CONTENT_LEFT, startY + 21 + index * 27, { size: 21, weight: isKitchen ? 700 : 400 }));
+    if (!isKitchen) composer.textAt(formatThaiCurrency(Number(item.unit_price) * Number(item.qty)), CONTENT_RIGHT, startY + 21, { align: "right", size: 20 });
+    composer.y = startY + Math.max(27, lines.length * 27);
+    if (item.special_request) {
+      composer.wrapped(`* ${item.special_request}`, CONTENT_WIDTH - 20, { x: CONTENT_LEFT + 20, size: 20, weight: 700, lineHeight: 26 });
+    }
+    composer.spacer(5);
+  });
+
+  composer.rule();
+  if (!isKitchen) {
+    composer.pair("รวม", formatThaiCurrency(Number(order.total_amount)));
+    composer.pair("รับเงิน", formatThaiCurrency(Number(order.paid_amount)));
+    composer.pair("ทอน", formatThaiCurrency(Number(order.change_amount)));
+    composer.pair("ชำระโดย", receiptPaymentLabels[order.payment_method] ?? order.payment_method);
+    if (promptpayQrDataUrl) {
+      const qrImage = await loadReceiptLogo(promptpayQrDataUrl);
+      if (qrImage) {
+        composer.rule();
+        composer.centered(`PromptPay ${branchLabel}`, 20, 700, 28);
+        composer.image(qrImage, 240, 240);
+        composer.centered(`ยอดชำระ ${formatThaiCurrency(Number(order.total_amount))}`, 20, 700, 27);
+        if (menu?.promptpay_name) composer.centered(`ชื่อบัญชี ${menu.promptpay_name}`, 18, 400, 24);
+      }
+    }
+    composer.rule();
+    composer.centered("นำสลิปนี้ไปรับสินค้าที่เคาน์เตอร์", 20, 500, 27);
+  } else {
+    composer.centered("ทำสินค้าแล้วส่งกลับเคาน์เตอร์", 21, 700, 28);
+  }
+  return drawOperations(composer);
+}
+
 function renderLongTestReceipt(): HTMLCanvasElement {
   const composer = new ReceiptComposer(createMeasureContext());
   composer.centered("ทดสอบ ESC/POS แบบยาว", 28, 700, 35);
@@ -529,7 +642,7 @@ function renderLongTestReceipt(): HTMLCanvasElement {
   return drawOperations(composer);
 }
 
-function canvasToEscPosRaster(canvas: HTMLCanvasElement): Uint8Array {
+export function canvasToEscPosRaster(canvas: HTMLCanvasElement): Uint8Array {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("อ่านภาพใบเสร็จไม่สำเร็จ");
   const image = context.getImageData(0, 0, canvas.width, canvas.height).data;
@@ -558,10 +671,9 @@ function canvasToEscPosRaster(canvas: HTMLCanvasElement): Uint8Array {
   return output;
 }
 
-async function sendCanvas(canvas: HTMLCanvasElement): Promise<void> {
+export async function printEscPosBytes(bytes: Uint8Array): Promise<void> {
   const device = await pairedDevice();
   if (!device) throw new Error("ยังไม่ได้เชื่อมเครื่องพิมพ์ ESC/POS กับเว็บนี้");
-  const bytes = canvasToEscPosRaster(canvas);
   await withPrinter(device, async (activeDevice, endpointNumber) => {
     const chunkSize = 16 * 1024;
     for (let offset = 0; offset < bytes.length; offset += chunkSize) {
@@ -578,11 +690,58 @@ export async function printEscPosReceipt(
   branch: EscPosReceiptBranch,
   cashier: string,
 ): Promise<void> {
-  await sendCanvas(await renderSaleReceipt(order, company, branch, cashier));
+  await printEscPosBytes(await buildEscPosReceiptBytes(order, company, branch, cashier));
+}
+
+export async function buildEscPosReceiptBytes(
+  order: SaleOrder,
+  company: EscPosReceiptCompany,
+  branch: EscPosReceiptBranch,
+  cashier: string,
+): Promise<Uint8Array> {
+  return canvasToEscPosRaster(await renderSaleReceipt(order, company, branch, cashier));
+}
+
+export async function buildEscPosTakeawayReceiptBytes(
+  receipt: TakeawayReceipt,
+  copyType: "customer" | "merchant",
+): Promise<Uint8Array> {
+  return canvasToEscPosRaster(await renderTakeawayReceipt(receipt, copyType));
+}
+
+export async function printEscPosTakeawayReceipt(
+  receipt: TakeawayReceipt,
+  copyType: "customer" | "merchant",
+): Promise<void> {
+  await printEscPosBytes(await buildEscPosTakeawayReceiptBytes(receipt, copyType));
+}
+
+export async function buildEscPosWapOrderSlipBytes(
+  order: WapOrder,
+  type: "customer" | "kitchen",
+  employeeName: string,
+  menu: WapMenu | null,
+  promptpayQrDataUrl?: string | null,
+): Promise<Uint8Array> {
+  return canvasToEscPosRaster(await renderWapOrderSlip(order, type, employeeName, menu, promptpayQrDataUrl));
+}
+
+export async function printEscPosWapOrderSlip(
+  order: WapOrder,
+  type: "customer" | "kitchen",
+  employeeName: string,
+  menu: WapMenu | null,
+  promptpayQrDataUrl?: string | null,
+): Promise<void> {
+  await printEscPosBytes(await buildEscPosWapOrderSlipBytes(order, type, employeeName, menu, promptpayQrDataUrl));
+}
+
+export function buildEscPosLongTestBytes(): Uint8Array {
+  return canvasToEscPosRaster(renderLongTestReceipt());
 }
 
 export async function printEscPosLongTest(): Promise<void> {
-  await sendCanvas(renderLongTestReceipt());
+  await printEscPosBytes(buildEscPosLongTestBytes());
 }
 
 export function describeEscPosError(error: unknown): string {

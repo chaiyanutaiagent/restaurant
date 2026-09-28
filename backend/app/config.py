@@ -55,6 +55,10 @@ def validate_stripe_test_mode_config(
     secret_key: str | None,
     webhook_secret: str | None,
     scope: str,
+    provider_account_id: str | None = None,
+    company_allowlist: str = "",
+    branch_allowlist: str = "",
+    connected_account_id: str | None = None,
 ) -> None:
     if mode == "disabled":
         return
@@ -66,6 +70,15 @@ def validate_stripe_test_mode_config(
         raise ValueError(f"{scope} Stripe Test Mode requires an sk_test_ secret")
     if not webhook_secret or not webhook_secret.startswith("whsec_"):
         raise ValueError(f"{scope} Stripe Test Mode requires a whsec_ webhook secret")
+    if not provider_account_id or not provider_account_id.startswith("acct_"):
+        raise ValueError(f"{scope} Stripe Test Mode requires an acct_ provider account ID")
+    if connected_account_id and connected_account_id != provider_account_id:
+        raise ValueError(f"{scope} connected account must match the provider account snapshot")
+    if scope == "POS":
+        if not parse_uuid_allowlist(company_allowlist):
+            raise ValueError("POS Stripe Test Mode requires a Company allowlist")
+        if not parse_uuid_allowlist(branch_allowlist):
+            raise ValueError("POS Stripe Test Mode requires a Branch allowlist")
 
 
 def validate_uat_auth_bypass_config(
@@ -253,6 +266,23 @@ def parse_uuid_allowlist(raw_values: str) -> set[uuid.UUID]:
             except ValueError as exc:
                 raise ValueError("Takeaway transaction allowlists must contain UUIDs") from exc
     return values
+
+
+def stripe_pos_test_context_enabled(
+    *,
+    mode: str,
+    company_allowlist: str,
+    branch_allowlist: str,
+    company_id: uuid.UUID,
+    branch_id: uuid.UUID | None,
+) -> bool:
+    """Fail closed unless this exact tenant and branch are enabled for Stripe Test Mode."""
+    return (
+        mode == "test"
+        and branch_id is not None
+        and company_id in parse_uuid_allowlist(company_allowlist)
+        and branch_id in parse_uuid_allowlist(branch_allowlist)
+    )
 
 
 def validate_company_supply_chain_write_activation_config(
@@ -471,11 +501,15 @@ class Settings(BaseSettings):
     saas_stripe_mode: Literal["disabled", "test"] = "disabled"
     saas_stripe_secret_key: str | None = None
     saas_stripe_webhook_secret: str | None = None
+    saas_stripe_account_id: str | None = None
     saas_stripe_api_base_url: str = "https://api.stripe.com/v1"
     stripe_pos_mode: Literal["disabled", "test"] = "disabled"
     stripe_pos_secret_key: str | None = None
     stripe_pos_webhook_secret: str | None = None
+    stripe_pos_account_id: str | None = None
     stripe_pos_connected_account_id: str | None = None
+    stripe_pos_company_allowlist: str = ""
+    stripe_pos_branch_allowlist: str = ""
     stripe_pos_api_base_url: str = "https://api.stripe.com/v1"
     stripe_webhook_tolerance_seconds: int = Field(default=300, ge=60, le=900)
     saas_privacy_internal_target_days: int = Field(default=30, ge=1, le=90)
@@ -530,6 +564,10 @@ class Settings(BaseSettings):
             secret_key=self.stripe_pos_secret_key,
             webhook_secret=self.stripe_pos_webhook_secret,
             scope="POS",
+            provider_account_id=self.stripe_pos_account_id,
+            company_allowlist=self.stripe_pos_company_allowlist,
+            branch_allowlist=self.stripe_pos_branch_allowlist,
+            connected_account_id=self.stripe_pos_connected_account_id,
         )
         validate_stripe_test_mode_config(
             environment=self.environment,
@@ -537,6 +575,7 @@ class Settings(BaseSettings):
             secret_key=self.saas_stripe_secret_key,
             webhook_secret=self.saas_stripe_webhook_secret,
             scope="SaaS",
+            provider_account_id=self.saas_stripe_account_id,
         )
         normalized_billing_provider = self.saas_billing_provider.strip().lower()
         if self.saas_stripe_mode == "test" and normalized_billing_provider != "stripe_test":

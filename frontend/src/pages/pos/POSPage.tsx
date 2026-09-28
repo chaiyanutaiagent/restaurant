@@ -50,6 +50,7 @@ import {
   type EscPosPrinterStatus,
 } from "@/lib/escPosPrinter";
 import { posApi } from "@/lib/posApi";
+import { gatewayApi } from "@/lib/paymentGatewayApi";
 import { productApi } from "@/lib/productApi";
 import {
   getQueuedRestaurantOrder,
@@ -70,6 +71,7 @@ import type { ProductListItem, RetailLookupProduct, RetailLookupVariant } from "
 import type { Customer, CustomerSearchResult, LoyaltySettings } from "@/types/crm";
 import type { CartItem, CashierShift, ExchangeContextDraft, HeldSaleDraft, HoldDraftClaimResult, PaymentDraft, PaymentMethod, PendingSale, PricingCalculation, ReplacementRuleDraft, SaleOrder, ServerHoldDraft } from "@/types/pos";
 import type { StockBalance, StockLocation } from "@/types/stock";
+import type { PaymentCapabilities, PaymentSession } from "@/types/paymentGateway";
 import CreateCustomerDialog from "@/pages/crm/CreateCustomerDialog";
 import RedeemPointsDialog from "@/pages/crm/RedeemPointsDialog";
 import CloseShiftDialog from "@/pages/pos/CloseShiftDialog";
@@ -561,6 +563,12 @@ export default function POSPage(): JSX.Element {
     },
     enabled: Boolean(branchId) && isOnline,
   });
+  const paymentCapabilitiesQuery = useQuery({
+    queryKey: ["payments", "capabilities", companyId, branchId],
+    queryFn: async () => (await gatewayApi.getCapabilities()).data.data as PaymentCapabilities,
+    enabled: Boolean(companyId && branchId && isOnline),
+  });
+  const stripePromptPayEnabled = paymentCapabilitiesQuery.data?.stripe_promptpay_test_enabled === true;
 
   const takeawayMenuQuery = useQuery({
     queryKey: ["pos", "takeaway-menu", branchId],
@@ -986,17 +994,27 @@ export default function POSPage(): JSX.Element {
 
   useEffect(() => {
     if (!isRetailMode) return;
-    // Retail provider and loyalty reservations remain fail-closed until their
-    // Server contracts are available. Cash uses the existing idempotent Sale path.
     setLoyaltyDiscount(0);
-    setPaymentMethod("cash");
+    if (!stripePromptPayEnabled) setPaymentMethod("cash");
     setSplitPaymentEnabled(false);
     setSecondaryPaymentAmount(0);
     setSecondaryPaymentReference("");
-  }, [isRetailMode]);
+  }, [isRetailMode, stripePromptPayEnabled]);
+
+  useEffect(() => {
+    if (!stripePromptPayEnabled || paymentMethod !== "promptpay") return;
+    setSplitPaymentEnabled(false);
+    setSecondaryPaymentAmount(0);
+    setSecondaryPaymentReference("");
+  }, [paymentMethod, stripePromptPayEnabled]);
 
   useEffect(() => {
     if (paymentMethod === "promptpay" && promptPayAmount > 0) {
+      if (stripePromptPayEnabled) {
+        setQrDataUrl("");
+        setPromptPayTarget("ระบบจะสร้าง Stripe PromptPay QR หลังยืนยันยอด");
+        return;
+      }
       void posApi.getPromptPayQR(promptPayAmount)
         .then(async (response) => {
           const payload = response.data.data.payload as string;
@@ -1009,7 +1027,7 @@ export default function POSPage(): JSX.Element {
           setPromptPayTarget("");
         });
     }
-  }, [paymentMethod, promptPayAmount]);
+  }, [paymentMethod, promptPayAmount, stripePromptPayEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2226,7 +2244,47 @@ export default function POSPage(): JSX.Element {
         return;
       }
       const response = await posApi.createSale(exactPayload);
-      const order = response.data.data as SaleOrder;
+      let order = response.data.data as SaleOrder;
+      if (order.status === "pending_payment") {
+        if (!stripePromptPayEnabled || paymentMethod !== "promptpay" || !branchId) {
+          throw new Error("รายการรอชำระเงิน แต่ Stripe PromptPay ไม่พร้อมสำหรับสาขานี้");
+        }
+        const sessionResponse = await gatewayApi.createPromptPay({
+          amount: Number(order.total_amount),
+          branch_id: branchId,
+          reference_type: "SaleOrder",
+          reference_id: order.id,
+          idempotency_key: `${checkoutIdRef.current}:stripe-promptpay`,
+        });
+        let session = sessionResponse.data.data as PaymentSession;
+        const displayPayload = session.qr_payload ?? session.redirect_url;
+        if (!displayPayload) {
+          throw new Error("Stripe ไม่ส่ง QR หรือหน้าชำระเงินกลับมา");
+        }
+        setQrDataUrl(await QRCode.toDataURL(displayPayload, { width: 240, margin: 1 }));
+        setPromptPayTarget("Stripe PromptPay · Test Mode — รอยืนยันจากธนาคาร");
+        const expiresAt = session.expires_at
+          ? new Date(session.expires_at).getTime()
+          : Date.now() + 15 * 60_000;
+        while (Date.now() <= expiresAt + 5_000) {
+          if (["completed", "failed", "cancelled", "expired"].includes(session.status)) break;
+          await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+          session = (await gatewayApi.checkSession(session.id)).data.data as PaymentSession;
+        }
+        if (session.status !== "completed") {
+          throw new Error(
+            session.status === "failed"
+              ? "Stripe แจ้งว่าการชำระเงินไม่สำเร็จ"
+              : session.status === "cancelled"
+                ? "การชำระเงินถูกยกเลิก"
+                : "หมดเวลารอการยืนยัน PromptPay",
+          );
+        }
+        order = (await posApi.getSale(order.id)).data.data;
+        if (order.status !== "completed") {
+          throw new Error("รับเงินแล้ว แต่ระบบยังปิดการขายไม่สำเร็จ กรุณาตรวจรายการก่อนลองใหม่");
+        }
+      }
       setLastOrder(order);
       setShowReceipt(true);
       await openCashDrawerAfterPayment(checkoutPayments);
@@ -3426,7 +3484,9 @@ export default function POSPage(): JSX.Element {
 
               <div className="grid grid-cols-2 gap-2">
                 {(["cash", "promptpay", "credit_card", "bank_transfer", "other"] as PaymentMethod[]).map((method) => {
-                  const retailBlocked = isRetailMode && method !== "cash";
+                  const retailBlocked = isRetailMode
+                    && method !== "cash"
+                    && !(method === "promptpay" && stripePromptPayEnabled);
                   return (
                     <button
                       key={method}
@@ -3438,6 +3498,7 @@ export default function POSPage(): JSX.Element {
                     >
                       <span className="block font-semibold">{method === "cash" ? "เงินสด" : method === "promptpay" ? "PromptPay" : method === "credit_card" ? "บัตรเครดิต" : method === "bank_transfer" ? "โอนเงิน" : "อื่นๆ"}</span>
                       {retailBlocked ? <span id={`retail-payment-${method}`} className="mt-1 block text-[10px]">รอ Provider/Policy UAT</span> : null}
+                      {method === "promptpay" && stripePromptPayEnabled ? <span className="mt-1 block text-[10px]">Stripe Test Mode</span> : null}
                     </button>
                   );
                 })}
@@ -3559,7 +3620,7 @@ export default function POSPage(): JSX.Element {
                   cart.items.length === 0 ||
                   !currentShift ||
                   (isRetailMode && (!isOnline || !retailContextValid || !catalogCacheTrusted)) ||
-                  (isRetailMode && paymentMethod !== "cash") ||
+                  (isRetailMode && paymentMethod !== "cash" && !(paymentMethod === "promptpay" && stripePromptPayEnabled)) ||
                   (isTakeawayMode && !takeawayMenuQuery.data) ||
                   (paymentMethod === "cash" && currentPaidAmount < finalTotal) ||
                   isSubmitting

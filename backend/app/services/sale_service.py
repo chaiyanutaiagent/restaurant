@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings, stripe_pos_test_context_enabled
 from app.models.audit import AuditLog
 from app.models.accounting import JournalEntry
 from app.models.branch import Branch
@@ -788,6 +789,8 @@ class SaleService:
         *,
         brand_id: uuid.UUID | None = None,
     ) -> SaleOrder:
+        if order.status != "completed":
+            return await self.get_sale(order.id, company_id)
         await ensure_sale_completed_handoff(
             self.db,
             company_id=company_id,
@@ -963,6 +966,30 @@ class SaleService:
         if paid_amount < total_amount:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Paid amount is insufficient")
         change_amount = q2(max(Decimal("0"), paid_amount - total_amount))
+        stripe_context_enabled = stripe_pos_test_context_enabled(
+            mode=settings.stripe_pos_mode,
+            company_allowlist=settings.stripe_pos_company_allowlist,
+            branch_allowlist=settings.stripe_pos_branch_allowlist,
+            company_id=company_id,
+            branch_id=branch_id,
+        )
+        has_promptpay_leg = any(row.payment_method == "promptpay" for row in payment_rows)
+        stripe_pending = stripe_context_enabled and has_promptpay_leg
+        if stripe_pending:
+            if data.is_offline:
+                raise HTTPException(status_code=409, detail="Stripe PromptPay is unavailable offline")
+            if data.source_hold_draft_id is not None or data.source_hold_draft_version is not None:
+                raise HTTPException(status_code=409, detail="Stripe PromptPay does not support held-bill conversion yet")
+            if (
+                len(payment_rows) != 1
+                or data.payment_method != "promptpay"
+                or payment_rows[0].payment_method != "promptpay"
+                or q2(Decimal(payment_rows[0].amount)) != total_amount
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Stripe PromptPay requires one full-payment leg",
+                )
 
         now_local = datetime.now(BANGKOK)
         order_number = await self._generate_order_number(company_id, now_local.strftime("%Y%m%d"))
@@ -984,14 +1011,15 @@ class SaleService:
             "vat_amount": q2(vat_total),
             "vat_rate": Decimal("7.00"),
             "total_amount": total_amount,
-            "paid_amount": paid_amount,
-            "change_amount": change_amount,
+            "paid_amount": Decimal("0") if stripe_pending else paid_amount,
+            "change_amount": Decimal("0") if stripe_pending else change_amount,
+            "status": "pending_payment" if stripe_pending else "completed",
             "is_offline": data.is_offline,
             "client_order_id": data.client_order_id,
-            # Reaching this insert means the server has authoritatively repriced,
-            # checked stock and accepted the payment. Offline-originated sales are
-            # therefore reconciled at this point too.
-            "synced_at": datetime.now(timezone.utc),
+            # Reaching this insert means the server has authoritatively repriced
+            # and checked stock. Provider-backed sales remain pending until their
+            # signed webhook atomically finalizes payment and inventory.
+            "synced_at": None if stripe_pending else datetime.now(timezone.utc),
             "note": data.note,
             "pricing_quote_id": data.pricing_quote_id,
             "pricing_request_hash": request_hash,
@@ -1144,45 +1172,46 @@ class SaleService:
                     )
                 )
 
-        for payment in payment_rows:
-            self.db.add(
-                Payment(
-                    order_id=order_id,
+        if not stripe_pending:
+            for payment in payment_rows:
+                self.db.add(
+                    Payment(
+                        order_id=order_id,
+                        company_id=company_id,
+                        payment_method=payment.payment_method,
+                        amount=q2(Decimal(payment.amount)),
+                        reference_no=payment.reference_no,
+                        currency="THB",
+                        settlement_state="settled" if payment.payment_method == "cash" else "unknown",
+                        note=data.note,
+                    )
+                )
+
+            for row in item_rows:
+                product = row["product"]
+                variant = row["variant"]
+                assert isinstance(product, Product)
+                if product.product_type in ("menu_item", "raw_material"):
+                    continue
+                balance = await self.stock_service._get_or_create_balance(
                     company_id=company_id,
-                    payment_method=payment.payment_method,
-                    amount=q2(Decimal(payment.amount)),
-                    reference_no=payment.reference_no,
-                    currency="THB",
-                    settlement_state="settled" if payment.payment_method == "cash" else "unknown",
+                    branch_id=branch_id,
+                    location_id=data.location_id,
+                    product_id=product.id,
+                    variant_id=variant.id if variant else None,
+                )
+                await self.stock_service._record_movement(
+                    balance=balance,
+                    movement_type="sale",
+                    qty_delta=-Decimal(row["qty"]),
+                    user_id=user_id,
+                    cost_per_unit=Decimal(balance.cost_per_unit or 0),
+                    reference_type="SaleOrder",
+                    reference_id=str(order_id),
                     note=data.note,
                 )
-            )
 
-        for row in item_rows:
-            product = row["product"]
-            variant = row["variant"]
-            assert isinstance(product, Product)
-            if product.product_type in ("menu_item", "raw_material"):
-                continue
-            balance = await self.stock_service._get_or_create_balance(
-                company_id=company_id,
-                branch_id=branch_id,
-                location_id=data.location_id,
-                product_id=product.id,
-                variant_id=variant.id if variant else None,
-            )
-            await self.stock_service._record_movement(
-                balance=balance,
-                movement_type="sale",
-                qty_delta=-Decimal(row["qty"]),
-                user_id=user_id,
-                cost_per_unit=Decimal(balance.cost_per_unit or 0),
-                reference_type="SaleOrder",
-                reference_id=str(order_id),
-                note=data.note,
-            )
-
-        if brand_id is not None and recipe_inventory_location_id is not None:
+        if not stripe_pending and brand_id is not None and recipe_inventory_location_id is not None:
             from app.services.store_inventory_service import StoreInventoryService
 
             sale_order = await self.db.get(SaleOrder, order_id)
@@ -1202,15 +1231,16 @@ class SaleService:
                 ],
             )
 
-        shift.total_sales = q2(Decimal(shift.total_sales or 0) + total_amount)
-        shift.total_orders = int(shift.total_orders or 0) + 1
-        shift.version = int(shift.version or 1) + 1
+        if not stripe_pending:
+            shift.total_sales = q2(Decimal(shift.total_sales or 0) + total_amount)
+            shift.total_orders = int(shift.total_orders or 0) + 1
+            shift.version = int(shift.version or 1) + 1
         self.db.add(
             AuditLog(
                 company_id=company_id,
                 branch_id=branch_id,
                 user_id=user_id,
-                action="pos.sale.create",
+                action="pos.sale.pending_payment" if stripe_pending else "pos.sale.create",
                 resource="SaleOrder",
                 resource_id=str(order_id),
                 new_value={
@@ -1231,7 +1261,7 @@ class SaleService:
                 },
             )
         )
-        if self.legacy_side_effects_enabled:
+        if self.legacy_side_effects_enabled and not stripe_pending:
             try:
                 await trigger_event(
                     self.db,
@@ -1263,20 +1293,21 @@ class SaleService:
                 pass
         if quote is not None:
             PricingService.consume_quote(quote, order_id)
-        await ensure_sale_completed_handoff(
-            self.db,
-            company_id=company_id,
-            brand_id=brand_id,
-            branch_id=branch_id,
-            order_id=order_id,
-            order_number=str(order_values["order_number"]),
-            total_amount=total_amount,
-            item_count=len(item_rows),
-            payment_methods=[payment.payment_method for payment in payment_rows],
-        )
+        if not stripe_pending:
+            await ensure_sale_completed_handoff(
+                self.db,
+                company_id=company_id,
+                brand_id=brand_id,
+                branch_id=branch_id,
+                order_id=order_id,
+                order_number=str(order_values["order_number"]),
+                total_amount=total_amount,
+                item_count=len(item_rows),
+                payment_methods=[payment.payment_method for payment in payment_rows],
+            )
         await self.db.commit()
         order = await self.get_sale(order_id, company_id)
-        if data.customer_id and self.legacy_side_effects_enabled:
+        if data.customer_id and self.legacy_side_effects_enabled and not stripe_pending:
             try:
                 crm_svc = CRMService(self.db)
                 await crm_svc.earn_points(
@@ -1292,8 +1323,150 @@ class SaleService:
             except Exception as e:
                 logger.error(f"Points earn failed: {e}")
                 await self.db.rollback()
-        await self._ensure_accounting_handoff(order, company_id, user_id)
+        if not stripe_pending:
+            await self._ensure_accounting_handoff(order, company_id, user_id)
         return await self.get_sale(order_id, company_id)
+
+    async def finalize_pending_provider_sale(
+        self,
+        *,
+        order_id: uuid.UUID,
+        company_id: uuid.UUID,
+        provider: str,
+        provider_payment_ref: str,
+    ) -> SaleOrder:
+        order = await self.db.scalar(
+            select(SaleOrder)
+            .where(SaleOrder.id == order_id, SaleOrder.company_id == company_id)
+            .options(selectinload(SaleOrder.items), selectinload(SaleOrder.payments))
+            .with_for_update()
+        )
+        if order is None:
+            raise HTTPException(status_code=404, detail="Pending SaleOrder not found")
+        if order.status == "completed":
+            return order
+        if order.status != "pending_payment" or q2(Decimal(order.paid_amount or 0)) != Decimal("0.00"):
+            raise HTTPException(status_code=409, detail="SaleOrder is not pending provider payment")
+        if order.payments:
+            raise HTTPException(status_code=409, detail="Pending SaleOrder already has a payment ledger entry")
+
+        stock_needs: dict[tuple[uuid.UUID, uuid.UUID | None], Decimal] = {}
+        for item in order.items:
+            key = (item.product_id, item.variant_id)
+            stock_needs[key] = stock_needs.get(key, Decimal("0")) + Decimal(item.qty)
+        await self._ensure_stock_available(company_id, order.branch_id, order.location_id, stock_needs)
+        products = list(
+            await self.db.scalars(
+                select(Product).where(
+                    Product.company_id == company_id,
+                    Product.id.in_({item.product_id for item in order.items}),
+                )
+            )
+        )
+        product_map = {product.id: product for product in products}
+        if len(product_map) != len({item.product_id for item in order.items}):
+            raise HTTPException(status_code=409, detail="Pending SaleOrder product snapshot is incomplete")
+
+        self.db.add(
+            Payment(
+                order_id=order.id,
+                company_id=company_id,
+                payment_method="promptpay",
+                amount=q2(Decimal(order.total_amount)),
+                reference_no=provider_payment_ref,
+                currency="THB",
+                provider_name=provider,
+                provider_payment_ref=provider_payment_ref,
+                settlement_state="captured",
+                note=order.note,
+            )
+        )
+        for item in order.items:
+            product = product_map[item.product_id]
+            if product.product_type in ("menu_item", "raw_material"):
+                continue
+            balance = await self.stock_service._get_or_create_balance(
+                company_id=company_id,
+                branch_id=order.branch_id,
+                location_id=order.location_id,
+                product_id=item.product_id,
+                variant_id=item.variant_id,
+            )
+            await self.stock_service._record_movement(
+                balance=balance,
+                movement_type="sale",
+                qty_delta=-Decimal(item.qty),
+                user_id=order.user_id,
+                cost_per_unit=Decimal(balance.cost_per_unit or 0),
+                reference_type="SaleOrder",
+                reference_id=str(order.id),
+                note=order.note,
+            )
+
+        context = order.pricing_context or {}
+        brand_id = uuid.UUID(context["brand_id"]) if context.get("brand_id") else None
+        if self.legacy_side_effects_enabled and brand_id is not None:
+            from app.services.store_inventory_service import StoreInventoryService
+
+            await StoreInventoryService(self.db).post_sale(
+                order=order,
+                company_id=company_id,
+                brand_id=brand_id,
+                branch_id=order.branch_id,
+                location_id=order.location_id,
+                user_id=order.user_id,
+                items=[
+                    (product_map[item.product_id], Decimal(item.qty))
+                    for item in order.items
+                    if product_map[item.product_id].product_type == "menu_item"
+                ],
+            )
+
+        shift = await self.db.scalar(
+            select(CashierShift).where(
+                CashierShift.id == order.shift_id,
+                CashierShift.company_id == company_id,
+                CashierShift.branch_id == order.branch_id,
+            ).with_for_update()
+        )
+        if shift is None:
+            raise HTTPException(status_code=409, detail="Pending SaleOrder shift was not found")
+        shift.total_sales = q2(Decimal(shift.total_sales or 0) + Decimal(order.total_amount))
+        shift.total_orders = int(shift.total_orders or 0) + 1
+        shift.version = int(shift.version or 1) + 1
+        order.status = "completed"
+        order.paid_amount = q2(Decimal(order.total_amount))
+        order.change_amount = Decimal("0")
+        order.synced_at = datetime.now(timezone.utc)
+        order.row_version = int(order.row_version or 1) + 1
+        self.db.add(
+            AuditLog(
+                company_id=company_id,
+                branch_id=order.branch_id,
+                user_id=order.user_id,
+                action="pos.sale.provider_payment_completed",
+                resource="SaleOrder",
+                resource_id=str(order.id),
+                new_value={
+                    "provider": provider,
+                    "provider_payment_ref": provider_payment_ref,
+                    "total_amount": str(order.total_amount),
+                },
+            )
+        )
+        await ensure_sale_completed_handoff(
+            self.db,
+            company_id=company_id,
+            brand_id=brand_id,
+            branch_id=order.branch_id,
+            order_id=order.id,
+            order_number=order.order_number,
+            total_amount=Decimal(order.total_amount),
+            item_count=len(order.items),
+            payment_methods=["promptpay"],
+        )
+        await self.db.flush()
+        return order
 
     async def _ensure_accounting_handoff(
         self,

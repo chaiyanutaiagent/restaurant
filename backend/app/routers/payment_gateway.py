@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 from typing import Any
+import hashlib
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
-from app.database import get_db
-from app.dependencies import TokenData, require_permission
+from app.config import settings, stripe_pos_test_context_enabled
+from app.database import (
+    AsyncSessionLocal,
+    active_restaurant_service_session_factory,
+    active_retail_service_session_factory,
+    get_db,
+)
+from app.dependencies import TokenData, get_scoped_operational_db, require_permission
 from app.schemas.payment_gateway import (
     CreateOmiseRequest,
     CreatePromptPayRequest,
@@ -20,10 +26,23 @@ from app.schemas.payment_gateway import (
     PaymentSessionRead,
 )
 from app.services.notification_service import NotificationService
-from app.services.payment_gateway_service import PaymentGatewayService
+from app.services.payment_gateway_service import PaymentGatewayService, STRIPE_POS_EVENT_TYPES
 from app.services.stripe_test_gateway import verify_stripe_webhook
 
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
+
+
+def _stripe_operational_session_factory(target_database: str):
+    if target_database == "legacy":
+        return AsyncSessionLocal
+    if target_database == "restaurant":
+        return active_restaurant_service_session_factory()
+    if target_database == "retail_pos":
+        return active_retail_service_session_factory()
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="Stripe POS target database metadata is invalid",
+    )
 
 
 def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -100,7 +119,7 @@ async def list_sessions(
     page: int = 1,
     limit: int = 20,
     current: TokenData = Depends(require_permission("pos.sale.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_scoped_operational_db),
 ) -> dict[str, Any]:
     rows, total = await PaymentGatewayService(db).list_sessions(
         current.company_id,
@@ -113,11 +132,33 @@ async def list_sessions(
     return ok(data, meta={"total": total, "page": page, "limit": limit})
 
 
+@router.get("/capabilities")
+async def get_payment_capabilities(
+    current: TokenData = Depends(require_permission("pos.sale.view")),
+) -> dict[str, Any]:
+    stripe_promptpay_test_enabled = (
+        (current.target_database or "legacy") in {"legacy", "restaurant", "retail_pos"}
+        and stripe_pos_test_context_enabled(
+            mode=settings.stripe_pos_mode,
+            company_allowlist=settings.stripe_pos_company_allowlist,
+            branch_allowlist=settings.stripe_pos_branch_allowlist,
+            company_id=current.company_id,
+            branch_id=current.branch_id,
+        )
+    )
+    return ok(
+        {
+            "stripe_promptpay_test_enabled": stripe_promptpay_test_enabled,
+            "stripe_mode": "test" if stripe_promptpay_test_enabled else "disabled",
+        }
+    )
+
+
 @router.post("/sessions/promptpay", status_code=status.HTTP_201_CREATED)
 async def create_promptpay_session(
     payload: CreatePromptPayRequest,
     current: TokenData = Depends(require_permission("pos.sale.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_scoped_operational_db),
 ) -> dict[str, Any]:
     row = await PaymentGatewayService(db).create_promptpay_session(
         current.company_id,
@@ -127,6 +168,7 @@ async def create_promptpay_session(
         payload.reference_id,
         current.user_id,
         payload.idempotency_key,
+        current.target_database or "legacy",
     )
     return ok(PaymentSessionRead.model_validate(row).model_dump(mode="json"))
 
@@ -135,7 +177,7 @@ async def create_promptpay_session(
 async def create_omise_session(
     payload: CreateOmiseRequest,
     current: TokenData = Depends(require_permission("pos.sale.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_scoped_operational_db),
 ) -> dict[str, Any]:
     row = await PaymentGatewayService(db).create_omise_session(
         current.company_id,
@@ -153,7 +195,7 @@ async def create_omise_session(
 async def get_session(
     session_id: uuid.UUID,
     current: TokenData = Depends(require_permission("pos.sale.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_scoped_operational_db),
 ) -> dict[str, Any]:
     row = await PaymentGatewayService(db).get_session(session_id, current.company_id)
     return ok(PaymentSessionRead.model_validate(row).model_dump(mode="json"))
@@ -163,7 +205,7 @@ async def get_session(
 async def check_session(
     session_id: uuid.UUID,
     current: TokenData = Depends(require_permission("pos.sale.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_scoped_operational_db),
 ) -> dict[str, Any]:
     row = await PaymentGatewayService(db).check_payment_status(session_id, current.company_id)
     return ok(PaymentSessionRead.model_validate(row).model_dump(mode="json"))
@@ -174,7 +216,7 @@ async def confirm_session(
     session_id: uuid.UUID,
     payload: PaymentSessionConfirmRequest | None = None,
     current: TokenData = Depends(require_permission("pos.sale.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_scoped_operational_db),
 ) -> dict[str, Any]:
     row = await PaymentGatewayService(db).confirm_payment(
         session_id,
@@ -200,7 +242,6 @@ async def omise_callback(
 @router.post("/callback/stripe/promptpay")
 async def stripe_promptpay_callback(
     request: Request,
-    db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     if settings.stripe_pos_mode != "test":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -211,7 +252,19 @@ async def stripe_promptpay_callback(
         settings.stripe_pos_webhook_secret,
         tolerance_seconds=settings.stripe_webhook_tolerance_seconds,
     )
-    row = await PaymentGatewayService(db).handle_stripe_promptpay_event(event)
+    if str(event.get("type") or "") not in STRIPE_POS_EVENT_TYPES:
+        return ok({"received": True, "updated": False, "session_id": None})
+    obj = event.get("data", {}).get("object", {})
+    metadata = obj.get("metadata") if isinstance(obj, dict) else None
+    if not isinstance(metadata, dict):
+        raise HTTPException(status_code=422, detail="Stripe POS metadata is missing")
+    target_database = str(metadata.get("target_database") or "")
+    session_factory = _stripe_operational_session_factory(target_database)
+    async with session_factory() as db:
+        row = await PaymentGatewayService(db).handle_stripe_promptpay_event(
+            event,
+            payload_sha256=hashlib.sha256(raw_body).hexdigest(),
+        )
     return ok(
         {
             "received": True,

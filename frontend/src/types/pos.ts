@@ -1,6 +1,6 @@
 export type PaymentMethod = "cash" | "promptpay" | "credit_card" | "bank_transfer" | "other";
 export type ShiftStatus = "open" | "closed";
-export type OrderStatus = "completed" | "voided" | "partially_refunded" | "refunded" | "pending_sync";
+export type OrderStatus = "pending_payment" | "completed" | "voided" | "partially_refunded" | "refunded" | "pending_sync";
 
 export interface CashierShift {
   id: string;

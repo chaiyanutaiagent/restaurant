@@ -326,6 +326,7 @@ class SaasBillingService:
         *,
         ip_address: str | None,
         user_agent: str | None,
+        commit: bool = True,
     ) -> SaasBillingEventRead:
         digest = _event_digest(data)
         existing = await self.db.scalar(
@@ -345,6 +346,16 @@ class SaasBillingService:
         )
         if subscription is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
+        existing = await self.db.scalar(
+            select(SaasBillingEvent).where(SaasBillingEvent.event_key == data.event_key)
+        )
+        if existing is not None:
+            if existing.payload_sha256 != digest:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Billing event key was already used with different normalized data",
+                )
+            return SaasBillingEventRead.model_validate(existing)
         invoice = None
         if data.invoice_id is not None:
             invoice = await self.db.scalar(
@@ -392,7 +403,8 @@ class SaasBillingService:
             ip_address=ip_address,
             user_agent=user_agent,
         )
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
         return SaasBillingEventRead.model_validate(row)
 
     @staticmethod

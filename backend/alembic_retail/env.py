@@ -43,6 +43,8 @@ RETAIL_SCHEMA_TABLES = {
     "sale_orders",
     "sale_order_items",
     "payments",
+    "payment_sessions",
+    "payment_provider_events",
     "approval_grant_usages",
     "audit_logs",
     "operational_outbox_events",

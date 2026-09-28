@@ -11,17 +11,29 @@ import uuid
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import settings, stripe_pos_test_context_enabled
 from app.models.branch import Branch
-from app.models.payment_gateway import NotificationLog, PaymentGatewayConfig, PaymentSession
+from app.models.payment_gateway import (
+    NotificationLog,
+    PaymentGatewayConfig,
+    PaymentProviderEvent,
+    PaymentSession,
+)
 from app.models.pos import Payment, SaleOrder
 from app.schemas.payment_gateway import CreateOmiseRequest, CreatePromptPayRequest
 from app.services.stripe_test_gateway import StripeTestClient, baht_to_satang
 from app.utils.promptpay import generate_promptpay_payload
 
 TWOPLACES = Decimal("0.01")
+STRIPE_POS_EVENT_TYPES = {
+    "payment_intent.processing",
+    "payment_intent.succeeded",
+    "payment_intent.payment_failed",
+    "payment_intent.canceled",
+}
 SENSITIVE_FIELDS = {
     "omise_secret_key",
     "twoc2p_secret_key",
@@ -78,6 +90,7 @@ class PaymentGatewayService:
         reference_id: str | None = None,
         user_id: uuid.UUID | None = None,
         idempotency_key: str | None = None,
+        target_database: str = "legacy",
     ) -> PaymentSession:
         normalized_amount = q2(amount)
         if normalized_amount <= 0:
@@ -100,6 +113,22 @@ class PaymentGatewayService:
             )
 
         if settings.stripe_pos_mode == "test":
+            if target_database not in {"legacy", "restaurant", "retail_pos"}:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Stripe POS operational database context is invalid",
+                )
+            if not stripe_pos_test_context_enabled(
+                mode=settings.stripe_pos_mode,
+                company_allowlist=settings.stripe_pos_company_allowlist,
+                branch_allowlist=settings.stripe_pos_branch_allowlist,
+                company_id=company_id,
+                branch_id=branch_id,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Stripe POS Test Mode is not enabled for this Company and Branch",
+                )
             if reference_type != "SaleOrder" or not reference_id or not idempotency_key:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -120,6 +149,11 @@ class PaymentGatewayService:
             )
             if order is None:
                 raise HTTPException(status_code=404, detail="SaleOrder not found for Stripe POS context")
+            if order.status != "pending_payment" or q2(order.paid_amount) != Decimal("0.00"):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Stripe POS requires an unpaid pending SaleOrder",
+                )
             if q2(order.total_amount) != normalized_amount:
                 raise HTTPException(status_code=422, detail="Stripe POS amount must equal SaleOrder total")
             existing_reference = await self.db.scalar(
@@ -139,8 +173,23 @@ class PaymentGatewayService:
                         detail="Stripe POS SaleOrder already has a different active amount",
                     )
                 return existing_reference
+            prior_attempts = int(
+                (
+                    await self.db.scalar(
+                        select(func.count(PaymentSession.id)).where(
+                            PaymentSession.company_id == company_id,
+                            PaymentSession.branch_id == branch_id,
+                            PaymentSession.gateway == "stripe_promptpay",
+                            PaymentSession.reference_type == reference_type,
+                            PaymentSession.reference_id == reference_id,
+                        )
+                    )
+                )
+                or 0
+            )
+            attempt_no = prior_attempts + 1
             idempotency_digest = hashlib.sha256(
-                f"{company_id}:{idempotency_key}".encode("utf-8")
+                f"{company_id}:{idempotency_key}:{attempt_no}".encode("utf-8")
             ).hexdigest()
             session_ref = f"PSS{idempotency_digest[:32].upper()}"
             existing = await self.db.scalar(
@@ -176,6 +225,8 @@ class PaymentGatewayService:
                     "session_ref": session_ref,
                     "reference_type": reference_type or "",
                     "reference_id": reference_id or "",
+                    "target_database": target_database,
+                    "attempt_no": str(attempt_no),
                 },
                 idempotency_key=f"pos-promptpay-{idempotency_digest}",
                 description=f"POS PromptPay {session_ref}",
@@ -189,7 +240,15 @@ class PaymentGatewayService:
                 session_ref=session_ref,
                 gateway_ref=intent.id,
                 gateway_status=intent.status,
-                gateway_payload={"provider": "stripe", "mode": "test", "event_ids": []},
+                provider_account_id=settings.stripe_pos_account_id,
+                provider_mode="test",
+                gateway_payload={
+                    "provider": "stripe",
+                    "mode": "test",
+                    "connected_account": bool(settings.stripe_pos_connected_account_id),
+                    "target_database": target_database,
+                    "attempt_no": attempt_no,
+                },
                 qr_payload=intent.qr_payload,
                 redirect_url=intent.hosted_instructions_url,
                 reference_type=reference_type,
@@ -257,19 +316,16 @@ class PaymentGatewayService:
         await self.db.commit()
         return await self.get_session(session_id, company_id)
 
-    async def handle_stripe_promptpay_event(self, event: dict) -> PaymentSession | None:
+    async def handle_stripe_promptpay_event(
+        self,
+        event: dict,
+        *,
+        payload_sha256: str,
+    ) -> PaymentSession | None:
         if event.get("livemode") is not False:
             raise HTTPException(status_code=422, detail="Stripe POS event is not from Test Mode")
-        expected_account = settings.stripe_pos_connected_account_id
-        if expected_account and str(event.get("account") or "") != expected_account:
-            raise HTTPException(status_code=422, detail="Stripe POS connected account mismatch")
         event_type = str(event.get("type") or "")
-        if event_type not in {
-            "payment_intent.processing",
-            "payment_intent.succeeded",
-            "payment_intent.payment_failed",
-            "payment_intent.canceled",
-        }:
+        if event_type not in STRIPE_POS_EVENT_TYPES:
             return None
         event_id = str(event.get("id") or "")
         obj = event.get("data", {}).get("object", {})
@@ -287,11 +343,23 @@ class PaymentGatewayService:
         )
         if session is None:
             return None
+        if session.provider_mode != "test" or not session.provider_account_id:
+            raise HTTPException(status_code=422, detail="Stripe POS provider snapshot is invalid")
+        event_account = str(event.get("account") or "")
+        connected_account = bool((session.gateway_payload or {}).get("connected_account"))
+        if connected_account and event_account != session.provider_account_id:
+            raise HTTPException(status_code=422, detail="Stripe POS connected account mismatch")
+        if not connected_account and event_account and event_account != session.provider_account_id:
+            raise HTTPException(status_code=422, detail="Stripe POS account mismatch")
         expected_metadata = {
             "context": "pos",
             "company_id": str(session.company_id),
             "branch_id": str(session.branch_id),
             "session_ref": session.session_ref,
+            "reference_type": str(session.reference_type or ""),
+            "reference_id": str(session.reference_id or ""),
+            "target_database": str((session.gateway_payload or {}).get("target_database") or ""),
+            "attempt_no": str((session.gateway_payload or {}).get("attempt_no") or ""),
         }
         if any(str(metadata.get(key) or "") != value for key, value in expected_metadata.items()):
             raise HTTPException(status_code=422, detail="Stripe POS metadata mismatch")
@@ -303,36 +371,107 @@ class PaymentGatewayService:
         if str(obj.get("currency") or "").lower() != session.currency.lower():
             raise HTTPException(status_code=422, detail="Stripe POS currency mismatch")
 
-        provider_data = dict(session.gateway_payload or {})
-        event_ids = list(provider_data.get("event_ids") or [])
-        if event_id in event_ids:
+        receipt_id = (
+            await self.db.execute(
+                insert(PaymentProviderEvent)
+                .values(
+                    company_id=session.company_id,
+                    payment_session_id=session.id,
+                    provider="stripe",
+                    provider_account_id=session.provider_account_id,
+                    event_id=event_id,
+                    event_type=event_type,
+                    payload_sha256=payload_sha256,
+                    result_status="processing",
+                    processed_at=datetime.now(timezone.utc),
+                )
+                .on_conflict_do_nothing(
+                    constraint="uq_payment_provider_events_account_event"
+                )
+                .returning(PaymentProviderEvent.id)
+            )
+        ).scalar_one_or_none()
+        if receipt_id is None:
+            existing_receipt = await self.db.scalar(
+                select(PaymentProviderEvent).where(
+                    PaymentProviderEvent.provider_account_id == session.provider_account_id,
+                    PaymentProviderEvent.event_id == event_id,
+                )
+            )
+            if existing_receipt is None:
+                raise HTTPException(status_code=409, detail="Stripe POS event is already processing")
+            if existing_receipt.payload_sha256 != payload_sha256:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Stripe POS event ID was reused with a different payload",
+                )
             return session
-        event_ids.append(event_id)
+        receipt = await self.db.get(PaymentProviderEvent, receipt_id)
+        if receipt is None:
+            raise HTTPException(status_code=500, detail="Stripe POS event receipt was not created")
+
+        provider_data = dict(session.gateway_payload or {})
         provider_data.update(
             {
                 "provider": "stripe",
                 "mode": "test",
                 "last_event_type": event_type,
-                "event_ids": event_ids[-20:],
+                "last_event_id": event_id,
             }
         )
         session.gateway_payload = provider_data
         session.gateway_status = str(obj.get("status") or event_type.rsplit(".", 1)[-1])[:50]
         now = datetime.now(timezone.utc)
+        finalized_order = None
+        sale_service = None
         if event_type == "payment_intent.succeeded":
-            session.status = "completed"
-            session.completed_at = now
-            await self._mark_reference_paid(session)
+            if session.status == "completed":
+                receipt.result_status = "ignored"
+            elif session.reference_type != "SaleOrder" or not session.reference_id:
+                raise HTTPException(status_code=422, detail="Stripe POS SaleOrder reference is missing")
+            else:
+                try:
+                    order_id = uuid.UUID(session.reference_id)
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail="Stripe POS SaleOrder reference is invalid") from exc
+                from app.services.sale_service import SaleService
+
+                target_database = str((session.gateway_payload or {}).get("target_database") or "legacy")
+                sale_service = SaleService(
+                    self.db,
+                    legacy_side_effects_enabled=target_database != "retail_pos",
+                )
+                finalized_order = await sale_service.finalize_pending_provider_sale(
+                    order_id=order_id,
+                    company_id=session.company_id,
+                    provider="stripe_promptpay",
+                    provider_payment_ref=session.gateway_ref or session.session_ref,
+                )
+                session.status = "completed"
+                session.completed_at = now
+                receipt.result_status = "completed"
         elif session.status != "completed":
             if event_type == "payment_intent.payment_failed":
                 session.status = "failed"
                 session.failed_at = now
+                receipt.result_status = "failed"
             elif event_type == "payment_intent.canceled":
                 session.status = "cancelled"
                 session.failed_at = now
+                receipt.result_status = "cancelled"
             else:
                 session.status = "pending"
+                receipt.result_status = "processing"
+        else:
+            receipt.result_status = "ignored"
+        receipt.processed_at = now
         await self.db.commit()
+        if finalized_order is not None and sale_service is not None:
+            await sale_service._ensure_accounting_handoff(
+                finalized_order,
+                session.company_id,
+                finalized_order.user_id,
+            )
         return await self.get_session(session.id, session.company_id)
 
     async def confirm_payment(
@@ -460,6 +599,8 @@ class PaymentGatewayService:
         gateway_ref: str | None = None,
         gateway_status: str | None = None,
         gateway_payload: dict | None = None,
+        provider_account_id: str | None = None,
+        provider_mode: str | None = None,
         qr_payload: str | None = None,
         redirect_url: str | None = None,
         reference_type: str | None = None,
@@ -480,6 +621,8 @@ class PaymentGatewayService:
             reference_id=reference_id,
             gateway_ref=gateway_ref,
             gateway_status=gateway_status,
+            provider_account_id=provider_account_id,
+            provider_mode=provider_mode,
             gateway_payload=gateway_payload,
             qr_payload=qr_payload,
             redirect_url=redirect_url,

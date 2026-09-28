@@ -30,9 +30,15 @@ export interface PaymentSession {
   reference_id: string | null;
   gateway_ref: string | null;
   qr_payload: string | null;
+  redirect_url: string | null;
   expires_at: string | null;
   completed_at: string | null;
   created_at: string;
+}
+
+export interface PaymentCapabilities {
+  stripe_promptpay_test_enabled: boolean;
+  stripe_mode: "disabled" | "test";
 }
 
 export interface NotificationLog {

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import settings, stripe_pos_test_context_enabled
 from app.database import get_restaurant_service_db
 from app.dependencies import (
     DeviceTokenData,
@@ -400,7 +400,17 @@ def _enforce_retail_payment_readiness(
     methods = {payment.payment_method for payment in payload.payments}
     if not methods:
         methods = {payload.payment_method}
-    if methods != {"cash"}:
+    stripe_promptpay_ready = (
+        methods == {"promptpay"}
+        and stripe_pos_test_context_enabled(
+            mode=settings.stripe_pos_mode,
+            company_allowlist=settings.stripe_pos_company_allowlist,
+            branch_allowlist=settings.stripe_pos_branch_allowlist,
+            company_id=current.company_id,
+            branch_id=current.branch_id,
+        )
+    )
+    if methods != {"cash"} and not stripe_promptpay_ready:
         raise pricing_error(
             status.HTTP_409_CONFLICT,
             "retail_provider_not_ready",

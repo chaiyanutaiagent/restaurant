@@ -13,8 +13,12 @@
 ## ขอบเขตที่ทำแล้ว
 
 - เพิ่ม Stripe Test Mode client โดยใช้ Secret Key ฝั่ง Server เท่านั้น
-- POS สร้าง PromptPay PaymentIntent จาก SaleOrder ที่ Server ตรวจ Company, Branch และยอดแล้ว
+- POS ใช้ allowlist แบบ exact Company + Branch; ค่า provider account/mode ถูก snapshot ต่อ payment session
+- POS สร้าง SaleOrder สถานะ `pending_payment`, `paid_amount=0` และยังไม่ตัดสต๊อก/ลง Payment/เพิ่มยอดกะ/ออก accounting handoff
+- POS สร้าง PromptPay PaymentIntent จาก SaleOrder ค้างชำระที่ Server ตรวจ Company, Branch และยอดแล้ว
 - POS ต้องส่ง idempotency key และผูก PaymentIntent กับ SaleOrder เท่านั้น
+- POS session และ SaleOrder อยู่ใน operational database เดียวกันตาม signed context (`legacy`, `restaurant`, `retail_pos`)
+- Stripe webhook เลือก operational database จาก `target_database` metadata ที่ผ่านการตรวจลายเซ็น แล้วตรวจซ้ำกับ snapshot ใน payment session; ค่าอื่นถูกปฏิเสธ
 - ปิดการจำลอง PromptPay สำเร็จอัตโนมัติหลัง 15 วินาที
 - ห้าม endpoint ยืนยันด้วยมือปิด Stripe PromptPay session
 - ปิดบิลจาก signed Stripe webhook เท่านั้น โดยตรวจ:
@@ -22,10 +26,13 @@
   - webhook timestamp และ HMAC signature
   - connected account (เมื่อกำหนด)
   - Company, Branch, session reference, amount และ currency
-  - event ซ้ำและ terminal-state regression
+  - event ซ้ำด้วย durable receipt (`provider account + Stripe event ID + payload digest`)
+  - terminal-state regression และ exactly-once sale finalization
 - แยก Stripe secret/webhook ของ POS ออกจาก SaaS อย่างชัดเจน
 - SaaS owner หรือ Platform billing admin สร้าง PromptPay session สำหรับ invoice สถานะ `open`
-- SaaS webhook ตรวจ Company, Subscription, Invoice, amount และ currency ก่อนทำ `invoice.paid` และ `subscription.activated`
+- SaaS เก็บ collection attempt และ PaymentIntent ID ก่อนแสดง QR; attempt ที่หมดอายุจะสร้าง attempt ใหม่ด้วย idempotency key ใหม่
+- SaaS webhook รับเฉพาะ PaymentIntent ที่มี collection attempt อยู่จริง และตรวจ account, Company, Subscription, Invoice, amount และ currency ก่อนทำ `invoice.paid` และ `subscription.activated`
+- ขอบเขต SaaS คือ **internal SaaS invoice + Stripe PaymentIntent collection** ไม่ใช่ Stripe Billing, Stripe Invoice หรือ `send_invoice`
 - Live charging ยังถูกปิดโดย config gate เดิม
 
 ## Endpoint Test Mode
@@ -33,6 +40,7 @@
 | บริบท | Endpoint |
 |---|---|
 | สร้าง POS PromptPay | `POST /api/v1/payments/sessions/promptpay` |
+| ตรวจ capability ต่อ Company/Branch | `GET /api/v1/payments/capabilities` |
 | POS webhook | `POST /api/v1/payments/callback/stripe/promptpay` |
 | เจ้าของ SaaS สร้าง QR invoice | `POST /api/v1/membership/billing/invoices/{invoice_id}/stripe-promptpay-session` |
 | Platform admin สร้าง QR invoice | `POST /api/v1/platform/companies/{company_id}/billing/invoices/{invoice_id}/stripe-promptpay-session` |
@@ -46,16 +54,35 @@
 STRIPE_POS_MODE=test
 STRIPE_POS_SECRET_KEY=<secret-store:sk_test_...>
 STRIPE_POS_WEBHOOK_SECRET=<secret-store:whsec_...>
-STRIPE_POS_CONNECTED_ACCOUNT_ID=<optional Stripe account ID>
+STRIPE_POS_ACCOUNT_ID=<acct_...>
+STRIPE_POS_CONNECTED_ACCOUNT_ID=<optional; when used must equal STRIPE_POS_ACCOUNT_ID>
+STRIPE_POS_COMPANY_ALLOWLIST=<Sketch Biz Company UUID>
+STRIPE_POS_BRANCH_ALLOWLIST=<approved Restaurant/Retail Branch UUIDs>
 
 SAAS_BILLING_PROVIDER=stripe_test
 SAAS_BILLING_LIVE_CHARGING_ENABLED=false
 SAAS_STRIPE_MODE=test
 SAAS_STRIPE_SECRET_KEY=<separate secret-store:sk_test_...>
 SAAS_STRIPE_WEBHOOK_SECRET=<separate secret-store:whsec_...>
+SAAS_STRIPE_ACCOUNT_ID=<separate acct_...>
 ```
 
 Config จะปฏิเสธ `sk_live_`, ปฏิเสธ Test Mode ใน Production และยังไม่อนุญาต Live charging
+
+## Migration heads ที่เตรียมแล้ว
+
+- Legacy/transaction boundary: `wp84stripe0027`
+  - เพิ่ม provider account/mode snapshot ใน `payment_sessions`
+  - เพิ่ม `payment_provider_events` สำหรับ durable webhook receipt
+  - เพิ่ม `saas_collection_attempts` ให้รองรับช่วงที่ Identity/SaaS billing ยังชี้ Legacy
+- Platform boundary: `p16platform0020`
+  - เพิ่ม `saas_collection_attempts` สำหรับ PaymentIntent lifecycle และ retry/expiry
+- Restaurant boundary: `wp84restaurant0008`
+  - เพิ่ม provider snapshot และ durable Stripe event receipt ในฐาน Restaurant
+- Retail boundary: `wp84retail0008`
+  - เพิ่ม `payment_sessions` และ durable Stripe event receipt ในฐาน Retail
+
+ยังไม่ได้รัน migration เหล่านี้บน UAT หรือ Production
 
 ## ข้อมูล UAT ที่ใช้ต่อได้
 
@@ -95,9 +122,13 @@ Production ยังเป็น **HOLD** จนกว่าจะผ่าน�
 
 ## Automated evidence
 
-- Stripe/SaaS focused tests: `15/15` ผ่าน
-- Backend regression: `590/590` ผ่าน (`1` skipped ตาม baseline)
+- Stripe/POS/SaaS focused tests: `15/15` ผ่าน
+- Backend regression: `597/597` ผ่าน (`1` skipped ตาม baseline)
 - Frontend TypeScript type-check: ผ่าน
+- Frontend production build: ผ่าน (มี baseline bundle-size warning)
+- SaaS static boundary check: ผ่าน
+- Alembic heads: Legacy `wp84stripe0027`, Platform `p16platform0020`, Restaurant `wp84restaurant0008`, Retail `wp84retail0008`
+- Migration rehearsal: Legacy full chain บนฐานชั่วคราวผ่าน; Platform `p15platform0019 → p16platform0020` ผ่าน; Restaurant `p6restaurant0007 ↔ wp84restaurant0008` และ Retail `p13retail0007 ↔ wp84retail0008` ผ่านทั้ง upgrade/downgrade/re-upgrade บน clone local; ลบฐาน rehearsal แล้ว
 - Docker Backend image build: ผ่าน
 - Production database, container, flag และ secret: **ไม่เปลี่ยนแปลง**
 

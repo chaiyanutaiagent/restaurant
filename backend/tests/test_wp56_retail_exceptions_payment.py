@@ -48,12 +48,21 @@ def _sale(method: str = "cash", *, offline: bool = False) -> CreateSaleRequest:
 
 class RetailPaymentReadinessTests(unittest.TestCase):
     def test_retail_cash_is_the_only_enabled_pilot_payment(self) -> None:
-        _enforce_retail_payment_readiness(_current(), _sale("cash"))
+        current = _current()
+        _enforce_retail_payment_readiness(current, _sale("cash"))
 
         with self.assertRaises(HTTPException) as raised:
-            _enforce_retail_payment_readiness(_current(), _sale("promptpay"))
+            _enforce_retail_payment_readiness(current, _sale("promptpay"))
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(raised.exception.detail["code"], "retail_provider_not_ready")
+
+        with patch.multiple(
+            settings,
+            stripe_pos_mode="test",
+            stripe_pos_company_allowlist=str(current.company_id),
+            stripe_pos_branch_allowlist=str(current.branch_id),
+        ):
+            _enforce_retail_payment_readiness(current, _sale("promptpay"))
 
     def test_retail_offline_and_sync_fail_closed(self) -> None:
         for payload, synchronized in ((_sale("cash", offline=True), False), (_sale("cash"), True)):

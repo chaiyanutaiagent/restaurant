@@ -80,7 +80,7 @@ from app.models.user_access import UserAccessRequest
 from app.models.accounting import Account, JournalEntry, JournalLine, AccountBalance
 from app.models.integration import OperationalOutboxEvent
 from app.models.entitlement import BrandModuleEntitlement
-from app.models.saas_billing import SaasBillingEvent, SaasInvoice, SaasPlan, SaasSubscription
+from app.models.saas_billing import SaasBillingEvent, SaasCollectionAttempt, SaasInvoice, SaasPlan, SaasSubscription
 from app.models.saas_privacy_support import (
     SaasPrivacyRequest,
     SaasRetentionDecision,
@@ -118,7 +118,7 @@ from app.models.crm import (
 )
 from app.models.api_integration import APIKey, WebhookEndpoint, WebhookDelivery, ExternalOrder
 from app.models.logistics import Carrier, ShippingRate, Shipment, ShipmentItem, ShipmentEvent
-from app.models.payment_gateway import PaymentGatewayConfig, PaymentSession, NotificationLog
+from app.models.payment_gateway import PaymentGatewayConfig, PaymentProviderEvent, PaymentSession, NotificationLog
 from app.models.restaurant import (
     Brand, BrandBranch,
     BranchReplenishmentPolicy,
@@ -185,6 +185,7 @@ __all__ = [
     "SaasAccountCredential",
     "SaasTenantMembership",
     "SaasBillingEvent",
+    "SaasCollectionAttempt",
     "SaasInvoice",
     "SaasPlan",
     "SaasSubscription",
@@ -301,6 +302,7 @@ __all__ = [
     "ShipmentItem",
     "ShipmentEvent",
     "PaymentGatewayConfig",
+    "PaymentProviderEvent",
     "PaymentSession",
     "NotificationLog",
     "Brand",

@@ -1,6 +1,7 @@
 import api from "./api";
 
 export const gatewayApi = {
+  getCapabilities: () => api.get("/payments/capabilities"),
   getConfig: () => api.get("/payments/config"),
   updateConfig: (data: object) => api.patch("/payments/config", data),
   testLineNotify: (data?: { message?: string }) => api.post("/payments/config/test-line", data ?? {}),

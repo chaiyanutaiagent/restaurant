@@ -67,6 +67,8 @@ class PaymentSession(UUIDMixin, TimestampMixin, Base):
     reference_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     gateway_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     gateway_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    provider_account_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    provider_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
     gateway_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     qr_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     redirect_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -78,6 +80,35 @@ class PaymentSession(UUIDMixin, TimestampMixin, Base):
     company: Mapped["Company"] = relationship("Company")
     branch: Mapped["Branch"] = relationship("Branch")
     creator: Mapped["User | None"] = relationship("User")
+
+
+class PaymentProviderEvent(UUIDMixin, Base):
+    __tablename__ = "payment_provider_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_account_id",
+            "event_id",
+            name="uq_payment_provider_events_account_event",
+        ),
+        Index("ix_payment_provider_events_session_created", "payment_session_id", "created_at"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False, index=True
+    )
+    payment_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("payment_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    provider_account_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
 
 
 class NotificationLog(UUIDMixin, Base):

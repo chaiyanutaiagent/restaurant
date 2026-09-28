@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, JSON, String, Text, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -104,3 +104,47 @@ class SaasBillingEvent(UUIDMixin, Base):
     result_status: Mapped[str] = mapped_column(String(20), nullable=False)
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+
+class SaasCollectionAttempt(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "saas_collection_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_account_id",
+            "provider_payment_intent_id",
+            name="uq_saas_collection_attempts_account_intent",
+        ),
+        UniqueConstraint("invoice_id", "attempt_no", name="uq_saas_collection_attempts_invoice_attempt"),
+        UniqueConstraint("idempotency_key", name="uq_saas_collection_attempts_idempotency_key"),
+        CheckConstraint("attempt_no > 0", name="attempt_no_positive"),
+        CheckConstraint("amount_satang > 0", name="amount_positive"),
+        CheckConstraint("char_length(currency) = 3", name="currency_length"),
+        CheckConstraint(
+            "status IN ('requires_action', 'processing', 'paid', 'failed', 'cancelled', 'expired')",
+            name="status_valid",
+        ),
+        Index("ix_saas_collection_attempts_invoice_status", "invoice_id", "status"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    subscription_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("saas_subscriptions.id", ondelete="CASCADE"), nullable=False
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("saas_invoices.id", ondelete="CASCADE"), nullable=False
+    )
+    attempt_no: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    provider_mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider_account_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider_payment_intent_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    amount_satang: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    qr_payload: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    redirect_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

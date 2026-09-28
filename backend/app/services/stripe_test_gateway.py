@@ -14,6 +14,7 @@ from fastapi import HTTPException, status
 
 
 TWOPLACES = Decimal("0.01")
+STRIPE_API_VERSION = "2026-02-25.clover"
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,7 @@ class StripeTestClient:
         headers = {
             "Authorization": f"Bearer {self.secret_key}",
             "Idempotency-Key": idempotency_key,
+            "Stripe-Version": STRIPE_API_VERSION,
         }
         if self.connected_account_id:
             headers["Stripe-Account"] = self.connected_account_id
@@ -192,8 +194,8 @@ class StripeTestClient:
     ) -> StripePromptPayIntent:
         if not isinstance(data, dict) or not isinstance(data.get("id"), str):
             raise HTTPException(status_code=502, detail="Stripe PaymentIntent response is invalid")
-        if data.get("livemode") is True:
-            raise HTTPException(status_code=502, detail="Stripe returned a Live Mode PaymentIntent")
+        if data.get("livemode") is not False:
+            raise HTTPException(status_code=502, detail="Stripe PaymentIntent is not explicitly Test Mode")
         amount = data.get("amount")
         currency = str(data.get("currency") or "").lower()
         if amount != expected_amount or currency != "thb":
@@ -205,17 +207,21 @@ class StripeTestClient:
             else {}
         )
         expires_at = qr.get("expires_at")
+        qr_payload = qr.get("data") if isinstance(qr.get("data"), str) else None
+        hosted_url = (
+            qr.get("hosted_instructions_url")
+            if isinstance(qr.get("hosted_instructions_url"), str)
+            else None
+        )
+        if str(data.get("status") or "") == "requires_action" and not (qr_payload or hosted_url):
+            raise HTTPException(status_code=502, detail="Stripe PromptPay response is missing QR instructions")
         return StripePromptPayIntent(
             id=data["id"],
             status=str(data.get("status") or "requires_action"),
             amount_satang=amount,
             currency="THB",
-            qr_payload=qr.get("data") if isinstance(qr.get("data"), str) else None,
-            hosted_instructions_url=(
-                qr.get("hosted_instructions_url")
-                if isinstance(qr.get("hosted_instructions_url"), str)
-                else None
-            ),
+            qr_payload=qr_payload,
+            hosted_instructions_url=hosted_url,
             expires_at=(
                 datetime.fromtimestamp(expires_at, tz=timezone.utc)
                 if isinstance(expires_at, int)

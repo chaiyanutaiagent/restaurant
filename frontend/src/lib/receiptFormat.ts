@@ -9,6 +9,7 @@ export const receiptPaymentLabels: Record<string, string> = {
 };
 
 export const receiptOrderStatusLabels: Record<SaleOrder["status"], string> = {
+  pending_payment: "รอยืนยันการชำระเงิน",
   completed: "ขายสำเร็จ",
   voided: "Void แล้ว",
   refunded: "คืนเงินเต็มบิล",

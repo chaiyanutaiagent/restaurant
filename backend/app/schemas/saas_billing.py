@@ -251,6 +251,8 @@ class SaasStripePromptPaySessionRead(BaseSchema):
     mode: Literal["test"] = "test"
     company_id: uuid.UUID
     invoice_id: uuid.UUID
+    collection_attempt_id: uuid.UUID
+    attempt_no: int
     payment_intent_id: str
     status: str
     amount_satang: int

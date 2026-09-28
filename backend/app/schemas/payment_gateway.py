@@ -80,6 +80,12 @@ class CreatePromptPayRequest(BaseSchema):
     branch_id: uuid.UUID
     reference_type: str | None = None
     reference_id: str | None = None
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
 
 
 class CreateOmiseRequest(BaseSchema):

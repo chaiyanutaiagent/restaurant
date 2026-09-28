@@ -32,6 +32,7 @@ from app.services.shared_reporting_service import SharedReportingService
 from app.services.saas_email_service import deliver_membership_email
 from app.services.saas_membership_service import SaasMembershipService
 from app.services.saas_billing_service import SaasBillingService
+from app.services.saas_stripe_test_service import SaasStripeTestService
 from app.services.business_directory_service import resolve_active_business
 from app.utils.public_rate_limit import check_public_rate_limit
 
@@ -247,6 +248,25 @@ async def my_billing(
         )
     summary = await SaasBillingService(db, operator_id=None).summary(current.company_id)
     return ok(summary.model_dump(mode="json"))
+
+
+@router.post("/billing/invoices/{invoice_id}/stripe-promptpay-session")
+async def create_my_invoice_stripe_promptpay_session(
+    invoice_id: uuid.UUID,
+    current: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    membership = await SaasMembershipService(db).membership_for_company(current.company_id)
+    if membership is None or membership.owner_user_id != current.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="SaaS membership not found",
+        )
+    result = await SaasStripeTestService(db).create_invoice_promptpay_session(
+        company_id=current.company_id,
+        invoice_id=invoice_id,
+    )
+    return ok(result.model_dump(mode="json"))
 
 
 @router.get("/modules")

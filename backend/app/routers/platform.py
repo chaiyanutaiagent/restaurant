@@ -49,12 +49,14 @@ from app.schemas.saas_privacy_support import (
     SupportTicketUpdate,
 )
 from app.services.saas_billing_service import SaasBillingService
+from app.services.saas_stripe_test_service import SaasStripeTestService
 from app.services.company_module_access_service import CompanyModuleAccessService
 from app.services.saas_privacy_support_service import SaasPrivacySupportService
 from app.services.platform_service import PlatformAuthService, PlatformTenantService
 from app.services.platform_operations_service import PlatformOperationsService
 from app.services.platform_access_service import require_platform_permission
 from app.services.platform_team_service import PlatformTeamService
+from app.services.stripe_test_gateway import verify_stripe_webhook
 
 
 router = APIRouter(prefix="/api/v1/platform", tags=["platform"])
@@ -714,6 +716,32 @@ async def import_billing_event(
     return ok(result.model_dump(mode="json"))
 
 
+@router.post("/billing/webhooks/stripe")
+async def stripe_saas_billing_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    raw_body = await request.body()
+    event = verify_stripe_webhook(
+        raw_body,
+        request.headers.get("stripe-signature"),
+        settings.saas_stripe_webhook_secret,
+        tolerance_seconds=settings.stripe_webhook_tolerance_seconds,
+    )
+    ip_address, user_agent = _client(request)
+    rows = await SaasStripeTestService(db).apply_webhook_event(
+        event,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(
+        {
+            "received": True,
+            "applied_event_ids": [str(row.id) for row in rows],
+        }
+    )
+
+
 @router.get("/privacy/requests")
 async def platform_privacy_requests(
     limit: int = Query(default=200, ge=1, le=500),
@@ -1033,6 +1061,21 @@ async def create_company_invoice(
     ip_address, user_agent = _client(request)
     result = await _billing_service(db, current, "platform.billing.manage").create_invoice(
         company_id, payload, ip_address=ip_address, user_agent=user_agent
+    )
+    return ok(result.model_dump(mode="json"))
+
+
+@router.post("/companies/{company_id}/billing/invoices/{invoice_id}/stripe-promptpay-session")
+async def create_company_invoice_stripe_promptpay_session(
+    company_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.billing.manage")
+    result = await SaasStripeTestService(db).create_invoice_promptpay_session(
+        company_id=company_id,
+        invoice_id=invoice_id,
     )
     return ok(result.model_dump(mode="json"))
 

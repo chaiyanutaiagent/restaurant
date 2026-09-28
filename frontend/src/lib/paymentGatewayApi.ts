@@ -8,7 +8,7 @@ export const gatewayApi = {
 
   listSessions: (params?: { status?: string; gateway?: string; page?: number }) =>
     api.get("/payments/sessions", { params }),
-  createPromptPay: (data: { amount: number; branch_id: string; reference_type?: string; reference_id?: string }) =>
+  createPromptPay: (data: { amount: number; branch_id: string; reference_type?: string; reference_id?: string; idempotency_key?: string }) =>
     api.post("/payments/sessions/promptpay", data),
   createOmise: (data: object) => api.post("/payments/sessions/omise", data),
   getSession: (id: string) => api.get(`/payments/sessions/${id}`),

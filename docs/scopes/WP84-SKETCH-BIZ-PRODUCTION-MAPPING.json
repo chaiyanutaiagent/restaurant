@@ -1,0 +1,82 @@
+{
+  "contract_version": "1.0",
+  "mode": "plan_only",
+  "generated_at": "2026-09-28",
+  "source_environment": "UAT",
+  "target_environment": "Production",
+  "production_apply_authorized": false,
+  "company": {
+    "uat_id": "1b8a1818-44d6-4d5f-9d22-e5e17b23c081",
+    "natural_key": {
+      "registration_id": "0125568025206",
+      "legal_name_th": "บริษัท สเก็ตช์ บีซ จำกัด"
+    },
+    "production_collision": {
+      "status": "manual_resolution_required",
+      "reason": "The same UUID is currently associated with a Production test identity and placeholder tax ID"
+    },
+    "production_id": null
+  },
+  "workspaces": [
+    {
+      "business_type": "restaurant",
+      "brand_slug": "krua-pa-pla-khuen",
+      "branch_code": "KPP-01",
+      "production_brand_id": null,
+      "production_branch_id": null,
+      "decision": "pending_identity_inventory"
+    },
+    {
+      "business_type": "restaurant",
+      "brand_slug": "the-loft-kitchen",
+      "branch_code": "TLK-01",
+      "production_brand_id": null,
+      "production_branch_id": null,
+      "decision": "pending_identity_inventory"
+    },
+    {
+      "business_type": "retail_pos",
+      "brand_slug": "the-loft-mini-mart",
+      "branch_code": "TLM-01",
+      "production_brand_id": null,
+      "production_branch_id": null,
+      "decision": "pending_identity_inventory"
+    },
+    {
+      "business_type": "takeaway",
+      "brand_slug": "chambo",
+      "branch_code": "BKK-01",
+      "production_brand_id": null,
+      "production_branch_id": null,
+      "decision": "reuse_or_map_existing_after_inventory"
+    }
+  ],
+  "allowed_sections": [
+    "company_legal_profile",
+    "brands",
+    "branches",
+    "brand_branch_links",
+    "roles",
+    "products",
+    "tax_configuration_after_owner_confirmation"
+  ],
+  "forbidden_sections": [
+    "orders",
+    "payments",
+    "refunds",
+    "transfers",
+    "shifts",
+    "sessions",
+    "test_users",
+    "passwords",
+    "provider_secrets"
+  ],
+  "gates": {
+    "production_identity_inventory_required": true,
+    "natural_key_idempotency_required": true,
+    "reviewed_migration_or_new_uuid_mapping_required": true,
+    "backup_restore_rehearsal_required": true,
+    "owner_approval_required": true,
+    "production_write_mode": "hold"
+  }
+}

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -21,6 +21,7 @@ from app.schemas.payment_gateway import (
 )
 from app.services.notification_service import NotificationService
 from app.services.payment_gateway_service import PaymentGatewayService
+from app.services.stripe_test_gateway import verify_stripe_webhook
 
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
 
@@ -125,6 +126,7 @@ async def create_promptpay_session(
         payload.reference_type,
         payload.reference_id,
         current.user_id,
+        payload.idempotency_key,
     )
     return ok(PaymentSessionRead.model_validate(row).model_dump(mode="json"))
 
@@ -193,6 +195,30 @@ async def omise_callback(
         return ok({"updated": False})
     row = await PaymentGatewayService(db).handle_gateway_callback(uuid.UUID(str(company_id_raw)), "omise", payload)
     return ok({"updated": row is not None, "session_id": str(row.id) if row else None})
+
+
+@router.post("/callback/stripe/promptpay")
+async def stripe_promptpay_callback(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if settings.stripe_pos_mode != "test":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    raw_body = await request.body()
+    event = verify_stripe_webhook(
+        raw_body,
+        request.headers.get("stripe-signature"),
+        settings.stripe_pos_webhook_secret,
+        tolerance_seconds=settings.stripe_webhook_tolerance_seconds,
+    )
+    row = await PaymentGatewayService(db).handle_stripe_promptpay_event(event)
+    return ok(
+        {
+            "received": True,
+            "updated": row is not None,
+            "session_id": str(row.id) if row else None,
+        }
+    )
 
 
 @router.post("/callback/2c2p")

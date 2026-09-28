@@ -244,3 +244,17 @@ class SaasBillingOverviewRead(BaseSchema):
     plans: list[SaasPlanRead]
     subscription_counts: dict[str, int]
     invoice_counts: dict[str, int]
+
+
+class SaasStripePromptPaySessionRead(BaseSchema):
+    provider: Literal["stripe"] = "stripe"
+    mode: Literal["test"] = "test"
+    company_id: uuid.UUID
+    invoice_id: uuid.UUID
+    payment_intent_id: str
+    status: str
+    amount_satang: int
+    currency: Literal["THB"] = "THB"
+    qr_payload: str | None = None
+    redirect_url: str | None = None
+    expires_at: datetime | None = None

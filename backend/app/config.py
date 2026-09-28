@@ -48,6 +48,26 @@ def validate_saas_billing_config(*, provider: str, live_charging_enabled: bool) 
         )
 
 
+def validate_stripe_test_mode_config(
+    *,
+    environment: str,
+    mode: str,
+    secret_key: str | None,
+    webhook_secret: str | None,
+    scope: str,
+) -> None:
+    if mode == "disabled":
+        return
+    if mode != "test":
+        raise ValueError(f"{scope} Stripe mode must be disabled or test")
+    if environment == "production":
+        raise ValueError(f"{scope} Stripe Test Mode is forbidden in Production")
+    if not secret_key or not secret_key.startswith("sk_test_"):
+        raise ValueError(f"{scope} Stripe Test Mode requires an sk_test_ secret")
+    if not webhook_secret or not webhook_secret.startswith("whsec_"):
+        raise ValueError(f"{scope} Stripe Test Mode requires a whsec_ webhook secret")
+
+
 def validate_uat_auth_bypass_config(
     *,
     environment: str,
@@ -448,6 +468,16 @@ class Settings(BaseSettings):
     saas_trial_days: int = Field(default=14, ge=1, le=90)
     saas_billing_provider: str = "unconfigured"
     saas_billing_live_charging_enabled: bool = False
+    saas_stripe_mode: Literal["disabled", "test"] = "disabled"
+    saas_stripe_secret_key: str | None = None
+    saas_stripe_webhook_secret: str | None = None
+    saas_stripe_api_base_url: str = "https://api.stripe.com/v1"
+    stripe_pos_mode: Literal["disabled", "test"] = "disabled"
+    stripe_pos_secret_key: str | None = None
+    stripe_pos_webhook_secret: str | None = None
+    stripe_pos_connected_account_id: str | None = None
+    stripe_pos_api_base_url: str = "https://api.stripe.com/v1"
+    stripe_webhook_tolerance_seconds: int = Field(default=300, ge=60, le=900)
     saas_privacy_internal_target_days: int = Field(default=30, ge=1, le=90)
     saas_support_access_max_minutes: int = Field(default=60, ge=5, le=60)
     uat_auth_bypass_enabled: bool = False
@@ -494,8 +524,27 @@ class Settings(BaseSettings):
             provider=self.saas_billing_provider,
             live_charging_enabled=self.saas_billing_live_charging_enabled,
         )
+        validate_stripe_test_mode_config(
+            environment=self.environment,
+            mode=self.stripe_pos_mode,
+            secret_key=self.stripe_pos_secret_key,
+            webhook_secret=self.stripe_pos_webhook_secret,
+            scope="POS",
+        )
+        validate_stripe_test_mode_config(
+            environment=self.environment,
+            mode=self.saas_stripe_mode,
+            secret_key=self.saas_stripe_secret_key,
+            webhook_secret=self.saas_stripe_webhook_secret,
+            scope="SaaS",
+        )
+        normalized_billing_provider = self.saas_billing_provider.strip().lower()
+        if self.saas_stripe_mode == "test" and normalized_billing_provider != "stripe_test":
+            raise ValueError("SaaS Stripe Test Mode requires SAAS_BILLING_PROVIDER=stripe_test")
+        if normalized_billing_provider == "stripe_test" and self.saas_stripe_mode != "test":
+            raise ValueError("SAAS_BILLING_PROVIDER=stripe_test requires SAAS_STRIPE_MODE=test")
         self.saas_public_base_url = self.saas_public_base_url.rstrip("/")
-        self.saas_billing_provider = self.saas_billing_provider.strip().lower()
+        self.saas_billing_provider = normalized_billing_provider
         validate_uat_auth_bypass_config(
             environment=self.environment,
             enabled=self.uat_auth_bypass_enabled,

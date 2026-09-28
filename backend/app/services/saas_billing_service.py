@@ -98,7 +98,10 @@ class SaasBillingService:
             live_charging_enabled=settings.saas_billing_live_charging_enabled,
             collection_available=(
                 settings.saas_billing_provider != "unconfigured"
-                and settings.saas_billing_live_charging_enabled
+                and (
+                    settings.saas_billing_live_charging_enabled
+                    or settings.saas_billing_provider == "stripe_test"
+                )
             ),
             plans=plans,
             subscription_counts={key: count for key, count in subscription_rows},
@@ -172,7 +175,10 @@ class SaasBillingService:
             live_charging_enabled=settings.saas_billing_live_charging_enabled,
             collection_available=(
                 settings.saas_billing_provider != "unconfigured"
-                and settings.saas_billing_live_charging_enabled
+                and (
+                    settings.saas_billing_live_charging_enabled
+                    or settings.saas_billing_provider == "stripe_test"
+                )
             ),
             plan=SaasPlanRead.model_validate(plan) if plan else None,
             subscription=(

@@ -46,7 +46,9 @@ Use this checklist for the final production go/no-go review. It is documentation
 ## Backup Checklist
 
 - [ ] Ran `./scripts/backup-production.sh` before migrations and deployment.
-- [ ] Backup directory contains `postgres.dump`, `uploads.tar.gz`, `redis.tar.gz`, `redis-backup-note.txt`, and `manifest.txt`.
+- [ ] Backup directory contains all five database dumps (`postgres.dump`, `platform-core.dump`, `restaurant.dump`, `retail.dump`, `takeaway.dump`), `uploads.tar.gz`, `redis.tar.gz`, `redis-backup-note.txt`, and `manifest.txt`.
+- [ ] Manifest version is `2` and contains SHA-256 checksums for every data artifact plus fingerprints for the runtime env and Compose files.
+- [ ] Runtime secrets and deploy configuration are independently recoverable from the approved secret/configuration store.
 - [ ] Backup artifacts are stored outside the repository or in an ignored local backup root.
 - [ ] Backup artifacts are treated as sensitive business data.
 - [ ] Restore drill completed in an isolated `COMPOSE_PROJECT_NAME` environment.

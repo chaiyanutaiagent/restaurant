@@ -183,15 +183,16 @@
 
 ## Backup / restore
 
-- [ ] Back up PostgreSQL with `postgres.dump`
+- [ ] Back up all five PostgreSQL boundaries with `postgres.dump`, `platform-core.dump`, `restaurant.dump`, `retail.dump`, and `takeaway.dump`
 - [ ] Back up uploads with `uploads.tar.gz`
 - [ ] Back up or explicitly account for Redis operational data
+- [ ] Verify manifest version 2 checksums for every database dump, uploads, Redis, and runtime configuration fingerprints
 - [ ] Store backups outside the repository
 - [ ] Protect backups as sensitive customer and business data
 - [ ] Define backup retention policy
 - [ ] Add restore verification process
 - [ ] Run an isolated restore drill with `COMPOSE_PROJECT_NAME`
-- [ ] Back up application config and secrets metadata separately
+- [ ] Keep application config and secrets recoverable in the approved secret/configuration store; the backup manifest stores fingerprints only
 - [ ] Test restore from backups before production launch
 
 ## UAT / smoke test

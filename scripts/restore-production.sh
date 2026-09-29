@@ -94,9 +94,12 @@ if [ ! -x scripts/check-production-env.sh ]; then
   fail "scripts/check-production-env.sh is missing or not executable"
 fi
 
-for file in postgres.dump platform-core.dump restaurant.dump retail.dump takeaway.dump uploads.tar.gz redis.tar.gz manifest.txt; do
+for file in postgres.dump platform-core.dump restaurant.dump retail.dump takeaway.dump uploads.tar.gz redis.tar.gz redis-backup-note.txt manifest.txt; do
   if [ ! -f "$BACKUP_DIR/$file" ]; then
     fail "required backup file missing: $BACKUP_DIR/$file"
+  fi
+  if [ ! -s "$BACKUP_DIR/$file" ]; then
+    fail "required backup file is empty: $BACKUP_DIR/$file"
   fi
 done
 
@@ -106,6 +109,22 @@ verify_checksum restaurant_sha256 restaurant.dump
 verify_checksum retail_sha256 retail.dump
 verify_checksum takeaway_sha256 takeaway.dump
 
+MANIFEST_VERSION="$(manifest_value manifest_version)"
+MANIFEST_VERSION="${MANIFEST_VERSION:-1}"
+case "$MANIFEST_VERSION" in
+  1)
+    printf '%s\n' 'WARNING: legacy backup manifest; uploads, Redis and runtime configuration checksums are unavailable.' >&2
+    ;;
+  2)
+    verify_checksum uploads_sha256 uploads.tar.gz
+    verify_checksum redis_sha256 redis.tar.gz
+    verify_checksum redis_note_sha256 redis-backup-note.txt
+    ;;
+  *)
+    fail "unsupported backup manifest version: $MANIFEST_VERSION"
+    ;;
+esac
+
 printf 'Validating production environment: %s\n' "$ENV_FILE"
 scripts/check-production-env.sh "$ENV_FILE"
 
@@ -114,13 +133,28 @@ export PRODUCTION_ENV_FILE="$ENV_FILE"
 printf 'Validating production compose configuration: %s\n' "$COMPOSE_FILE"
 docker compose -f "$COMPOSE_FILE" config >/dev/null
 
+if [ "$MANIFEST_VERSION" = "2" ]; then
+  CURRENT_ENV_SHA256="$(checksum_file "$ENV_FILE")"
+  CURRENT_COMPOSE_SHA256="$(checksum_file "$COMPOSE_FILE")"
+  BACKUP_ENV_SHA256="$(manifest_value runtime_env_sha256)"
+  BACKUP_COMPOSE_SHA256="$(manifest_value compose_file_sha256)"
+  [ -n "$BACKUP_ENV_SHA256" ] || fail "runtime environment checksum missing from manifest"
+  [ -n "$BACKUP_COMPOSE_SHA256" ] || fail "compose file checksum missing from manifest"
+  if [ "$CURRENT_ENV_SHA256" != "$BACKUP_ENV_SHA256" ]; then
+    printf '%s\n' 'WARNING: current runtime environment differs from the backed-up configuration fingerprint.' >&2
+  fi
+  if [ "$CURRENT_COMPOSE_SHA256" != "$BACKUP_COMPOSE_SHA256" ]; then
+    printf '%s\n' 'WARNING: current compose file differs from the backed-up configuration fingerprint.' >&2
+  fi
+fi
+
 printf '%s\n' 'WARNING: restore is destructive.'
 printf '%s\n' 'Stop backend/nginx/frontend workers before restoring, or allow this script to stop them now.'
 printf '%s\n' 'PostgreSQL data, uploads, and Redis data for this compose project will be replaced.'
 
 if [ "$ASSUME_YES" -ne 1 ]; then
   printf 'Type RESTORE to continue: '
-  read CONFIRMATION
+  IFS= read -r CONFIRMATION
   if [ "$CONFIRMATION" != "RESTORE" ]; then
     fail "restore cancelled"
   fi

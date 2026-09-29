@@ -4,10 +4,10 @@ Backups protect customer, inventory, sales, and operational data. Treat every ba
 
 ## What Is Backed Up
 
-- PostgreSQL: custom-format `pg_dump` from the `postgres` service.
+- PostgreSQL: custom-format `pg_dump` for the Legacy, Platform, Restaurant, Retail, and Takeaway databases.
 - Uploads: `uploads` volume mounted at `/app/uploads`.
 - Redis: `/data` volume after `redis-cli SAVE`.
-- Manifest: timestamp, compose project name, service names, and backup contents.
+- Manifest: timestamp, compose project name, service names, backup contents, SHA-256 for every data artifact, and fingerprints of the runtime env and Compose files.
 
 ## What Is Not Backed Up
 
@@ -40,10 +40,16 @@ To write under another local directory:
 The backup directory should contain:
 
 - `postgres.dump`
+- `platform-core.dump`
+- `restaurant.dump`
+- `retail.dump`
+- `takeaway.dump`
 - `uploads.tar.gz`
 - `redis.tar.gz`
 - `redis-backup-note.txt`
 - `manifest.txt`
+
+Manifest version 2 records SHA-256 checksums for all five database dumps, uploads, Redis, and the Redis note. It also records fingerprints for `.env.production` and the Compose file without copying secret values into the backup. Treat the manifest as sensitive operational metadata.
 
 `./scripts/check-production-status.sh` reports the latest local backup directory age when `backups/` exists.
 
@@ -55,7 +61,7 @@ Restore is destructive. Stop application traffic first, verify the target enviro
 ./scripts/restore-production.sh backups/restaurant-pos-prod-YYYYMMDDTHHMMSSZ
 ```
 
-The script requires typing `RESTORE` before it replaces PostgreSQL data, uploads, and Redis data. For non-interactive restore drills, pass `--yes`:
+The script verifies every available checksum before changing data, then requires typing `RESTORE` before it replaces PostgreSQL data, uploads, and Redis data. For non-interactive restore drills, pass `--yes`:
 
 ```sh
 ./scripts/restore-production.sh --yes backups/restaurant-pos-prod-YYYYMMDDTHHMMSSZ
@@ -101,5 +107,6 @@ Adjust retention for legal, tax, and business continuity requirements.
 - No automated off-site upload is included.
 - No encryption-at-rest wrapper is included; use encrypted storage or a secret-managed backup system.
 - No scheduled backup timer is included.
+- The runtime env and Compose files are fingerprinted, not copied; secrets and deploy configuration must be recoverable from the approved secret/configuration store.
 - Redis restore replaces operational cache/queue state and may not be appropriate while workers are active.
 - Nginx logs are not included in application data backups.

@@ -116,6 +116,7 @@ state; PostgreSQL and uploads are the durable system-of-record backups.
 NOTE
 
 cat > "$BACKUP_DIR/manifest.txt" <<EOF
+manifest_version=2
 backup_timestamp_utc=$TIMESTAMP
 compose_file=$COMPOSE_FILE
 compose_project_name=$COMPOSE_PROJECT
@@ -124,11 +125,16 @@ postgres_service=postgres
 redis_service=redis
 uploads_source=volume:$UPLOADS_VOLUME
 contents=postgres.dump platform-core.dump restaurant.dump retail.dump takeaway.dump uploads.tar.gz redis.tar.gz redis-backup-note.txt manifest.txt
+runtime_env_sha256=$(checksum_file "$ENV_FILE")
+compose_file_sha256=$(checksum_file "$COMPOSE_FILE")
 postgres_sha256=$(checksum_file "$BACKUP_DIR/postgres.dump")
 platform_sha256=$(checksum_file "$BACKUP_DIR/platform-core.dump")
 restaurant_sha256=$(checksum_file "$BACKUP_DIR/restaurant.dump")
 retail_sha256=$(checksum_file "$BACKUP_DIR/retail.dump")
 takeaway_sha256=$(checksum_file "$BACKUP_DIR/takeaway.dump")
+uploads_sha256=$(checksum_file "$BACKUP_DIR/uploads.tar.gz")
+redis_sha256=$(checksum_file "$BACKUP_DIR/redis.tar.gz")
+redis_note_sha256=$(checksum_file "$BACKUP_DIR/redis-backup-note.txt")
 EOF
 
 chmod 600 "$BACKUP_DIR"/*.dump "$BACKUP_DIR"/*.tar.gz "$BACKUP_DIR"/*.txt

@@ -12,7 +12,7 @@ function tokens(company: string, device: string) {
     store_device_id: device, station_key: "counter-1", permissions, exp: Math.floor(Date.now()/1000)+3600 };
   return { access_token: `test.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.fixture`, refresh_token: `test-refresh-${company}`, user, business_slug: company === companyA ? "company-one" : "company-two" };
 }
-async function mockApi(page: Page) {
+async function mockApi(page: Page, options: { catalogFailure?: boolean } = {}) {
   await page.route("https://uat-takeaway.foodchainservice.com/api/v1/**", async (route) => {
     const request = route.request(), url = new URL(request.url());
     let data: unknown = [];
@@ -25,12 +25,15 @@ async function mockApi(page: Page) {
       const body = request.postDataJSON(); data = tokens(body.business_code === "company-one" ? companyA : companyB, body.device_id);
     } else if (url.pathname.endsWith("/takeaway/status")) data = { enabled: true, writes_enabled: false, company_id: request.headers()["x-company-id"], branch_id: branch, brand_id: brand, hard_holds: [] };
     else if (url.pathname.endsWith("/takeaway/catalog/categories")) data = [{ id: "category-drink", name: "เครื่องดื่ม" }];
-    else if (url.pathname.endsWith("/takeaway/catalog/items")) data = [{
+    else if (url.pathname.endsWith("/takeaway/catalog/items")) {
+      if (options.catalogFailure) return route.fulfill({ status: 500, json: { detail: "catalog unavailable" } });
+      data = [{
       item: { id: "item-coffee", brand_id: brand, category_id: "category-drink", sku: "CF-001", barcode: "885000000001",
         name: "กาแฟเย็น", description: "หวานน้อย", image_url: null, price: "55.00", unit: "แก้ว", tax_rate: "7.00",
         kitchen_station: "drink", track_stock: true, sort_order: 1, is_featured: true, is_active: true },
       effective_price: "55.00", branch_is_available: true, available_qty: "8.00", is_available: true,
-    }];
+      }];
+    }
     return route.fulfill({ json: { data, meta: {}, error: null } });
   });
 }
@@ -74,6 +77,14 @@ test("Store product list shows customer-facing content and actual branch stock",
   await expect(page.getByText("พร้อมขาย 8", { exact: true })).toBeVisible();
   await page.getByPlaceholder("ค้นหาชื่อสินค้า SKU หรือบาร์โค้ด").fill("ไม่พบ");
   await expect(page.getByText("ไม่พบสินค้า", { exact: true })).toBeVisible();
+});
+
+test("Store product list reports API failure instead of pretending the catalog is empty", async ({ page }) => {
+  await mockApi(page, { catalogFailure: true }); await page.goto("/"); await login(page, "company-one");
+  await page.getByRole("link", { name: "สินค้า", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("โหลดรายการสินค้าไม่สำเร็จ");
+  await expect(page.getByRole("button", { name: "ลองใหม่", exact: true })).toBeVisible();
+  await expect(page.getByText("ไม่พบสินค้า", { exact: true })).toHaveCount(0);
 });
 
 test("logout clears session; same APK resolves and logs into another company", async ({ page }) => {

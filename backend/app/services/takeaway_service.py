@@ -285,6 +285,21 @@ class TakeawayService:
         await self.db.refresh(item)
         return item
 
+    async def _sale_location_id(self, branch_id: uuid.UUID) -> uuid.UUID:
+        location_id = await self.db.scalar(
+            select(TakeawayStockLocation.id)
+            .where(
+                TakeawayStockLocation.company_id == self.current.company_id,
+                TakeawayStockLocation.branch_id == branch_id,
+                TakeawayStockLocation.location_type == "store",
+                TakeawayStockLocation.is_active.is_(True),
+            )
+            .order_by(TakeawayStockLocation.created_at, TakeawayStockLocation.id)
+            .limit(1)
+        )
+        # Legacy Phase-6 fixtures use the branch id as a virtual Store location.
+        return location_id or branch_id
+
     async def list_catalog(
         self,
         brand_id: uuid.UUID,
@@ -298,6 +313,7 @@ class TakeawayService:
         ]
         stock_totals = None
         if branch_id is not None:
+            sale_location_id = await self._sale_location_id(branch_id)
             stock_totals = (
                 select(
                     TakeawayStockBalance.item_id.label("item_id"),
@@ -306,15 +322,10 @@ class TakeawayService:
                         0,
                     ).label("available_qty"),
                 )
-                .join(
-                    TakeawayStockLocation,
-                    TakeawayStockLocation.id == TakeawayStockBalance.location_id,
-                )
                 .where(
                     TakeawayStockBalance.company_id == self.current.company_id,
-                    TakeawayStockLocation.branch_id == branch_id,
-                    TakeawayStockLocation.location_type == "store",
-                    TakeawayStockLocation.is_active.is_(True),
+                    TakeawayStockBalance.location_id == sale_location_id,
+                    TakeawayStockBalance.lot_code == "",
                 )
                 .group_by(TakeawayStockBalance.item_id)
                 .subquery()
@@ -610,7 +621,7 @@ class TakeawayService:
             await self.db.flush()
         previous_qty = Decimal(balance.on_hand_qty)
         resulting_qty = previous_qty + delta
-        if resulting_qty < 0:
+        if resulting_qty < Decimal(balance.reserved_qty):
             raise HTTPException(status_code=409, detail="Insufficient Takeaway stock")
         if delta > 0 and unit_cost >= 0:
             previous_value = previous_qty * Decimal(balance.average_cost)
@@ -930,18 +941,7 @@ class TakeawayService:
                 select(TakeawayOrderItem).where(TakeawayOrderItem.order_id == order.id)
             )
         )
-        store_location_id = await self.db.scalar(
-            select(TakeawayStockLocation.id)
-            .where(
-                TakeawayStockLocation.company_id == self.current.company_id,
-                TakeawayStockLocation.branch_id == order.branch_id,
-                TakeawayStockLocation.location_type == "store",
-                TakeawayStockLocation.is_active.is_(True),
-            )
-            .order_by(TakeawayStockLocation.created_at, TakeawayStockLocation.id)
-            .limit(1)
-        )
-        sale_location_id = store_location_id or order.branch_id
+        sale_location_id = await self._sale_location_id(order.branch_id)
         raw_stock_item_ids = (order.source_metadata or {}).get("stock_item_ids", [])
         stock_item_ids = (
             {str(value) for value in raw_stock_item_ids}
@@ -1144,21 +1144,7 @@ class TakeawayService:
         )
         self.db.add(order)
         await self.db.flush()
-        store_location_id = await self.db.scalar(
-            select(TakeawayStockLocation.id)
-            .where(
-                TakeawayStockLocation.company_id == self.current.company_id,
-                TakeawayStockLocation.branch_id == data.branch_id,
-                TakeawayStockLocation.location_type == "store",
-                TakeawayStockLocation.is_active.is_(True),
-            )
-            .order_by(TakeawayStockLocation.created_at, TakeawayStockLocation.id)
-            .limit(1)
-        )
-        # Existing pre-Phase-6 fixtures use the branch id as a virtual store
-        # location. Keep that fallback while preferring the explicit location
-        # created by setup/import for all new tenants.
-        sale_location_id = store_location_id or data.branch_id
+        sale_location_id = await self._sale_location_id(data.branch_id)
         receipt_lines: list[dict[str, object]] = []
         for line, item, unit_price, line_subtotal, line_tax in prepared:
             order_item = TakeawayOrderItem(

@@ -18,6 +18,7 @@ from app.models.takeaway import (
 )
 from app.routers import takeaway
 from app.schemas.takeaway import (
+    TakeawayCatalogItemUpdate,
     TakeawayPaymentCreate,
     TakeawayProductionBatchCreate,
     TakeawayProductionLineCreate,
@@ -44,6 +45,13 @@ def token(*, business_type: str = "takeaway", permissions: list[str] | None = No
 class TakeawayServicePolicyTests(unittest.TestCase):
     def test_money_uses_two_decimal_half_up_rounding(self) -> None:
         self.assertEqual(money(Decimal("10.125")), Decimal("10.13"))
+
+    def test_catalog_update_rejects_explicit_null_for_required_columns(self) -> None:
+        for field in ("name", "price", "track_stock", "is_active"):
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                TakeawayCatalogItemUpdate.model_validate({field: None})
+        payload = TakeawayCatalogItemUpdate(description=None)
+        self.assertEqual(payload.model_dump(exclude_unset=True), {"description": None})
 
     def test_cross_business_and_cross_branch_access_fail_closed(self) -> None:
         restaurant = token(business_type="restaurant")

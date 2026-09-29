@@ -182,6 +182,7 @@ async def run() -> None:
                 )
             )
             store_location = TakeawayStockLocation(
+                id=uuid.UUID("00000000-0000-4000-8000-000000000001"),
                 company_id=company_id,
                 branch_id=branch_id,
                 code=f"STORE-{str(branch_id)[:8]}",
@@ -190,7 +191,7 @@ async def run() -> None:
             )
             db.add(store_location)
             await db.flush()
-            await service_a.create_stock_movement(
+            primary_balance = await service_a.create_stock_movement(
                 TakeawayStockMovementCreate(
                     location_id=store_location.id,
                     item_id=item.id,
@@ -202,12 +203,64 @@ async def run() -> None:
                     idempotency_key=f"smoke-receive-{uuid.uuid4()}",
                 )
             )
+            primary_balance.reserved_qty = Decimal("3")
+            secondary_location = TakeawayStockLocation(
+                id=uuid.UUID("00000000-0000-4000-8000-000000000002"),
+                company_id=company_id,
+                branch_id=branch_id,
+                code=f"STORE-SECONDARY-{str(branch_id)[:8]}",
+                name="Smoke Secondary Store",
+                location_type="store",
+            )
+            db.add(secondary_location)
+            await db.flush()
+            await service_a.create_stock_movement(
+                TakeawayStockMovementCreate(
+                    location_id=store_location.id,
+                    item_id=item.id,
+                    lot_code="LOT-TEST",
+                    quantity_delta=Decimal("50"),
+                    unit_cost=Decimal("40"),
+                    movement_type="receive",
+                    brand_id=brand_a,
+                    branch_id=branch_id,
+                    idempotency_key=f"smoke-receive-named-lot-{uuid.uuid4()}",
+                )
+            )
+            await service_a.create_stock_movement(
+                TakeawayStockMovementCreate(
+                    location_id=secondary_location.id,
+                    item_id=item.id,
+                    quantity_delta=Decimal("100"),
+                    unit_cost=Decimal("40"),
+                    movement_type="receive",
+                    brand_id=brand_a,
+                    branch_id=branch_id,
+                    idempotency_key=f"smoke-receive-secondary-{uuid.uuid4()}",
+                )
+            )
+            zero_item = await service_a.create_catalog_item(
+                TakeawayCatalogItemCreate(
+                    brand_id=brand_a,
+                    category_id=category.id,
+                    sku="SMOKE-ZERO-1",
+                    name="สินค้าสต๊อกศูนย์",
+                    price=Decimal("20"),
+                    track_stock=True,
+                    sort_order=2,
+                )
+            )
             catalog_rows = await service_a.list_catalog(brand_a, branch_id)
-            assert len(catalog_rows) == 1
-            assert catalog_rows[0]["item"].description == "เมนูทดสอบสำหรับหน้าร้าน"
-            assert catalog_rows[0]["item"].image_url == "https://example.com/smoke-food.jpg"
-            assert catalog_rows[0]["available_qty"] == Decimal("10")
-            assert catalog_rows[0]["is_available"] is True
+            assert len(catalog_rows) == 2
+            rows_by_id = {row["item"].id: row for row in catalog_rows}
+            assert rows_by_id[item.id]["item"].description == "เมนูทดสอบสำหรับหน้าร้าน"
+            assert rows_by_id[item.id]["item"].image_url == "https://example.com/smoke-food.jpg"
+            # Only the primary Store location and the sale lot are sellable.
+            # Named lots and secondary Store locations must not overstate checkout stock.
+            assert rows_by_id[item.id]["available_qty"] == Decimal("7")
+            assert rows_by_id[item.id]["is_available"] is True
+            assert rows_by_id[zero_item.id]["available_qty"] is None
+            assert rows_by_id[zero_item.id]["is_available"] is False
             updated_item = await service_a.update_catalog_item(
                 item.id,
                 TakeawayCatalogItemUpdate(description="รายละเอียดที่แก้ไข", sort_order=2),
@@ -232,6 +285,11 @@ async def run() -> None:
             replay_order, replay_token, was_replayed = await service_a.create_sale(sale_payload)
             assert not replayed and pickup_token and was_replayed and replay_token is None
             assert replay_order.id == order.id
+            after_sale_rows = {
+                row["item"].id: row
+                for row in await service_a.list_catalog(brand_a, branch_id)
+            }
+            assert after_sale_rows[item.id]["available_qty"] == Decimal("5")
             receipt = await service_a.get_receipt(order.id)
             receipt, print_replayed = await service_a.mark_receipt_printed(
                 order.id,

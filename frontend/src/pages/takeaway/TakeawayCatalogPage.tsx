@@ -168,7 +168,13 @@ export default function TakeawayCatalogPage({ mode = "store" }: { mode?: Catalog
       </div>
     </section>
 
-    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+    {catalogQuery.isError ? <section role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-rose-900">
+      <h2 className="font-black">โหลดรายการสินค้าไม่สำเร็จ</h2>
+      <p className="mt-1 text-sm">ตรวจการเชื่อมต่อหรือการอัปเดตระบบ แล้วลองอีกครั้ง</p>
+      <button onClick={() => void catalogQuery.refetch()} className="mt-4 rounded-xl bg-rose-700 px-4 py-2 text-sm font-black text-white">ลองใหม่</button>
+    </section> : null}
+
+    {!catalogQuery.isError ? <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
       {rows.map((row) => {
         const availableQty = row.available_qty == null ? null : Number(row.available_qty);
         return <article key={row.item.id} className={`overflow-hidden rounded-2xl border bg-white shadow-sm ${row.is_available ? "border-slate-200" : "border-rose-200 opacity-75"}`}>
@@ -186,7 +192,7 @@ export default function TakeawayCatalogPage({ mode = "store" }: { mode?: Catalog
         </article>;
       })}
       {!catalogQuery.isLoading && rows.length === 0 ? <div className="col-span-full rounded-2xl border border-dashed bg-white p-10 text-center text-slate-500"><PackageSearch className="mx-auto h-10 w-10" /><p className="mt-3 font-bold">ไม่พบสินค้า</p></div> : null}
-    </section>
+    </section> : null}
 
     {formOpen ? <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm">
       <form onSubmit={(event) => { event.preventDefault(); saveMutation.mutate(); }} className="mx-auto max-w-3xl rounded-3xl bg-white p-5 shadow-2xl md:p-7">

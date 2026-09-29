@@ -86,6 +86,28 @@ class TakeawayCatalogItemUpdate(BaseSchema):
     def normalize_required_text(cls, value: str | None) -> str | None:
         return _text(value) if value is not None else None
 
+    @model_validator(mode="after")
+    def reject_explicit_null_for_required_fields(self) -> "TakeawayCatalogItemUpdate":
+        required_fields = {
+            "sku",
+            "name",
+            "unit",
+            "price",
+            "tax_rate",
+            "track_stock",
+            "sort_order",
+            "is_featured",
+            "is_active",
+        }
+        invalid = sorted(
+            field
+            for field in required_fields & self.model_fields_set
+            if getattr(self, field) is None
+        )
+        if invalid:
+            raise ValueError(f"fields cannot be null: {', '.join(invalid)}")
+        return self
+
 
 class TakeawayBranchAvailabilityUpdate(BaseSchema):
     price_override: Decimal | None = Field(default=None, ge=0)

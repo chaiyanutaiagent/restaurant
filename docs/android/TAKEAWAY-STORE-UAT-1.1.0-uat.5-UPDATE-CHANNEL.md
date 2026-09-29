@@ -1,8 +1,8 @@
-# Takeaway Store UAT 1.1.0-uat.4 — signed update channel
+# Takeaway Store UAT 1.1.0-uat.5 — signed update channel
 
 Date: 2026-09-29  
 Status: **DEPLOYED TO UAT / PHYSICAL UPGRADE TEST PENDING**  
-Source commit: `2a9d19933aa6171e453888605561518a85e9a56a`
+Source commit: `1ce101f82ea48b85f92a100f2eb76f7ea6166c1e`
 
 ## Outcome
 
@@ -11,15 +11,15 @@ Source commit: `2a9d19933aa6171e453888605561518a85e9a56a`
 - The native updater allows only Foodchainservice HTTPS hosts and verifies manifest signature, APK SHA-256, package id, version code and APK signer before opening Android Package Installer.
 - The update is an in-place install. The company session, secure credentials, offline queue and printer configuration are not cleared.
 - Android still requires the user to authorize `Install unknown apps` once and confirm each installation. Silent installation requires managed-device/MDM ownership and is outside this sideloaded UAT channel.
-- `uat.2` and `uat.3` cannot discover this channel because they were built without the Store updater. They require one manual in-place installation of `uat.4`; later releases can be discovered from inside the app.
+- `uat.2` and `uat.3` cannot discover this channel because they were built without the Store updater. They require one manual in-place installation of `uat.5`; later releases can be discovered from inside the app. The internal `uat.4` pre-release was superseded before handoff because its update check started only after login.
 
 ## Published UAT artifact
 
 - Package: `com.foodchainservice.takeaway.uat`
-- Version: `1.1.0-uat.4` / `10103`
-- APK: `https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/foodchainservice-takeaway-store-1.1.0-uat.4.apk`
+- Version: `1.1.0-uat.5` / `10104`
+- APK: `https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/foodchainservice-takeaway-store-1.1.0-uat.5.apk`
 - Manifest: `https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/latest.json`
-- APK SHA-256: `f56fc8330242e7d60099df7a2f04f131b38f85fe29dd37f7e9c820fd3bc35c1e`
+- APK SHA-256: `1cba9a9a98b6f2cccb2c4701aa06a426741d897343807db7cf5e8fa65b7fdb61`
 - Android signing certificate SHA-256: `acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5`
 - Manifest signing key: Ed25519; private key remains only in the ignored local `.secrets` directory and was not uploaded to the UAT host.
 
@@ -32,7 +32,7 @@ Source commit: `2a9d19933aa6171e453888605561518a85e9a56a`
 | Store bundle boundary | PASS: 6 compiled files |
 | Android unit, lint, assemble | PASS |
 | Finished APK boundary | PASS: 8 embedded assets |
-| APK package/version | PASS: `com.foodchainservice.takeaway.uat`, `1.1.0-uat.4`, `10103` |
+| APK package/version | PASS: `com.foodchainservice.takeaway.uat`, `1.1.0-uat.5`, `10104` |
 | APK signatures | PASS: v1 and v2; same debug signer as `uat.2`/`uat.3` |
 | Published manifest signature + downloaded APK hash | PASS |
 | Manifest CORS/cache policy | PASS: `Access-Control-Allow-Origin: *`, `no-store` |
@@ -49,7 +49,7 @@ Source commit: `2a9d19933aa6171e453888605561518a85e9a56a`
 
 ## Remaining physical proof
 
-1. Install `uat.4` over the currently installed UAT package without uninstalling it.
+1. Install `uat.5` over the currently installed UAT package without uninstalling it.
 2. Confirm login/session, pending offline records and printer pairing remain intact.
 3. Publish a higher test build and verify app-open detection, one-time unknown-app permission, download validation and Android confirmation.
 4. Relaunch and confirm the installed version no longer shows the update gate.

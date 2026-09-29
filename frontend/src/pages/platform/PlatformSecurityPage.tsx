@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { platformApi, platformErrorMessage } from "@/lib/platformApi";
+import { isPlatformPasswordValid, platformPasswordRules } from "@/lib/platformPasswordPolicy";
 import { usePlatformAuthStore } from "@/stores/platform-auth.store";
 import type { PlatformMfaSetup } from "@/types/platform";
 
@@ -23,6 +24,7 @@ export default function PlatformSecurityPage(): JSX.Element {
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const newPasswordValid = isPlatformPasswordValid(newPassword);
 
   const sessions = useQuery({
     queryKey: ["platform", "security", "sessions"],
@@ -156,10 +158,10 @@ export default function PlatformSecurityPage(): JSX.Element {
         <div className="flex items-center gap-3"><KeyRound className="h-6 w-6 text-violet-300" /><div><h3 className="text-xl font-semibold">เปลี่ยนรหัสผ่าน</h3><p className="text-sm text-slate-400">เมื่อเปลี่ยนสำเร็จทุก session จะถูกเพิกถอน</p></div></div>
         <div className="mt-5 grid gap-4 md:grid-cols-3">
           <div className="space-y-2"><Label htmlFor="current-password">รหัสผ่านปัจจุบัน</Label><Input id="current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></div>
-          <div className="space-y-2"><Label htmlFor="new-password">รหัสผ่านใหม่อย่างน้อย 12 ตัว</Label><Input id="new-password" type="password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></div>
+          <div className="space-y-2"><Label htmlFor="new-password">รหัสผ่านใหม่</Label><Input id="new-password" type="password" minLength={12} maxLength={128} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /><ul className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">{platformPasswordRules.map((rule) => <li key={rule.label} className={rule.valid(newPassword) ? "text-emerald-300" : "text-slate-500"}>{rule.valid(newPassword) ? "✓" : "○"} {rule.label}</li>)}</ul></div>
           <div className="space-y-2"><Label htmlFor="password-mfa">MFA (ถ้าเปิดใช้งาน)</Label><Input id="password-mfa" value={mfaCode} onChange={(event) => setMfaCode(event.target.value)} /></div>
         </div>
-        <Button className="mt-5" onClick={() => changePassword.mutate()} disabled={!currentPassword || newPassword.length < 12 || changePassword.isPending}>เปลี่ยนรหัสผ่านและออกทุกเครื่อง</Button>
+        <Button className="mt-5" onClick={() => changePassword.mutate()} disabled={!currentPassword || !newPasswordValid || changePassword.isPending}>เปลี่ยนรหัสผ่านและออกทุกเครื่อง</Button>
       </section>
     </div>
   );

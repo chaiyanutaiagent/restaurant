@@ -1,0 +1,78 @@
+{
+  "scope": "WP84-PRODUCTION-ALIGNMENT-STRIPE-TEST-MODE-01",
+  "generated_at": "2026-09-29T07:21:45+07:00",
+  "release": {
+    "git_commit": "da8ab2afe5050e6ba5d3fd35a7139752c50c109a",
+    "source_archive_sha256": "9946bb884429469ba6b2ba3597437934484bf2057fe87a4e7deac417dc17b2e8",
+    "immutable_images": false,
+    "backend_image_digest": null,
+    "frontend_image_digest": null,
+    "status": "local_candidate_only"
+  },
+  "automated_evidence": {
+    "backend_regression": {"status": "passed", "passed": 597, "skipped": 1},
+    "frontend_typecheck": {"status": "passed"},
+    "frontend_production_build": {"status": "passed", "baseline_bundle_warning": true},
+    "saas_static_boundary": {"status": "passed"},
+    "backend_container_build": {"status": "passed"},
+    "migration_rehearsal": {
+      "status": "passed_local_clones",
+      "legacy": "wp84stripe0027",
+      "platform": "p16platform0020",
+      "restaurant": "wp84restaurant0008",
+      "retail": "wp84retail0008"
+    }
+  },
+  "uat_candidate": {
+    "status": "not_deployed",
+    "url": "https://uat-pos.foodchainservice.com",
+    "previous_verified_release": "dfb2441549950a865389010c8462757501655f53",
+    "reason": "Current WP84 commit has not been deployed or verified on UAT.",
+    "read_only_connectivity": {
+      "verified_at": "2026-09-29T07:23:15+07:00",
+      "uat_pos_ready": 200,
+      "uat_app": 200,
+      "uat_restaurant": 200,
+      "uat_retail": 200,
+      "uat_takeaway": 200,
+      "observed_backend_version": "showcase-4f5c6e2",
+      "status": "online_but_not_current_candidate"
+    }
+  },
+  "backup_and_recovery": {
+    "backup_script": "ready_manifest_v2",
+    "five_database_boundaries": true,
+    "uploads_checksum": true,
+    "redis_checksum": true,
+    "runtime_configuration_fingerprints": true,
+    "current_candidate_restore_drill": "pending"
+  },
+  "physical_evidence": {
+    "receipt_printing": "passed_on_tested_80mm_device",
+    "cash_drawer_cash_payment": "passed_on_tested_device",
+    "non_cash_receipt_flows": "confirmed_by_owner",
+    "restaurant_full_pilot": "pending",
+    "retail_full_pilot": "pending",
+    "scanner_ipad_and_network_recovery": "pending_or_not_evidenced"
+  },
+  "external_gates": {
+    "platform_operator_mfa": "pending",
+    "accountant_tax_review": "pending",
+    "production_master_data_mapping_approval": "pending",
+    "restaurant_physical_pilot_signoff": "pending",
+    "retail_physical_pilot_signoff": "pending",
+    "monitoring_owner_and_alert_route": "pending",
+    "rollback_owner_and_rto": "pending",
+    "production_smtp": "pending"
+  },
+  "payment_scope": {
+    "cash_only_pilot": "technically_available_subject_to_release_gates",
+    "stripe_test_mode": "uat_only",
+    "stripe_live": "not_implemented_and_not_authorized"
+  },
+  "owner_decision": {
+    "decision": "no_go",
+    "reason": "Current commit has no immutable image digests, UAT deployment, current restore drill, or completed external approvals."
+  },
+  "production_activation": {"status": "not_started"}
+}

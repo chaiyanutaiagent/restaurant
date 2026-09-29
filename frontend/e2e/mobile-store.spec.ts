@@ -134,11 +134,47 @@ test("old responses and failed refresh cannot replace or clear a new employee se
   expect(result).toEqual({ staleDenied: true, company: companyB, user: `user-${companyB}` });
 });
 
-test("legacy full-app updater is disabled for Store candidate", async ({ page }) => {
+test("Store updater rejects an unconfigured or unverified release channel", async ({ page }) => {
   await page.goto("/");
   const denied = await page.evaluate(async () => {
     const path = "/src/mobile-store/appUpdate.ts", { loadTakeawayRelease } = await import(path);
     try { await loadTakeawayRelease(); return false; } catch { return true; }
   });
   expect(denied).toBe(true);
+});
+
+test("Store updater accepts only the matching signed manifest payload", async ({ page }) => {
+  await page.goto("/");
+  const result = await page.evaluate(async () => {
+    const path = "/src/mobile-store/appUpdate.ts";
+    const { verifyTakeawayStoreReleaseManifest } = await import(path);
+    const keys = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+    const publicKey = await crypto.subtle.exportKey("spki", keys.publicKey);
+    const pem = `-----BEGIN PUBLIC KEY-----\n${btoa(String.fromCharCode(...new Uint8Array(publicKey)))}\n-----END PUBLIC KEY-----`;
+    const manifest = {
+      surface: "takeaway_store" as const,
+      channel: "uat" as const,
+      package_id: "com.foodchainservice.takeaway.uat",
+      version_name: "1.1.0-uat.fixture",
+      version_code: 10104,
+      minimum_supported_version_code: 10103,
+      rollback_version_code: 10103,
+      apk_url: "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/fixture.apk",
+      apk_sha256: "a".repeat(64),
+      published_at: "2026-09-29T00:00:00.000Z",
+      signature: "",
+    };
+    const payload = JSON.stringify({
+      apk_sha256: manifest.apk_sha256, apk_url: manifest.apk_url, channel: manifest.channel,
+      minimum_supported_version_code: manifest.minimum_supported_version_code, package_id: manifest.package_id,
+      published_at: manifest.published_at, rollback_version_code: manifest.rollback_version_code,
+      surface: manifest.surface, version_code: manifest.version_code, version_name: manifest.version_name,
+    });
+    const signature = await crypto.subtle.sign({ name: "Ed25519" }, keys.privateKey, new TextEncoder().encode(payload));
+    manifest.signature = btoa(String.fromCharCode(...new Uint8Array(signature)));
+    const valid = await verifyTakeawayStoreReleaseManifest(manifest, pem);
+    const tampered = await verifyTakeawayStoreReleaseManifest({ ...manifest, version_code: 10105 }, pem);
+    return { valid, tampered };
+  });
+  expect(result).toEqual({ valid: true, tampered: false });
 });

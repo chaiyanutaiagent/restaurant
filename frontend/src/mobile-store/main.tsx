@@ -14,6 +14,7 @@ import { cleanupStoreData } from "./db";
 import { onboardingApi } from "./api";
 import Onboarding from "./Onboarding";
 import { StoreCreditPage, StoreTransfersPage } from "./StoreSupportPages";
+import UpdateGate from "./UpdateGate";
 import "../index.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -51,7 +52,7 @@ function StoreApp(): JSX.Element {
   </header>{error && <p role="alert" className="bg-red-50 p-4 text-red-800">{error}</p>}<main className="p-3 md:p-5">
     <Routes><Route path="/" element={<Navigate to={visible[0]?.path || "/login"} replace />} /><Route path="/login" element={<Navigate to={visible[0]?.path || "/"} replace />} />
       {STORE_ROUTES.map((route, index) => { const Page = pages[index]; return <Route key={route.path} path={route.path} element={allowedStoreRoute(route.path, session.permissions) ? <Page /> : <p role="alert">ไม่มีสิทธิ์ใช้งานหน้านี้</p>} />; })}
-    </Routes></main><Toaster /></>;
+    </Routes></main><UpdateGate /><Toaster /></>;
 }
 document.title = "Foodchainservice Takeaway Store UAT";
 document.documentElement.classList.add("native-app", "native-android");

@@ -6,8 +6,13 @@ export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, process.cwd(), ""), ...process.env };
   if (mode !== "android-uat" || env.VITE_UAT_AUTO_LOGIN !== "false"
       || env.VITE_COMPANY_ID || env.VITE_BUSINESS_SLUG
-      || env.VITE_API_BASE_URL !== "https://uat-takeaway.foodchainservice.com") {
-    throw new Error("Store candidate requires UAT HTTPS, auto-login=false, and no default tenant");
+      || env.VITE_API_BASE_URL !== "https://uat-takeaway.foodchainservice.com"
+      || env.VITE_TAKEAWAY_STORE_RELEASE_CHANNEL !== "uat"
+      || env.VITE_TAKEAWAY_STORE_PACKAGE_ID !== "com.foodchainservice.takeaway.uat"
+      || !/^https:\/\/uat-takeaway\.foodchainservice\.com\//.test(env.VITE_TAKEAWAY_STORE_RELEASE_MANIFEST_URL || "")
+      || !/BEGIN PUBLIC KEY/.test(env.VITE_TAKEAWAY_STORE_RELEASE_PUBLIC_KEY || "")
+      || /REPLACE_WITH/.test(env.VITE_TAKEAWAY_STORE_RELEASE_PUBLIC_KEY || "")) {
+    throw new Error("Store candidate requires isolated UAT API, package and signed update channel");
   }
   return {
     cacheDir: "node_modules/.vite-mobile-store",

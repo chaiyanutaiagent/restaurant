@@ -10,10 +10,14 @@ from app.utils.password_policy import validate_platform_password
 
 class PlatformPasswordPolicyTests(unittest.TestCase):
     def test_accepts_password_with_all_required_character_classes(self) -> None:
-        password = "Strong-Owner-12!"
+        password = "Abcd12!x"
         self.assertEqual(validate_platform_password(password), password)
         invitation = PlatformOperatorInvitationAccept(token="t" * 32, password=password)
         self.assertEqual(invitation.password, password)
+
+    def test_rejects_password_shorter_than_eight_characters(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_platform_password("Ab1!xyz")
 
     def test_rejects_password_without_uppercase_number_or_special_character(self) -> None:
         for password in (

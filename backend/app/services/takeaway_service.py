@@ -558,6 +558,16 @@ class TakeawayService:
         return balance
 
     async def create_stock_movement(self, data: TakeawayStockMovementCreate) -> TakeawayStockBalance:
+        if self.current.client_surface == "takeaway_store":
+            await self._store_location(data.location_id)
+            assert_takeaway_scope(self.current, brand_id=data.brand_id, branch_id=data.branch_id)
+            item = await self.db.scalar(select(TakeawayCatalogItem.id).where(
+                TakeawayCatalogItem.id == data.item_id,
+                TakeawayCatalogItem.company_id == self.current.company_id,
+                TakeawayCatalogItem.brand_id == self.current.brand_id,
+            ))
+            if item is None:
+                raise HTTPException(404, "Store item not found")
         if data.brand_id is not None:
             await self._validate_context(brand_id=data.brand_id, branch_id=data.branch_id)
         balance = await self._apply_stock(**data.model_dump())
@@ -592,6 +602,8 @@ class TakeawayService:
                 TakeawayStockLocation,
                 TakeawayStockLocation.id == TakeawayStockBalance.location_id,
             ).where(TakeawayStockLocation.branch_id == self.current.branch_id)
+            if self.current.client_surface == "takeaway_store":
+                statement = statement.where(TakeawayStockLocation.location_type.in_(["store", "waste"]))
         if location_id is not None:
             statement = statement.where(TakeawayStockBalance.location_id == location_id)
         return list(await self.db.scalars(statement.order_by(TakeawayStockBalance.item_id)))
@@ -612,6 +624,12 @@ class TakeawayService:
             )
         if self.current.branch_id is not None:
             statement = statement.where(TakeawayStockMovement.branch_id == self.current.branch_id)
+        if self.current.client_surface == "takeaway_store":
+            statement = statement.join(TakeawayStockLocation, TakeawayStockLocation.id == TakeawayStockMovement.location_id).where(
+                TakeawayStockLocation.company_id == self.current.company_id,
+                TakeawayStockLocation.branch_id == self.current.branch_id,
+                TakeawayStockLocation.location_type.in_(["store", "waste"]),
+            )
         if location_id is not None:
             statement = statement.where(TakeawayStockMovement.location_id == location_id)
         return list(
@@ -627,6 +645,8 @@ class TakeawayService:
         )
         if self.current.branch_id is not None:
             statement = statement.where(TakeawayStockLocation.branch_id == self.current.branch_id)
+        if self.current.client_surface == "takeaway_store":
+            statement = statement.where(TakeawayStockLocation.location_type.in_(["store", "waste"]))
         return list(await self.db.scalars(statement.order_by(TakeawayStockLocation.name)))
 
     async def create_ordering_link(
@@ -2565,6 +2585,10 @@ class TakeawayService:
         )
         if row is None:
             raise HTTPException(status_code=404, detail="Takeaway transfer not found")
+        if self.current.client_surface == "takeaway_store":
+            if stage != "received":
+                raise HTTPException(403, "Store can only receive transfers")
+            await self._store_location(row.to_location_id)
         if row.brand_id is not None:
             assert_takeaway_scope(self.current, brand_id=row.brand_id)
         expected = "draft" if stage == "shipped" else "shipped"
@@ -2617,6 +2641,7 @@ class TakeawayService:
                         movement_type="transfer_in",
                         idempotency_key=f"transfer:{data.idempotency_key}:{item.id}:in",
                         brand_id=row.brand_id,
+                        branch_id=self.current.branch_id if self.current.client_surface == "takeaway_store" else None,
                         transfer_id=row.id,
                     )
         row.status = "received" if stage == "received" else "shipped"
@@ -3171,6 +3196,35 @@ class TakeawayService:
         if effective_brand is not None:
             statement = statement.where(TakeawayTransfer.brand_id == effective_brand)
         return list(await self.db.scalars(statement.order_by(TakeawayTransfer.created_at.desc()).limit(limit)))
+
+    async def _store_location(self, location_id: uuid.UUID):
+        location = await self.db.scalar(select(TakeawayStockLocation).where(
+            TakeawayStockLocation.id == location_id,
+            TakeawayStockLocation.company_id == self.current.company_id,
+            TakeawayStockLocation.branch_id == self.current.branch_id,
+            TakeawayStockLocation.location_type.in_(["store", "waste"]),
+            TakeawayStockLocation.is_active.is_(True),
+        ))
+        if location is None:
+            raise HTTPException(404, "Store location not found in the signed branch")
+        return location
+
+    async def list_store_transfers(self):
+        rows = list(await self.db.scalars(select(TakeawayTransfer).join(
+            TakeawayStockLocation, TakeawayStockLocation.id == TakeawayTransfer.to_location_id,
+        ).where(
+            TakeawayTransfer.company_id == self.current.company_id,
+            TakeawayStockLocation.company_id == self.current.company_id,
+            TakeawayStockLocation.branch_id == self.current.branch_id,
+            TakeawayStockLocation.location_type == "store",
+        ).order_by(TakeawayTransfer.created_at.desc()).limit(100)))
+        items = list(await self.db.scalars(select(TakeawayTransferItem).where(
+            TakeawayTransferItem.transfer_id.in_([row.id for row in rows]),
+        ))) if rows else []
+        return [{"id": row.id, "transfer_number": row.transfer_number, "status": row.status,
+                 "items": [{"id": item.id, "item_id": item.item_id, "unit": item.unit,
+                            "shipped_qty": item.shipped_qty, "received_qty": item.received_qty}
+                           for item in items if item.transfer_id == row.id]} for row in rows]
 
     async def list_credit_accounts(
         self,

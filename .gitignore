@@ -49,3 +49,4 @@ releases/*
 logs/
 uploads/
 backend/uploads/
+frontend/dist-mobile-store/

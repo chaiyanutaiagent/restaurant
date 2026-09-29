@@ -590,6 +590,12 @@ PERMISSIONS: list[dict[str, str]] = [
         "description": "Plan, start, complete, and cancel brand production batches.",
     },
     {
+        "code": "takeaway.store.access",
+        "name": "Access Takeaway Store mobile app",
+        "module": "takeaway",
+        "description": "Sign in to the branch-limited Takeaway Store mobile surface.",
+    },
+    {
         "code": "takeaway.catalog.view",
         "name": "View Takeaway Catalog",
         "module": "takeaway",

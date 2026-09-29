@@ -22,6 +22,7 @@ from app.services.platform_reference_projection import enqueue_reference_event
 from app.business_context import CanonicalBusinessContext
 from app.services.staff_scope_policy import assignment_applies_to_context, normalized_station_key
 from app.services.saas_membership_service import membership_access_error
+from app.services.mobile_store_policy import MOBILE_STORE_SURFACE, store_permissions
 from app.utils.security import (
     create_access_token,
     create_refresh_token,
@@ -191,6 +192,8 @@ class AuthService:
         station_key: str | None = None,
         qa_persona: str | None = None,
         qa_deadline: datetime | None = None,
+        client_surface: str | None = None,
+        store_device_id: str | None = None,
     ) -> tuple[str, str]:
         company = await self.db.get(Company, user.company_id)
         if company is None or not company.is_active:
@@ -206,6 +209,10 @@ class AuthService:
             assignment_ids,
             scope_types,
         ) = await self.get_user_permissions(user, branch_id, station_key)
+        if client_surface == MOBILE_STORE_SURFACE:
+            permissions = store_permissions(user=user, context=context, permissions=permissions, device_id=store_device_id)
+            scope_types = ["branch"]
+            resolved_station_key = resolved_station_key or normalized_station_key(station_key)
         session_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
         qa_deadline = qa_deadline or (
@@ -227,6 +234,8 @@ class AuthService:
             company_credential_version=company.credential_version,
             user_credential_version=getattr(user, "credential_version", 1),
             session_id=str(session_id),
+            client_surface=client_surface,
+            store_device_id=store_device_id,
             expires_delta=expires_delta,
             qa_persona=qa_persona,
             qa_deadline=qa_deadline,
@@ -239,6 +248,8 @@ class AuthService:
             company_credential_version=company.credential_version,
             user_credential_version=getattr(user, "credential_version", 1),
             session_id=str(session_id),
+            client_surface=client_surface,
+            store_device_id=store_device_id,
             expires_delta=expires_delta,
             qa_persona=qa_persona,
             qa_deadline=qa_deadline,
@@ -365,6 +376,12 @@ class AuthService:
             payload.get("station_key"),
         )
         new_session_id = uuid.uuid4()
+        client_surface = payload.get("client_surface")
+        store_device_id = payload.get("store_device_id")
+        if client_surface == MOBILE_STORE_SURFACE:
+            permissions = store_permissions(user=user, context=context, permissions=permissions, device_id=store_device_id)
+            scope_types = ["branch"]
+            resolved_station_key = resolved_station_key or normalized_station_key(payload.get("station_key"))
         qa_persona = payload.get("qa_persona")
         qa_deadline = (
             datetime.fromtimestamp(int(payload["qa_deadline"]), tz=timezone.utc)
@@ -387,6 +404,8 @@ class AuthService:
             company_credential_version=company.credential_version,
             user_credential_version=getattr(user, "credential_version", 1),
             session_id=str(new_session_id),
+            client_surface=client_surface,
+            store_device_id=store_device_id,
             expires_delta=expires_delta,
             qa_persona=qa_persona,
             qa_deadline=qa_deadline,
@@ -399,6 +418,8 @@ class AuthService:
             company_credential_version=company.credential_version,
             user_credential_version=getattr(user, "credential_version", 1),
             session_id=str(new_session_id),
+            client_surface=client_surface,
+            store_device_id=store_device_id,
             expires_delta=expires_delta,
             qa_persona=qa_persona,
             qa_deadline=qa_deadline,

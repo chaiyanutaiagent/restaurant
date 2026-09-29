@@ -42,6 +42,10 @@ class TestStaffProfile:
 
 
 TEST_STAFF_PROFILES = (
+    TestStaffProfile("takeaway-cashier", "test.chambo.store-cashier", "CHB-MOB-CASH", "มานะ", "ขายดี", "แคชเชียร์ Takeaway Store", "chambo"),
+    TestStaffProfile("takeaway-branch-manager", "test.chambo.store-manager", "CHB-MOB-MGR", "มาลี", "ดูแลร้าน", "ผู้จัดการ Takeaway Store", "chambo"),
+    TestStaffProfile("takeaway-stock-receiving", "test.chambo.store-receiving", "CHB-MOB-RCV", "วิชัย", "รับสินค้า", "สต๊อกและรับสินค้า Takeaway", "chambo"),
+    TestStaffProfile("takeaway-central-kitchen", "test.chambo.central-kitchen", "CHB-CK", "วิภา", "ครัวกลาง", "ครัวกลาง Takeaway (เว็บเท่านั้น)", "chambo"),
     TestStaffProfile("company-owner", "test.owner", "UAT-OWNER", "ณัฐวุฒิ", "ศรีสุข", "เจ้าของบริษัท"),
     TestStaffProfile("accountant", "test.accountant", "UAT-ACCOUNT", "สุภาวดี", "มั่นคง", "เจ้าหน้าที่บัญชี"),
     TestStaffProfile("purchasing", "test.purchasing", "UAT-PURCHASE", "กิตติพงศ์", "วงศ์ดี", "เจ้าหน้าที่จัดซื้อ"),

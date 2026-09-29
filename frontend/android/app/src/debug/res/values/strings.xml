@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Foodchainservice Takeaway UAT</string>
-    <string name="title_activity_main">Foodchainservice Takeaway UAT</string>
+    <string name="app_name">Foodchainservice Takeaway Store UAT</string>
+    <string name="title_activity_main">Foodchainservice Takeaway Store UAT</string>
     <string name="package_name">com.foodchainservice.takeaway.uat</string>
     <string name="custom_url_scheme">com.foodchainservice.takeaway.uat</string>
 </resources>

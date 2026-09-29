@@ -52,8 +52,8 @@ function StoreApp(): JSX.Element {
   </header>{error && <p role="alert" className="bg-red-50 p-4 text-red-800">{error}</p>}<main className="p-3 md:p-5">
     <Routes><Route path="/" element={<Navigate to={visible[0]?.path || "/login"} replace />} /><Route path="/login" element={<Navigate to={visible[0]?.path || "/"} replace />} />
       {STORE_ROUTES.map((route, index) => { const Page = pages[index]; return <Route key={route.path} path={route.path} element={allowedStoreRoute(route.path, session.permissions) ? <Page /> : <p role="alert">ไม่มีสิทธิ์ใช้งานหน้านี้</p>} />; })}
-    </Routes></main><UpdateGate /><Toaster /></>;
+    </Routes></main></>;
 }
 document.title = "Foodchainservice Takeaway Store UAT";
 document.documentElement.classList.add("native-app", "native-android");
-ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><QueryClientProvider client={queryClient}><BrowserRouter><StoreApp /></BrowserRouter></QueryClientProvider></React.StrictMode>);
+ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><QueryClientProvider client={queryClient}><BrowserRouter><StoreApp /><UpdateGate /><Toaster /></BrowserRouter></QueryClientProvider></React.StrictMode>);

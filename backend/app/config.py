@@ -76,6 +76,33 @@ def validate_uat_auth_bypass_config(
     resolve_uat_auth_bypass_hosts(public_base_url, allowed_hosts or [])
 
 
+def validate_uat_superadmin_access_config(
+    *,
+    environment: str,
+    enabled: bool,
+    public_base_url: str,
+    company_id: uuid.UUID | None,
+    username: str | None,
+) -> None:
+    """Fail closed unless the temporary all-login account is scoped to UAT."""
+    if not enabled:
+        return
+    parsed_url = urlsplit(public_base_url)
+    if (
+        environment != "development"
+        or parsed_url.scheme != "https"
+        or parsed_url.hostname is None
+        or not parsed_url.hostname.startswith("uat-")
+    ):
+        raise ValueError(
+            "Temporary superadmin access is allowed only on an HTTPS UAT development host"
+        )
+    if company_id is None or not username or not username.strip():
+        raise ValueError(
+            "Temporary superadmin access requires an explicit Company ID and username"
+        )
+
+
 def resolve_uat_auth_bypass_hosts(public_base_url: str, allowed_hosts: list[str]) -> set[str]:
     public_host = urlsplit(public_base_url).hostname
     if public_host is None:
@@ -455,6 +482,9 @@ class Settings(BaseSettings):
     uat_auth_bypass_username: str | None = None
     uat_platform_auth_bypass_username: str | None = None
     uat_auth_bypass_hosts: list[str] = Field(default_factory=list)
+    uat_superadmin_all_logins_enabled: bool = False
+    uat_superadmin_company_id: uuid.UUID | None = None
+    uat_superadmin_username: str | None = None
     qa_access_mode_enabled: bool = False
     qa_access_key: str | None = None
     qa_access_company_id: uuid.UUID | None = None
@@ -504,6 +534,13 @@ class Settings(BaseSettings):
             username=self.uat_auth_bypass_username,
             platform_username=self.uat_platform_auth_bypass_username,
             allowed_hosts=self.uat_auth_bypass_hosts,
+        )
+        validate_uat_superadmin_access_config(
+            environment=self.environment,
+            enabled=self.uat_superadmin_all_logins_enabled,
+            public_base_url=self.saas_public_base_url,
+            company_id=self.uat_superadmin_company_id,
+            username=self.uat_superadmin_username,
         )
         validate_qa_access_mode_config(
             environment=self.environment,

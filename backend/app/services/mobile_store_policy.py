@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit
+
 from fastapi import HTTPException
+
+from app.config import settings
 
 MOBILE_STORE_SURFACE = "takeaway_store"
 STORE_PERMISSIONS = frozenset({
@@ -36,12 +40,29 @@ STORE_API_ROUTES = (
 )
 
 
+def uat_superadmin_store_access(user) -> bool:
+    """Allow the named tenant superadmin into Store only on the explicit UAT gate."""
+    configured_username = (settings.uat_superadmin_username or "").strip().lower()
+    public_host = urlsplit(settings.saas_public_base_url).hostname or ""
+    return bool(
+        settings.uat_superadmin_all_logins_enabled
+        and settings.environment == "development"
+        and public_host.startswith("uat-")
+        and getattr(user, "is_superuser", False)
+        and settings.uat_superadmin_company_id is not None
+        and getattr(user, "company_id", None) == settings.uat_superadmin_company_id
+        and getattr(user, "username", "").strip().lower() == configured_username
+    )
+
+
 def store_permissions(*, user, context, permissions: list[str], device_id: str | None) -> list[str]:
-    if (user.is_superuser or "*" in permissions or not context
+    uat_superadmin = uat_superadmin_store_access(user)
+    if ((user.is_superuser and not uat_superadmin)
+            or ("*" in permissions and not uat_superadmin) or not context
             or context.business_type != "takeaway" or context.target_database != "takeaway"
             or not context.branch_id or not device_id):
         raise HTTPException(403, "A non-superuser Takeaway branch assignment is required")
-    allowed = sorted(STORE_PERMISSIONS.intersection(permissions))
+    allowed = sorted(STORE_PERMISSIONS if uat_superadmin else STORE_PERMISSIONS.intersection(permissions))
     if "takeaway.store.access" not in allowed or not STORE_ENTRY_PERMISSIONS.intersection(allowed):
         raise HTTPException(403, "No Takeaway Store role is assigned")
     return allowed

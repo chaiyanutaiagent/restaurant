@@ -8,7 +8,12 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app.config import resolve_uat_auth_bypass_hosts, validate_qa_access_mode_config, validate_uat_auth_bypass_config
+from app.config import (
+    resolve_uat_auth_bypass_hosts,
+    validate_qa_access_mode_config,
+    validate_uat_auth_bypass_config,
+    validate_uat_superadmin_access_config,
+)
 from app.routers.auth import _qa_access_guard
 from app.routers.platform import _platform_qa_access_guard
 
@@ -85,6 +90,45 @@ class UatAuthBypassConfigTests(unittest.TestCase):
                 "uat-retail.foodchainservice.com",
             },
         )
+
+
+class UatSuperadminAccessConfigTests(unittest.TestCase):
+    company_id = uuid.UUID("1b8a1818-44d6-4d5f-9d22-e5e17b23c081")
+
+    def test_disabled_gate_is_safe_in_any_environment(self) -> None:
+        validate_uat_superadmin_access_config(
+            environment="production",
+            enabled=False,
+            public_base_url="https://foodchainservice.com",
+            company_id=None,
+            username=None,
+        )
+
+    def test_enabled_gate_requires_exact_uat_scope(self) -> None:
+        validate_uat_superadmin_access_config(
+            environment="development",
+            enabled=True,
+            public_base_url="https://uat-pos.foodchainservice.com",
+            company_id=self.company_id,
+            username="superadmin",
+        )
+        invalid_cases = (
+            ("production", "https://uat-pos.foodchainservice.com", self.company_id, "superadmin"),
+            ("development", "http://uat-pos.foodchainservice.com", self.company_id, "superadmin"),
+            ("development", "https://foodchainservice.com", self.company_id, "superadmin"),
+            ("development", "https://uat-pos.foodchainservice.com", None, "superadmin"),
+            ("development", "https://uat-pos.foodchainservice.com", self.company_id, " "),
+        )
+        for environment, base_url, company_id, username in invalid_cases:
+            with self.subTest(environment=environment, base_url=base_url):
+                with self.assertRaises(ValueError):
+                    validate_uat_superadmin_access_config(
+                        environment=environment,
+                        enabled=True,
+                        public_base_url=base_url,
+                        company_id=company_id,
+                        username=username,
+                    )
 
 
 class QaAccessModeConfigTests(unittest.TestCase):

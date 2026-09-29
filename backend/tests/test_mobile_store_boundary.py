@@ -11,7 +11,12 @@ from starlette.requests import Request
 from app.dependencies import TokenData, get_current_user
 from app.services.auth_service import AuthService
 from app.services.business_directory_service import resolve_active_business
-from app.services.mobile_store_policy import enforce_store_request, store_permissions
+from app.services.mobile_store_policy import (
+    STORE_PERMISSIONS,
+    enforce_store_request,
+    store_permissions,
+    uat_superadmin_store_access,
+)
 from app.services.role_preset_service import ROLE_PRESET_POLICIES
 from app.services.takeaway_service import TakeawayService
 from app.utils.security import create_access_token, decode_token
@@ -38,6 +43,56 @@ class StorePolicyTests(unittest.TestCase):
         for superuser, business, branch in [(True, "takeaway", uuid.uuid4()), (False, "restaurant", uuid.uuid4()), (False, "takeaway", None)]:
             with self.subTest(superuser=superuser, business=business, branch=branch), self.assertRaises(HTTPException):
                 store_permissions(user=NS(is_superuser=superuser), context=NS(branch_id=branch, business_type=business, target_database=business), permissions=POLICIES["company-owner"], device_id="d")
+
+    def test_named_uat_superadmin_gets_store_only_permissions(self):
+        company_id = uuid.uuid4()
+        user = NS(
+            company_id=company_id,
+            username="superadmin",
+            is_superuser=True,
+        )
+        with patch("app.services.mobile_store_policy.settings") as configured:
+            configured.uat_superadmin_all_logins_enabled = True
+            configured.environment = "development"
+            configured.saas_public_base_url = "https://uat-pos.foodchainservice.com"
+            configured.uat_superadmin_company_id = company_id
+            configured.uat_superadmin_username = "superadmin"
+            self.assertTrue(uat_superadmin_store_access(user))
+            result = store_permissions(
+                user=user,
+                context=self.context,
+                permissions=["*"],
+                device_id="device",
+            )
+        self.assertEqual(result, sorted(STORE_PERMISSIONS))
+        self.assertNotIn("*", result)
+        self.assertNotIn("takeaway.production.manage", result)
+
+    def test_uat_superadmin_gate_fails_closed_outside_exact_scope(self):
+        company_id = uuid.uuid4()
+        base_user = NS(company_id=company_id, username="superadmin", is_superuser=True)
+        cases = (
+            {"enabled": False},
+            {"environment": "production"},
+            {"host": "pos.foodchainservice.com"},
+            {"company_id": uuid.uuid4()},
+            {"username": "another-admin"},
+        )
+        for override in cases:
+            with self.subTest(override=override), patch("app.services.mobile_store_policy.settings") as configured:
+                configured.uat_superadmin_all_logins_enabled = override.get("enabled", True)
+                configured.environment = override.get("environment", "development")
+                configured.saas_public_base_url = "https://" + override.get("host", "uat-pos.foodchainservice.com")
+                configured.uat_superadmin_company_id = override.get("company_id", company_id)
+                configured.uat_superadmin_username = override.get("username", "superadmin")
+                self.assertFalse(uat_superadmin_store_access(base_user))
+                with self.assertRaises(HTTPException):
+                    store_permissions(
+                        user=base_user,
+                        context=self.context,
+                        permissions=["*"],
+                        device_id="device",
+                    )
 
     def test_api_paths_and_methods_are_allowlisted(self):
         payload = dict(client_surface="takeaway_store", company_id="a", branch_id="b", store_device_id="d")

@@ -22,7 +22,11 @@ from app.services.platform_reference_projection import enqueue_reference_event
 from app.business_context import CanonicalBusinessContext
 from app.services.staff_scope_policy import assignment_applies_to_context, normalized_station_key
 from app.services.saas_membership_service import membership_access_error
-from app.services.mobile_store_policy import MOBILE_STORE_SURFACE, store_permissions
+from app.services.mobile_store_policy import (
+    MOBILE_STORE_SURFACE,
+    store_permissions,
+    uat_superadmin_store_access,
+)
 from app.utils.security import (
     create_access_token,
     create_refresh_token,
@@ -255,6 +259,7 @@ class AuthService:
             qa_deadline=qa_deadline,
         )
         expires_at = self._extract_expiration(refresh_token)
+        temporary_uat_superadmin = uat_superadmin_store_access(user)
         self.db.add(
             RefreshToken(
                 id=session_id,
@@ -271,13 +276,20 @@ class AuthService:
                 company_id=user.company_id,
                 branch_id=resolved_branch_id,
                 user_id=user.id,
-                action="qa.user.session.issue" if qa_persona else "user.login",
+                action=(
+                    "uat.superadmin.store.login"
+                    if temporary_uat_superadmin and client_surface == MOBILE_STORE_SURFACE
+                    else "uat.superadmin.login"
+                    if temporary_uat_superadmin
+                    else "qa.user.session.issue" if qa_persona else "user.login"
+                ),
                 resource="User",
                 resource_id=str(user.id),
                 ip_address=ip_address,
                 user_agent=user_agent,
                 new_value={
                     "qa_mode": bool(qa_persona),
+                    "temporary_uat_superadmin": temporary_uat_superadmin,
                     "persona": qa_persona,
                     "expires_at": qa_deadline.isoformat() if qa_deadline else None,
                 },

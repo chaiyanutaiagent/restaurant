@@ -12,7 +12,11 @@ from app.models.branch import Branch
 from app.routers.auth import _token_response, ok
 from app.services.auth_service import AuthService
 from app.services.business_directory_service import resolve_active_business
-from app.services.mobile_store_policy import MOBILE_STORE_SURFACE, store_permissions
+from app.services.mobile_store_policy import (
+    MOBILE_STORE_SURFACE,
+    store_permissions,
+    uat_superadmin_store_access,
+)
 from app.utils.public_rate_limit import require_public_rate_limit
 
 router = APIRouter(prefix="/api/v1/mobile-store", tags=["mobile-store"])
@@ -42,7 +46,7 @@ async def authenticate(payload: StoreCredentials, request: Request, db: AsyncSes
     company = await resolve_active_business(db, payload.business_code)
     service = AuthService(db)
     user = await service.authenticate_user(company.id, payload.username.strip().lower(), payload.password)
-    if user.is_superuser:
+    if user.is_superuser and not uat_superadmin_store_access(user):
         raise HTTPException(403, "Platform administrators cannot sign in to Takeaway Store")
     return company, user, service
 

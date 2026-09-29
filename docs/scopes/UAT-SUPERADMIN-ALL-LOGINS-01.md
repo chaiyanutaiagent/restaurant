@@ -33,3 +33,21 @@ After the shared test cycle, set `UAT_SUPERADMIN_ALL_LOGINS_ENABLED=false`,
 recreate only the UAT backend, revoke active `superadmin` refresh sessions, and
 continue permission testing with the named UAT role personas. Production must
 keep this switch false or absent.
+
+## Deployment evidence
+
+- Source commit: `fce44bd65c8982cc1a159358bbc7bf9dd1c2f4b5`.
+- Source archive SHA-256:
+  `132320a126176d2d77014f319591384457e5250b83c1f33aa3345aeba139e959`.
+- Backend image: `restaurant-pos-backend:uat-superadmin-fce44bd`, digest
+  `sha256:823f246e6eb00c7b7c0349abc3c05170fcbc19f2f448451149cea17da8e80e60`.
+- Backend regression: 598 passed.
+- Tenant `superadmin` is active and scoped to the configured UAT Company; its
+  password hash was synchronized from the separately stored Platform identity
+  without exposing or changing the password.
+- Tenant automatic login returned `superadmin` on POS, App, Restaurant, Retail
+  and Takeaway UAT hosts. Platform automatic login returned `superadmin` with
+  the UAT `platform_owner` role.
+- Live Store policy resolved Takeaway branch `BKK-01` with 12 allowlisted Store
+  permissions and no wildcard permission.
+- Production retained its prior image and had no UAT superadmin gate variable.

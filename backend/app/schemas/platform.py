@@ -150,7 +150,7 @@ class PlatformOperatorInvitationRead(BaseSchema):
 
 class PlatformOperatorInvitationAccept(BaseSchema):
     token: str = Field(min_length=32, max_length=500)
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
 
     @field_validator("password")
     @classmethod
@@ -256,7 +256,7 @@ class PlatformMfaDisableRequest(PlatformMfaCodeRequest):
 
 class PlatformPasswordChangeRequest(BaseSchema):
     current_password: str = Field(min_length=1, max_length=128)
-    new_password: str = Field(min_length=12, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
     mfa_code: str | None = Field(default=None, max_length=32)
 
     @field_validator("new_password")

@@ -13,7 +13,7 @@ android {
         applicationId "com.foodchainservice.takeaway"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 10101
+        versionCode 10102
         versionName "1.1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -35,7 +35,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix ".uat"
-            versionNameSuffix "-uat.2"
+            versionNameSuffix "-uat.3"
         }
         release {
             minifyEnabled false
@@ -54,7 +54,29 @@ gradle.taskGraph.whenReady { graph ->
     if (requestsReleaseArtifact && !takeawayReleaseSigningReady) {
         throw new GradleException("Takeaway release signing environment is incomplete; refusing to create an unsigned release")
     }
+    if (requestsReleaseArtifact) {
+        throw new GradleException("Production Android release is on HOLD for Store UAT 1.1.0-uat.3")
+    }
 }
+
+tasks.register('verifyStoreAssets') {
+    doLast {
+        def configFile = file('src/main/assets/capacitor.config.json')
+        def config = new groovy.json.JsonSlurper().parse(configFile)
+        if (config.webDir != 'dist-mobile-store' || config.server?.cleartext != false || config.android?.allowMixedContent != false) {
+            throw new GradleException('Build and sync the dedicated HTTPS Store bundle before assembling Android')
+        }
+        def assets = fileTree('src/main/assets/public') { include '**/*.js', '**/*.html' }
+        if (assets.isEmpty()) throw new GradleException('Store assets are missing')
+        def forbidden = ['/restaurant', '/retail', '/platform', '/takeaway/central', '/takeaway/admin', '/auth/uat/auto-login', '1b8a1818-44d6-4d5f-9d22-e5e17b23c081', 'sketch-biz']
+        assets.each { asset ->
+            forbidden.each { marker ->
+                if (asset.getText('UTF-8').contains(marker)) throw new GradleException("Forbidden Store asset marker: ${marker}")
+            }
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn('verifyStoreAssets') }
 
 repositories {
     flatDir{

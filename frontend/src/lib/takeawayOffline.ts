@@ -40,7 +40,14 @@ export type TakeawayQueuedSaleResult = {
 const activeSyncs = new Map<string, Promise<TakeawayOutboxSummary>>();
 
 function currentScope(): TakeawayScope {
-  const { companyId, brandId, branchId, user } = useAuthStore.getState();
+  const state = useAuthStore.getState();
+  const { companyId, brandId, branchId, user, accessToken } = state;
+  if ("deviceId" in state && accessToken) {
+    const payload = JSON.parse(atob(accessToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    if (payload.client_surface === "takeaway_store" && payload.exp * 1000 <= Date.now()) {
+      throw new Error("สิทธิ์หน้าร้านหมดอายุ กรุณาต่ออินเทอร์เน็ตเพื่อต่ออายุ session ก่อนขาย");
+    }
+  }
   if (!companyId || !brandId || !branchId || !user?.id) {
     throw new Error("กรุณาเข้าสู่ระบบและเลือกสาขา Takeaway ก่อนขาย");
   }
@@ -83,6 +90,8 @@ async function isConnected(): Promise<boolean> {
 }
 
 async function installationId(): Promise<string> {
+  const auth = useAuthStore.getState();
+  if ("deviceId" in auth && typeof auth.deviceId === "string") return auth.deviceId;
   const key = "takeaway.installation_id";
   const existing = await db.offlineSettings.get(key);
   if (existing?.value) return existing.value;
@@ -104,7 +113,7 @@ async function nextSequence(scope: TakeawayScope): Promise<number> {
 export async function refreshTakeawayWorkspace(): Promise<TakeawayWorkspaceSnapshot> {
   const scope = currentScope();
   const context = (await takeawayApi.status()).data.data;
-  if (context.brand_id !== scope.brandId || context.branch_id !== scope.branchId) {
+  if (context.company_id !== scope.companyId || context.brand_id !== scope.brandId || context.branch_id !== scope.branchId) {
     throw new Error("บริบท Takeaway ของเซิร์ฟเวอร์ไม่ตรงกับสาขาที่เลือก");
   }
   const [categories, catalog, shifts] = await Promise.all([
@@ -228,6 +237,7 @@ async function performSync(): Promise<TakeawayOutboxSummary> {
     .sort((a, b) => a.created_at - b.created_at);
 
   for (const row of rows) {
+    if (scopeKey() !== scopeKey(scope)) throw new Error("บริบทผู้ใช้เปลี่ยน กรุณาซิงก์ใหม่");
     await db.takeawayPendingSales.update(row.client_sale_id, {
       status: "syncing",
       attempts: row.attempts + 1,
@@ -295,7 +305,7 @@ export async function queueTakeawaySale(
   const scope = currentScope();
   const deviceId = await installationId();
   const sequence = await nextSequence(scope);
-  const clientSaleId = `${deviceId}:${sequence}`;
+  const clientSaleId = `${scope.companyId}:${scope.branchId}:${deviceId}:${sequence}`;
   const payload: TakeawaySalePayload = {
     ...draft,
     idempotency_key: `takeaway-sale:${clientSaleId}`,
@@ -343,6 +353,7 @@ export async function markTakeawayReceiptPrinted(
   if (clientSaleId) {
     const row = await db.takeawayPendingSales.get(clientSaleId);
     if (row) {
+      if (!rowMatchesScope(row, currentScope())) throw new Error("ไม่มีสิทธิ์เข้าถึงใบเสร็จนี้");
       const current = row.server_receipt ?? row.local_receipt;
       const localReceipt = {
         ...current,

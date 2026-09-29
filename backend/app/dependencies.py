@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import uuid
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +33,7 @@ from app.services.staff_scope_policy import normalized_station_key
 from app.services.tenant_control_policy import TenantControlPolicy
 from app.services.platform_access_service import effective_platform_access, platform_environment
 from app.utils.security import decode_token
+from app.services.mobile_store_policy import MOBILE_STORE_SURFACE, enforce_store_request, store_permissions
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 platform_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/platform/auth/login")
@@ -52,6 +53,8 @@ class TokenData:
     scope_types: list[str] = field(default_factory=list)
     qa_persona: str | None = None
     qa_deadline: datetime | None = None
+    client_surface: str | None = None
+    store_device_id: str | None = None
 
 
 @dataclass
@@ -94,6 +97,7 @@ def _device_unauthorized() -> HTTPException:
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_identity_db),
+    request: Request = None,
 ) -> TokenData:
     payload = decode_token(token)
     if payload.get("type") != "access":
@@ -167,17 +171,29 @@ async def get_current_user(
             branch_id,
             station_key=payload.get("station_key"),
         )
+    permissions = payload.get("permissions", [])
+    scopes = list(payload.get("scope_types", []))
+    if payload.get("client_surface") == MOBILE_STORE_SURFACE:
+        from app.services.auth_service import AuthService
+        effective, _, _, _, _, _ = await AuthService(db).get_user_permissions(user, branch_id, payload.get("station_key"))
+        permissions = store_permissions(user=user, context=context, permissions=effective, device_id=payload.get("store_device_id"))
+        scopes = ["branch"]
+        if request is None:
+            raise HTTPException(403, "Store request context is required")
+        enforce_store_request(payload, request.method, request.url.path, request.headers)
     return TokenData(
         user_id=user_id,
         company_id=company_id,
         branch_id=branch_id,
-        permissions=payload.get("permissions", []),
+        permissions=permissions,
         brand_id=context.brand_id if context else None,
         business_type=context.business_type if context else None,
         target_database=context.target_database if context else None,
         station_key=payload.get("station_key"),
         assignment_ids=[uuid.UUID(value) for value in payload.get("assignment_ids", [])],
-        scope_types=list(payload.get("scope_types", [])),
+        scope_types=scopes,
+        client_surface=payload.get("client_surface"),
+        store_device_id=payload.get("store_device_id"),
         qa_persona=payload.get("qa_persona"),
         qa_deadline=(
             datetime.fromtimestamp(int(payload["qa_deadline"]), tz=timezone.utc)

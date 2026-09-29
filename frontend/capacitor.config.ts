@@ -4,14 +4,14 @@ const isUatBuild = process.env.CAPACITOR_UAT === "true";
 
 const config: CapacitorConfig = {
   appId: "com.foodchainservice.takeaway",
-  appName: "Foodchainservice Takeaway",
-  webDir: "dist",
+  appName: "Foodchainservice Takeaway Store",
+  webDir: isUatBuild ? "dist-mobile-store" : "dist",
   android: {
-    allowMixedContent: isUatBuild,
+    allowMixedContent: false,
   },
   server: {
     androidScheme: "https",
-    cleartext: isUatBuild,
+    cleartext: false,
   },
 };
 

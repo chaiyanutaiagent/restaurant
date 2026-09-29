@@ -24,6 +24,10 @@ class RolePresetPolicyTests(unittest.TestCase):
         self.assertEqual(
             list(self.policies),
             [
+                "takeaway-cashier",
+                "takeaway-branch-manager",
+                "takeaway-stock-receiving",
+                "takeaway-central-kitchen",
                 "company-owner",
                 "brand-manager",
                 "branch-manager",
@@ -40,7 +44,7 @@ class RolePresetPolicyTests(unittest.TestCase):
                 "kitchen-staff",
             ],
         )
-        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-09-27.1")
+        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-09-29.1")
 
     def test_every_preset_uses_registered_permissions_without_duplicates(self) -> None:
         for policy in ROLE_PRESET_POLICIES:

@@ -11,8 +11,8 @@ class SketchBizTestStaffContractTests(unittest.TestCase):
         expected = {policy.key for policy in ROLE_PRESET_POLICIES}
         actual = {profile.preset_key for profile in TEST_STAFF_PROFILES}
         self.assertEqual(actual, expected)
-        self.assertEqual(len(TEST_STAFF_PROFILES), 33)
-        self.assertEqual(len({profile.username for profile in TEST_STAFF_PROFILES}), 33)
+        self.assertEqual(len(TEST_STAFF_PROFILES), 37)
+        self.assertEqual(len({profile.username for profile in TEST_STAFF_PROFILES}), 37)
         self.assertTrue(all(profile.first_name and profile.last_name for profile in TEST_STAFF_PROFILES))
         shared = [profile for profile in TEST_STAFF_PROFILES if profile.workspace_key is None]
         self.assertEqual(
@@ -29,7 +29,7 @@ class SketchBizTestStaffContractTests(unittest.TestCase):
                 "krua-pa-pla-khuen": 8,
                 "the-loft-kitchen": 8,
                 "the-loft-mini-mart": 6,
-                "chambo": 6,
+                "chambo": 10,
             },
         )
         retail_roles = {
@@ -46,7 +46,8 @@ class SketchBizTestStaffContractTests(unittest.TestCase):
         }
         self.assertEqual(
             takeaway_roles,
-            {"brand-manager", "area-manager", "branch-manager", "takeaway-store-operator"},
+            {"brand-manager", "area-manager", "branch-manager", "takeaway-store-operator",
+             "takeaway-cashier", "takeaway-branch-manager", "takeaway-stock-receiving", "takeaway-central-kitchen"},
         )
         self.assertEqual(
             sum(profile.preset_key == "takeaway-store-operator" for profile in TEST_STAFF_PROFILES),

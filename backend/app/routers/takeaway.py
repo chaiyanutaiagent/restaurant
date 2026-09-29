@@ -511,6 +511,10 @@ async def create_sale(
     current: TokenData = Depends(require_permission("takeaway.sale.create")),
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
+    if current.client_surface == "takeaway_store" and str(payload.offline_device_id) != current.store_device_id:
+        raise HTTPException(403, "Sale device does not match the Store session")
+    if current.client_surface == "takeaway_store" and payload.payment.method == "credit" and "takeaway.credit.manage" not in current.permissions:
+        raise HTTPException(403, "Store credit requires branch manager permission")
     order, pickup_token, replayed = await TakeawayService(db, current).create_sale(payload)
     return ok(
         {"order": order, "pickup_token": pickup_token},
@@ -524,6 +528,10 @@ async def sync_offline_sale(
     current: TokenData = Depends(require_permission("takeaway.sale.create")),
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
+    if current.client_surface == "takeaway_store" and str(payload.offline_device_id) != current.store_device_id:
+        raise HTTPException(403, "Sale device does not match the Store session")
+    if current.client_surface == "takeaway_store" and payload.payment.method == "credit" and "takeaway.credit.manage" not in current.permissions:
+        raise HTTPException(403, "Store credit requires branch manager permission")
     order, pickup_token, replayed = await TakeawayService(db, current).create_sale(payload)
     return ok(
         {"order": order, "pickup_token": pickup_token},
@@ -548,6 +556,8 @@ async def capture_order_payment(
     current: TokenData = Depends(require_permission("takeaway.sale.create")),
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
+    if current.client_surface == "takeaway_store" and payload.payment.method == "credit" and "takeaway.credit.manage" not in current.permissions:
+        raise HTTPException(403, "Store credit requires branch manager permission")
     order, replayed = await TakeawayService(db, current).capture_order_payment(order_id, payload)
     return ok(order, {"idempotent_replay": replayed})
 
@@ -793,6 +803,7 @@ async def receive_store_central_order_quantities(
 
 
 @router.get("/central/orders")
+@router.get("/store/central-orders")
 async def list_central_orders(
     brand_id: uuid.UUID | None = None,
     branch_id: uuid.UUID | None = None,
@@ -966,6 +977,16 @@ async def list_transfers(
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
     return ok(await TakeawayService(db, current).list_transfers(brand_id=brand_id, limit=limit))
+
+
+@router.get("/store/transfers")
+async def list_store_transfers(
+    current: TokenData = Depends(require_permission("takeaway.transfer.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(403, "Store branch required")
+    return ok(await TakeawayService(db, current).list_store_transfers())
 
 
 @router.post("/transfers/{transfer_id}/status")

@@ -39,6 +39,8 @@ def create_access_token(
     session_id: str | None = None,
     qa_persona: str | None = None,
     qa_deadline: datetime | None = None,
+    client_surface: str | None = None,
+    store_device_id: str | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     expire = now + (
@@ -62,6 +64,8 @@ def create_access_token(
         "qa_persona": qa_persona,
         "qa_deadline": int(qa_deadline.timestamp()) if qa_deadline else None,
         "type": "access",
+        "client_surface": client_surface,
+        "store_device_id": store_device_id,
         "exp": expire,
         "iat": now,
     }
@@ -80,6 +84,8 @@ def create_refresh_token(
     expires_delta: timedelta | None = None,
     qa_persona: str | None = None,
     qa_deadline: datetime | None = None,
+    client_surface: str | None = None,
+    store_device_id: str | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     payload = {
@@ -94,6 +100,8 @@ def create_refresh_token(
         "qa_persona": qa_persona,
         "qa_deadline": int(qa_deadline.timestamp()) if qa_deadline else None,
         "type": "refresh",
+        "client_surface": client_surface,
+        "store_device_id": store_device_id,
         "jti": str(uuid.uuid4()),
         "exp": now + (expires_delta or timedelta(days=settings.refresh_token_expire_days)),
         "iat": now,

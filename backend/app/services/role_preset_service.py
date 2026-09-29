@@ -10,9 +10,10 @@ from app.models.role import Permission
 from app.schemas.role import RolePresetRead, RoleScope
 
 
-ROLE_PRESET_POLICY_VERSION = "2026-09-27.1"
+ROLE_PRESET_POLICY_VERSION = "2026-09-29.1"
 
 TAKEAWAY_OWNER_PERMISSIONS = (
+    "takeaway.store.access",
     "takeaway.catalog.view",
     "takeaway.catalog.manage",
     "takeaway.sale.view",
@@ -149,6 +150,37 @@ COMPANY_OWNER_PERMISSION_CODES = (
 
 
 ROLE_PRESET_POLICIES = (
+    RolePresetPolicy(
+        key="takeaway-cashier", name="Takeaway Cashier",
+        description="Store selling and preparation on one assigned branch; no credit or central administration.",
+        default_scope="branch", allowed_scopes=("branch", "station"), is_branch_assignable=True,
+        permission_codes=("takeaway.store.access", "takeaway.catalog.view", "takeaway.sale.view",
+            "takeaway.sale.create", "takeaway.shift.manage", "takeaway.pickup.manage",
+            "takeaway.stock.view", "takeaway.central_order.create"),
+    ),
+    RolePresetPolicy(
+        key="takeaway-branch-manager", name="Takeaway Branch Manager",
+        description="Assigned Takeaway branch operations and credit requests; no credit approval or limit changes in mobile.",
+        default_scope="branch", allowed_scopes=("branch",), is_branch_assignable=True,
+        permission_codes=("takeaway.store.access", "takeaway.catalog.view", "takeaway.sale.view",
+            "takeaway.sale.create", "takeaway.shift.manage", "takeaway.pickup.manage",
+            "takeaway.stock.view", "takeaway.stock.manage", "takeaway.central_order.create",
+            "takeaway.transfer.manage", "takeaway.credit.manage"),
+    ),
+    RolePresetPolicy(
+        key="takeaway-stock-receiving", name="Takeaway Stock / Receiving",
+        description="Assigned store stock, replenishment and receiving; no sales or credit.",
+        default_scope="branch", allowed_scopes=("branch",), is_branch_assignable=True,
+        permission_codes=("takeaway.store.access", "takeaway.catalog.view", "takeaway.stock.view",
+            "takeaway.central_order.create", "takeaway.transfer.manage"),
+    ),
+    RolePresetPolicy(
+        key="takeaway-central-kitchen", name="Takeaway Central Kitchen",
+        description="Central production and stock through the web workspace; cannot sign in to Store mobile.",
+        default_scope="brand", allowed_scopes=("brand",), is_branch_assignable=False,
+        permission_codes=("takeaway.catalog.view", "takeaway.production.manage",
+            "takeaway.stock.view", "takeaway.stock.manage", "takeaway.central_order.manage", "takeaway.transfer.manage"),
+    ),
     RolePresetPolicy(
         key="company-owner",
         name="Company Owner",
@@ -543,6 +575,7 @@ ROLE_PRESET_POLICIES = (
         allowed_scopes=("branch",),
         is_branch_assignable=True,
         permission_codes=(
+            "takeaway.store.access",
             "system.branch.view",
             "takeaway.catalog.view",
             "takeaway.sale.view",

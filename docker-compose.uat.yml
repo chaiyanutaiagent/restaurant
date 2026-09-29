@@ -14,3 +14,6 @@ services:
       QA_ACCESS_SESSION_MINUTES: ${QA_ACCESS_SESSION_MINUTES:-30}
     volumes:
       - ./backend/tests:/app/tests:ro
+  frontend:
+    volumes:
+      - ${UAT_ANDROID_ARTIFACT_DIR:-/home/behappyaiagent/restaurant-uat-releases/android}:/usr/share/nginx/html/downloads:ro

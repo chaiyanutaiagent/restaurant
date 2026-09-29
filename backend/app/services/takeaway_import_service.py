@@ -657,6 +657,7 @@ class TakeawayImportService:
                 sku=str(data["sku"]),
                 barcode=data.get("barcode"),
                 name=str(data["name"]),
+                description=data.get("description"),
                 unit=str(data["unit_code"]),
                 price=Decimal(str(data["selling_price"])),
                 tax_rate=Decimal(str(data["vat_rate"])),

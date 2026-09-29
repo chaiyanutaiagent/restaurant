@@ -4,6 +4,24 @@ import type { ApiResponse } from "@/types/api";
 
 export type TakeawayRecord = Record<string, unknown> & { id: string };
 
+export type TakeawayCatalogItem = TakeawayRecord & {
+  brand_id: string;
+  category_id: string | null;
+  sku: string;
+  barcode: string | null;
+  name: string;
+  description: string | null;
+  image_url: string | null;
+  price: string;
+  unit: string;
+  tax_rate: string;
+  kitchen_station: string | null;
+  track_stock: boolean;
+  sort_order: number;
+  is_featured: boolean;
+  is_active: boolean;
+};
+
 export type TakeawayContext = {
   enabled: boolean;
   writes_enabled: boolean;
@@ -16,15 +34,29 @@ export type TakeawayContext = {
 };
 
 export type TakeawayCatalogRow = {
-  item: TakeawayRecord & {
-    name: string;
-    sku: string;
-    category_id: string | null;
-    price: string;
-    unit: string;
-  };
+  item: TakeawayCatalogItem;
   effective_price: string;
   is_available: boolean;
+  branch_is_available?: boolean;
+  available_qty?: string | null;
+};
+
+export type TakeawayCatalogItemPayload = {
+  brand_id?: string;
+  category_id: string | null;
+  sku: string;
+  barcode: string | null;
+  name: string;
+  description: string | null;
+  image_url: string | null;
+  unit: string;
+  price: string;
+  tax_rate: string;
+  kitchen_station: string | null;
+  track_stock: boolean;
+  sort_order: number;
+  is_featured: boolean;
+  is_active?: boolean;
 };
 
 export type TakeawaySalePayload = {
@@ -164,6 +196,18 @@ export const takeawayApi = {
     api.get<ApiResponse<TakeawayCatalogRow[]>>("/takeaway/catalog/items", {
       params: { brand_id: brandId, branch_id: branchId || undefined },
     }),
+  createCatalogItem: (payload: TakeawayCatalogItemPayload & { brand_id: string }) =>
+    api.post<ApiResponse<TakeawayCatalogItem>>("/takeaway/catalog/items", payload),
+  updateCatalogItem: (id: string, payload: Omit<TakeawayCatalogItemPayload, "brand_id">) =>
+    api.patch<ApiResponse<TakeawayCatalogItem>>(`/takeaway/catalog/items/${id}`, payload),
+  setCatalogBranchAvailability: (
+    id: string,
+    branchId: string,
+    brandId: string,
+    payload: { price_override: string | null; is_available: boolean },
+  ) => api.put<ApiResponse<TakeawayRecord>>(`/takeaway/catalog/items/${id}/branches/${branchId}`, payload, {
+    params: { brand_id: brandId },
+  }),
   shifts: () => api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/shifts"),
   openShift: (payload: { business_date: string; opening_cash: string }) =>
     api.post<ApiResponse<TakeawayRecord>>("/takeaway/shifts/open", payload),

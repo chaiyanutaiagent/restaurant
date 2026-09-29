@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CloudOff, Minus, Plus, Printer, QrCode, ReceiptText, RefreshCw, ShoppingCart } from "lucide-react";
+import { AlertTriangle, CloudOff, ImageOff, Minus, Plus, Printer, QrCode, ReceiptText, RefreshCw, Search, ShoppingCart } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import TakeawayReceiptSlip from "@/components/takeaway/TakeawayReceiptSlip";
@@ -40,6 +40,7 @@ export default function TakeawayCounterPage(): JSX.Element {
   const releaseGate = useTakeawayReleaseGate();
   const writesEnabled = releaseGate.writesEnabled;
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [productSearch, setProductSearch] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [openingCash, setOpeningCash] = useState("0");
   const [lastQueue, setLastQueue] = useState<number | null>(null);
@@ -163,9 +164,11 @@ export default function TakeawayCounterPage(): JSX.Element {
       await outboxQuery.refetch();
       if (result.status === "synced") {
         await Promise.all([
+          refreshTakeawayWorkspace(),
           queryClient.invalidateQueries({ queryKey: ["takeaway", "orders"] }),
           queryClient.invalidateQueries({ queryKey: ["takeaway", "stock"] }),
         ]);
+        await queryClient.invalidateQueries({ queryKey: ["takeaway", "offline-workspace"] });
       } else {
         void queryClient.invalidateQueries({ queryKey: ["takeaway", "orders"], refetchType: "none" });
         void queryClient.invalidateQueries({ queryKey: ["takeaway", "stock"], refetchType: "none" });
@@ -200,7 +203,12 @@ export default function TakeawayCounterPage(): JSX.Element {
       });
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["takeaway", "orders"] });
+      await Promise.all([
+        refreshTakeawayWorkspace(),
+        queryClient.invalidateQueries({ queryKey: ["takeaway", "orders"] }),
+        queryClient.invalidateQueries({ queryKey: ["takeaway", "stock"] }),
+      ]);
+      await queryClient.invalidateQueries({ queryKey: ["takeaway", "offline-workspace"] });
       toast({ title: "รับชำระแล้ว", description: "รายการพร้อมให้พนักงานเริ่มเตรียมสินค้า" });
     },
     onError: () => toast({ title: "รับชำระไม่สำเร็จ", description: "ตรวจยอดเงินและสต๊อก", variant: "destructive" }),
@@ -228,7 +236,14 @@ export default function TakeawayCounterPage(): JSX.Element {
     },
     onError: () => toast({ title: "เรียกใบเสร็จไม่สำเร็จ", variant: "destructive" }),
   });
-  const visibleItems = catalog.filter((row) => row.is_available && (!categoryId || row.item.category_id === categoryId));
+  const visibleItems = catalog.filter((row) => {
+    if (categoryId && row.item.category_id !== categoryId) return false;
+    const needle = productSearch.trim().toLowerCase();
+    if (!needle) return true;
+    return `${row.item.name} ${row.item.sku} ${row.item.barcode ?? ""} ${row.item.description ?? ""}`
+      .toLowerCase()
+      .includes(needle);
+  });
   const subtotal = useMemo(() => cart.reduce((sum, line) => sum + Number(line.row.effective_price) * line.quantity, 0), [cart]);
   const tax = useMemo(() => cart.reduce((sum, line) => sum + Number(line.row.effective_price) * line.quantity * Number(line.row.item.tax_rate ?? 0) / 100, 0), [cart]);
   const total = subtotal + tax;
@@ -236,6 +251,7 @@ export default function TakeawayCounterPage(): JSX.Element {
     ["queued", "preparing", "ready"].includes(String(order.fulfillment_status)),
   );
   const adjust = (row: TakeawayCatalogRow, delta: number): void => setCart((current) => {
+    if (!row.is_available && delta > 0) return current;
     const found = current.find((line) => line.row.item.id === row.item.id);
     if (!found && delta > 0) return [...current, { row, quantity: 1 }];
     return current.map((line) => line.row.item.id === row.item.id ? { ...line, quantity: line.quantity + delta } : line).filter((line) => line.quantity > 0);
@@ -257,13 +273,37 @@ export default function TakeawayCounterPage(): JSX.Element {
         {orderingQr ? <div className="flex flex-wrap items-center gap-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><img src={orderingQr} alt="QR ลูกค้าสั่งเอง" className="h-36 w-36 rounded-xl bg-white p-2" /><div><h2 className="font-black text-emerald-950">QR สั่งสินค้าของสาขา</h2><p className="mt-1 text-sm text-emerald-800">ใช้ได้ 12 ชั่วโมง ลูกค้าสั่งแล้วรายการจะรอรับชำระก่อนเริ่มเตรียมสินค้า</p><button onClick={() => window.print()} className="mt-3 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white">พิมพ์ QR</button></div></div> : null}
         {(pendingOrdersQuery.data ?? []).length ? <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><h2 className="font-black text-amber-950">ออเดอร์ QR รอชำระ</h2><div className="mt-3 grid gap-2">{(pendingOrdersQuery.data ?? []).map((order) => <div key={order.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-3"><div><p className="font-black">คิว {String(order.queue_number)} · {String(order.order_number)}</p><p className="text-sm text-slate-500">ยอด {money(Number(order.total_amount))}</p></div><button disabled={!writesEnabled || captureMutation.isPending} onClick={() => captureMutation.mutate(order)} className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">รับเงินสดและเริ่มงาน</button></div>)}</div></div> : null}
         {activeFulfillmentOrders.length ? <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4"><h2 className="font-black text-sky-950">รายการเตรียมและส่งมอบ</h2><div className="mt-3 grid gap-2 md:grid-cols-2">{activeFulfillmentOrders.map((order) => <div key={order.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-3"><div><p className="font-black">คิว {String(order.queue_number ?? "-")} · {String(order.order_number)}</p><p className="text-sm text-slate-500">{order.fulfillment_status === "queued" ? "รอเตรียม" : order.fulfillment_status === "preparing" ? "กำลังเตรียม" : "พร้อมส่งมอบ"}</p></div>{order.fulfillment_status === "queued" ? <button disabled={!writesEnabled || fulfillmentMutation.isPending} onClick={() => fulfillmentMutation.mutate({ id: order.id, action: "preparing" })} className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-black disabled:opacity-40">เริ่มเตรียม</button> : order.fulfillment_status === "preparing" ? <button disabled={!writesEnabled || fulfillmentMutation.isPending} onClick={() => fulfillmentMutation.mutate({ id: order.id, action: "ready" })} className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-black disabled:opacity-40">พร้อมรับ</button> : <button disabled={!writesEnabled || fulfillmentMutation.isPending} onClick={() => fulfillmentMutation.mutate({ id: order.id, action: "picked_up" })} className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-black text-white disabled:opacity-40">ส่งมอบแล้ว</button>}</div>)}</div></div> : null}
+        <label className="relative block rounded-2xl bg-white shadow-sm">
+          <Search className="pointer-events-none absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
+          <input
+            value={productSearch}
+            onChange={(event) => setProductSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              const exact = catalog.find((row) => row.is_available && [row.item.sku, row.item.barcode].filter(Boolean).some((value) => String(value).toLowerCase() === productSearch.trim().toLowerCase()));
+              if (exact) {
+                event.preventDefault();
+                adjust(exact, 1);
+                setProductSearch("");
+              }
+            }}
+            placeholder="ค้นหาชื่อสินค้า หรือสแกน SKU / บาร์โค้ด แล้วกด Enter"
+            className="h-12 w-full rounded-2xl border border-slate-200 pl-12 pr-4 text-sm outline-none focus:border-emerald-500"
+          />
+        </label>
         <div className="flex gap-2 overflow-x-auto rounded-2xl bg-white p-3 shadow-sm">
           <button onClick={() => setCategoryId(null)} className={`min-w-fit rounded-xl px-4 py-2 text-sm font-bold ${categoryId === null ? "bg-emerald-500 text-slate-950" : "bg-slate-100"}`}>ทั้งหมด</button>
           {categories.map((category) => <button key={category.id} onClick={() => setCategoryId(category.id)} className={`min-w-fit rounded-xl px-4 py-2 text-sm font-bold ${categoryId === category.id ? "bg-emerald-500 text-slate-950" : "bg-slate-100"}`}>{String(category.name)}</button>)}
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-          {visibleItems.map((row) => <button key={row.item.id} onClick={() => adjust(row, 1)} className="min-h-36 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-emerald-400 hover:shadow-md"><p className="text-xs font-bold text-slate-400">{row.item.sku}</p><h2 className="mt-2 font-black">{row.item.name}</h2><p className="mt-6 text-xl font-black text-emerald-700">{money(Number(row.effective_price))}</p></button>)}
-          {!workspaceQuery.isLoading && visibleItems.length === 0 ? <div className="col-span-full rounded-2xl border border-dashed bg-white p-10 text-center text-slate-500">ยังไม่มีสินค้าพร้อมขายในหมวดนี้</div> : null}
+          {visibleItems.map((row) => {
+            const availableQty = row.available_qty == null ? null : Number(row.available_qty);
+            return <button key={row.item.id} disabled={!row.is_available} onClick={() => adjust(row, 1)} className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition hover:border-emerald-400 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60">
+              <div className="relative aspect-[16/9] bg-slate-100">{row.item.image_url ? <img src={row.item.image_url} alt={row.item.name} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-400"><ImageOff className="h-8 w-8" /></div>}<span className={`absolute right-2 top-2 rounded-full px-2 py-1 text-[11px] font-black ${row.is_available ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-700"}`}>{row.is_available ? availableQty !== null && row.item.track_stock ? `เหลือ ${availableQty.toLocaleString("th-TH", { maximumFractionDigits: 2 })}` : "พร้อมขาย" : "หมด/ปิดขาย"}</span></div>
+              <div className="p-4"><p className="text-xs font-bold text-slate-400">{row.item.sku}{row.item.barcode ? ` · ${row.item.barcode}` : ""}</p><h2 className="mt-1 line-clamp-2 font-black">{row.item.name}</h2>{row.item.description ? <p className="mt-1 line-clamp-2 text-xs text-slate-500">{row.item.description}</p> : null}<p className="mt-4 text-xl font-black text-emerald-700">{money(Number(row.effective_price))}</p></div>
+            </button>;
+          })}
+          {!workspaceQuery.isLoading && visibleItems.length === 0 ? <div className="col-span-full rounded-2xl border border-dashed bg-white p-10 text-center text-slate-500">ไม่พบสินค้าในหมวดหรือคำค้นหานี้</div> : null}
         </div>
         {(recentOrdersQuery.data ?? []).length ? <div className="rounded-2xl border bg-white p-4 shadow-sm"><h2 className="font-black">บิลล่าสุด</h2><div className="mt-3 flex gap-2 overflow-x-auto">{(recentOrdersQuery.data ?? []).slice(0, 8).map((order) => <button key={order.id} disabled={!writesEnabled || reprintMutation.isPending} onClick={() => reprintMutation.mutate(order.id)} className="min-w-fit rounded-xl border px-3 py-2 text-left text-sm disabled:opacity-40"><span className="font-black">คิว {String(order.queue_number ?? "-")}</span><span className="ml-2 text-slate-500">{money(Number(order.total_amount))}</span><Printer className="ml-2 inline h-4 w-4" /></button>)}</div></div> : null}
       </section>

@@ -50,15 +50,41 @@ class TakeawayCatalogItemCreate(BaseSchema):
     sku: str = Field(max_length=100)
     barcode: str | None = Field(default=None, max_length=100)
     name: str = Field(max_length=300)
+    description: str | None = Field(default=None, max_length=2000)
+    image_url: str | None = Field(default=None, max_length=1000)
     unit: str = Field(default="ชิ้น", max_length=40)
     price: Decimal = Field(ge=0, decimal_places=2)
     tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
     kitchen_station: str | None = Field(default=None, max_length=80)
     track_stock: bool = True
+    sort_order: int = Field(default=0, ge=0)
+    is_featured: bool = False
 
     _normalize_sku = field_validator("sku")(_text)
     _normalize_name = field_validator("name")(_text)
     _normalize_unit = field_validator("unit")(_text)
+
+
+class TakeawayCatalogItemUpdate(BaseSchema):
+    category_id: uuid.UUID | None = None
+    sku: str | None = Field(default=None, max_length=100)
+    barcode: str | None = Field(default=None, max_length=100)
+    name: str | None = Field(default=None, max_length=300)
+    description: str | None = Field(default=None, max_length=2000)
+    image_url: str | None = Field(default=None, max_length=1000)
+    unit: str | None = Field(default=None, max_length=40)
+    price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    tax_rate: Decimal | None = Field(default=None, ge=0, le=100)
+    kitchen_station: str | None = Field(default=None, max_length=80)
+    track_stock: bool | None = None
+    sort_order: int | None = Field(default=None, ge=0)
+    is_featured: bool | None = None
+    is_active: bool | None = None
+
+    @field_validator("sku", "name", "unit")
+    @classmethod
+    def normalize_required_text(cls, value: str | None) -> str | None:
+        return _text(value) if value is not None else None
 
 
 class TakeawayBranchAvailabilityUpdate(BaseSchema):

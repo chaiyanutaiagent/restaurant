@@ -50,6 +50,7 @@ from app.models.takeaway import (
 )
 from app.schemas.takeaway import (
     TakeawayCatalogItemCreate,
+    TakeawayCatalogItemUpdate,
     TakeawayCategoryCreate,
     TakeawayCentralOrderCreate,
     TakeawayCentralOrderDiscrepancyResolution,
@@ -251,17 +252,77 @@ class TakeawayService:
         await self.db.refresh(item)
         return item
 
+    async def update_catalog_item(
+        self,
+        item_id: uuid.UUID,
+        data: TakeawayCatalogItemUpdate,
+    ) -> TakeawayCatalogItem:
+        item = await self.db.scalar(
+            select(TakeawayCatalogItem).where(
+                TakeawayCatalogItem.id == item_id,
+                TakeawayCatalogItem.company_id == self.current.company_id,
+            )
+        )
+        if item is None:
+            raise HTTPException(status_code=404, detail="Takeaway catalog item not found")
+        await self._validate_context(brand_id=item.brand_id)
+        changes = data.model_dump(exclude_unset=True)
+        category_id = changes.get("category_id")
+        if category_id is not None:
+            category = await self.db.scalar(
+                select(TakeawayCategory.id).where(
+                    TakeawayCategory.id == category_id,
+                    TakeawayCategory.company_id == self.current.company_id,
+                    TakeawayCategory.brand_id == item.brand_id,
+                    TakeawayCategory.is_active.is_(True),
+                )
+            )
+            if category is None:
+                raise HTTPException(status_code=404, detail="Takeaway category not found")
+        for field, value in changes.items():
+            setattr(item, field, value)
+        await self.db.commit()
+        await self.db.refresh(item)
+        return item
+
     async def list_catalog(
         self,
         brand_id: uuid.UUID,
         branch_id: uuid.UUID | None = None,
-    ) -> list[tuple[TakeawayCatalogItem, Decimal | None, bool]]:
+    ) -> list[dict[str, object]]:
         await self._validate_context(brand_id=brand_id, branch_id=branch_id)
+        columns: list[object] = [
+            TakeawayCatalogItem,
+            TakeawayBranchCatalogItem.price_override,
+            func.coalesce(TakeawayBranchCatalogItem.is_available, True),
+        ]
+        stock_totals = None
+        if branch_id is not None:
+            stock_totals = (
+                select(
+                    TakeawayStockBalance.item_id.label("item_id"),
+                    func.coalesce(
+                        func.sum(TakeawayStockBalance.on_hand_qty - TakeawayStockBalance.reserved_qty),
+                        0,
+                    ).label("available_qty"),
+                )
+                .join(
+                    TakeawayStockLocation,
+                    TakeawayStockLocation.id == TakeawayStockBalance.location_id,
+                )
+                .where(
+                    TakeawayStockBalance.company_id == self.current.company_id,
+                    TakeawayStockLocation.branch_id == branch_id,
+                    TakeawayStockLocation.location_type == "store",
+                    TakeawayStockLocation.is_active.is_(True),
+                )
+                .group_by(TakeawayStockBalance.item_id)
+                .subquery()
+            )
+            columns.append(stock_totals.c.available_qty)
         statement = (
             select(
-                TakeawayCatalogItem,
-                TakeawayBranchCatalogItem.price_override,
-                func.coalesce(TakeawayBranchCatalogItem.is_available, True),
+                *columns,
             )
             .outerjoin(
                 TakeawayBranchCatalogItem,
@@ -273,9 +334,32 @@ class TakeawayService:
                 TakeawayCatalogItem.brand_id == brand_id,
                 TakeawayCatalogItem.is_active.is_(True),
             )
-            .order_by(TakeawayCatalogItem.name)
+            .order_by(TakeawayCatalogItem.sort_order, TakeawayCatalogItem.name)
         )
-        return [(row[0], row[1], bool(row[2])) for row in (await self.db.execute(statement)).all()]
+        if stock_totals is not None:
+            statement = statement.outerjoin(
+                stock_totals,
+                stock_totals.c.item_id == TakeawayCatalogItem.id,
+            )
+        rows: list[dict[str, object]] = []
+        for row in (await self.db.execute(statement)).all():
+            item = row[0]
+            price_override = row[1]
+            branch_is_available = bool(row[2])
+            available_qty = Decimal(row[3]) if stock_totals is not None and row[3] is not None else None
+            stock_is_available = (
+                not item.track_stock
+                or branch_id is None
+                or (available_qty is not None and available_qty > 0)
+            )
+            rows.append({
+                "item": item,
+                "effective_price": price_override if price_override is not None else item.price,
+                "branch_is_available": branch_is_available,
+                "available_qty": available_qty,
+                "is_available": branch_is_available and stock_is_available,
+            })
+        return rows
 
     async def set_branch_availability(
         self,

@@ -275,6 +275,8 @@ def _extract_records(
                 "sku": row["sku"],
                 "barcode": row.get("barcode"),
                 "name": row["name"],
+                "name_en": row.get("name_en"),
+                "description": row.get("description"),
                 "category_source_id": str(row["category_id"]) if row.get("category_id") else None,
                 "unit_code": row["unit_code"],
                 "product_type": row.get("product_type") or "stock",

@@ -1,5 +1,6 @@
 export const STORE_ROUTES = [
   { path: "/takeaway/store/orders", label: "ขายและเตรียมสินค้า", permission: "takeaway.sale.create" },
+  { path: "/takeaway/store/catalog", label: "สินค้า", permission: "takeaway.catalog.view" },
   { path: "/takeaway/store/shifts", label: "กะขาย", permission: "takeaway.shift.manage" },
   { path: "/takeaway/store/stock", label: "สต๊อกร้าน", permission: "takeaway.stock.view" },
   { path: "/takeaway/store/central-orders", label: "สั่ง/รับส่วนกลาง", permission: "takeaway.central_order.create" },

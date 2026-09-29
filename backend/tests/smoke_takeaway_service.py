@@ -24,6 +24,7 @@ from app.models.takeaway import (
 )
 from app.schemas.takeaway import (
     TakeawayCatalogItemCreate,
+    TakeawayCatalogItemUpdate,
     TakeawayCategoryCreate,
     TakeawayCentralOrderCreate,
     TakeawayCentralOrderLineCreate,
@@ -170,10 +171,14 @@ async def run() -> None:
                     category_id=category.id,
                     sku="SMOKE-FOOD-1",
                     name="หมูย่างทดสอบ",
+                    description="เมนูทดสอบสำหรับหน้าร้าน",
+                    image_url="https://example.com/smoke-food.jpg",
                     price=Decimal("100"),
                     tax_rate=Decimal("7"),
                     kitchen_station="grill",
                     track_stock=True,
+                    sort_order=1,
+                    is_featured=True,
                 )
             )
             store_location = TakeawayStockLocation(
@@ -197,6 +202,17 @@ async def run() -> None:
                     idempotency_key=f"smoke-receive-{uuid.uuid4()}",
                 )
             )
+            catalog_rows = await service_a.list_catalog(brand_a, branch_id)
+            assert len(catalog_rows) == 1
+            assert catalog_rows[0]["item"].description == "เมนูทดสอบสำหรับหน้าร้าน"
+            assert catalog_rows[0]["item"].image_url == "https://example.com/smoke-food.jpg"
+            assert catalog_rows[0]["available_qty"] == Decimal("10")
+            assert catalog_rows[0]["is_available"] is True
+            updated_item = await service_a.update_catalog_item(
+                item.id,
+                TakeawayCatalogItemUpdate(description="รายละเอียดที่แก้ไข", sort_order=2),
+            )
+            assert updated_item.description == "รายละเอียดที่แก้ไข" and updated_item.sort_order == 2
             shift = await service_a.open_shift(
                 TakeawayShiftOpen(business_date=business_date, opening_cash=Decimal("500"))
             )

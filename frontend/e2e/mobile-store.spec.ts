@@ -24,6 +24,13 @@ async function mockApi(page: Page) {
     else if (url.pathname.endsWith("/mobile-store/login")) {
       const body = request.postDataJSON(); data = tokens(body.business_code === "company-one" ? companyA : companyB, body.device_id);
     } else if (url.pathname.endsWith("/takeaway/status")) data = { enabled: true, writes_enabled: false, company_id: request.headers()["x-company-id"], branch_id: branch, brand_id: brand, hard_holds: [] };
+    else if (url.pathname.endsWith("/takeaway/catalog/categories")) data = [{ id: "category-drink", name: "เครื่องดื่ม" }];
+    else if (url.pathname.endsWith("/takeaway/catalog/items")) data = [{
+      item: { id: "item-coffee", brand_id: brand, category_id: "category-drink", sku: "CF-001", barcode: "885000000001",
+        name: "กาแฟเย็น", description: "หวานน้อย", image_url: null, price: "55.00", unit: "แก้ว", tax_rate: "7.00",
+        kitchen_station: "drink", track_stock: true, sort_order: 1, is_featured: true, is_active: true },
+      effective_price: "55.00", branch_is_available: true, available_qty: "8.00", is_available: true,
+    }];
     return route.fulfill({ json: { data, meta: {}, error: null } });
   });
 }
@@ -55,6 +62,18 @@ test("unknown and inactive business codes cannot progress", async ({ page }) => 
     await expect(page.getByRole("alert")).toBeVisible();
     await expect(page.getByLabel("รหัสผ่าน", { exact: true })).toHaveCount(0);
   }
+});
+
+test("Store product list shows customer-facing content and actual branch stock", async ({ page }) => {
+  await mockApi(page); await page.goto("/"); await login(page, "company-one");
+  await page.getByRole("link", { name: "สินค้า", exact: true }).click();
+  await expect(page).toHaveURL(/\/takeaway\/store\/catalog$/);
+  await expect(page.getByRole("heading", { name: "รายการสินค้า", exact: true })).toBeVisible();
+  await expect(page.getByText("กาแฟเย็น", { exact: true })).toBeVisible();
+  await expect(page.getByText("หวานน้อย", { exact: true })).toBeVisible();
+  await expect(page.getByText("พร้อมขาย 8", { exact: true })).toBeVisible();
+  await page.getByPlaceholder("ค้นหาชื่อสินค้า SKU หรือบาร์โค้ด").fill("ไม่พบ");
+  await expect(page.getByText("ไม่พบสินค้า", { exact: true })).toBeVisible();
 });
 
 test("logout clears session; same APK resolves and logs into another company", async ({ page }) => {

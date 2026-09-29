@@ -40,6 +40,7 @@ export const TAKEAWAY_NAVIGATION: TakeawayNavigationGroup[] = [
     allowedScopes: ["company", "branch", "station"],
     items: [
       { key: "store-orders", label: "ขายและเตรียมสินค้า", to: "/takeaway/store/orders", permissions: ["takeaway.sale.create"], description: "รับเงิน เตรียมสินค้า เรียกคิว และส่งมอบ" },
+      { key: "store-catalog", label: "สินค้า", to: "/takeaway/store/catalog", permissions: ["takeaway.catalog.view"], description: "รายการ ราคา และสถานะพร้อมขายของสาขา" },
       { key: "store-shifts", label: "กะขาย", to: "/takeaway/store/shifts", permissions: ["takeaway.shift.manage"], description: "เปิด ปิด และตรวจเงินในกะ" },
       { key: "store-fulfillment", label: "จุดเตรียมสินค้า", to: "/takeaway/store/fulfillment", permissions: ["takeaway.sale.create", "takeaway.kitchen.manage", "takeaway.pickup.manage"], description: "หน้าจอเสริมสำหรับสาขาที่แยกจุดเตรียม", fulfillmentModes: ["separate_stations"] },
       { key: "store-central-orders", label: "สั่งส่วนกลาง", to: "/takeaway/store/central-orders", permissions: ["takeaway.central_order.create"], description: "ใบสั่งประจำ รายการเพิ่ม และรับของ" },
@@ -72,6 +73,7 @@ export const TAKEAWAY_NAVIGATION: TakeawayNavigationGroup[] = [
     shortLabel: "ADMIN",
     allowedScopes: ["company", "brand"],
     items: [
+      { key: "admin-catalog", label: "จัดการสินค้า", to: "/takeaway/admin/catalog", permissions: ["takeaway.catalog.manage"], description: "รูป รายละเอียด ราคา หมวด และการแสดงหน้าร้าน" },
       { key: "admin-import", label: "นำเข้า Chambo", to: "/takeaway/admin/import", permissions: ["takeaway.import.dry_run"], description: "ตรวจแพ็กเกจก่อนย้ายข้อมูล" },
       { key: "admin-cutover", label: "Cutover", to: "/takeaway/admin/cutover", permissions: ["takeaway.import.apply"], description: "เตรียม activation และ rollback" },
       { key: "admin-erp", label: "เชื่อม ERP", to: "/takeaway/admin/erp", permissions: ["takeaway.erp.export"], description: "Outbox และ reconciliation" },

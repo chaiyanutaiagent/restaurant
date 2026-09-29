@@ -117,6 +117,7 @@ import PlatformSupportPage from "@/pages/platform/PlatformSupportPage";
 import PlatformTeamPage from "@/pages/platform/PlatformTeamPage";
 import PlatformInvitationPage from "@/pages/platform/PlatformInvitationPage";
 import TakeawayCounterPage from "@/pages/takeaway/TakeawayCounterPage";
+import TakeawayCatalogPage from "@/pages/takeaway/TakeawayCatalogPage";
 import TakeawayCutoverPage from "@/pages/takeaway/TakeawayCutoverPage";
 import TakeawayCentralRecipesPage from "@/pages/takeaway/TakeawayCentralRecipesPage";
 import TakeawayDeviceSettingsPage from "@/pages/takeaway/TakeawayDeviceSettingsPage";
@@ -220,6 +221,9 @@ export default function App(): JSX.Element {
                 <Route element={<ProtectedRoute permission="takeaway.shift.manage" />}>
                   <Route path="/takeaway/store/shifts" element={<TakeawayShiftPage />} />
                 </Route>
+                <Route element={<ProtectedRoute permission="takeaway.catalog.view" />}>
+                  <Route path="/takeaway/store/catalog" element={<TakeawayCatalogPage mode="store" />} />
+                </Route>
                 <Route element={<ProtectedRoute permissions={["takeaway.sale.create", "takeaway.kitchen.manage", "takeaway.pickup.manage"]} />}>
                   <Route path="/takeaway/store/fulfillment" element={<TakeawayOperationsPage section="fulfillment" workspace="store" />} />
                   <Route path="/takeaway/store/kitchen" element={<Navigate to="/takeaway/store/fulfillment" replace />} />
@@ -271,6 +275,9 @@ export default function App(): JSX.Element {
               </Route>
 
               <Route element={<TakeawayWorkspaceGuard area="admin" />}>
+                <Route element={<ProtectedRoute permission="takeaway.catalog.manage" />}>
+                  <Route path="/takeaway/admin/catalog" element={<TakeawayCatalogPage mode="admin" />} />
+                </Route>
                 <Route element={<ProtectedRoute permission="takeaway.import.dry_run" />}>
                   <Route path="/takeaway/admin/import" element={<TakeawayOperationsPage section="import" workspace="admin" />} />
                 </Route>

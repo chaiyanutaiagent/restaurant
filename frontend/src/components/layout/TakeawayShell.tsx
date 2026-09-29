@@ -8,6 +8,7 @@ import {
   Factory,
   LayoutDashboard,
   PackageCheck,
+  PackageSearch,
   PlugZap,
   ScrollText,
   ShoppingBag,
@@ -32,6 +33,7 @@ import { takeawayApi } from "@/lib/takeawayApi";
 const icons: Record<string, typeof LayoutDashboard> = {
   overview: LayoutDashboard,
   "store-orders": ShoppingBag,
+  "store-catalog": PackageSearch,
   "store-shifts": Clock3,
   "store-fulfillment": PackageCheck,
   "store-central-orders": ClipboardList,
@@ -48,6 +50,7 @@ const icons: Record<string, typeof LayoutDashboard> = {
   "central-reports": BarChart3,
   "central-staff": Users,
   "admin-import": DatabaseZap,
+  "admin-catalog": PackageSearch,
   "admin-cutover": Construction,
   "admin-erp": PlugZap,
   "admin-users": UserRoundCog,

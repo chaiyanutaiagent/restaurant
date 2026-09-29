@@ -27,6 +27,7 @@ from app.database import get_platform_db
 from app.schemas.takeaway import (
     TakeawayBranchAvailabilityUpdate,
     TakeawayCatalogItemCreate,
+    TakeawayCatalogItemUpdate,
     TakeawayCategoryCreate,
     TakeawayCentralOrderCreate,
     TakeawayCentralOrderDiscrepancyResolution,
@@ -260,11 +261,11 @@ async def public_ordering_menu(
             "categories": categories,
             "items": [
                 {
-                    "item": item,
-                    "effective_price": price_override if price_override is not None else item.price,
-                    "is_available": is_available,
+                    "item": row["item"],
+                    "effective_price": row["effective_price"],
+                    "is_available": row["is_available"],
                 }
-                for item, price_override, is_available in catalog
+                for row in catalog
             ],
         },
         "meta": {"version": settings.app_version},
@@ -435,17 +436,17 @@ async def list_catalog(
     current: TokenData = Depends(require_permission("takeaway.catalog.view")),
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
-    rows = await TakeawayService(db, current).list_catalog(brand_id, branch_id)
-    return ok(
-        [
-            {
-                "item": item,
-                "effective_price": price_override if price_override is not None else item.price,
-                "is_available": is_available,
-            }
-            for item, price_override, is_available in rows
-        ]
-    )
+    return ok(await TakeawayService(db, current).list_catalog(brand_id, branch_id))
+
+
+@router.patch("/catalog/items/{item_id}")
+async def update_catalog_item(
+    item_id: uuid.UUID,
+    payload: TakeawayCatalogItemUpdate,
+    current: TokenData = Depends(require_permission("takeaway.catalog.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).update_catalog_item(item_id, payload))
 
 
 @router.put("/catalog/items/{item_id}/branches/{branch_id}")

@@ -1,13 +1,19 @@
 import api from "./api";
 import type { ApiResponse } from "@/types/api";
 import type { TakeawayRecord, TakeawayContext, TakeawayCatalogRow, TakeawaySalePayload,
-  TakeawayReceipt, TakeawayShiftSummary, TakeawayCentralOrder } from "../lib/takeawayApi";
+  TakeawayReceipt, TakeawayShiftSummary, TakeawayCentralOrder, TakeawayCatalogItemPayload } from "../lib/takeawayApi";
 export type * from "../lib/takeawayApi";
 
 export const takeawayApi = {
   status: () => api.get<ApiResponse<TakeawayContext>>("/takeaway/status"),
   categories: (brandId: string) => api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/catalog/categories", { params: { brand_id: brandId } }),
   catalog: (brandId: string, branchId?: string | null) => api.get<ApiResponse<TakeawayCatalogRow[]>>("/takeaway/catalog/items", { params: { brand_id: brandId, branch_id: branchId } }),
+  createCatalogItem: async (_payload: TakeawayCatalogItemPayload & { brand_id: string }): Promise<never> => {
+    throw new Error("การแก้ข้อมูลหลักสินค้าให้ทำจากระบบหลังบ้าน");
+  },
+  updateCatalogItem: async (_id: string, _payload: Omit<TakeawayCatalogItemPayload, "brand_id">): Promise<never> => {
+    throw new Error("การแก้ข้อมูลหลักสินค้าให้ทำจากระบบหลังบ้าน");
+  },
   shifts: () => api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/shifts"),
   openShift: (payload: { business_date: string; opening_cash: string }) => api.post<ApiResponse<TakeawayRecord>>("/takeaway/shifts/open", payload),
   closeShift: (id: string, payload: { counted_cash: string; note?: string }) => api.post<ApiResponse<TakeawayRecord>>(`/takeaway/shifts/${id}/close`, payload),

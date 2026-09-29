@@ -69,6 +69,32 @@ test("logout clears session; same APK resolves and logs into another company", a
   expect(requests.some((url) => url.includes("auto-login"))).toBe(false);
 });
 
+test("restricted Store token accepts UAT superadmin identity but still rejects wildcard", async ({ page }) => {
+  await page.goto("/");
+  const result = await page.evaluate(async ({ company, fixture }) => {
+    const session = await import("/src/mobile-store/session.ts");
+    const restricted = { ...fixture, user: { ...fixture.user, is_superuser: true } };
+    let restrictedAccepted = true;
+    try { await session.saveSession({ tokens: restricted, companyId: company, deviceId: "device" }); }
+    catch { restrictedAccepted = false; }
+    const parts = fixture.access_token.split(".");
+    const claims = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    const encoded = btoa(JSON.stringify({ ...claims, permissions: ["*"] }))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    let wildcardDenied = false;
+    try {
+      await session.saveSession({
+        tokens: { ...restricted, access_token: `${parts[0]}.${encoded}.${parts[2]}` },
+        companyId: company,
+        deviceId: "device",
+      });
+    } catch { wildcardDenied = true; }
+    await session.clearSession();
+    return { restrictedAccepted, wildcardDenied };
+  }, { company: companyA, fixture: tokens(companyA, "device") });
+  expect(result).toEqual({ restrictedAccepted: true, wildcardDenied: true });
+});
+
 test("offline data is isolated across companies and logout preserves unsynced sales", async ({ page }) => {
   await page.goto("/");
   const result = await page.evaluate(async ({ a, b, tA, tB, branchId, brandId }) => {

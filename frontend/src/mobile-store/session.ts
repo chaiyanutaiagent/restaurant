@@ -29,7 +29,7 @@ export function sessionClaims(session: Session): StoreClaims {
   if (claims.client_surface !== "takeaway_store" || claims.business_type !== "takeaway"
       || claims.target_database !== "takeaway" || !claims.branch_id || !claims.brand_id || !claims.station_key
       || claims.company_id !== session.companyId || claims.store_device_id !== session.deviceId
-      || session.tokens.user.company_id !== session.companyId || session.tokens.user.is_superuser
+      || session.tokens.user.company_id !== session.companyId
       || claims.permissions.includes("*") || !claims.permissions.includes("takeaway.store.access")) {
     throw new Error("บัญชีนี้ไม่ใช่สิทธิ์หน้าร้าน Takeaway กรุณาเข้าสู่ระบบใหม่");
   }

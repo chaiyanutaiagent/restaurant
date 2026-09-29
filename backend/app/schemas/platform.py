@@ -10,6 +10,7 @@ from pydantic import ConfigDict, Field, field_validator
 from app.schemas import BaseSchema
 from app.schemas.membership import SaasMembershipRead
 from app.utils.business_slug import normalize_business_slug
+from app.utils.password_policy import validate_platform_password
 
 
 USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,99}$")
@@ -151,6 +152,11 @@ class PlatformOperatorInvitationAccept(BaseSchema):
     token: str = Field(min_length=32, max_length=500)
     password: str = Field(min_length=12, max_length=128)
 
+    @field_validator("password")
+    @classmethod
+    def validate_password_policy(cls, value: str) -> str:
+        return validate_platform_password(value)
+
 
 class PlatformRoleAssignmentRequest(BaseSchema):
     role_code: PlatformRoleCode
@@ -252,6 +258,11 @@ class PlatformPasswordChangeRequest(BaseSchema):
     current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=12, max_length=128)
     mfa_code: str | None = Field(default=None, max_length=32)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password_policy(cls, value: str) -> str:
+        return validate_platform_password(value)
 
 
 class PlatformCompanyOwnerCreate(BaseSchema):

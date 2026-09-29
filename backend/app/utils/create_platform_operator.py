@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from app.database import active_identity_session_factory
 from app.models.audit import AuditLog
 from app.models.platform import PlatformOperator, PlatformSession
+from app.utils.password_policy import validate_platform_password
 from app.utils.security import hash_password
 
 
@@ -44,8 +45,7 @@ async def create_operator(
     normalized_username = username.strip().lower()
     normalized_name = display_name.strip()
     normalized_email = email.strip().lower() if email and email.strip() else None
-    if len(password) < 12:
-        raise ValueError("Platform operator password must contain at least 12 characters")
+    validate_platform_password(password)
     if not normalized_username or not normalized_name:
         raise ValueError("Username and display name are required")
 

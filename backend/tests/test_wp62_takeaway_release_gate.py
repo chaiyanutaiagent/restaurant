@@ -179,7 +179,7 @@ class TakeawayWriteActivationConfigTests(unittest.TestCase):
                 branch_allowlist="",
                 approval_reference=None,
             )
-        with self.assertRaisesRegex(ValueError, "uat-\*"):
+        with self.assertRaisesRegex(ValueError, "exact approved HTTPS Foodchainservice UAT"):
             validate_takeaway_write_activation_config(
                 environment="development",
                 legacy_uat_enabled=True,

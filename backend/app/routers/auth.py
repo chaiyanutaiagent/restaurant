@@ -4,7 +4,6 @@ import uuid
 import hmac
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
@@ -28,13 +27,17 @@ from app.schemas.user import UserRead
 from app.schemas.qa_access import QaPersonaBranchRead, QaPersonaRead, QaSessionRequest
 from app.services.auth_service import AuthService
 from app.utils.security import decode_token
+from app.utils.uat_host_policy import resolve_qa_access_authority
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
 def _qa_access_guard(request: Request, access_key: str | None) -> None:
-    configured_host = urlsplit(settings.saas_public_base_url).hostname
-    request_host = (request.headers.get("host") or "").split(",", 1)[0].strip().split(":", 1)[0].lower()
+    try:
+        configured_host = resolve_qa_access_authority(settings.saas_public_base_url)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found") from None
+    request_host = (request.headers.get("host") or "").lower()
     configured_key = settings.qa_access_key or ""
     if (
         not settings.qa_access_mode_enabled
@@ -120,21 +123,21 @@ async def uat_auto_login(
     request: Request,
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
-    configured_host = urlsplit(settings.saas_public_base_url).hostname
-    request_host = request.headers.get("host") or ""
-    request_host = request_host.split(",", 1)[0].strip().split(":", 1)[0].lower()
+    request_host = (request.headers.get("host") or "").lower()
     if (
         not settings.uat_auth_bypass_enabled
         or settings.environment != "development"
-        or configured_host is None
         or settings.uat_auth_bypass_company_id is None
         or settings.uat_auth_bypass_username is None
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    allowed_hosts = resolve_uat_auth_bypass_hosts(
-        settings.saas_public_base_url,
-        settings.uat_auth_bypass_hosts,
-    )
+    try:
+        allowed_hosts = resolve_uat_auth_bypass_hosts(
+            settings.saas_public_base_url,
+            settings.uat_auth_bypass_hosts,
+        )
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found") from None
     if request_host not in allowed_hosts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 

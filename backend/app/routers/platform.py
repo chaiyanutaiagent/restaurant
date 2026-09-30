@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any
 import uuid
 import hmac
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.config import resolve_uat_auth_bypass_hosts, settings
+from app.utils.uat_host_policy import resolve_qa_access_authority
 from app.database import get_identity_db, get_restaurant_service_db
 from app.dependencies import PlatformTokenData, get_current_platform_operator
 from app.models.platform import PlatformOperator
@@ -91,14 +91,11 @@ def _set_refresh_cookie(response: Response, refresh_token: str, *, max_age: int 
 
 
 def _platform_qa_access_guard(request: Request, access_key: str | None) -> None:
-    configured_host = urlsplit(settings.saas_public_base_url).hostname
-    request_host = (
-        (request.headers.get("host") or "")
-        .split(",", 1)[0]
-        .strip()
-        .split(":", 1)[0]
-        .lower()
-    )
+    try:
+        configured_host = resolve_qa_access_authority(settings.saas_public_base_url)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found") from None
+    request_host = (request.headers.get("host") or "").lower()
     configured_key = settings.qa_access_key or ""
     if (
         not settings.qa_access_mode_enabled
@@ -193,19 +190,20 @@ async def uat_platform_auto_login(
     response: Response,
     db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
-    configured_host = urlsplit(settings.saas_public_base_url).hostname
-    request_host = (request.headers.get("host") or "").split(",", 1)[0].strip().split(":", 1)[0].lower()
+    request_host = (request.headers.get("host") or "").lower()
     if (
         not settings.uat_auth_bypass_enabled
         or settings.environment != "development"
-        or configured_host is None
         or settings.uat_platform_auth_bypass_username is None
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    allowed_hosts = resolve_uat_auth_bypass_hosts(
-        settings.saas_public_base_url,
-        settings.uat_auth_bypass_hosts,
-    )
+    try:
+        allowed_hosts = resolve_uat_auth_bypass_hosts(
+            settings.saas_public_base_url,
+            settings.uat_auth_bypass_hosts,
+        )
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found") from None
     if request_host not in allowed_hosts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     ip_address, user_agent = _client(request)

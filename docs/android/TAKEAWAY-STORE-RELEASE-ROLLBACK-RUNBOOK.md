@@ -25,6 +25,14 @@ no Production state. Baseline evidence is in
 - [ ] Record the tenant/branch transaction allowlist, customer approval, backup
   point and expected outage. This candidate does not open transaction flags.
 - [ ] Confirm monitoring recipients and an operator who can pause rollout.
+- [ ] For enabled UAT test-access modes, use exactly `https://` plus one of
+  `uat-pos.foodchainservice.com`, `uat-app.foodchainservice.com`,
+  `uat-restaurant.foodchainservice.com`, `uat-retail.foodchainservice.com`, or
+  `uat-takeaway.foodchainservice.com`. Only an optional root slash is accepted;
+  no port, credentials, application path, query or fragment. Proxy Host headers
+  must match an approved configured host verbatim apart from letter case.
+  Localhost/127.0.0.1 and ports are allowed only for local QA persona mode, with
+  the request Host matching the configured local authority including its port.
 
 ## Backup validation and recovery rehearsal
 

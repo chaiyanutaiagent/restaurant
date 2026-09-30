@@ -8,6 +8,11 @@ from urllib.parse import urlsplit
 from pydantic import computed_field
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from app.utils.uat_host_policy import (
+    APPROVED_UAT_HOSTS,
+    resolve_qa_access_authority,
+    resolve_uat_public_host,
+)
 
 
 def effective_database_url(explicit_url: str | None, legacy_url: str) -> str:
@@ -62,13 +67,7 @@ def validate_uat_auth_bypass_config(
         return
     if environment != "development":
         raise ValueError("UAT auth bypass is allowed only in the development environment")
-    parsed_url = urlsplit(public_base_url)
-    if (
-        parsed_url.scheme != "https"
-        or parsed_url.hostname is None
-        or not parsed_url.hostname.startswith("uat-")
-    ):
-        raise ValueError("UAT auth bypass requires an HTTPS hostname beginning with uat-")
+    resolve_uat_public_host(public_base_url)
     if company_id is None or not username or not username.strip():
         raise ValueError("UAT auth bypass requires an explicit Company ID and username")
     if not platform_username or not platform_username.strip():
@@ -87,16 +86,11 @@ def validate_uat_superadmin_access_config(
     """Fail closed unless the temporary all-login account is scoped to UAT."""
     if not enabled:
         return
-    parsed_url = urlsplit(public_base_url)
-    if (
-        environment != "development"
-        or parsed_url.scheme != "https"
-        or parsed_url.hostname is None
-        or not parsed_url.hostname.startswith("uat-")
-    ):
+    if environment != "development":
         raise ValueError(
             "Temporary superadmin access is allowed only on an HTTPS UAT development host"
         )
+    resolve_uat_public_host(public_base_url)
     if company_id is None or not username or not username.strip():
         raise ValueError(
             "Temporary superadmin access requires an explicit Company ID and username"
@@ -104,21 +98,11 @@ def validate_uat_superadmin_access_config(
 
 
 def resolve_uat_auth_bypass_hosts(public_base_url: str, allowed_hosts: list[str]) -> set[str]:
-    public_host = urlsplit(public_base_url).hostname
-    if public_host is None:
-        return set()
-    result = {public_host.lower()}
+    result = {resolve_uat_public_host(public_base_url)}
     for value in allowed_hosts:
-        host = value.strip().lower()
-        if (
-            not host
-            or "*" in host
-            or "://" in host
-            or "/" in host
-            or not host.startswith("uat-")
-            or not host.endswith(".foodchainservice.com")
-        ):
-            raise ValueError("UAT auth bypass hosts must be exact uat-*.foodchainservice.com hostnames")
+        host = value.lower()
+        if host not in APPROVED_UAT_HOSTS:
+            raise ValueError("UAT auth bypass hosts must be exact approved Foodchainservice UAT hostnames")
         result.add(host)
     return result
 
@@ -137,15 +121,7 @@ def validate_qa_access_mode_config(
         return
     if environment != "development":
         raise ValueError("QA access mode is allowed only in the development environment")
-    parsed_url = urlsplit(public_base_url)
-    local_host = parsed_url.hostname in {"localhost", "127.0.0.1"}
-    uat_host = (
-        parsed_url.scheme == "https"
-        and parsed_url.hostname is not None
-        and parsed_url.hostname.startswith("uat-")
-    )
-    if not (local_host or uat_host):
-        raise ValueError("QA access mode requires localhost or an HTTPS uat-* hostname")
+    resolve_qa_access_authority(public_base_url)
     if access_key is None or len(access_key.strip()) < 32:
         raise ValueError("QA access mode requires a runtime access key of at least 32 characters")
     if company_id is None or not personas:
@@ -205,12 +181,7 @@ def validate_takeaway_write_activation_config(
     if effective_mode == "uat":
         if environment != "development":
             raise ValueError("Takeaway UAT writes are approved only in UAT development")
-        if (
-            parsed_url.scheme != "https"
-            or parsed_url.hostname is None
-            or not parsed_url.hostname.startswith("uat-")
-        ):
-            raise ValueError("Takeaway UAT writes require an HTTPS uat-* hostname")
+        resolve_uat_public_host(public_base_url)
         return
 
     if legacy_uat_enabled:
@@ -272,15 +243,9 @@ def validate_company_supply_chain_write_activation_config(
     """Keep Company Kitchen and Distribution mutations inside a bounded UAT wave."""
     if not kitchen_writes_enabled and not distribution_writes_enabled:
         return
-    parsed_url = urlsplit(public_base_url)
     if environment != "development":
         raise ValueError("Company supply-chain writes are approved only in UAT development")
-    if (
-        parsed_url.scheme != "https"
-        or parsed_url.hostname is None
-        or not parsed_url.hostname.startswith("uat-")
-    ):
-        raise ValueError("Company supply-chain writes require an HTTPS uat-* hostname")
+    resolve_uat_public_host(public_base_url)
     if distribution_writes_enabled and not kitchen_writes_enabled:
         raise ValueError("Company Distribution writes require Company Kitchen writes first")
 
@@ -341,15 +306,9 @@ def validate_pos_offline_mode_config(
     """Keep the planned POS outbox dark until a bounded UAT explicitly enables it."""
     if not enabled:
         return
-    parsed_url = urlsplit(public_base_url)
     if environment != "development":
         raise ValueError("POS offline mode is not approved outside UAT development")
-    if (
-        parsed_url.scheme != "https"
-        or parsed_url.hostname is None
-        or not parsed_url.hostname.startswith("uat-")
-    ):
-        raise ValueError("POS offline mode requires an HTTPS hostname beginning with uat-")
+    resolve_uat_public_host(public_base_url)
     if not company_allowlist.strip() or not branch_allowlist.strip():
         raise ValueError("POS offline mode requires explicit Company and Branch allow-lists")
 
@@ -363,15 +322,9 @@ def validate_physical_uat_evidence_config(
     """Physical evidence collection is an isolated UAT tool, never a Production switch."""
     if not enabled:
         return
-    parsed_url = urlsplit(public_base_url)
     if environment != "development":
         raise ValueError("Physical UAT evidence is not approved outside UAT development")
-    if (
-        parsed_url.scheme != "https"
-        or parsed_url.hostname is None
-        or not parsed_url.hostname.startswith("uat-")
-    ):
-        raise ValueError("Physical UAT evidence requires an HTTPS hostname beginning with uat-")
+    resolve_uat_public_host(public_base_url)
 
 
 def validate_refund_runtime_config(

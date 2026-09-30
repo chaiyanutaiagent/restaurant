@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 
 from app.config import settings
+from app.utils.uat_host_policy import resolve_uat_public_host
 
 MOBILE_STORE_SURFACE = "takeaway_store"
 STORE_PERMISSIONS = frozenset({
@@ -44,15 +44,12 @@ def uat_superadmin_store_access(user) -> bool:
     """Allow the named tenant superadmin into Store only on the explicit UAT gate."""
     configured_username = (settings.uat_superadmin_username or "").strip().lower()
     try:
-        public_url = urlsplit(settings.saas_public_base_url)
-        public_host = public_url.hostname or ""
+        resolve_uat_public_host(settings.saas_public_base_url)
     except ValueError:
         return False
     return bool(
         settings.uat_superadmin_all_logins_enabled
         and settings.environment == "development"
-        and public_url.scheme == "https"
-        and public_host.startswith("uat-")
         and bool(configured_username)
         and getattr(user, "is_superuser", False)
         and settings.uat_superadmin_company_id is not None

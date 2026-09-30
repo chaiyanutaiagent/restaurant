@@ -102,8 +102,8 @@ was expected before treating it as evidence of image recovery.
 
 ## Candidate changes
 
-- Store UAT superadmin runtime checks now reject HTTP, malformed base URLs and
-  empty configured usernames, alongside the existing environment/company/user gate.
+- Store UAT superadmin runtime checks reject origins outside the exact approved
+  host list and empty configured usernames, alongside the environment/company/user gate.
 - Store session checks bind token subject to returned employee; onboarding rejects
   a login response for a different business code.
 - A shared browser/CLI release policy binds package, channel and exact download
@@ -113,7 +113,7 @@ was expected before treating it as evidence of image recovery.
 - Native certificate checks fail closed when signer data is absent, including
   legacy Android signature handling; Production APKs cannot use UAT download hosts.
 
-## Automated verification
+## Automated verification of the initial candidate
 
 | Gate | Result |
 | --- | --- |
@@ -171,6 +171,45 @@ Native reports remain locally at `frontend/android/app/build/test-results/` and
 `frontend/android/app/build/reports/lint-results-debug.html`; generated artifacts
 and the dependency symlink are excluded from the commit. Tests do not prove
 physical installation, printer behavior or concurrent database stock locking.
+
+## QA exact host follow up
+
+QA found that `3dd4c02` still accepted any HTTPS hostname beginning `uat-`.
+That was a blocking authentication guard gap, not an acceptable Production
+configuration. The follow-up uses `backend/app/utils/uat_host_policy.py` for
+the startup validators and request-time test-access checks.
+
+Approved origins are HTTPS on `uat-pos`, `uat-app`, `uat-restaurant`, `uat-retail`
+and `uat-takeaway`, each under `foodchainservice.com`. Only an optional root slash
+and case-insensitive scheme/host are accepted. Arbitrary `uat-*` subdomains,
+external domains, suffix confusion, wildcard, userinfo, explicit ports (including
+443), non-root paths, query, fragment and malformed URLs are rejected.
+
+The base URL is validated before adding its host to the bypass allowlist.
+Tenant/platform bypass and QA guards no longer truncate comma-delimited or
+port-bearing Host headers into a permitted hostname. Invalid runtime settings
+produce 404; Store superadmin eligibility returns false. Loopback is preserved
+only in QA persona mode with HTTP(S), a valid optional port and exact request
+authority matching. Other UAT access and write-mode startup validators reject it.
+
+Nine new tests in `test_uat_host_policy.py` cover the seven startup validators,
+positive approved-host controls, adversarial origins/Host headers, base-host
+allowlist injection, runtime superadmin/bypass/QA paths, and loopback restrictions.
+The runtime adversarial cases include a Host matching the malicious configured
+origin, reproducing the original guard gap rather than relying on a host mismatch.
+
+Focused gate: `python -B -m unittest discover -s tests -p 'test_uat*.py'` passed
+21 tests. The first full regression found two obsolete assertions matching the
+old permissive error wording in WP62/WP63 tests; both now assert the exact-host
+policy error while retaining the same rejection behavior and inputs.
+
+Final full backend gate: **613 run, 612 passed, 1 skipped, no failures** using
+the same local container command above. The skip remains the unconfigured
+`RETAIL_DATABASE_URL` integration case. `git diff --check` passed.
+
+This follow-up changes backend code/tests and documentation only. Frontend and
+Android gates were not redundantly rerun. No server access, runtime modification,
+deployment, migration, secret change or business data change was performed.
 
 ## Remaining gates
 

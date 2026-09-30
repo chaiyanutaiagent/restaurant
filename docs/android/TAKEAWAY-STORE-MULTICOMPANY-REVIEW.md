@@ -47,7 +47,6 @@ instead of building a new APK for every customer.
 | P1 before wider rollout | Isolated database restore and offline forward-rollback rehearsal | Checksums do not prove recovery without lost transactions |
 | P1 | Add disposable-PostgreSQL integration cases for concurrent stock/reservation, idempotency collision and tenant-predicate enforcement | Current new tests use mocked result rows and inspect SQL; they do not prove concurrent behavior |
 | P1 | Review global idempotency-key uniqueness in stock movements/credit/outbox | `takeaway_stock_movements` uses a globally unique key, and replay lookup is by key alone; cross-tenant key collision may cause denial or misleading replay success, not a certified isolation guarantee |
-| P1 | Enforce exact UAT hostname allowlists consistently across all test modes | Current superadmin/QA base-host check uses `uat-` prefix plus configured environment, not a full approved-host list |
 | P1 | Review restored JWT expiry/offline authorization and revoked-user offline queues | Offline continuation policy needs explicit business approval; client cache is not live revocation |
 | P2 | Consider PostgreSQL RLS and composite tenant foreign keys through a migration plan | Defense in depth against a future missing application predicate; not introduced in this no-migration candidate |
 | P2 | Server-side minimum client enforcement with documented offline grace | A client update prompt cannot enforce revocation when the feed is unreachable |
@@ -57,3 +56,12 @@ This is a bounded code review, not a certification that every application query,
 database relationship or endpoint is tenant safe. No new RLS, schema migration,
 company data import, permission seed, secret rotation or runtime flag change was
 performed. Broader migrations and operational rehearsals require their own scope.
+
+The QA host-policy blocker from `3dd4c02` is fixed in the follow-up candidate:
+startup UAT validators and runtime tenant/platform bypass, QA persona access and
+Store superadmin use the same exact five-host policy in `uat_host_policy.py`.
+HTTP(S) loopback with an explicit matching port remains available only to QA
+persona mode. Host prefixes/suffixes, arbitrary ports, userinfo and non-root
+paths do not authorize test access. This fix is not yet deployed. Legacy CLI
+fixture/maintenance helpers still need a separate consistency review; they were
+not executed or broadened by this HTTP authentication fix.

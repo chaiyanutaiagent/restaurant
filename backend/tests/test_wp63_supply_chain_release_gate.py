@@ -22,7 +22,7 @@ class CompanySupplyChainReleaseConfigTests(unittest.TestCase):
                 kitchen_writes_enabled=True,
                 distribution_writes_enabled=False,
             )
-        with self.assertRaisesRegex(ValueError, "HTTPS uat"):
+        with self.assertRaisesRegex(ValueError, "exact approved HTTPS Foodchainservice UAT"):
             validate_company_supply_chain_write_activation_config(
                 environment="development",
                 public_base_url="https://pos.foodchainservice.com",

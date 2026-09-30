@@ -2,6 +2,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { createHash, sign } from "node:crypto";
+import { validReleaseManifest, canonicalReleasePayload } from "../frontend/src/mobile-store/releasePolicy.js";
 
 const [apkPath, versionName, versionCodeRaw, apkUrl, channel, packageId, privateKeyPath, outputPath, minimumRaw, rollbackRaw] = process.argv.slice(2);
 if (!apkPath || !versionName || !versionCodeRaw || !apkUrl || !channel || !packageId || !privateKeyPath || !outputPath) {
@@ -35,7 +36,8 @@ const payload = {
   version_code: versionCode,
   version_name: versionName,
 };
-const signature = sign(null, Buffer.from(JSON.stringify(payload)), readFileSync(privateKeyPath)).toString("base64");
+if (!validReleaseManifest(payload, false)) throw new Error("invalid Store release policy");
+const signature = sign(null, Buffer.from(canonicalReleasePayload(payload)), readFileSync(privateKeyPath)).toString("base64");
 writeFileSync(outputPath, `${JSON.stringify({
   surface: payload.surface,
   channel: payload.channel,

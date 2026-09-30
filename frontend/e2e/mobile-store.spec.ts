@@ -199,6 +199,40 @@ test("Store updater rejects an unconfigured or unverified release channel", asyn
   expect(denied).toBe(true);
 });
 
+test("session rejects a mixed-company or mixed-user login response", async ({ page }) => {
+  await page.goto("/");
+  const denied = await page.evaluate(async ({ fixture, company }) => {
+    const path = "/src/mobile-store/session.ts", { sessionClaims } = await import(path);
+    let count = 0;
+    for (const user of [{ ...fixture.user, company_id: "another-company" }, { ...fixture.user, id: "another-user" }]) {
+      try { sessionClaims({ tokens: { ...fixture, user }, companyId: company, deviceId: "device" }); }
+      catch { count++; }
+    }
+    return count;
+  }, { fixture: tokens(companyA, "device"), company: companyA });
+  expect(denied).toBe(2);
+});
+
+test("onboarding rejects valid-looking tokens for a different business code", async ({ page }) => {
+  await mockApi(page);
+  await page.route("**/mobile-store/login", async (route) => {
+    const body = route.request().postDataJSON();
+    await route.fulfill({ json: { data: tokens(companyB, body.device_id), meta: {}, error: null } });
+  });
+  await page.goto("/");
+  await page.getByLabel("Business Code", { exact: true }).fill("company-one");
+  await page.getByRole("button", { name: "ตรวจสอบบริษัท", exact: true }).click();
+  await page.getByLabel("ชื่อผู้ใช้", { exact: true }).fill("stock");
+  await page.getByLabel("รหัสผ่าน", { exact: true }).fill("fixture-only");
+  await page.getByRole("button", { name: "ตรวจสอบบัญชีและสาขา", exact: true }).click();
+  await page.getByRole("button", { name: "เข้าใช้งานสาขานี้", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("เข้าสู่ระบบไม่สำเร็จ");
+  expect(await page.evaluate(async () => {
+    const path = "/src/mobile-store/session.ts";
+    return (await import(path)).useAuthStore.getState().companyId;
+  })).toBeNull();
+});
+
 test("Store updater accepts only the matching signed manifest payload", async ({ page }) => {
   await page.goto("/");
   const result = await page.evaluate(async () => {

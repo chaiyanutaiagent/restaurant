@@ -5,7 +5,7 @@ import type { User } from "@/types/user";
 
 const KEY = "foodchainservice.store.session.v1";
 const DEVICE_KEY = "foodchainservice.store.device.v1";
-type StoreClaims = { company_id: string; brand_id: string; branch_id: string; station_key: string;
+type StoreClaims = { sub: string; company_id: string; brand_id: string; branch_id: string; station_key: string;
   client_surface: string; store_device_id: string; business_type: string; target_database: string;
   permissions: string[]; exp: number };
 type Session = { tokens: TokenResponse; companyId: string; deviceId: string };
@@ -30,6 +30,7 @@ export function sessionClaims(session: Session): StoreClaims {
       || claims.target_database !== "takeaway" || !claims.branch_id || !claims.brand_id || !claims.station_key
       || claims.company_id !== session.companyId || claims.store_device_id !== session.deviceId
       || session.tokens.user.company_id !== session.companyId
+      || !claims.sub || claims.sub !== session.tokens.user.id
       || claims.permissions.includes("*") || !claims.permissions.includes("takeaway.store.access")) {
     throw new Error("บัญชีนี้ไม่ใช่สิทธิ์หน้าร้าน Takeaway กรุณาเข้าสู่ระบบใหม่");
   }

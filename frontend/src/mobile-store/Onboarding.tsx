@@ -47,6 +47,9 @@ export default function Onboarding(): JSX.Element {
         return;
       }
       const result = await onboardingApi.post<ApiResponse<TokenResponse>>("/mobile-store/login", { ...payload, branch_id: branch });
+      if (result.data.data.business_slug !== payload.business_code) {
+        throw new Error("Business code does not match the login response");
+      }
       await saveSession({ tokens: result.data.data, companyId: result.data.data.user.company_id, deviceId: payload.device_id });
       setPassword("");
     } catch {

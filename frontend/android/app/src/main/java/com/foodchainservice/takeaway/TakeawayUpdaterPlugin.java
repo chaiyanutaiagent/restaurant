@@ -3,6 +3,7 @@ package com.foodchainservice.takeaway;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
@@ -21,18 +22,11 @@ import java.io.FileOutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
-import java.util.Arrays;
-import java.util.HashSet;
 import java.util.Locale;
-import java.util.Set;
 
 @CapacitorPlugin(name = "TakeawayUpdater")
 public class TakeawayUpdaterPlugin extends Plugin {
     private static final long MAX_APK_BYTES = 250L * 1024L * 1024L;
-    private static final Set<String> ALLOWED_HOSTS = new HashSet<>(Arrays.asList(
-        "uat-takeaway.foodchainservice.com",
-        "downloads.foodchainservice.com"
-    ));
 
     @PluginMethod
     public void getStatus(PluginCall call) {
@@ -89,7 +83,7 @@ public class TakeawayUpdaterPlugin extends Plugin {
             connection = (HttpURLConnection) source.openConnection();
             connection.setConnectTimeout(15_000);
             connection.setReadTimeout(60_000);
-            connection.setInstanceFollowRedirects(true);
+            connection.setInstanceFollowRedirects(false);
             connection.connect();
             validateUrl(connection.getURL());
             if (connection.getResponseCode() < 200 || connection.getResponseCode() >= 300) {
@@ -116,12 +110,14 @@ public class TakeawayUpdaterPlugin extends Plugin {
                 throw new SecurityException("SHA-256 ของ APK ไม่ตรงกับ release");
             }
             PackageManager packageManager = getContext().getPackageManager();
-            PackageInfo candidate = packageManager.getPackageArchiveInfo(target.getAbsolutePath(), PackageManager.GET_SIGNING_CERTIFICATES);
+            int certificateFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? PackageManager.GET_SIGNING_CERTIFICATES : PackageManager.GET_SIGNATURES;
+            PackageInfo candidate = packageManager.getPackageArchiveInfo(target.getAbsolutePath(), certificateFlags);
             if (candidate == null || !getContext().getPackageName().equals(candidate.packageName)) {
                 throw new SecurityException("APK ไม่ใช่แอป Takeaway Store ชุดนี้");
             }
             if (versionCode(candidate) != expectedVersionCode) throw new SecurityException("Version code ของ APK ไม่ตรงกับ release");
-            PackageInfo installed = packageManager.getPackageInfo(getContext().getPackageName(), PackageManager.GET_SIGNING_CERTIFICATES);
+            PackageInfo installed = packageManager.getPackageInfo(getContext().getPackageName(), certificateFlags);
             if (versionCode(candidate) <= versionCode(installed)) throw new SecurityException("APK ไม่ใช่เวอร์ชันใหม่กว่า");
             if (!sameSigner(installed, candidate)) throw new SecurityException("ลายเซ็น APK ไม่ตรงกับแอปที่ติดตั้ง");
 
@@ -144,7 +140,7 @@ public class TakeawayUpdaterPlugin extends Plugin {
     }
 
     private void validateUrl(URL url) {
-        if (!"https".equalsIgnoreCase(url.getProtocol()) || !ALLOWED_HOSTS.contains(url.getHost().toLowerCase(Locale.US))) {
+        if (!StoreUpdatePolicy.allowedUrl(url, getContext().getPackageName())) {
             throw new SecurityException("ต้องเป็น HTTPS ของ Foodchainservice เท่านั้น");
         }
     }
@@ -154,8 +150,22 @@ public class TakeawayUpdaterPlugin extends Plugin {
     }
 
     private boolean sameSigner(PackageInfo installed, PackageInfo candidate) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || installed.signingInfo == null || candidate.signingInfo == null) return true;
-        return Arrays.equals(installed.signingInfo.getApkContentsSigners(), candidate.signingInfo.getApkContentsSigners());
+        return StoreUpdatePolicy.sameCertificates(certificates(installed), certificates(candidate));
+    }
+
+    private byte[][] certificates(PackageInfo info) {
+        Signature[] signatures;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            signatures = info.signingInfo == null ? null : info.signingInfo.getApkContentsSigners();
+        } else {
+            signatures = info.signatures;
+        }
+        if (signatures == null) return null;
+        byte[][] result = new byte[signatures.length][];
+        for (int i = 0; i < signatures.length; i++) {
+            result[i] = signatures[i] == null ? null : signatures[i].toByteArray();
+        }
+        return result;
     }
 
     private String toHex(byte[] bytes) {

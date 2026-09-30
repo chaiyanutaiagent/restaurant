@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
+import { canonicalReleasePayload, validReleaseChannel, validReleaseManifest, validReleaseUrl } from "./releasePolicy.js";
 
 export type TakeawayStoreReleaseManifest = {
   surface: "takeaway_store";
@@ -36,21 +37,6 @@ export type TakeawayStoreRelease = {
 
 const nativeUpdater = registerPlugin<TakeawayUpdaterNative>("TakeawayUpdater");
 
-function canonicalPayload(manifest: TakeawayStoreReleaseManifest): string {
-  return JSON.stringify({
-    apk_sha256: manifest.apk_sha256,
-    apk_url: manifest.apk_url,
-    channel: manifest.channel,
-    minimum_supported_version_code: manifest.minimum_supported_version_code,
-    package_id: manifest.package_id,
-    published_at: manifest.published_at,
-    rollback_version_code: manifest.rollback_version_code,
-    surface: manifest.surface,
-    version_code: manifest.version_code,
-    version_name: manifest.version_name,
-  });
-}
-
 function bytesFromBase64(value: string): ArrayBuffer {
   const binary = window.atob(value);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0)).buffer as ArrayBuffer;
@@ -73,25 +59,7 @@ function configuredValue(name: "url" | "key" | "package" | "channel"): string {
 }
 
 function validManifest(value: unknown): value is TakeawayStoreReleaseManifest {
-  if (!value || typeof value !== "object") return false;
-  const manifest = value as Record<string, unknown>;
-  return manifest.surface === "takeaway_store"
-    && (manifest.channel === "uat" || manifest.channel === "production")
-    && typeof manifest.package_id === "string"
-    && typeof manifest.version_name === "string"
-    && Number.isSafeInteger(manifest.version_code)
-    && Number.isSafeInteger(manifest.minimum_supported_version_code)
-    && Number(manifest.version_code) > 0
-    && Number(manifest.minimum_supported_version_code) > 0
-    && Number(manifest.minimum_supported_version_code) <= Number(manifest.version_code)
-    && (manifest.rollback_version_code === null || Number.isSafeInteger(manifest.rollback_version_code))
-    && typeof manifest.apk_url === "string"
-    && /^https:\/\//.test(manifest.apk_url)
-    && typeof manifest.apk_sha256 === "string"
-    && /^[a-f0-9]{64}$/i.test(manifest.apk_sha256)
-    && typeof manifest.published_at === "string"
-    && !Number.isNaN(Date.parse(manifest.published_at))
-    && typeof manifest.signature === "string";
+  return validReleaseManifest(value);
 }
 
 export async function verifyTakeawayStoreReleaseManifest(
@@ -99,6 +67,7 @@ export async function verifyTakeawayStoreReleaseManifest(
   publicKeyPem: string,
 ): Promise<boolean> {
   try {
+    if (!validManifest(manifest)) return false;
     const key = await window.crypto.subtle.importKey(
       "spki",
       spkiFromPem(publicKeyPem),
@@ -110,7 +79,7 @@ export async function verifyTakeawayStoreReleaseManifest(
       { name: "Ed25519" },
       key,
       bytesFromBase64(manifest.signature),
-      new TextEncoder().encode(canonicalPayload(manifest)).buffer as ArrayBuffer,
+      new TextEncoder().encode(canonicalReleasePayload(manifest)).buffer as ArrayBuffer,
     );
   } catch {
     return false;
@@ -125,7 +94,10 @@ export async function loadTakeawayRelease(): Promise<TakeawayStoreRelease> {
   const publicKey = configuredValue("key").replace(/\\n/g, "\n");
   const expectedPackage = configuredValue("package");
   const expectedChannel = configuredValue("channel");
-  const response = await fetch(url, { cache: "no-store" });
+  if (!validReleaseChannel(expectedPackage, expectedChannel) || !validReleaseUrl(url, expectedChannel, ".json")) {
+    throw new Error("ช่องอัปเดตหรือ URL ไม่ได้รับอนุญาต");
+  }
+  const response = await fetch(url, { cache: "no-store", redirect: "error", credentials: "omit" });
   if (!response.ok) throw new Error("โหลดข้อมูลอัปเดตไม่สำเร็จ");
   const candidate: unknown = await response.json();
   if (!validManifest(candidate)) throw new Error("รูปแบบข้อมูลอัปเดตไม่ถูกต้อง");
@@ -147,9 +119,22 @@ export async function loadTakeawayRelease(): Promise<TakeawayStoreRelease> {
 
 export async function installTakeawayRelease(release: TakeawayStoreRelease): Promise<void> {
   if (!release.verified || !release.updateAvailable) throw new Error("ไม่มีอัปเดตที่ผ่านการตรวจสอบ");
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== "android") throw new Error("ต้องติดตั้งผ่าน Android");
+  // Snapshot and reverify: UI state and caller-supplied booleans are not a trust boundary.
+  const manifest = { ...release.manifest };
+  const expectedPackage = configuredValue("package"), expectedChannel = configuredValue("channel");
+  if (!validReleaseChannel(expectedPackage, expectedChannel)
+      || manifest.package_id !== expectedPackage || manifest.channel !== expectedChannel
+      || !await verifyTakeawayStoreReleaseManifest(manifest, configuredValue("key").replace(/\\n/g, "\n"))) {
+    throw new Error("ข้อมูลอัปเดตไม่ผ่านการตรวจสอบซ้ำ");
+  }
+  const installed = await nativeUpdater.getStatus();
+  if (installed.packageId !== expectedPackage || manifest.version_code <= installed.versionCode) {
+    throw new Error("Package หรือเวอร์ชันอัปเดตไม่ถูกต้อง");
+  }
   await nativeUpdater.installUpdate({
-    apkUrl: release.manifest.apk_url,
-    apkSha256: release.manifest.apk_sha256,
-    versionCode: release.manifest.version_code,
+    apkUrl: manifest.apk_url,
+    apkSha256: manifest.apk_sha256,
+    versionCode: manifest.version_code,
   });
 }

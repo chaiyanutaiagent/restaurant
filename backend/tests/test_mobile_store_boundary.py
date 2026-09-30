@@ -77,12 +77,16 @@ class StorePolicyTests(unittest.TestCase):
             {"host": "pos.foodchainservice.com"},
             {"company_id": uuid.uuid4()},
             {"username": "another-admin"},
+            {"username": " "},
+            {"company_id": None},
+            {"url": "http://uat-pos.foodchainservice.com"},
+            {"url": "https://[invalid"},
         )
         for override in cases:
             with self.subTest(override=override), patch("app.services.mobile_store_policy.settings") as configured:
                 configured.uat_superadmin_all_logins_enabled = override.get("enabled", True)
                 configured.environment = override.get("environment", "development")
-                configured.saas_public_base_url = "https://" + override.get("host", "uat-pos.foodchainservice.com")
+                configured.saas_public_base_url = override.get("url", "https://" + override.get("host", "uat-pos.foodchainservice.com"))
                 configured.uat_superadmin_company_id = override.get("company_id", company_id)
                 configured.uat_superadmin_username = override.get("username", "superadmin")
                 self.assertFalse(uat_superadmin_store_access(base_user))

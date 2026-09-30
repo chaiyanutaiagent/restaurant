@@ -2,12 +2,14 @@
 
 import { readFileSync } from "node:fs";
 import { createHash, verify } from "node:crypto";
+import { validReleaseManifest, canonicalReleasePayload } from "../frontend/src/mobile-store/releasePolicy.js";
 
 const [manifestPath, publicKeyPath, apkPath, expectedPackage, expectedChannel] = process.argv.slice(2);
 if (!manifestPath || !publicKeyPath || !apkPath || !expectedPackage || !expectedChannel) {
   throw new Error("usage: verify-takeaway-store-release-manifest <manifest-json> <ed25519-public-key> <apk> <package-id> <uat|production>");
 }
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+if (!validReleaseManifest(manifest)) throw new Error("invalid Store release policy");
 if (manifest.surface !== "takeaway_store") throw new Error("unexpected surface");
 if (manifest.package_id !== expectedPackage) throw new Error("unexpected package id");
 if (manifest.channel !== expectedChannel) throw new Error("unexpected channel");
@@ -25,7 +27,7 @@ const payload = {
   version_code: manifest.version_code,
   version_name: manifest.version_name,
 };
-if (!verify(null, Buffer.from(JSON.stringify(payload)), readFileSync(publicKeyPath), Buffer.from(manifest.signature, "base64"))) {
+if (!verify(null, Buffer.from(canonicalReleasePayload(payload)), readFileSync(publicKeyPath), Buffer.from(manifest.signature, "base64"))) {
   throw new Error("release signature mismatch");
 }
 process.stdout.write(`verified ${manifest.surface} ${manifest.package_id} ${manifest.version_name} sha256=${digest}\n`);

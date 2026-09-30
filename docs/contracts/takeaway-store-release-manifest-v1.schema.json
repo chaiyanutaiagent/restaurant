@@ -10,12 +10,26 @@
     "channel": { "enum": ["uat", "production"] },
     "package_id": { "enum": ["com.foodchainservice.takeaway", "com.foodchainservice.takeaway.uat"] },
     "version_name": { "type": "string", "minLength": 1 },
-    "version_code": { "type": "integer", "minimum": 1 },
+    "version_code": { "type": "integer", "minimum": 1, "maximum": 2100000000 },
     "minimum_supported_version_code": { "type": "integer", "minimum": 1 },
     "rollback_version_code": { "type": ["integer", "null"], "minimum": 1 },
     "apk_url": { "type": "string", "format": "uri", "pattern": "^https://" },
     "apk_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "published_at": { "type": "string", "format": "date-time" },
-    "signature": { "type": "string", "minLength": 40 }
-  }
+    "signature": { "type": "string", "pattern": "^[A-Za-z0-9+/]{86}==$" }
+  },
+  "$comment": "Runtime releasePolicy additionally enforces minimum <= release, 0 < rollback < release, and rejects URL credentials, query, fragment, alternate ports and encoded paths.",
+  "allOf": [
+    {
+      "if": { "properties": { "channel": { "const": "uat" } } },
+      "then": { "properties": {
+        "package_id": { "const": "com.foodchainservice.takeaway.uat" },
+        "apk_url": { "pattern": "^https://uat-takeaway\\.foodchainservice\\.com/downloads/takeaway-store/" }
+      } },
+      "else": { "properties": {
+        "package_id": { "const": "com.foodchainservice.takeaway" },
+        "apk_url": { "pattern": "^https://downloads\\.foodchainservice\\.com/downloads/takeaway-store/" }
+      } }
+    }
+  ]
 }

@@ -43,11 +43,17 @@ STORE_API_ROUTES = (
 def uat_superadmin_store_access(user) -> bool:
     """Allow the named tenant superadmin into Store only on the explicit UAT gate."""
     configured_username = (settings.uat_superadmin_username or "").strip().lower()
-    public_host = urlsplit(settings.saas_public_base_url).hostname or ""
+    try:
+        public_url = urlsplit(settings.saas_public_base_url)
+        public_host = public_url.hostname or ""
+    except ValueError:
+        return False
     return bool(
         settings.uat_superadmin_all_logins_enabled
         and settings.environment == "development"
+        and public_url.scheme == "https"
         and public_host.startswith("uat-")
+        and bool(configured_username)
         and getattr(user, "is_superuser", False)
         and settings.uat_superadmin_company_id is not None
         and getattr(user, "company_id", None) == settings.uat_superadmin_company_id

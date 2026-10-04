@@ -26,7 +26,8 @@ const nativePrinter = registerPlugin<TakeawayPrinterNative>("TakeawayPrinter");
 const PRINTER_KEY = "foodchainservice-takeaway-printer";
 
 export function isNativeTakeawayPrinterAvailable(): boolean {
-  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android"
+    && Capacitor.isPluginAvailable("TakeawayPrinter");
 }
 
 export function savedTakeawayPrinter(): TakeawayPrinterDevice | null {

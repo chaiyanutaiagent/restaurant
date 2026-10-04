@@ -15,6 +15,8 @@ export default function QRManagerPage(): JSX.Element {
   const queryClient = useQueryClient();
   const branchId = useAuthStore((s) => s.branchId);
   const [qsQrDataUrl, setQsQrDataUrl] = useState("");
+  const customerOrigin = import.meta.env.VITE_APP_SURFACE === "pos-uat"
+    ? new URL(import.meta.env.VITE_API_BASE_URL!).origin : window.location.origin;
 
   const settingsQuery = useQuery({
     queryKey: ["branch-settings", branchId],
@@ -30,11 +32,11 @@ export default function QRManagerPage(): JSX.Element {
   // Generate QR image เมื่อมี token
   useEffect(() => {
     if (hasTables || !settings?.fb_qs_qr_token) { setQsQrDataUrl(""); return; }
-    const url = `${window.location.origin}/order/${settings.fb_qs_qr_token}`;
+    const url = `${customerOrigin}/order/${settings.fb_qs_qr_token}`;
     QRCode.toDataURL(url, { width: 300, margin: 2, color: { dark: "#1e293b" } })
       .then(setQsQrDataUrl)
       .catch(() => setQsQrDataUrl(""));
-  }, [hasTables, settings?.fb_qs_qr_token]);
+  }, [hasTables, settings?.fb_qs_qr_token, customerOrigin]);
 
   const generateMutation = useMutation({
     mutationFn: async () => (await authApi.post("/restaurant/qs-qr/generate")).data.data,
@@ -110,7 +112,7 @@ export default function QRManagerPage(): JSX.Element {
               <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 <p className="font-medium">URL:</p>
                 <p className="mt-1 break-all text-xs font-mono text-blue-600">
-                  {window.location.origin}/order/{settingsQuery.data?.fb_qs_qr_token}
+                  {customerOrigin}/order/{settingsQuery.data?.fb_qs_qr_token}
                 </p>
               </div>
             </>

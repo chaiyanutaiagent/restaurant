@@ -2,6 +2,7 @@
 /// <reference types="vite-plugin-pwa/client" />
 
 interface ImportMetaEnv {
+  readonly VITE_APP_SURFACE?: string;
   readonly VITE_API_BASE_URL?: string;
   readonly VITE_COMPANY_ID?: string;
   readonly VITE_BUSINESS_SLUG?: string;

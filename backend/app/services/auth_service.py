@@ -27,6 +27,7 @@ from app.services.mobile_store_policy import (
     store_permissions,
     uat_superadmin_store_access,
 )
+from app.services.mobile_pos_policy import POS_SURFACES, pos_permissions
 from app.utils.security import (
     create_access_token,
     create_refresh_token,
@@ -217,6 +218,10 @@ class AuthService:
             permissions = store_permissions(user=user, context=context, permissions=permissions, device_id=store_device_id)
             scope_types = ["branch"]
             resolved_station_key = resolved_station_key or normalized_station_key(station_key)
+        elif client_surface in POS_SURFACES:
+            permissions = pos_permissions(surface=client_surface, user=user, context=context, permissions=permissions, device_id=store_device_id)
+            scope_types = ["branch"]
+            resolved_station_key = resolved_station_key or normalized_station_key(station_key)
         session_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
         qa_deadline = qa_deadline or (
@@ -392,6 +397,10 @@ class AuthService:
         store_device_id = payload.get("store_device_id")
         if client_surface == MOBILE_STORE_SURFACE:
             permissions = store_permissions(user=user, context=context, permissions=permissions, device_id=store_device_id)
+            scope_types = ["branch"]
+            resolved_station_key = resolved_station_key or normalized_station_key(payload.get("station_key"))
+        elif client_surface in POS_SURFACES:
+            permissions = pos_permissions(surface=client_surface, user=user, context=context, permissions=permissions, device_id=store_device_id)
             scope_types = ["branch"]
             resolved_station_key = resolved_station_key or normalized_station_key(payload.get("station_key"))
         qa_persona = payload.get("qa_persona")

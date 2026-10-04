@@ -1,0 +1,7 @@
+.mobile-pos body {
+  background: #f8fafc;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  min-width: 320px;
+}
+.mobile-pos input, .mobile-pos select { font-size: 16px; }
+.mobile-pos button, .mobile-pos a { touch-action: manipulation; }

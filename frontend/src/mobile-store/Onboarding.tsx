@@ -6,7 +6,7 @@ import { onboardingApi } from "./api";
 import { businessCodeFromQr } from "./routes";
 import { installationId, saveSession } from "./session";
 
-export default function Onboarding(): JSX.Element {
+export default function Onboarding({ appName = "Foodchainservice Takeaway Store", product = "takeaway" }: { appName?: string; product?: string }): JSX.Element {
   const [code, setCode] = useState("");
   const [business, setBusiness] = useState<{ business_code: string; name: string } | null>(null);
   const [username, setUsername] = useState("");
@@ -39,25 +39,29 @@ export default function Onboarding(): JSX.Element {
         setBusiness(resolved.data.data);
         return;
       }
-      const payload = { business_code: business.business_code, username, password,
+      const isPos = import.meta.env.VITE_APP_SURFACE === "pos-uat";
+      const authRoot = isPos ? "/mobile-pos" : "/mobile-store";
+      const payload = { business_code: business.business_code, username, password, ...(isPos ? { product } : {}),
         station_key: station, device_id: await installationId() };
       if (!branches.length) {
-        const result = await onboardingApi.post<ApiResponse<Array<{ id: string; code: string; name: string }>>>("/mobile-store/branches", payload);
+        const result = await onboardingApi.post<ApiResponse<Array<{ id: string; code: string; name: string }>>>(`${authRoot}/branches`, payload);
         setBranches(result.data.data); setBranch(result.data.data[0]?.id ?? "");
         return;
       }
-      const result = await onboardingApi.post<ApiResponse<TokenResponse>>("/mobile-store/login", { ...payload, branch_id: branch });
+      const result = await onboardingApi.post<ApiResponse<TokenResponse>>(`${authRoot}/login`, { ...payload, branch_id: branch });
       if (result.data.data.business_slug !== payload.business_code) {
         throw new Error("Business code does not match the login response");
       }
-      await saveSession({ tokens: result.data.data, companyId: result.data.data.user.company_id, deviceId: payload.device_id });
+      const session = { tokens: result.data.data, companyId: result.data.data.user.company_id, deviceId: payload.device_id, expectedProduct: product };
+      await saveSession(session);
       setPassword("");
-    } catch {
-      setError("เข้าสู่ระบบไม่สำเร็จ ตรวจรหัสบริษัท บัญชี สิทธิ์สาขา และการเชื่อมต่อ");
+    } catch (failure) {
+      const localReason = failure instanceof Error && /^(มีรายการค้างส่ง|สิทธิ์บริษัท)/.test(failure.message) ? failure.message : null;
+      setError(localReason ?? "เข้าสู่ระบบไม่สำเร็จ ตรวจรหัสบริษัท บัญชี สิทธิ์สาขา และการเชื่อมต่อ");
     } finally { setBusy(false); }
   }
   return <div className="mx-auto my-8 max-w-md space-y-5 rounded-2xl bg-white p-6 shadow">
-    <h1 className="text-2xl font-bold">Foodchainservice Takeaway Store</h1>
+    <h1 className="text-2xl font-bold">{appName}</h1>
     <p>UAT · พนักงานหน้าร้าน</p>
     <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       {!business ? <>

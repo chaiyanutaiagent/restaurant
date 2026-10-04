@@ -175,7 +175,7 @@ export class RestaurantDatabase extends Dexie {
   takeawayPendingSales!: Table<TakeawayPendingSale, string>;
 
   public constructor() {
-    super("RestaurantPOSDatabase");
+    super(import.meta.env.VITE_APP_SURFACE === "pos-uat" ? "FoodchainservicePOSUATDatabase" : "RestaurantPOSDatabase");
 
     this.version(1).stores({
       pendingTransactions: "++id, type, payload, createdAt, syncedAt",

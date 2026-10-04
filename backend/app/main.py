@@ -43,6 +43,7 @@ from app.routers import payable as payable_router
 from app.routers import auth, membership, pos, privacy_support, products, purchase, reports, stock, stock_count as stock_count_router, system, transfer
 from app.routers import router
 from app.routers import mobile_store_auth
+from app.routers import mobile_pos_auth
 from app.utils.create_superuser import ensure_default_company_seed_in_session
 from app.utils.seed_permissions import seed_default_permissions
 from app.services.reference_projector_worker import (
@@ -247,6 +248,7 @@ app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads"
 app.include_router(router)
 app.include_router(auth.router)
 app.include_router(mobile_store_auth.router)
+app.include_router(mobile_pos_auth.router)
 app.include_router(membership.router)
 app.include_router(privacy_support.router)
 app.include_router(platform_router.router)

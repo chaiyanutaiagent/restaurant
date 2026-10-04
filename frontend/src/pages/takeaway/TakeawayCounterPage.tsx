@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNativePosWorkGuard } from "@/lib/nativePosWorkGuard";
 import { AlertTriangle, CloudOff, ImageOff, Minus, Plus, Printer, QrCode, ReceiptText, RefreshCw, Search, ShoppingCart } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -42,6 +43,7 @@ export default function TakeawayCounterPage(): JSX.Element {
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [productSearch, setProductSearch] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
+  useNativePosWorkGuard("takeaway-cart", cart.length > 0);
   const [openingCash, setOpeningCash] = useState("0");
   const [lastQueue, setLastQueue] = useState<number | null>(null);
   const [pickupQr, setPickupQr] = useState("");

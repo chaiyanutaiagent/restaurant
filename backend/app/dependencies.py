@@ -34,6 +34,7 @@ from app.services.tenant_control_policy import TenantControlPolicy
 from app.services.platform_access_service import effective_platform_access, platform_environment
 from app.utils.security import decode_token
 from app.services.mobile_store_policy import MOBILE_STORE_SURFACE, enforce_store_request, store_permissions
+from app.services.mobile_pos_policy import POS_SURFACES, enforce_pos_request, pos_permissions
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 platform_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/platform/auth/login")
@@ -181,6 +182,15 @@ async def get_current_user(
         if request is None:
             raise HTTPException(403, "Store request context is required")
         enforce_store_request(payload, request.method, request.url.path, request.headers)
+    elif payload.get("client_surface") in POS_SURFACES:
+        from app.services.auth_service import AuthService
+        effective, _, _, _, _, _ = await AuthService(db).get_user_permissions(user, branch_id, payload.get("station_key"))
+        permissions = pos_permissions(surface=payload["client_surface"], user=user, context=context,
+            permissions=effective, device_id=payload.get("store_device_id"))
+        scopes = ["branch"]
+        if request is None:
+            raise HTTPException(403, "POS request context is required")
+        enforce_pos_request(payload, request, context)
     return TokenData(
         user_id=user_id,
         company_id=company_id,

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Foodchainservice POS UAT</string>
+    <string name="title_activity_main">Foodchainservice POS UAT</string>
+    <string name="package_name">com.foodchainservice.pos.uat</string>
+    <string name="custom_url_scheme">com.foodchainservice.pos.uat</string>
+</resources>

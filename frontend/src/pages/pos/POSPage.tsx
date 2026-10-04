@@ -23,6 +23,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useReactToPrint } from "react-to-print";
+import { nativeReceiptPrint } from "@/lib/nativeDocumentPrint";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -83,6 +84,7 @@ import RefundWorkspaceDialog from "@/components/pos/RefundWorkspaceDialog";
 import TakeawayOrderSlip from "@/components/pos/TakeawayOrderSlip";
 import type { ApprovalAction } from "@/types/approval";
 import { PLATFORM_BRAND } from "@/config/platformBrand";
+import { useNativePosWorkGuard } from "@/lib/nativePosWorkGuard";
 
 const SHIFT_CACHE_KEY = "restaurant-pos-current-shift";
 const BARCODE_FORMATS = ["ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e", "qr_code"] as const;
@@ -395,6 +397,7 @@ export default function POSPage(): JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  useNativePosWorkGuard("pos-cart", cartItems.length > 0);
   const [orderDiscount, setOrderDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paidAmount, setPaidAmount] = useState(0);
@@ -506,11 +509,12 @@ export default function POSPage(): JSX.Element {
   const offlineProducts = useOfflineProducts(searchTerm, catalogRevision);
   const receiptPageHeightMm = useMemo(() => estimateReceiptPageHeightMm(lastOrder), [lastOrder]);
   const handleBrowserPrint = useReactToPrint({
+    print: nativeReceiptPrint,
     contentRef: receiptRef,
     pageStyle: `@page { size: 80mm ${receiptPageHeightMm}mm; margin: 0; } @media print { html, body { margin: 0 !important; padding: 0 !important; } }`,
   });
-  const printTakeawayCustomerSlip = useReactToPrint({ contentRef: takeawayCustomerSlipRef });
-  const printTakeawayKitchenSlip = useReactToPrint({ contentRef: takeawayKitchenSlipRef });
+  const printTakeawayCustomerSlip = useReactToPrint({ contentRef: takeawayCustomerSlipRef, print: nativeReceiptPrint });
+  const printTakeawayKitchenSlip = useReactToPrint({ contentRef: takeawayKitchenSlipRef, print: nativeReceiptPrint });
 
   const branchQuery = useQuery({
     queryKey: ["pos", "branches"],
@@ -2648,8 +2652,8 @@ export default function POSPage(): JSX.Element {
               <Button
                 size="sm"
                 variant="outline"
-                aria-label="กลับหน้าผู้ดูแล"
-                onClick={() => openWorkspace("/admin", "หน้าผู้ดูแล")}
+                aria-label={import.meta.env.VITE_APP_SURFACE === "pos-uat" ? "ตั้งค่าแอป" : "กลับหน้าผู้ดูแล"}
+                onClick={() => openWorkspace(import.meta.env.VITE_APP_SURFACE === "pos-uat" ? "/device" : "/admin", "ตั้งค่า")}
               >
                 <ArrowLeft className="h-4 w-4" />
               </Button>
@@ -2702,7 +2706,7 @@ export default function POSPage(): JSX.Element {
                     <Camera className="mr-2 h-4 w-4" />
                     เปิดกล้องสแกน
                   </Button>
-                  <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-xs text-slate-500">
+                  <div className={`items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-xs text-slate-500 ${import.meta.env.VITE_APP_SURFACE === "pos-uat" ? "hidden" : "flex"}`}>
                     Enter = เพิ่มสินค้า, F1 = โฟกัสค้นหา, F2 = ช่องเงินสด
                   </div>
                 </div>

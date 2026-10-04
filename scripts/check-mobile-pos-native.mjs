@@ -1,0 +1,24 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+const read = (name) => readFile(new URL(`../frontend/${name}`, import.meta.url), "utf8");
+const android = await read("android-pos/app/src/main/AndroidManifest.xml");
+assert.match(android, /android:allowBackup="false"/);
+assert.match(android, /android:usesCleartextTraffic="false"/);
+assert.match(android, /android.permission.CAMERA/);
+assert.doesNotMatch(android, /REQUEST_INSTALL_PACKAGES/);
+assert.match(android, /android.permission.BLUETOOTH_CONNECT/);
+const gradle = await read("android-pos/app/build.gradle");
+assert.match(gradle, /applicationId "com.foodchainservice.pos.uat"/);
+assert.match(gradle, /POS Production release is on HOLD/);
+const ios = await read("ios-pos/App/App/Info.plist");
+assert.match(ios, /NSCameraUsageDescription/);
+assert.match(ios, /<key>NSAllowsArbitraryLoads<\/key>\s*<false\/>/);
+assert.match(ios, /<key>NSAllowsArbitraryLoadsInWebContent<\/key>\s*<false\/>/);
+const project = await read("ios-pos/App/App.xcodeproj/project.pbxproj");
+assert.equal((project.match(/PRODUCT_BUNDLE_IDENTIFIER = com.foodchainservice.pos.uat;/g) || []).length, 2);
+assert.doesNotMatch(project, /com.getcapacitor.App/);
+const config = await read("capacitor.config.ts");
+assert.doesNotMatch(config, /server:\s*\{[^}]*\burl:|allowNavigation:/);
+assert.match(config, /cleartext: false/);
+console.log("PASS: Android and iOS native UAT identity, transport and permission guards (source only)");

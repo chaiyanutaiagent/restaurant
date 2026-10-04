@@ -12,6 +12,7 @@ import { authApi } from "@/lib/api";
 import { formatThaiCurrency } from "@/lib/cartUtils";
 import { categoryApi, productApi } from "@/lib/productApi";
 import { useOnlineStatus } from "@/lib/syncService";
+import { useNativePosWorkGuard } from "@/lib/nativePosWorkGuard";
 import RestaurantOrderComposer, {
   type StaffMenuProduct,
   type StaffOrderCartLine,
@@ -111,6 +112,7 @@ export default function SessionDetailPage(): JSX.Element {
   const isOnline = useOnlineStatus();
   const [addOrderOpen, setAddOrderOpen] = useState(false);
   const [orderCart, setOrderCart] = useState<StaffOrderCartLine[]>([]);
+  useNativePosWorkGuard("restaurant-order", orderCart.length > 0);
   const orderIdempotencyKeyRef = useRef(requestKey("staff-order"));
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
   const [cancelReasonCode, setCancelReasonCode] = useState<CancellationReasonCode>("customer_changed_mind");

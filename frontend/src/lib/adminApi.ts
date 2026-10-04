@@ -15,6 +15,12 @@ import type {
   UserAccessRequestStatus,
   UserDetail
 } from "@/types/admin";
+import type {
+  AccessReviewOutcome,
+  CompanyAccessReviewUser,
+  CompanyTenantSecurity,
+  CompanyTenantSession
+} from "@/types/companyAccess";
 import api from "./api";
 
 export const userApi = {
@@ -28,7 +34,8 @@ export const userApi = {
   get: (id: string) => api.get<ApiResponse<UserDetail>>(`/system/users/${id}`),
   create: (data: object) => api.post<ApiResponse<UserDetail>>("/system/users", data),
   update: (id: string, data: object) => api.patch<ApiResponse<UserDetail>>(`/system/users/${id}`, data),
-  deactivate: (id: string) => api.post<ApiResponse<UserDetail>>(`/system/users/${id}/deactivate`),
+  deactivate: (id: string, data: { reason: string; request_id: string; expected_credential_version: number }) =>
+    api.post<ApiResponse<UserDetail>>(`/system/users/${id}/deactivate`, data),
   changePassword: (id: string, newPassword: string) =>
     api.post<ApiResponse<{ message: string }>>(`/system/users/${id}/change-password`, {
       new_password: newPassword
@@ -57,6 +64,37 @@ export const userApi = {
       `/system/users/${userId}/role-assignments/${assignmentId}/revoke`,
       { reason }
     )
+};
+
+export const companyAccessApi = {
+  reviews: (status?: "due" | "stale" | "high_risk" | "inactive") =>
+    api.get<ApiResponse<CompanyAccessReviewUser[]>>("/system/access-reviews", {
+      params: { status: status || undefined }
+    }),
+  security: () => api.get<ApiResponse<CompanyTenantSecurity>>("/system/security-posture"),
+  sessions: (userId: string) =>
+    api.get<ApiResponse<CompanyTenantSession[]>>(`/system/users/${userId}/sessions`),
+  review: (userId: string, data: {
+    outcome: AccessReviewOutcome;
+    reason: string;
+    request_id: string;
+    expected_credential_version: number;
+    assignment_id?: string;
+  }) => api.post<ApiResponse<CompanyAccessReviewUser>>(`/system/users/${userId}/access-review`, data),
+  revokeSession: (userId: string, sessionId: string, data: {
+    reason: string;
+    request_id: string;
+    expected_credential_version: number;
+  }) => api.post<ApiResponse<{ revoked_session_count: number }>>(
+    `/system/users/${userId}/sessions/${sessionId}/revoke`, data
+  ),
+  revokeAllSessions: (userId: string, data: {
+    reason: string;
+    request_id: string;
+    expected_credential_version: number;
+  }) => api.post<ApiResponse<{ revoked_session_count: number; credential_version: number }>>(
+    `/system/users/${userId}/sessions/revoke`, data
+  )
 };
 
 export const staffAssignmentApi = {

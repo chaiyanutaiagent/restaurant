@@ -1,18 +1,48 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from typing import Any, Literal
 import re
 import uuid
 
-from pydantic import Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from app.schemas import BaseSchema
+from app.schemas.membership import SaasMembershipRead
+from app.utils.business_slug import normalize_business_slug
+from app.utils.password_policy import validate_platform_password
 
 
 USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,99}$")
 PLAN_CODE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,49}$")
 FEATURE_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{1,99}$")
 LIMIT_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{1,99}$")
+OPERATIONS_COMPONENT_KEYS = {
+    "legacy_database",
+    "platform_database",
+    "restaurant_database",
+    "takeaway_database",
+    "redis",
+    "uploads",
+    "reference_projector",
+    "takeaway_reference_projector",
+    "public_api",
+}
+OPERATIONS_ALERT_CODES = {
+    "readiness_unhealthy",
+    "projector_failed",
+    "projector_loop_errors",
+    "disk_threshold",
+    "backup_missing",
+    "backup_incomplete",
+    "backup_stale",
+    "backup_checksum_failed",
+    "restore_missing",
+    "restore_stale",
+    "restore_failed",
+    "alert_not_configured",
+    "alert_delivery_failed",
+}
 
 
 def _required_text(value: str, *, field_name: str, max_length: int) -> str:
@@ -27,6 +57,7 @@ def _required_text(value: str, *, field_name: str, max_length: int) -> str:
 class PlatformLoginRequest(BaseSchema):
     username: str
     password: str
+    mfa_code: str | None = Field(default=None, max_length=32)
 
     @field_validator("username")
     @classmethod
@@ -37,20 +68,201 @@ class PlatformLoginRequest(BaseSchema):
         return normalized
 
 
+PlatformRoleCode = Literal[
+    "platform_owner", "operations", "support", "billing", "security", "auditor"
+]
+PlatformEnvironment = Literal["uat", "production"]
+
+
 class PlatformOperatorRead(BaseSchema):
     id: uuid.UUID
     username: str
     email: str | None = None
     display_name: str
+    is_active: bool = True
     is_superuser: bool
+    mfa_enabled: bool
     last_login_at: datetime | None = None
+    credential_version: int = 1
+    role_codes: list[PlatformRoleCode] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+    environment: PlatformEnvironment = "uat"
+    access_reviewed_at: datetime | None = None
+    access_review_due_at: datetime | None = None
+
+
+class PlatformRoleDefinitionRead(BaseSchema):
+    code: PlatformRoleCode
+    label: str
+    permissions: list[str]
+
+
+class PlatformTeamOperatorRead(PlatformOperatorRead):
+    active_session_count: int = 0
+    stale_access: bool = False
+    review_due: bool = False
+    deactivated_at: datetime | None = None
+    deactivation_reason: str | None = None
+    deep_links: dict[str, str] = Field(default_factory=dict)
+
+
+class PlatformOperatorInviteRequest(BaseSchema):
+    username: str
+    email: str = Field(min_length=3, max_length=255)
+    display_name: str = Field(min_length=1, max_length=200)
+    role_code: PlatformRoleCode
+    environment: PlatformEnvironment
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+
+    @field_validator("username")
+    @classmethod
+    def normalize_invite_username(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not USERNAME_PATTERN.fullmatch(normalized):
+            raise ValueError("username format is invalid")
+        return normalized
+
+    @field_validator("email")
+    @classmethod
+    def normalize_invite_email(cls, value: str) -> str:
+        return _required_text(value, field_name="email", max_length=255).lower()
+
+    @field_validator("display_name", "reason")
+    @classmethod
+    def normalize_invite_text(cls, value: str, info) -> str:
+        return _required_text(value, field_name=info.field_name, max_length=500)
+
+
+class PlatformOperatorInvitationRead(BaseSchema):
+    id: uuid.UUID
+    username: str
+    email: str
+    display_name: str
+    role_code: PlatformRoleCode
+    environment: PlatformEnvironment
+    expires_at: datetime
+    accepted_at: datetime | None = None
+    revoked_at: datetime | None = None
+    acceptance_token: str | None = None
+    deep_link: str | None = None
+
+
+class PlatformOperatorInvitationAccept(BaseSchema):
+    token: str = Field(min_length=32, max_length=500)
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_policy(cls, value: str) -> str:
+        return validate_platform_password(value)
+
+
+class PlatformRoleAssignmentRequest(BaseSchema):
+    role_code: PlatformRoleCode
+    environment: PlatformEnvironment
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+    expected_credential_version: int = Field(ge=1)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_assignment_reason(cls, value: str) -> str:
+        return _required_text(value, field_name="reason", max_length=500)
+
+
+class PlatformRoleRevokeRequest(PlatformRoleAssignmentRequest):
+    pass
+
+
+class PlatformOperatorStateRequest(BaseSchema):
+    active: bool
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+    expected_credential_version: int = Field(ge=1)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_state_reason(cls, value: str) -> str:
+        return _required_text(value, field_name="reason", max_length=500)
+
+
+class PlatformAccessReviewRequest(BaseSchema):
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+    expected_credential_version: int = Field(ge=1)
+    next_review_due_at: datetime
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_review_reason(cls, value: str) -> str:
+        return _required_text(value, field_name="reason", max_length=500)
+
+
+class PlatformOperatorSessionsRevokeRequest(BaseSchema):
+    environment: PlatformEnvironment
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_session_reason(cls, value: str) -> str:
+        return _required_text(value, field_name="reason", max_length=500)
 
 
 class PlatformTokenResponse(BaseSchema):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+    csrf_token: str
+    session_id: uuid.UUID
     operator: PlatformOperatorRead
+
+
+class PlatformSessionRead(BaseSchema):
+    id: uuid.UUID
+    current: bool
+    created_at: datetime
+    last_seen_at: datetime
+    expires_at: datetime
+    mfa_verified_at: datetime | None = None
+    revoked_at: datetime | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+
+
+class PlatformMfaSetupRead(BaseSchema):
+    secret: str
+    provisioning_uri: str
+
+
+class PlatformMfaCodeRequest(BaseSchema):
+    code: str = Field(min_length=6, max_length=32)
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        return _required_text(value, field_name="code", max_length=32)
+
+
+class PlatformMfaConfirmRead(BaseSchema):
+    recovery_codes: list[str]
+    operator: PlatformOperatorRead
+
+
+class PlatformMfaDisableRequest(PlatformMfaCodeRequest):
+    password: str = Field(min_length=1, max_length=128)
+
+
+class PlatformPasswordChangeRequest(BaseSchema):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+    mfa_code: str | None = Field(default=None, max_length=32)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password_policy(cls, value: str) -> str:
+        return validate_platform_password(value)
 
 
 class PlatformCompanyOwnerCreate(BaseSchema):
@@ -80,6 +292,7 @@ class PlatformCompanyOwnerCreate(BaseSchema):
 
 class PlatformCompanyCreate(BaseSchema):
     name: str = Field(min_length=1, max_length=255)
+    business_slug: str | None = None
     name_en: str | None = Field(default=None, max_length=255)
     tax_id: str | None = Field(default=None, max_length=20)
     email: str | None = Field(default=None, max_length=255)
@@ -100,6 +313,11 @@ class PlatformCompanyCreate(BaseSchema):
     @classmethod
     def normalize_required_text(cls, value: str, info) -> str:
         return _required_text(value, field_name=info.field_name, max_length=500)
+
+    @field_validator("business_slug")
+    @classmethod
+    def validate_business_slug(cls, value: str | None) -> str | None:
+        return normalize_business_slug(value) if value and value.strip() else None
 
     @field_validator("name_en", "tax_id", "email", "phone")
     @classmethod
@@ -184,6 +402,15 @@ class PlatformLifecycleAction(BaseSchema):
         return _required_text(value, field_name="reason", max_length=500)
 
 
+class PlatformTenantExportRequest(BaseSchema):
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        return _required_text(value, field_name="reason", max_length=500)
+
+
 class PlatformTenantControlsRead(BaseSchema):
     plan_code: str
     feature_flags: dict[str, bool]
@@ -193,6 +420,7 @@ class PlatformTenantControlsRead(BaseSchema):
 class PlatformCompanyListItem(BaseSchema):
     id: uuid.UUID
     name: str
+    business_slug: str
     name_en: str | None = None
     tax_id: str | None = None
     email: str | None = None
@@ -224,7 +452,150 @@ class PlatformCompanyDetailRead(PlatformCompanyListItem):
     timezone: str
     controls: PlatformTenantControlsRead
     onboarding: PlatformOnboardingRead
+    membership: SaasMembershipRead | None = None
     suspension_reason: str | None = None
     reactivated_at: datetime | None = None
     reactivation_reason: str | None = None
     updated_at: datetime
+
+
+class PlatformDashboardTotalsRead(BaseSchema):
+    companies: int
+    active_companies: int
+    suspended_companies: int
+    brands: int
+    branches: int
+    enabled_user_accounts: int
+    devices: int
+    paired_devices: int
+
+
+class PlatformDashboardOnboardingRead(BaseSchema):
+    ready_companies: int
+    pending_companies: int
+    total_active_companies: int
+
+
+class PlatformDashboardCompanyRead(PlatformCompanyListItem):
+    onboarding_complete: bool
+    completed_steps: int
+    total_steps: int
+    last_activity_at: datetime | None = None
+    attention_codes: list[str]
+
+
+class PlatformDashboardRead(BaseSchema):
+    generated_at: datetime
+    totals: PlatformDashboardTotalsRead
+    onboarding: PlatformDashboardOnboardingRead
+    product_status: dict[str, Literal["pilot", "planned"]]
+    attention_summary: dict[str, int]
+    feature_usage: dict[str, int]
+    plan_usage: dict[str, int]
+    recent_companies: list[PlatformDashboardCompanyRead]
+    recent_events: list[dict[str, Any]]
+
+
+class PlatformLimitStateRead(BaseSchema):
+    resource_key: str
+    current: int
+    limit: int | None
+    unlimited: bool
+    exceeded: bool
+    remaining: int | None
+    utilization_percent: int | None
+
+
+class PlatformTenantUsageRead(BaseSchema):
+    company_id: uuid.UUID
+    generated_at: datetime
+    plan_code: str
+    feature_flags: dict[str, bool]
+    plan_limits: dict[str, int]
+    usage: dict[str, int]
+    limit_state: dict[str, PlatformLimitStateRead]
+    attention_codes: list[str]
+    last_activity_at: datetime | None = None
+    onboarding_completed_steps: int
+    onboarding_total_steps: int
+
+
+class PlatformTenantUsageSnapshotRead(BaseSchema):
+    id: uuid.UUID
+    company_id: uuid.UUID
+    captured_on: date
+    plan_code: str
+    feature_flags: dict[str, bool]
+    plan_limits: dict[str, int]
+    usage: dict[str, int]
+    limit_state: dict[str, dict[str, Any]]
+    attention_codes: list[str]
+    last_activity_at: datetime | None = None
+    onboarding_completed_steps: int
+    onboarding_total_steps: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlatformOperationsEvidenceImport(BaseSchema):
+    model_config = ConfigDict(extra="forbid")
+
+    captured_at: datetime
+    overall_status: Literal["ok", "degraded", "critical"]
+    component_checks: dict[str, Literal["ok", "error", "disabled"]]
+    projector_failed_events: int = Field(default=0, ge=0)
+    projector_loop_errors: int = Field(default=0, ge=0)
+    disk_usage_percent: int | None = Field(default=None, ge=0, le=100)
+    backup_status: Literal["unknown", "current", "stale", "failed"] = "unknown"
+    backup_age_hours: int | None = Field(default=None, ge=0)
+    restore_status: Literal["unknown", "passed", "stale", "failed"] = "unknown"
+    restore_drill_at: datetime | None = None
+    alert_delivery_status: Literal[
+        "unknown", "not_configured", "healthy", "failed"
+    ] = "unknown"
+    alert_codes: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("component_checks")
+    @classmethod
+    def validate_component_checks(
+        cls,
+        value: dict[str, Literal["ok", "error", "disabled"]],
+    ) -> dict[str, Literal["ok", "error", "disabled"]]:
+        unknown = set(value) - OPERATIONS_COMPONENT_KEYS
+        if unknown:
+            raise ValueError(f"unsupported operational component: {sorted(unknown)[0]}")
+        return dict(sorted(value.items()))
+
+    @field_validator("alert_codes")
+    @classmethod
+    def validate_alert_codes(cls, value: list[str]) -> list[str]:
+        normalized = sorted(set(value))
+        unknown = set(normalized) - OPERATIONS_ALERT_CODES
+        if unknown:
+            raise ValueError(f"unsupported operational alert code: {sorted(unknown)[0]}")
+        return normalized
+
+
+class PlatformOperationsSnapshotRead(PlatformOperationsEvidenceImport):
+    id: uuid.UUID
+    source: Literal["operator_runtime", "scheduled_runtime", "resilience_import"]
+    evidence_sha256: str
+    captured_by: uuid.UUID | None = None
+    created_at: datetime
+
+
+class PlatformRuntimeRead(BaseSchema):
+    status: Literal["ok", "critical"]
+    component_checks: dict[str, Literal["ok", "error", "disabled"]]
+    projector_failed_events: int
+    projector_loop_errors: int
+    disk_usage_percent: int | None = None
+
+
+class PlatformOperationsSummaryRead(BaseSchema):
+    generated_at: datetime
+    runtime: PlatformRuntimeRead
+    latest_snapshot: PlatformOperationsSnapshotRead | None = None
+    latest_backup: PlatformOperationsSnapshotRead | None = None
+    latest_restore: PlatformOperationsSnapshotRead | None = None
+    latest_alert: PlatformOperationsSnapshotRead | None = None

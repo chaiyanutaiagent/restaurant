@@ -1,18 +1,20 @@
-# Restaurant POS Architecture Overview
+# Foodchainservice Platform Architecture Overview
 
-Restaurant POS is organized as a core ERP platform with operational modules layered underneath it.
+Foodchainservice is organized as a Control Plane, Company Admin/shared services, and operational
+modules with explicit data boundaries. Restaurant POS remains one operational module rather than
+the name of the whole platform.
 
 ## System Shape
 
 ```text
-ERP Core Platform
-├─ ERP Admin
-├─ POS Module
-│  ├─ POS Workspace
-│  └─ POS Admin
-├─ Restaurant Module
-│  ├─ Restaurant Workspace
-│  └─ Restaurant Admin
+Foodchainservice Platform
+├─ Platform Owner Control Plane
+├─ Customer Register / Company Admin
+├─ ERP, Reporting, Central Kitchen and Supply Chain
+├─ Restaurant POS
+├─ Takeaway POS
+├─ Retail POS
+├─ Hotel PMS (planned)
 └─ Integration Layer
 ```
 

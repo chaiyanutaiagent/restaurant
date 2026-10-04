@@ -12,7 +12,19 @@ type SyncedProduct = ProductListItem & { synced_at: number };
 type SyncedCategory = Category & { synced_at: number };
 type SyncedUnit = Unit & { synced_at: number };
 type SyncedStockBalance = StockBalance & { synced_at: number };
-export async function syncProductCatalog(): Promise<void> {
+export const POS_CATALOG_ISOLATION_KEY = "pos-catalog-isolation-key";
+
+export type PendingSaleScope = {
+  companyId: string;
+  branchId: string;
+  userId: string;
+  businessType: "restaurant" | "retail_pos";
+};
+
+export async function syncProductCatalog(
+  catalogScope: "all" | "restaurant_menu" | "retail_sale" = "all",
+  isolationKey?: string,
+): Promise<void> {
   try {
     const limit = 100;
     let page = 1;
@@ -20,7 +32,7 @@ export async function syncProductCatalog(): Promise<void> {
     const products: SyncedProduct[] = [];
 
     do {
-      const response = await productApi.list({ page, limit, is_active: true });
+      const response = await productApi.list({ page, limit, is_active: true, catalog_scope: catalogScope });
       const items = response.data.data as ProductListItem[];
       total = response.data.meta.total ?? items.length;
       products.push(...items.map((item) => ({ ...item, synced_at: Date.now() })));
@@ -49,6 +61,11 @@ export async function syncProductCatalog(): Promise<void> {
       await db.categories.bulkPut(categories);
       await db.units.bulkPut(units);
     });
+    if (isolationKey) {
+      window.localStorage.setItem(POS_CATALOG_ISOLATION_KEY, isolationKey);
+    } else {
+      window.localStorage.removeItem(POS_CATALOG_ISOLATION_KEY);
+    }
   } catch {
     return;
   }
@@ -89,14 +106,35 @@ export async function syncStockBalances(branchId?: string): Promise<void> {
   }
 }
 
-export async function syncPendingSales(): Promise<{ synced: number; failed: number }> {
+export async function syncPendingSales(scope: PendingSaleScope): Promise<{ synced: number; failed: number }> {
   if (!navigator.onLine) {
     return { synced: 0, failed: 0 };
   }
 
-  const pending = (await db.pendingSales.toArray()).filter((item) => !item.synced);
+  const pending = (await db.pendingSales.toArray()).filter((item) => (
+    !item.synced
+    && item.company_id === scope.companyId
+    && item.branch_id === scope.branchId
+    && item.user_id === scope.userId
+    && item.business_type === scope.businessType
+  ));
   if (pending.length === 0) {
     return { synced: 0, failed: 0 };
+  }
+
+  if (scope.businessType === "retail_pos") {
+    const updatedAt = Date.now();
+    await db.transaction("rw", db.pendingSales, async () => {
+      for (const sale of pending) {
+        await db.pendingSales.update(sale.client_order_id, {
+          status: "needs_review",
+          updated_at: updatedAt,
+          last_error_code: "retail_offline_not_authorized",
+          last_error_message: "Retail POS ยังไม่อนุญาตให้ส่งรายการขายออฟไลน์ กรุณาให้ผู้จัดการตรวจสอบ",
+        });
+      }
+    });
+    return { synced: 0, failed: pending.length };
   }
 
   let synced = 0;
@@ -104,6 +142,19 @@ export async function syncPendingSales(): Promise<{ synced: number; failed: numb
 
   for (let index = 0; index < pending.length; index += 50) {
     const batch = pending.slice(index, index + 50);
+    const attemptAt = Date.now();
+    await db.transaction("rw", db.pendingSales, async () => {
+      for (const sale of batch) {
+        await db.pendingSales.update(sale.client_order_id, {
+          status: "syncing",
+          attempt_count: (sale.attempt_count ?? 0) + 1,
+          last_attempt_at: attemptAt,
+          updated_at: attemptAt,
+          last_error_code: null,
+          last_error_message: null,
+        });
+      }
+    });
     try {
       const ordersPayload = batch.map((sale) => ({
         shift_id: sale.shift_id,
@@ -136,16 +187,50 @@ export async function syncPendingSales(): Promise<{ synced: number; failed: numb
       const response = await posApi.syncSales(ordersPayload);
       const orders = response.data.data as SaleOrder[];
       const syncedAt = Date.now();
+      const ordersByClientId = new Map(
+        orders.filter((order) => order.client_order_id).map((order) => [order.client_order_id as string, order]),
+      );
       await db.transaction("rw", db.pendingSales, db.completedOrders, async () => {
         for (const sale of batch) {
-          await db.pendingSales.update(sale.client_order_id, { synced: true });
+          const order = ordersByClientId.get(sale.client_order_id);
+          if (order) {
+            await db.pendingSales.update(sale.client_order_id, {
+              synced: true,
+              status: "synced",
+              server_order_id: order.id,
+              server_order_number: order.order_number,
+              acknowledged_at: syncedAt,
+              updated_at: syncedAt,
+              last_error_code: null,
+              last_error_message: null,
+            });
+            synced += 1;
+          } else {
+            await db.pendingSales.update(sale.client_order_id, {
+              status: "needs_review",
+              updated_at: syncedAt,
+              last_error_code: "missing_item_acknowledgement",
+              last_error_message: "Server ไม่ได้ตอบผลรายรายการ กรุณาให้ผู้จัดการตรวจสอบก่อนลองใหม่",
+            });
+            failed += 1;
+          }
         }
         await db.completedOrders.bulkPut(
           orders.map((order) => ({ ...order, synced_at: syncedAt })) satisfies SyncedCompletedOrder[]
         );
       });
-      synced += batch.length;
     } catch {
+      const failedAt = Date.now();
+      await db.transaction("rw", db.pendingSales, async () => {
+        for (const sale of batch) {
+          await db.pendingSales.update(sale.client_order_id, {
+            status: "needs_review",
+            updated_at: failedAt,
+            last_error_code: "sync_request_failed",
+            last_error_message: "ส่งรายการไม่สำเร็จ ระบบเก็บรหัสเดิมไว้ กรุณาตรวจเครือข่ายและให้ผู้จัดการตรวจสอบ",
+          });
+        }
+      });
       failed += batch.length;
     }
   }
@@ -163,11 +248,10 @@ export function initAutoSync(): void {
   window.addEventListener("online", () => {
     void syncProductCatalog();
     void syncStockBalances();
-    void syncPendingSales();
   });
 }
 
-export function useOfflineProducts(search?: string): ProductListItem[] {
+export function useOfflineProducts(search?: string, catalogRevision = 0): ProductListItem[] {
   const [items, setItems] = useState<ProductListItem[]>([]);
 
   useEffect(() => {
@@ -193,7 +277,7 @@ export function useOfflineProducts(search?: string): ProductListItem[] {
     return () => {
       cancelled = true;
     };
-  }, [search]);
+  }, [catalogRevision, search]);
 
   return items;
 }

@@ -13,12 +13,14 @@ export interface TokenResponse {
   refresh_token: string;
   token_type: string;
   expires_in: number;
+  business_slug: string;
   user: User;
 }
 
 export interface MeResponse {
   user: User;
   company_id: string;
+  business_slug: string;
   branch_id: string | null;
   brand_id: string | null;
   business_type: "restaurant" | "retail_pos" | "takeaway" | null;
@@ -27,4 +29,15 @@ export interface MeResponse {
   assignment_ids: string[];
   scope_types: Array<"company" | "brand" | "branch" | "station">;
   permissions: string[];
+}
+
+export interface QaPersona {
+  key: string;
+  label: string;
+  surface: "tenant" | "platform" | "public";
+  subject_id: string | null;
+  company_id: string | null;
+  company_name: string | null;
+  business_slug: string | null;
+  branches: Array<{ id: string; name: string; code: string; is_default: boolean }>;
 }

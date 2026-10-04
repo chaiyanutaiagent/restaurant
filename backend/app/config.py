@@ -1,15 +1,348 @@
 from __future__ import annotations
 
+import uuid
 from functools import cached_property
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import computed_field
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from app.utils.uat_host_policy import (
+    APPROVED_UAT_HOSTS,
+    resolve_qa_access_authority,
+    resolve_uat_public_host,
+)
 
 
 def effective_database_url(explicit_url: str | None, legacy_url: str) -> str:
     return explicit_url or legacy_url
+
+
+def resolve_api_docs_enabled(environment: str, configured: bool | None) -> bool:
+    """Keep local docs convenient while defaulting internet production to closed."""
+    if configured is not None:
+        return configured
+    return environment != "production"
+
+
+def validate_saas_email_delivery_config(
+    *,
+    environment: str,
+    mode: str,
+    public_base_url: str,
+    smtp_host: str | None,
+    smtp_from_email: str | None,
+) -> None:
+    if mode == "smtp" and (not smtp_host or not smtp_from_email):
+        raise ValueError("SaaS SMTP mode requires host and from email")
+    if environment == "production":
+        if mode != "smtp":
+            raise ValueError("Production SaaS account email delivery must use SMTP")
+        if not public_base_url.startswith("https://"):
+            raise ValueError("Production SaaS public base URL must use HTTPS")
+
+
+def validate_saas_billing_config(*, provider: str, live_charging_enabled: bool) -> None:
+    normalized = provider.strip().lower()
+    if not normalized:
+        raise ValueError("SaaS billing provider decision must not be empty")
+    if live_charging_enabled:
+        raise ValueError(
+            "Live SaaS charging is unavailable until a provider adapter Scope is approved"
+        )
+
+
+def validate_uat_auth_bypass_config(
+    *,
+    environment: str,
+    enabled: bool,
+    public_base_url: str,
+    company_id: uuid.UUID | None,
+    username: str | None,
+    platform_username: str | None,
+    allowed_hosts: list[str] | None = None,
+) -> None:
+    if not enabled:
+        return
+    if environment != "development":
+        raise ValueError("UAT auth bypass is allowed only in the development environment")
+    resolve_uat_public_host(public_base_url)
+    if company_id is None or not username or not username.strip():
+        raise ValueError("UAT auth bypass requires an explicit Company ID and username")
+    if not platform_username or not platform_username.strip():
+        raise ValueError("UAT auth bypass requires an explicit Platform username")
+    resolve_uat_auth_bypass_hosts(public_base_url, allowed_hosts or [])
+
+
+def validate_uat_superadmin_access_config(
+    *,
+    environment: str,
+    enabled: bool,
+    public_base_url: str,
+    company_id: uuid.UUID | None,
+    username: str | None,
+) -> None:
+    """Fail closed unless the temporary all-login account is scoped to UAT."""
+    if not enabled:
+        return
+    if environment != "development":
+        raise ValueError(
+            "Temporary superadmin access is allowed only on an HTTPS UAT development host"
+        )
+    resolve_uat_public_host(public_base_url)
+    if company_id is None or not username or not username.strip():
+        raise ValueError(
+            "Temporary superadmin access requires an explicit Company ID and username"
+        )
+
+
+def resolve_uat_auth_bypass_hosts(public_base_url: str, allowed_hosts: list[str]) -> set[str]:
+    result = {resolve_uat_public_host(public_base_url)}
+    for value in allowed_hosts:
+        host = value.lower()
+        if host not in APPROVED_UAT_HOSTS:
+            raise ValueError("UAT auth bypass hosts must be exact approved Foodchainservice UAT hostnames")
+        result.add(host)
+    return result
+
+
+def validate_qa_access_mode_config(
+    *,
+    environment: str,
+    enabled: bool,
+    public_base_url: str,
+    access_key: str | None,
+    company_id: uuid.UUID | None,
+    personas: dict[str, str],
+    platform_personas: dict[str, str],
+) -> None:
+    if not enabled:
+        return
+    if environment != "development":
+        raise ValueError("QA access mode is allowed only in the development environment")
+    resolve_qa_access_authority(public_base_url)
+    if access_key is None or len(access_key.strip()) < 32:
+        raise ValueError("QA access mode requires a runtime access key of at least 32 characters")
+    if company_id is None or not personas:
+        raise ValueError("QA access mode requires an explicit Company ID and tenant personas")
+    if not platform_personas:
+        raise ValueError("QA access mode requires explicit Platform personas")
+
+
+def validate_takeaway_runtime_config(
+    *,
+    environment: str,
+    enabled: bool,
+    service_database: str,
+    database_url: str | None,
+    identity_database: str,
+    reference_projector_enabled: bool,
+) -> None:
+    """Keep the Phase 6 boundary dark until every required dependency is explicit."""
+    if not enabled:
+        return
+    if service_database != "takeaway":
+        raise ValueError(
+            "TAKEAWAY_FEATURE_ENABLED requires TAKEAWAY_SERVICE_DATABASE=takeaway"
+        )
+    if not database_url:
+        raise ValueError("Takeaway service requires an explicit TAKEAWAY_DATABASE_URL")
+    if identity_database != "platform_core":
+        raise ValueError("Takeaway service requires IDENTITY_DATABASE=platform_core")
+    if not reference_projector_enabled:
+        raise ValueError("Takeaway service requires REFERENCE_PROJECTOR_ENABLED=true")
+    if environment in {"staging", "production"} and "localhost" in database_url:
+        raise ValueError("Staging and production Takeaway databases cannot use localhost")
+
+
+def validate_takeaway_write_activation_config(
+    *,
+    environment: str,
+    legacy_uat_enabled: bool,
+    mode: str,
+    feature_enabled: bool,
+    public_base_url: str,
+    company_allowlist: str,
+    brand_allowlist: str,
+    branch_allowlist: str,
+    approval_reference: str | None,
+) -> None:
+    """Keep Takeaway mutations behind an explicit server-authoritative release gate."""
+    effective_mode = resolve_takeaway_write_mode(
+        legacy_uat_enabled=legacy_uat_enabled,
+        configured_mode=mode,
+    )
+    if effective_mode == "hold":
+        return
+    if not feature_enabled:
+        raise ValueError("Takeaway transaction writes require TAKEAWAY_FEATURE_ENABLED=true")
+    parsed_url = urlsplit(public_base_url)
+    if effective_mode == "uat":
+        if environment != "development":
+            raise ValueError("Takeaway UAT writes are approved only in UAT development")
+        resolve_uat_public_host(public_base_url)
+        return
+
+    if legacy_uat_enabled:
+        raise ValueError("Legacy UAT write flag cannot be combined with canary/live mode")
+    if environment != "production":
+        raise ValueError("Takeaway canary/live mode requires ENVIRONMENT=production")
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.hostname is None
+        or parsed_url.hostname.startswith("uat-")
+        or parsed_url.hostname in {"localhost", "127.0.0.1"}
+    ):
+        raise ValueError("Takeaway canary/live mode requires a Production HTTPS hostname")
+    if not approval_reference or len(approval_reference.strip()) < 8:
+        raise ValueError("Takeaway canary/live mode requires an approval reference")
+    if effective_mode == "canary":
+        for label, raw_values in (
+            ("Company", company_allowlist),
+            ("Brand", brand_allowlist),
+            ("Branch", branch_allowlist),
+        ):
+            if not parse_uuid_allowlist(raw_values):
+                raise ValueError(f"Takeaway canary mode requires a {label} allowlist")
+
+
+def resolve_takeaway_write_mode(
+    *,
+    legacy_uat_enabled: bool,
+    configured_mode: str,
+) -> Literal["hold", "uat", "canary", "live"]:
+    """Map the legacy UAT flag without allowing it to unlock Production."""
+    if legacy_uat_enabled and configured_mode == "hold":
+        return "uat"
+    if configured_mode not in {"hold", "uat", "canary", "live"}:
+        raise ValueError("Invalid Takeaway transaction write mode")
+    return configured_mode  # type: ignore[return-value]
+
+
+def parse_uuid_allowlist(raw_values: str) -> set[uuid.UUID]:
+    """Parse a comma-separated UUID allowlist and fail closed on malformed entries."""
+    values: set[uuid.UUID] = set()
+    for raw_value in raw_values.split(","):
+        value = raw_value.strip()
+        if value:
+            try:
+                values.add(uuid.UUID(value))
+            except ValueError as exc:
+                raise ValueError("Takeaway transaction allowlists must contain UUIDs") from exc
+    return values
+
+
+def validate_company_supply_chain_write_activation_config(
+    *,
+    environment: str,
+    public_base_url: str,
+    kitchen_writes_enabled: bool,
+    distribution_writes_enabled: bool,
+) -> None:
+    """Keep Company Kitchen and Distribution mutations inside a bounded UAT wave."""
+    if not kitchen_writes_enabled and not distribution_writes_enabled:
+        return
+    if environment != "development":
+        raise ValueError("Company supply-chain writes are approved only in UAT development")
+    resolve_uat_public_host(public_base_url)
+    if distribution_writes_enabled and not kitchen_writes_enabled:
+        raise ValueError("Company Distribution writes require Company Kitchen writes first")
+
+
+def validate_retail_runtime_config(
+    *,
+    environment: str,
+    service_database: str,
+    database_url: str | None,
+    identity_database: str,
+    reference_projector_enabled: bool,
+    retail_reference_projector_enabled: bool,
+) -> None:
+    """Fail closed until the dedicated Retail boundary is explicitly prepared."""
+    if retail_reference_projector_enabled and not database_url:
+        raise ValueError("Retail reference projector requires RETAIL_DATABASE_URL")
+    if service_database == "legacy":
+        return
+    if service_database != "retail":
+        raise ValueError("RETAIL_SERVICE_DATABASE must be legacy or retail")
+    if not database_url:
+        raise ValueError("Retail cutover requires an explicit RETAIL_DATABASE_URL")
+    if identity_database != "platform_core":
+        raise ValueError("Retail cutover requires IDENTITY_DATABASE=platform_core")
+    if not reference_projector_enabled:
+        raise ValueError("Retail cutover requires REFERENCE_PROJECTOR_ENABLED=true")
+    if not retail_reference_projector_enabled:
+        raise ValueError(
+            "Retail cutover requires RETAIL_REFERENCE_PROJECTOR_ENABLED=true"
+        )
+    if environment in {"staging", "production"} and "localhost" in database_url:
+        raise ValueError("Staging and production Retail databases cannot use localhost")
+
+
+def validate_shared_reporting_runtime_config(
+    *,
+    enabled: bool,
+    identity_database: str,
+    reference_projector_enabled: bool,
+) -> None:
+    """Reporting projection can activate only after Platform identity projection is authoritative."""
+    if not enabled:
+        return
+    if identity_database != "platform_core":
+        raise ValueError("Shared reporting requires IDENTITY_DATABASE=platform_core")
+    if not reference_projector_enabled:
+        raise ValueError("Shared reporting requires REFERENCE_PROJECTOR_ENABLED=true")
+
+
+def validate_pos_offline_mode_config(
+    *,
+    environment: str,
+    enabled: bool,
+    public_base_url: str,
+    company_allowlist: str,
+    branch_allowlist: str,
+) -> None:
+    """Keep the planned POS outbox dark until a bounded UAT explicitly enables it."""
+    if not enabled:
+        return
+    if environment != "development":
+        raise ValueError("POS offline mode is not approved outside UAT development")
+    resolve_uat_public_host(public_base_url)
+    if not company_allowlist.strip() or not branch_allowlist.strip():
+        raise ValueError("POS offline mode requires explicit Company and Branch allow-lists")
+
+
+def validate_physical_uat_evidence_config(
+    *,
+    environment: str,
+    enabled: bool,
+    public_base_url: str,
+) -> None:
+    """Physical evidence collection is an isolated UAT tool, never a Production switch."""
+    if not enabled:
+        return
+    if environment != "development":
+        raise ValueError("Physical UAT evidence is not approved outside UAT development")
+    resolve_uat_public_host(public_base_url)
+
+
+def validate_refund_runtime_config(
+    *,
+    environment: str,
+    provider_mode: str,
+    webhook_secret: str | None,
+    non_fiscal_credit_note_enabled: bool,
+) -> None:
+    if provider_mode == "live":
+        raise ValueError("Live refund provider is not implemented or approved")
+    if provider_mode == "sandbox":
+        if environment == "production":
+            raise ValueError("Sandbox refund provider is forbidden in Production")
+        if not webhook_secret or len(webhook_secret) < 16:
+            raise ValueError("Sandbox refund provider requires a webhook secret of at least 16 characters")
+    if non_fiscal_credit_note_enabled and environment == "production":
+        raise ValueError("Synthetic non-fiscal Credit Notes are forbidden in Production")
 
 
 class Settings(BaseSettings):
@@ -21,11 +354,36 @@ class Settings(BaseSettings):
     database_url: str
     platform_database_url: str | None = None
     restaurant_database_url: str | None = None
+    retail_database_url: str | None = None
+    takeaway_database_url: str | None = None
     identity_database: Literal["legacy", "platform_core"] = "legacy"
     restaurant_service_database: Literal["legacy", "restaurant"] = "legacy"
+    retail_service_database: Literal["legacy", "retail"] = "legacy"
+    retail_reference_projector_enabled: bool = False
+    retail_reference_projector_poll_seconds: float = Field(
+        default=5.0,
+        ge=0.5,
+        le=300.0,
+    )
+    takeaway_service_database: Literal["disabled", "takeaway"] = "disabled"
+    takeaway_feature_enabled: bool = False
+    takeaway_uat_transaction_writes_enabled: bool = False
+    takeaway_transaction_write_mode: Literal["hold", "uat", "canary", "live"] = "hold"
+    takeaway_transaction_company_allowlist: str = ""
+    takeaway_transaction_brand_allowlist: str = ""
+    takeaway_transaction_branch_allowlist: str = ""
+    takeaway_transaction_approval_reference: str | None = None
+    takeaway_import_trusted_keys_json: str = "{}"
     reference_projector_enabled: bool = False
     reference_projector_poll_seconds: float = Field(default=1.0, ge=0.1, le=60.0)
     reference_projector_batch_size: int = Field(default=100, ge=1, le=1000)
+    shared_reporting_projector_enabled: bool = False
+    shared_reporting_projector_poll_seconds: float = Field(default=5.0, ge=0.5, le=300.0)
+    shared_reporting_projector_batch_size: int = Field(default=100, ge=1, le=1000)
+    webhook_retry_worker_enabled: bool = False
+    webhook_retry_poll_seconds: int = Field(default=30, ge=5, le=300)
+    company_kitchen_writes_enabled: bool = False
+    company_distribution_writes_enabled: bool = False
     redis_url: str
     secret_key: str
     algorithm: str
@@ -47,6 +405,7 @@ class Settings(BaseSettings):
     cors_origins: list[str]
     app_name: str
     app_version: str
+    enable_api_docs: bool | None = None
     celery_broker_url: str
     celery_result_backend: str
     upload_dir: str = "./uploads"
@@ -54,6 +413,47 @@ class Settings(BaseSettings):
     allowed_image_types: list[str] = Field(
         default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
     )
+    saas_public_base_url: str = "http://localhost:4173"
+    saas_email_delivery_mode: Literal["console", "smtp"] = "console"
+    saas_smtp_host: str | None = None
+    saas_smtp_port: int = Field(default=587, ge=1, le=65535)
+    saas_smtp_username: str | None = None
+    saas_smtp_password: str | None = None
+    saas_smtp_from_email: str | None = None
+    saas_smtp_from_name: str = "Restaurant SaaS"
+    saas_smtp_use_tls: bool = False
+    saas_smtp_start_tls: bool = True
+    saas_verification_expire_hours: int = Field(default=24, ge=1, le=72)
+    saas_password_reset_expire_minutes: int = Field(default=30, ge=10, le=120)
+    saas_trial_days: int = Field(default=14, ge=1, le=90)
+    saas_billing_provider: str = "unconfigured"
+    saas_billing_live_charging_enabled: bool = False
+    saas_privacy_internal_target_days: int = Field(default=30, ge=1, le=90)
+    saas_support_access_max_minutes: int = Field(default=60, ge=5, le=60)
+    uat_auth_bypass_enabled: bool = False
+    uat_auth_bypass_company_id: uuid.UUID | None = None
+    uat_auth_bypass_username: str | None = None
+    uat_platform_auth_bypass_username: str | None = None
+    uat_auth_bypass_hosts: list[str] = Field(default_factory=list)
+    uat_superadmin_all_logins_enabled: bool = False
+    uat_superadmin_company_id: uuid.UUID | None = None
+    uat_superadmin_username: str | None = None
+    qa_access_mode_enabled: bool = False
+    qa_access_key: str | None = None
+    qa_access_company_id: uuid.UUID | None = None
+    qa_access_personas: dict[str, str] = Field(default_factory=dict)
+    qa_platform_personas: dict[str, str] = Field(default_factory=dict)
+    qa_access_session_minutes: int = Field(default=30, ge=5, le=60)
+    # WP47 design gate. This remains false until physical UAT is separately approved.
+    pos_offline_mode_enabled: bool = False
+    pos_offline_company_allowlist: str = ""
+    pos_offline_branch_allowlist: str = ""
+    pos_offline_retention_days: int = Field(default=7, ge=1, le=90)
+    physical_uat_evidence_enabled: bool = False
+    uat_release_commit: str = "unreleased"
+    refund_provider_mode: Literal["disabled", "sandbox", "live"] = "disabled"
+    refund_sandbox_webhook_secret: str | None = None
+    refund_uat_non_fiscal_credit_note_enabled: bool = False
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env", "../../.env"),
@@ -63,6 +463,110 @@ class Settings(BaseSettings):
         # Compose. Service-specific bootstrap variables are not app settings.
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def validate_saas_delivery(self) -> "Settings":
+        validate_saas_email_delivery_config(
+            environment=self.environment,
+            mode=self.saas_email_delivery_mode,
+            public_base_url=self.saas_public_base_url,
+            smtp_host=self.saas_smtp_host,
+            smtp_from_email=self.saas_smtp_from_email,
+        )
+        validate_saas_billing_config(
+            provider=self.saas_billing_provider,
+            live_charging_enabled=self.saas_billing_live_charging_enabled,
+        )
+        self.saas_public_base_url = self.saas_public_base_url.rstrip("/")
+        self.saas_billing_provider = self.saas_billing_provider.strip().lower()
+        validate_uat_auth_bypass_config(
+            environment=self.environment,
+            enabled=self.uat_auth_bypass_enabled,
+            public_base_url=self.saas_public_base_url,
+            company_id=self.uat_auth_bypass_company_id,
+            username=self.uat_auth_bypass_username,
+            platform_username=self.uat_platform_auth_bypass_username,
+            allowed_hosts=self.uat_auth_bypass_hosts,
+        )
+        validate_uat_superadmin_access_config(
+            environment=self.environment,
+            enabled=self.uat_superadmin_all_logins_enabled,
+            public_base_url=self.saas_public_base_url,
+            company_id=self.uat_superadmin_company_id,
+            username=self.uat_superadmin_username,
+        )
+        validate_qa_access_mode_config(
+            environment=self.environment,
+            enabled=self.qa_access_mode_enabled,
+            public_base_url=self.saas_public_base_url,
+            access_key=self.qa_access_key,
+            company_id=self.qa_access_company_id,
+            personas=self.qa_access_personas,
+            platform_personas=self.qa_platform_personas,
+        )
+        if self.qa_access_mode_enabled and self.uat_auth_bypass_enabled:
+            raise ValueError("QA access mode cannot coexist with credentialless UAT auth bypass")
+        validate_takeaway_runtime_config(
+            environment=self.environment,
+            enabled=self.takeaway_feature_enabled,
+            service_database=self.takeaway_service_database,
+            database_url=self.takeaway_database_url,
+            identity_database=self.identity_database,
+            reference_projector_enabled=self.reference_projector_enabled,
+        )
+        validate_takeaway_write_activation_config(
+            environment=self.environment,
+            legacy_uat_enabled=self.takeaway_uat_transaction_writes_enabled,
+            mode=self.takeaway_transaction_write_mode,
+            feature_enabled=self.takeaway_feature_enabled,
+            public_base_url=self.saas_public_base_url,
+            company_allowlist=self.takeaway_transaction_company_allowlist,
+            brand_allowlist=self.takeaway_transaction_brand_allowlist,
+            branch_allowlist=self.takeaway_transaction_branch_allowlist,
+            approval_reference=self.takeaway_transaction_approval_reference,
+        )
+        validate_company_supply_chain_write_activation_config(
+            environment=self.environment,
+            public_base_url=self.saas_public_base_url,
+            kitchen_writes_enabled=self.company_kitchen_writes_enabled,
+            distribution_writes_enabled=self.company_distribution_writes_enabled,
+        )
+        validate_retail_runtime_config(
+            environment=self.environment,
+            service_database=self.retail_service_database,
+            database_url=self.retail_database_url,
+            identity_database=self.identity_database,
+            reference_projector_enabled=self.reference_projector_enabled,
+            retail_reference_projector_enabled=self.retail_reference_projector_enabled,
+        )
+        validate_shared_reporting_runtime_config(
+            enabled=self.shared_reporting_projector_enabled,
+            identity_database=self.identity_database,
+            reference_projector_enabled=self.reference_projector_enabled,
+        )
+        validate_pos_offline_mode_config(
+            environment=self.environment,
+            enabled=self.pos_offline_mode_enabled,
+            public_base_url=self.saas_public_base_url,
+            company_allowlist=self.pos_offline_company_allowlist,
+            branch_allowlist=self.pos_offline_branch_allowlist,
+        )
+        validate_physical_uat_evidence_config(
+            environment=self.environment,
+            enabled=self.physical_uat_evidence_enabled,
+            public_base_url=self.saas_public_base_url,
+        )
+        validate_refund_runtime_config(
+            environment=self.environment,
+            provider_mode=self.refund_provider_mode,
+            webhook_secret=self.refund_sandbox_webhook_secret,
+            non_fiscal_credit_note_enabled=self.refund_uat_non_fiscal_credit_note_enabled,
+        )
+        if self.uat_auth_bypass_username is not None:
+            self.uat_auth_bypass_username = self.uat_auth_bypass_username.strip() or None
+        if self.uat_platform_auth_bypass_username is not None:
+            self.uat_platform_auth_bypass_username = self.uat_platform_auth_bypass_username.strip() or None
+        return self
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -95,9 +599,33 @@ class Settings(BaseSettings):
             "postgresql+psycopg2://",
         )
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def retail_database_url_sync(self) -> str | None:
+        if self.retail_database_url is None:
+            return None
+        return self.retail_database_url.replace(
+            "postgresql+asyncpg://",
+            "postgresql+psycopg2://",
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def takeaway_database_url_sync(self) -> str | None:
+        if self.takeaway_database_url is None:
+            return None
+        return self.takeaway_database_url.replace(
+            "postgresql+asyncpg://",
+            "postgresql+psycopg2://",
+        )
+
     @cached_property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @cached_property
+    def api_docs_enabled(self) -> bool:
+        return resolve_api_docs_enabled(self.environment, self.enable_api_docs)
 
 
 settings = Settings()

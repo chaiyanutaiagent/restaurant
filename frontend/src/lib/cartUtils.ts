@@ -51,8 +51,9 @@ function calcDiscount(base: number, discountAmount: number, discountType: string
 
 export function calcCart(items: CartItem[], orderDiscount: number, discountType: string): Cart {
   const normalizedItems = items.map((item) => {
-    const itemDiscount = calcDiscount(item.original_price, item.discount_amount, item.discount_type);
-    const effectivePrice = Math.max(0, round2(item.original_price - itemDiscount));
+    const basePrice = item.price_override?.requested_unit_price ?? item.original_price;
+    const itemDiscount = calcDiscount(basePrice, item.discount_amount, item.discount_type);
+    const effectivePrice = Math.max(0, round2(basePrice - itemDiscount));
     const subtotal = round2(effectivePrice * item.qty);
     const vatAmount = calcItemVat(subtotal, item.vat_type, item.vat_rate);
     return {

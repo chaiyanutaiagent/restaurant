@@ -9,8 +9,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
-from app.dependencies import TokenData, require_permission
+from app.dependencies import TokenData, get_legacy_model_operational_db as get_db, require_permission
 from app.schemas.report import DashboardStats
 from app.services.report_service import ReportService
 from app.services.report_scope_policy import resolve_report_branch_id

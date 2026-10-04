@@ -274,7 +274,10 @@ export default function UsersPage(): JSX.Element {
         first_name: editUser.first_name || null,
         last_name: editUser.last_name || null,
         display_name: editUser.display_name || null,
-        is_active: editUser.is_active
+        is_active: editUser.is_active,
+        reason: editUser.is_active === selectedUser?.is_active ? undefined : "เปลี่ยนสถานะจากหน้าจัดการพนักงาน",
+        expected_credential_version: selectedUser?.credential_version,
+        request_id: editUser.is_active === selectedUser?.is_active ? undefined : crypto.randomUUID()
       });
     },
     onSuccess: async () => {
@@ -290,7 +293,14 @@ export default function UsersPage(): JSX.Element {
   });
 
   const deactivateMutation = useMutation({
-    mutationFn: async (userId: string) => userApi.deactivate(userId),
+    mutationFn: async (userId: string) => {
+      if (!selectedUser || selectedUser.id !== userId) throw new Error("กรุณาโหลดข้อมูลผู้ใช้อีกครั้ง");
+      return userApi.deactivate(userId, {
+        reason: "ปิดบัญชีจากหน้าจัดการพนักงาน",
+        request_id: crypto.randomUUID(),
+        expected_credential_version: selectedUser.credential_version
+      });
+    },
     onSuccess: async (_, userId) => {
       await invalidateUsers();
       await queryClient.invalidateQueries({ queryKey: ["admin", "users", userId] });

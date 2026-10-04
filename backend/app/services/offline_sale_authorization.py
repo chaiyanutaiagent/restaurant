@@ -116,6 +116,7 @@ class OfflineSaleAuthorizationService:
             or device.paired_at is None
             or device.paired_at > local_created_at
             or credential_version < 1
+            or device.credential_version != credential_version
             or (device.revoked_at is not None and device.revoked_at <= local_created_at)
         ):
             raise ValueError("อุปกรณ์ไม่มีสิทธิ์สำหรับรายการขายออฟไลน์นี้")

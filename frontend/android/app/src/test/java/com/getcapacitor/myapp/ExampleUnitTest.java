@@ -1,4 +1,4 @@
-package com.getcapacitor.myapp;
+package com.foodchainservice.takeaway;
 
 import static org.junit.Assert.*;
 

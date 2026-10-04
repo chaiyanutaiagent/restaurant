@@ -385,7 +385,7 @@ export default function SettingsPage(): JSX.Element {
                   </div>
                 ))}
               </div>
-              <Button variant="outline" onClick={() => { window.location.href = "mailto:support@example.com?subject=Restaurant POS%20Issue%20Report"; }}>
+              <Button variant="outline" onClick={() => { window.location.href = "mailto:support@example.com?subject=Foodchainservice%20Issue%20Report"; }}>
                 รายงานปัญหา
               </Button>
             </CardContent>

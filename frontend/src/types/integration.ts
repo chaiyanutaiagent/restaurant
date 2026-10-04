@@ -2,6 +2,8 @@ export interface APIKey {
   id: string;
   company_id: string;
   name: string;
+  purpose: string;
+  owner_contact: string;
   key_prefix: string;
   scopes: string[];
   is_active: boolean;
@@ -9,6 +11,7 @@ export interface APIKey {
   expires_at: string | null;
   created_at: string;
   revoked_at: string | null;
+  rotated_from_id: string | null;
 }
 
 export interface APIKeyCreated {
@@ -22,6 +25,9 @@ export interface WebhookEndpoint {
   name: string;
   url: string;
   events: string[];
+  secret_configured: boolean;
+  secret_rotated_at: string | null;
+  incoming_source: string | null;
   is_active: boolean;
   last_triggered_at: string | null;
   failure_count: number;
@@ -33,7 +39,9 @@ export interface WebhookDelivery {
   webhook_id: string;
   event_type: string;
   response_status: number | null;
+  status: "pending" | "delivered" | "retry_scheduled" | "dead_letter";
   attempt_count: number;
+  last_error_code: string | null;
   delivered_at: string | null;
   failed_at: string | null;
   next_retry_at: string | null;
@@ -48,8 +56,12 @@ export interface ExternalOrder {
   customer_name: string | null;
   customer_phone: string | null;
   total_amount: number;
+  server_total_amount: number | null;
+  review_reasons: string[];
   payment_status: string | null;
   sale_order_id: string | null;
   received_at: string;
   processed_at: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
 }

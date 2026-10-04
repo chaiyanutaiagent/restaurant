@@ -71,23 +71,29 @@ seed_roles_and_users() {
     -e FNB_PERMISSION_IDENTITY_DATABASE="$FNB_PERMISSION_IDENTITY_DATABASE" \
     backend python -c 'import asyncio
 import os
+import uuid
 from sqlalchemy import select, delete, insert
 from app.database import identity_session_factory_for
 from app.models.branch import Branch
 from app.models.company import Company
+from app.models.restaurant import Brand, BrandBranch
 from app.models.role import Permission, Role, role_permissions_table
+from app.models.stock import StockLocation
 from app.models.user import User, UserBranch
+from app.services.role_preset_service import COMPANY_OWNER_PERMISSION_CODES
 from app.utils.security import hash_password
 
 PASSWORD = os.environ["SMOKE_PASSWORD"]
 IDENTITY_DATABASE = os.environ["FNB_PERMISSION_IDENTITY_DATABASE"]
 ROLE_DEFS = {
+    "FNB Smoke Owner": list(COMPANY_OWNER_PERMISSION_CODES),
     "FNB Smoke Cashier": ["fb.menu.view", "fb.table.manage", "fb.order.create"],
     "FNB Smoke Kitchen": ["fb.menu.view", "fb.kitchen.manage"],
     "FNB Smoke Recipe": ["fb.menu.view", "fb.recipe.manage", "fb.report.view"],
     "FNB Smoke Manager": ["fb.menu.view", "fb.table.manage", "fb.order.create", "fb.kitchen.manage", "fb.recipe.manage", "fb.report.view", "fb.settings.manage"],
 }
 USER_DEFS = {
+    "fnb_smoke_owner": "FNB Smoke Owner",
     "fnb_smoke_cashier": "FNB Smoke Cashier",
     "fnb_smoke_kitchen": "FNB Smoke Kitchen",
     "fnb_smoke_recipe": "FNB Smoke Recipe",
@@ -102,12 +108,56 @@ async def main():
             raise RuntimeError("No active company found")
         branch = await db.scalar(
             select(Branch)
-            .where(Branch.company_id == company.id, Branch.deleted_at.is_(None), Branch.is_active.is_(True))
+            .join(BrandBranch, BrandBranch.branch_id == Branch.id)
+            .join(Brand, Brand.id == BrandBranch.brand_id)
+            .where(
+                Branch.company_id == company.id,
+                Branch.deleted_at.is_(None),
+                Branch.is_active.is_(True),
+                Brand.company_id == company.id,
+                Brand.business_type == "restaurant",
+                Brand.is_active.is_(True),
+                BrandBranch.company_id == company.id,
+                BrandBranch.is_active.is_(True),
+            )
             .order_by(Branch.sort_order, Branch.created_at)
             .limit(1)
         )
-        if not branch:
-            raise RuntimeError("No active branch found")
+        if branch is None:
+            marker = uuid.uuid4().hex[:8]
+            branch = Branch(
+                company_id=company.id,
+                code=f"FNB-PERM-{marker}",
+                name=f"F&B Permission Smoke {marker}",
+                is_active=True,
+            )
+            db.add(branch)
+            await db.flush()
+            location = StockLocation(
+                company_id=company.id,
+                branch_id=branch.id,
+                code=f"FPST-{marker}",
+                name=f"F&B Permission Stock {marker}",
+                is_active=True,
+            )
+            brand = Brand(
+                company_id=company.id,
+                slug=f"fnb-permission-smoke-{marker}",
+                name=f"F&B Permission Smoke {marker}",
+                business_type="restaurant",
+                is_active=True,
+            )
+            db.add_all([location, brand])
+            await db.flush()
+            db.add(
+                BrandBranch(
+                    company_id=company.id,
+                    brand_id=brand.id,
+                    branch_id=branch.id,
+                    store_location_id=location.id,
+                    is_active=True,
+                )
+            )
 
         permissions = {
             permission.code: permission
@@ -240,20 +290,29 @@ if [[ "$FNB_PERMISSION_IDENTITY_DATABASE" = "platform_core" ]]; then
   done
 fi
 
-COMPANY_ID="$(psql_at "select id from companies order by created_at limit 1;")"
-BRANCH_ID="$(psql_at "select id from branches where company_id='$COMPANY_ID' and deleted_at is null order by sort_order, created_at limit 1;")"
+COMPANY_ID="$(psql_at "select company_id from users where username='fnb_smoke_owner' and deleted_at is null limit 1;")"
+BRANCH_ID="$(psql_at "select ub.branch_id from user_branches ub join users u on u.id=ub.user_id where u.username='fnb_smoke_owner' and ub.deleted_at is null limit 1;")"
 if [[ -z "$COMPANY_ID" || -z "$BRANCH_ID" ]]; then
   echo "Missing company or branch for permission smoke." >&2
   exit 1
 fi
 
 TODAY="$(date +%F)"
+OWNER_TOKEN="$(login_as fnb_smoke_owner "$COMPANY_ID" "$BRANCH_ID")"
 CASHIER_TOKEN="$(login_as fnb_smoke_cashier "$COMPANY_ID" "$BRANCH_ID")"
 KITCHEN_TOKEN="$(login_as fnb_smoke_kitchen "$COMPANY_ID" "$BRANCH_ID")"
 RECIPE_TOKEN="$(login_as fnb_smoke_recipe "$COMPANY_ID" "$BRANCH_ID")"
 MANAGER_TOKEN="$(login_as fnb_smoke_manager "$COMPANY_ID" "$BRANCH_ID")"
 
 http_auth_expect PATCH "$INTERNAL_BASE_URL/api/v1/restaurant/settings" "$MANAGER_TOKEN" 200 '{"has_tables":true,"table_qr_enabled":true}' >/dev/null
+
+echo "== F&B permission smoke: company owner"
+OWNER_RAW_SKU="PERM-OWNER-RAW-$(date +%s)"
+http_auth_expect GET "$INTERNAL_BASE_URL/api/v1/restaurant/kitchen" "$OWNER_TOKEN" 200 >/dev/null
+http_auth_expect POST "$INTERNAL_BASE_URL/api/v1/restaurant/raw-materials" "$OWNER_TOKEN" 201 "{\"sku\":\"$OWNER_RAW_SKU\",\"name\":\"Owner Permission Raw Material\",\"cost_price\":1.23,\"unit\":\"g\"}" >/dev/null
+http_auth_expect GET "$INTERNAL_BASE_URL/api/v1/restaurant/reports/ingredients?branch_id=$BRANCH_ID&date_from=$TODAY&date_to=$TODAY" "$OWNER_TOKEN" 200 >/dev/null
+http_auth_expect POST "$INTERNAL_BASE_URL/api/v1/restaurant/qs-qr/generate" "$OWNER_TOKEN" 400 '{}' >/dev/null
+http_auth_expect GET "$INTERNAL_BASE_URL/api/v1/platform/companies" "$OWNER_TOKEN" 401 >/dev/null
 
 echo "== F&B permission smoke: cashier"
 http_auth_expect GET "$INTERNAL_BASE_URL/api/v1/restaurant/tables" "$CASHIER_TOKEN" 200 >/dev/null
@@ -281,4 +340,4 @@ http_auth_expect GET "$INTERNAL_BASE_URL/api/v1/restaurant/kitchen" "$MANAGER_TO
 http_auth_expect POST "$INTERNAL_BASE_URL/api/v1/restaurant/qs-qr/generate" "$MANAGER_TOKEN" 400 '{}' >/dev/null
 http_auth_expect GET "$INTERNAL_BASE_URL/api/v1/restaurant/reports/ingredients?branch_id=$BRANCH_ID&date_from=$TODAY&date_to=$TODAY" "$MANAGER_TOKEN" 200 >/dev/null
 
-echo "PASS: F&B permission smoke OK company=$COMPANY_ID branch=$BRANCH_ID raw_sku=$RAW_SKU"
+echo "PASS: F&B permission smoke OK company=$COMPANY_ID branch=$BRANCH_ID owner_raw_sku=$OWNER_RAW_SKU recipe_raw_sku=$RAW_SKU"

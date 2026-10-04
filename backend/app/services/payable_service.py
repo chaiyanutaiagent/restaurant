@@ -15,6 +15,7 @@ from app.models.company import Company
 from app.models.etax import TaxDocument
 from app.models.payable import APPayment, APPaymentAllocation, SupplierInvoice, WHTCertificate
 from app.models.purchase import PurchaseOrder, Supplier
+from app.models.tax_operations import TaxLedgerEntry
 from app.schemas.payable import CreateAPPaymentRequest, SupplierInvoiceCreate, VatReturnReport
 from app.services.accounting_service import AccountingService
 from app.utils.posting_rules import PostingLine
@@ -64,6 +65,10 @@ class PayableService:
             po_id=data.po_id,
             invoice_number=invoice_number,
             supplier_ref=data.supplier_ref,
+            tax_invoice_number=data.tax_invoice_number,
+            tax_invoice_date=data.tax_invoice_date,
+            input_vat_claimable=data.input_vat_claimable,
+            nonclaimable_reason=data.nonclaimable_reason,
             status="unpaid",
             invoice_date=data.invoice_date,
             due_date=due_date,
@@ -372,6 +377,16 @@ class PayableService:
         return cert
 
     async def get_vat_return_report(self, company_id: uuid.UUID, year: int, month: int) -> VatReturnReport:
+        tax_ledger = (
+            await self.db.scalars(
+                select(TaxLedgerEntry).where(
+                    TaxLedgerEntry.company_id == company_id,
+                    TaxLedgerEntry.status == "posted",
+                    func.extract("year", TaxLedgerEntry.document_date) == year,
+                    func.extract("month", TaxLedgerEntry.document_date) == month,
+                )
+            )
+        ).all()
         output_docs = (
             await self.db.scalars(
                 select(TaxDocument).where(
@@ -395,8 +410,19 @@ class PayableService:
             )
         ).all()
 
-        output_vat_total = q2(sum((Decimal(item.vat_amount or 0) for item in output_docs), Decimal("0")))
-        input_vat_total = q2(sum((Decimal(item.vat_amount or 0) for item in input_invoices), Decimal("0")))
+        if tax_ledger:
+            output_rows = [item for item in tax_ledger if item.tax_direction == "output"]
+            input_rows = [item for item in tax_ledger if item.tax_direction == "input"]
+            output_vat_total = q2(sum((Decimal(item.tax_amount or 0) for item in output_rows), Decimal("0")))
+            input_vat_total = q2(sum((Decimal(item.tax_amount or 0) for item in input_rows), Decimal("0")))
+            output_doc_count = len(output_rows)
+            input_invoice_count = len(input_rows)
+        else:
+            # Compatibility before the first Tax Center sync.
+            output_vat_total = q2(sum((Decimal(item.vat_amount or 0) for item in output_docs), Decimal("0")))
+            input_vat_total = q2(sum((Decimal(item.vat_amount or 0) for item in input_invoices), Decimal("0")))
+            output_doc_count = len(output_docs)
+            input_invoice_count = len(input_invoices)
         net_vat_payable = q2(output_vat_total - input_vat_total)
 
         next_month_year = year + (1 if month == 12 else 0)
@@ -419,8 +445,8 @@ class PayableService:
             input_vat_total=input_vat_total,
             net_vat_payable=net_vat_payable,
             net_vat_label=net_label,
-            output_doc_count=len(output_docs),
-            input_invoice_count=len(input_invoices),
+            output_doc_count=output_doc_count,
+            input_invoice_count=input_invoice_count,
             filing_due_date=filing_due_date,
         )
 

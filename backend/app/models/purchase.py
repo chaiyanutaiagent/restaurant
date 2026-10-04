@@ -15,6 +15,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    CheckConstraint,
     UniqueConstraint,
     text,
 )
@@ -35,7 +36,10 @@ if TYPE_CHECKING:
 
 class Supplier(SoftDeleteMixin, Base):
     __tablename__ = "suppliers"
-    __table_args__ = (UniqueConstraint("company_id", "code", name="uq_suppliers_company_id_code"),)
+    __table_args__ = (
+        CheckConstraint("tax_entity_type IN ('individual', 'juristic', 'unknown')", name="tax_entity_type"),
+        UniqueConstraint("company_id", "code", name="uq_suppliers_company_id_code"),
+    )
 
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -48,6 +52,7 @@ class Supplier(SoftDeleteMixin, Base):
     name_en: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tax_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
     branch_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    tax_entity_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'unknown'"))
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     address_en: Mapped[str | None] = mapped_column(Text, nullable=True)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)

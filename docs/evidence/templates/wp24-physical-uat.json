@@ -1,0 +1,33 @@
+{
+  "scope": "WP24-TAKEAWAY-PHYSICAL-UAT",
+  "environment": "uat",
+  "build": {
+    "git_commit": "REQUIRED_40_CHAR_COMMIT",
+    "package_id": "com.foodchainservice.takeaway.uat",
+    "version_name": "REQUIRED",
+    "apk_sha256": "REQUIRED_64_CHAR_SHA256"
+  },
+  "devices": [
+    {"type": "android", "alias": "REQUIRED", "os_version": "REQUIRED"},
+    {"type": "ipad", "alias": "REQUIRED", "os_version": "REQUIRED"}
+  ],
+  "checks": [
+    {"id": "android_install_launch", "status": "not_run", "evidence": [], "note": ""},
+    {"id": "ipad_safari_layout_touch", "status": "not_run", "evidence": [], "note": ""},
+    {"id": "camera_qr_scan", "status": "not_run", "evidence": [], "note": ""},
+    {"id": "bluetooth_pair_permission", "status": "not_run", "evidence": [], "note": ""},
+    {"id": "customer_merchant_print_cut", "status": "not_run", "evidence": [], "note": ""},
+    {"id": "printer_reconnect_paper_out", "status": "not_run", "evidence": [], "note": ""},
+    {"id": "offline_sale_lost_ack_replay", "status": "not_run", "evidence": [], "note": ""},
+    {"id": "kds_multi_device_concurrency", "status": "not_run", "evidence": [], "note": ""},
+    {"id": "pickup_public_status", "status": "not_run", "evidence": [], "note": ""},
+    {"id": "shift_stock_central_transfer", "status": "not_run", "evidence": [], "note": ""},
+    {"id": "operator_handoff", "status": "not_run", "evidence": [], "note": ""}
+  ],
+  "approval": {
+    "status": "pending",
+    "operator": "REQUIRED",
+    "owner": "REQUIRED",
+    "approved_at": null
+  }
+}

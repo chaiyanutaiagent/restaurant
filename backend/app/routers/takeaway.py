@@ -1,0 +1,1291 @@
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+from decimal import Decimal
+import hashlib
+import json
+from typing import Any
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.encoders import jsonable_encoder
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.business_context import TAKEAWAY
+from app.config import parse_uuid_allowlist, resolve_takeaway_write_mode, settings
+from app.dependencies import (
+    TokenData,
+    get_current_user,
+    get_takeaway_operational_db,
+    require_business_type,
+    require_company_feature,
+    require_any_permission,
+    require_permission,
+)
+from app.database import get_platform_db
+from app.schemas.takeaway import (
+    TakeawayBranchAvailabilityUpdate,
+    TakeawayCatalogItemCreate,
+    TakeawayCatalogItemUpdate,
+    TakeawayCategoryCreate,
+    TakeawayCentralOrderCreate,
+    TakeawayCentralOrderDiscrepancyResolution,
+    TakeawayCentralOrderFulfilment,
+    TakeawayCentralOrderItemUpdate,
+    TakeawayCentralOrderStatusUpdate,
+    TakeawayCentralRoundCreate,
+    TakeawayCreditEntryCreate,
+    TakeawayCreditLimitUpdate,
+    TakeawayCreditPaymentConfigUpsert,
+    TakeawayCreditTopupCreate,
+    TakeawayCreditTopupReview,
+    TakeawayCutoverExecute,
+    TakeawayErpEventAcknowledge,
+    TakeawayImportDryRun,
+    TakeawayOrderPaymentCapture,
+    TakeawayOrderingLinkCreate,
+    TakeawayProductionBatchCreate,
+    TakeawayProductionComplete,
+    TakeawayProductionStatusUpdate,
+    TakeawayRecipeCreate,
+    TakeawayReplenishmentGenerate,
+    TakeawayReplenishmentPolicyUpsert,
+    TakeawayRefundCreate,
+    TakeawayReceiptPrintCreate,
+    TakeawaySaleCreate,
+    TakeawayPublicOrderCreate,
+    TakeawayShiftClose,
+    TakeawayShiftOpen,
+    TakeawayStoreCentralOrderCreate,
+    TakeawayStockMovementCreate,
+    TakeawayTransferCreate,
+    TakeawayTransferDiscrepancyResolution,
+    TakeawayTransferFulfilment,
+    TakeawayTransferStatusUpdate,
+)
+from app.services.takeaway_service import TakeawayService
+from app.models.takeaway import (
+    TakeawayOrder,
+    TakeawayOrderingToken,
+    TakeawayPickupToken,
+    TakeawayReferenceProjection,
+)
+from app.services.takeaway_import_service import (
+    TakeawayImportService,
+    build_takeaway_cutover_preview,
+    validate_takeaway_import_package,
+)
+from app.utils.public_rate_limit import check_public_rate_limit
+
+
+router = APIRouter(
+    prefix="/api/v1/takeaway",
+    tags=["takeaway"],
+    dependencies=[
+        Depends(require_business_type(TAKEAWAY)),
+        Depends(require_company_feature("takeaway")),
+    ],
+)
+public_router = APIRouter(prefix="/api/public/takeaway", tags=["takeaway-public"])
+
+
+READ_ONLY_POST_PATHS = {
+    "/api/v1/takeaway/imports/dry-run",
+    "/api/v1/takeaway/cutover/preview",
+}
+
+
+def takeaway_write_mode() -> str:
+    return resolve_takeaway_write_mode(
+        legacy_uat_enabled=settings.takeaway_uat_transaction_writes_enabled,
+        configured_mode=settings.takeaway_transaction_write_mode,
+    )
+
+
+def takeaway_write_allowed(
+    *,
+    company_id: uuid.UUID | None,
+    brand_id: uuid.UUID | None,
+    branch_id: uuid.UUID | None,
+) -> bool:
+    mode = takeaway_write_mode()
+    if mode == "hold":
+        return False
+    if mode in {"uat", "live"}:
+        return True
+    if company_id is None or brand_id is None or branch_id is None:
+        return False
+    try:
+        return (
+            company_id in parse_uuid_allowlist(settings.takeaway_transaction_company_allowlist)
+            and brand_id in parse_uuid_allowlist(settings.takeaway_transaction_brand_allowlist)
+            and branch_id in parse_uuid_allowlist(settings.takeaway_transaction_branch_allowlist)
+        )
+    except ValueError:
+        return False
+
+
+def takeaway_release_stage() -> str:
+    return {
+        "hold": "dark_launch",
+        "uat": "uat_synthetic",
+        "canary": "canary",
+        "live": "live",
+    }[takeaway_write_mode()]
+
+
+def takeaway_write_hold() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "takeaway_write_hold",
+            "message": "Takeaway transactions are disabled for this release context",
+            "release_stage": takeaway_release_stage(),
+        },
+    )
+
+
+async def require_takeaway_write_activation(
+    request: Request,
+    current: TokenData = Depends(get_current_user),
+) -> None:
+    if request.method.upper() in {"GET", "HEAD", "OPTIONS"}:
+        return
+    if request.url.path in READ_ONLY_POST_PATHS:
+        return
+    if not takeaway_write_allowed(
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+    ):
+        raise takeaway_write_hold()
+
+
+async def require_public_takeaway_write_activation(
+    request: Request,
+    ordering_token: str,
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> None:
+    if request.method.upper() in {"GET", "HEAD", "OPTIONS"}:
+        return
+    token_row = await _ordering_token(ordering_token, db)
+    if not takeaway_write_allowed(
+        company_id=token_row.company_id,
+        brand_id=token_row.brand_id,
+        branch_id=token_row.branch_id,
+    ):
+        raise takeaway_write_hold()
+
+
+router.dependencies.append(Depends(require_takeaway_write_activation))
+
+
+def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "data": jsonable_encoder(data),
+        "meta": {
+            "version": settings.app_version,
+            "business_type": TAKEAWAY,
+            "target_database": "takeaway",
+            **(meta or {}),
+        },
+        "error": None,
+    }
+
+
+async def _ordering_token(
+    raw_token: str,
+    db: AsyncSession,
+) -> TakeawayOrderingToken:
+    if not settings.takeaway_feature_enabled or len(raw_token) < 20 or len(raw_token) > 200:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ordering link not found")
+    row = await db.scalar(
+        select(TakeawayOrderingToken).where(
+            TakeawayOrderingToken.token_hash == hashlib.sha256(raw_token.encode()).hexdigest(),
+            TakeawayOrderingToken.revoked_at.is_(None),
+        )
+    )
+    if row is None or row.expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ordering link not found")
+    return row
+
+
+def _public_current(row: TakeawayOrderingToken) -> TokenData:
+    return TokenData(
+        user_id=row.created_by,
+        company_id=row.company_id,
+        brand_id=row.brand_id,
+        branch_id=row.branch_id,
+        business_type="takeaway",
+        target_database="takeaway",
+        permissions=[],
+        scope_types=["branch"],
+    )
+
+
+@public_router.get("/ordering/{ordering_token}")
+async def public_ordering_menu(
+    ordering_token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    client = request.client.host if request.client else "unknown"
+    if not await check_public_rate_limit(
+        f"takeaway-menu:{client}:{hashlib.sha256(ordering_token.encode()).hexdigest()[:16]}",
+        limit=120,
+        window_seconds=60,
+    ):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests")
+    token_row = await _ordering_token(ordering_token, db)
+    service = TakeawayService(db, _public_current(token_row))
+    categories = await service.list_categories(token_row.brand_id)
+    catalog = await service.list_catalog(token_row.brand_id, token_row.branch_id)
+    branch_ref = await db.scalar(
+        select(TakeawayReferenceProjection).where(
+            TakeawayReferenceProjection.aggregate_type == "branch",
+            TakeawayReferenceProjection.aggregate_id == token_row.branch_id,
+            TakeawayReferenceProjection.company_id == token_row.company_id,
+        )
+    )
+    return {
+        "data": {
+            "branch_name": (branch_ref.payload.get("name") if branch_ref else None) or "Takeaway",
+            "expires_at": token_row.expires_at,
+            "writes_enabled": takeaway_write_allowed(
+                company_id=token_row.company_id,
+                brand_id=token_row.brand_id,
+                branch_id=token_row.branch_id,
+            ),
+            "release_stage": takeaway_release_stage(),
+            "categories": categories,
+            "items": [
+                {
+                    "item": row["item"],
+                    "effective_price": row["effective_price"],
+                    "is_available": row["is_available"],
+                }
+                for row in catalog
+            ],
+        },
+        "meta": {"version": settings.app_version},
+        "error": None,
+    }
+
+
+@public_router.post(
+    "/ordering/{ordering_token}/orders",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_public_takeaway_write_activation)],
+)
+async def public_create_order(
+    ordering_token: str,
+    payload: TakeawayPublicOrderCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    client = request.client.host if request.client else "unknown"
+    if not await check_public_rate_limit(
+        f"takeaway-order:{client}:{hashlib.sha256(ordering_token.encode()).hexdigest()[:16]}",
+        limit=20,
+        window_seconds=60,
+    ):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests")
+    token_row = await _ordering_token(ordering_token, db)
+    order, pickup_token, replayed = await TakeawayService(
+        db,
+        _public_current(token_row),
+    ).create_public_order(payload)
+    return {
+        "data": {
+            "order_number": order.order_number,
+            "queue_number": order.queue_number,
+            "total_amount": order.total_amount,
+            "fulfillment_status": order.fulfillment_status,
+            "pickup_token": pickup_token,
+        },
+        "meta": {"version": settings.app_version, "idempotent_replay": replayed},
+        "error": None,
+    }
+
+
+@public_router.get("/pickup/{pickup_token}")
+async def public_pickup_status(
+    pickup_token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    if not settings.takeaway_feature_enabled or len(pickup_token) < 20 or len(pickup_token) > 200:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup order not found")
+    token_hash = hashlib.sha256(pickup_token.encode()).hexdigest()
+    client = request.client.host if request.client else "unknown"
+    if not await check_public_rate_limit(
+        f"takeaway-pickup:{client}",
+        limit=300,
+        window_seconds=60,
+    ):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests")
+    token_row = await db.scalar(
+        select(TakeawayPickupToken).where(TakeawayPickupToken.token_hash == token_hash)
+    )
+    if token_row is None or token_row.expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup order not found")
+    order = await db.get(TakeawayOrder, token_row.order_id)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup order not found")
+    return {
+        "data": {
+            "order_number": order.order_number,
+            "queue_number": order.queue_number,
+            "total_amount": order.total_amount,
+            "status": order.status,
+            "fulfillment_status": order.fulfillment_status,
+            "paid_at": order.paid_at,
+            "picked_up_at": order.picked_up_at,
+        },
+        "meta": {"version": settings.app_version},
+        "error": None,
+    }
+
+
+@router.get("/status")
+async def takeaway_status(
+    current: TokenData = Depends(
+        require_any_permission(
+            "takeaway.catalog.view",
+            "takeaway.sale.create",
+            "takeaway.kitchen.manage",
+            "takeaway.pickup.manage",
+        )
+    ),
+    platform_db: AsyncSession = Depends(get_platform_db),
+) -> dict[str, Any]:
+    fulfillment_mode = "counter_combined"
+    if current.brand_id is not None:
+        theme_config = await platform_db.scalar(
+            text(
+                "SELECT theme_config FROM brands "
+                "WHERE id = :brand_id AND company_id = :company_id AND is_active = true"
+            ),
+            {"brand_id": current.brand_id, "company_id": current.company_id},
+        )
+        theme_config = theme_config or {}
+        branch_modes = theme_config.get("takeaway_branch_fulfillment_modes", {})
+        configured_mode = (
+            branch_modes.get(str(current.branch_id))
+            if current.branch_id is not None and isinstance(branch_modes, dict)
+            else None
+        ) or theme_config.get("takeaway_fulfillment_mode")
+        if configured_mode in {"counter_combined", "separate_stations"}:
+            fulfillment_mode = configured_mode
+    return ok(
+        {
+            "enabled": settings.takeaway_feature_enabled,
+            "writes_enabled": takeaway_write_allowed(
+                company_id=current.company_id,
+                brand_id=current.brand_id,
+                branch_id=current.branch_id,
+            ),
+            "release_stage": takeaway_release_stage(),
+            "hard_holds": [
+                "real_takeaway_transactions",
+                "chambo_real_data",
+                "live_payment_tax_provider",
+                "production_activation",
+                "owner_canary_signoff",
+            ],
+            "company_id": current.company_id,
+            "brand_id": current.brand_id,
+            "branch_id": current.branch_id,
+            "fulfillment_mode": fulfillment_mode,
+        }
+    )
+
+
+@router.post("/catalog/categories", status_code=status.HTTP_201_CREATED)
+async def create_category(
+    payload: TakeawayCategoryCreate,
+    current: TokenData = Depends(require_permission("takeaway.catalog.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_category(payload))
+
+
+@router.get("/catalog/categories")
+async def list_categories(
+    brand_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("takeaway.catalog.view")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).list_categories(brand_id))
+
+
+@router.post("/catalog/items", status_code=status.HTTP_201_CREATED)
+async def create_catalog_item(
+    payload: TakeawayCatalogItemCreate,
+    current: TokenData = Depends(require_permission("takeaway.catalog.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_catalog_item(payload))
+
+
+@router.get("/catalog/items")
+async def list_catalog(
+    brand_id: uuid.UUID,
+    branch_id: uuid.UUID | None = None,
+    current: TokenData = Depends(require_permission("takeaway.catalog.view")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).list_catalog(brand_id, branch_id))
+
+
+@router.patch("/catalog/items/{item_id}")
+async def update_catalog_item(
+    item_id: uuid.UUID,
+    payload: TakeawayCatalogItemUpdate,
+    current: TokenData = Depends(require_permission("takeaway.catalog.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).update_catalog_item(item_id, payload))
+
+
+@router.put("/catalog/items/{item_id}/branches/{branch_id}")
+async def set_branch_availability(
+    item_id: uuid.UUID,
+    branch_id: uuid.UUID,
+    brand_id: uuid.UUID,
+    payload: TakeawayBranchAvailabilityUpdate,
+    current: TokenData = Depends(require_permission("takeaway.catalog.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).set_branch_availability(
+            brand_id=brand_id,
+            branch_id=branch_id,
+            item_id=item_id,
+            price_override=payload.price_override,
+            is_available=payload.is_available,
+        )
+    )
+
+
+@router.post("/shifts/open", status_code=status.HTTP_201_CREATED)
+async def open_shift(
+    payload: TakeawayShiftOpen,
+    current: TokenData = Depends(require_permission("takeaway.shift.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).open_shift(payload))
+
+
+@router.post("/shifts/{shift_id}/close")
+async def close_shift(
+    shift_id: uuid.UUID,
+    payload: TakeawayShiftClose,
+    current: TokenData = Depends(require_permission("takeaway.shift.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).close_shift(shift_id, payload))
+
+
+@router.get("/shifts/{shift_id}/summary")
+async def shift_summary(
+    shift_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("takeaway.shift.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).shift_summary(shift_id))
+
+
+@router.get("/shifts")
+async def list_shifts(
+    limit: int = Query(default=100, ge=1, le=500),
+    current: TokenData = Depends(require_permission("takeaway.shift.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).list_shifts(limit=limit))
+
+
+@router.post("/sales", status_code=status.HTTP_201_CREATED)
+async def create_sale(
+    payload: TakeawaySaleCreate,
+    current: TokenData = Depends(require_permission("takeaway.sale.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    if current.client_surface == "takeaway_store" and str(payload.offline_device_id) != current.store_device_id:
+        raise HTTPException(403, "Sale device does not match the Store session")
+    if current.client_surface == "takeaway_store" and payload.payment.method == "credit" and "takeaway.credit.manage" not in current.permissions:
+        raise HTTPException(403, "Store credit requires branch manager permission")
+    order, pickup_token, replayed = await TakeawayService(db, current).create_sale(payload)
+    return ok(
+        {"order": order, "pickup_token": pickup_token},
+        {"idempotent_replay": replayed},
+    )
+
+
+@router.post("/sales/offline-sync", status_code=status.HTTP_201_CREATED)
+async def sync_offline_sale(
+    payload: TakeawaySaleCreate,
+    current: TokenData = Depends(require_permission("takeaway.sale.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    if current.client_surface == "takeaway_store" and str(payload.offline_device_id) != current.store_device_id:
+        raise HTTPException(403, "Sale device does not match the Store session")
+    if current.client_surface == "takeaway_store" and payload.payment.method == "credit" and "takeaway.credit.manage" not in current.permissions:
+        raise HTTPException(403, "Store credit requires branch manager permission")
+    order, pickup_token, replayed = await TakeawayService(db, current).create_sale(payload)
+    return ok(
+        {"order": order, "pickup_token": pickup_token},
+        {"idempotent_replay": replayed, "offline": True},
+    )
+
+
+@router.post("/ordering-links", status_code=status.HTTP_201_CREATED)
+async def create_ordering_link(
+    payload: TakeawayOrderingLinkCreate,
+    current: TokenData = Depends(require_permission("takeaway.sale.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    row, raw_token = await TakeawayService(db, current).create_ordering_link(payload)
+    return ok({"token": raw_token, "expires_at": row.expires_at})
+
+
+@router.post("/orders/{order_id}/capture-payment")
+async def capture_order_payment(
+    order_id: uuid.UUID,
+    payload: TakeawayOrderPaymentCapture,
+    current: TokenData = Depends(require_permission("takeaway.sale.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    if current.client_surface == "takeaway_store" and payload.payment.method == "credit" and "takeaway.credit.manage" not in current.permissions:
+        raise HTTPException(403, "Store credit requires branch manager permission")
+    order, replayed = await TakeawayService(db, current).capture_order_payment(order_id, payload)
+    return ok(order, {"idempotent_replay": replayed})
+
+
+@router.get("/orders")
+async def list_orders(
+    branch_id: uuid.UUID | None = None,
+    fulfillment_status: str | None = Query(default=None, max_length=30),
+    limit: int = Query(default=100, ge=1, le=500),
+    current: TokenData = Depends(require_permission("takeaway.sale.view")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_orders(
+            branch_id=branch_id,
+            fulfillment_status=fulfillment_status,
+            limit=limit,
+        )
+    )
+
+
+@router.get("/orders/{order_id}/receipt")
+async def get_order_receipt(
+    order_id: uuid.UUID,
+    current: TokenData = Depends(
+        require_any_permission("takeaway.sale.create", "takeaway.sale.view")
+    ),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).get_receipt(order_id))
+
+
+@router.post("/orders/{order_id}/receipt/prints")
+async def mark_order_receipt_printed(
+    order_id: uuid.UUID,
+    payload: TakeawayReceiptPrintCreate,
+    current: TokenData = Depends(require_permission("takeaway.sale.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    receipt, replayed = await TakeawayService(db, current).mark_receipt_printed(
+        order_id,
+        payload,
+    )
+    return ok(receipt, {"idempotent_replay": replayed})
+
+
+@router.post("/orders/{order_id}/refund")
+async def refund_order(
+    order_id: uuid.UUID,
+    payload: TakeawayRefundCreate,
+    current: TokenData = Depends(require_permission("takeaway.sale.refund")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).refund_order(
+            order_id,
+            payload.idempotency_key,
+            payload.reason,
+        )
+    )
+
+
+@router.post("/kitchen/tickets/{ticket_id}/{next_status}")
+async def update_kitchen_ticket(
+    ticket_id: uuid.UUID,
+    next_status: str,
+    current: TokenData = Depends(require_permission("takeaway.kitchen.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).update_kitchen_ticket(ticket_id, next_status))
+
+
+@router.post("/fulfillment/orders/{order_id}/{next_status}")
+async def update_fulfillment_order(
+    order_id: uuid.UUID,
+    next_status: str,
+    current: TokenData = Depends(
+        require_any_permission("takeaway.sale.create", "takeaway.kitchen.manage")
+    ),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).update_fulfillment_order(order_id, next_status))
+
+
+@router.get("/kitchen/tickets")
+async def list_kitchen_tickets(
+    branch_id: uuid.UUID | None = None,
+    ticket_status: str | None = Query(default=None, alias="status", max_length=30),
+    station: str | None = Query(default=None, max_length=80),
+    limit: int = Query(default=200, ge=1, le=500),
+    current: TokenData = Depends(require_permission("takeaway.kitchen.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_kitchen_tickets(
+            branch_id=branch_id,
+            ticket_status=ticket_status,
+            station=station,
+            limit=limit,
+        )
+    )
+
+
+@router.post("/orders/{order_id}/picked-up")
+async def mark_picked_up(
+    order_id: uuid.UUID,
+    current: TokenData = Depends(
+        require_any_permission("takeaway.sale.create", "takeaway.pickup.manage")
+    ),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).mark_picked_up(order_id))
+
+
+@router.get("/recipes")
+async def list_recipes(
+    brand_id: uuid.UUID | None = None,
+    active_only: bool = True,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_recipes(
+            brand_id=brand_id,
+            active_only=active_only,
+        )
+    )
+
+
+@router.post("/recipes", status_code=status.HTTP_201_CREATED)
+async def create_recipe(
+    payload: TakeawayRecipeCreate,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_recipe(payload))
+
+
+@router.get("/replenishment/policies")
+async def list_replenishment_policies(
+    brand_id: uuid.UUID | None = None,
+    branch_id: uuid.UUID | None = None,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_replenishment_policies(
+            brand_id=brand_id,
+            branch_id=branch_id,
+        )
+    )
+
+
+@router.put("/replenishment/policies")
+async def upsert_replenishment_policy(
+    payload: TakeawayReplenishmentPolicyUpsert,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).upsert_replenishment_policy(payload))
+
+
+@router.get("/replenishment/suggestions")
+async def replenishment_suggestions(
+    brand_id: uuid.UUID,
+    branch_id: uuid.UUID,
+    lookback_days: int = Query(default=7, ge=1, le=90),
+    current: TokenData = Depends(
+        require_any_permission("takeaway.central_order.create", "takeaway.production.manage")
+    ),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).replenishment_suggestions(
+            brand_id=brand_id,
+            branch_id=branch_id,
+            lookback_days=lookback_days,
+        )
+    )
+
+
+@router.post("/replenishment/generate-order", status_code=status.HTTP_201_CREATED)
+async def generate_replenishment_order(
+    payload: TakeawayReplenishmentGenerate,
+    current: TokenData = Depends(require_permission("takeaway.central_order.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).generate_replenishment_order(payload))
+
+
+@router.post("/central/rounds", status_code=status.HTTP_201_CREATED)
+async def create_central_round(
+    payload: TakeawayCentralRoundCreate,
+    current: TokenData = Depends(require_permission("takeaway.central_order.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).create_central_round(
+            payload.brand_id,
+            payload.business_date,
+            payload.round_no,
+        )
+    )
+
+
+@router.post("/central/orders", status_code=status.HTTP_201_CREATED)
+async def create_central_order(
+    payload: TakeawayCentralOrderCreate,
+    current: TokenData = Depends(require_permission("takeaway.central_order.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_central_order(payload))
+
+
+@router.post("/store/central-orders", status_code=status.HTTP_201_CREATED)
+async def create_store_central_order(
+    payload: TakeawayStoreCentralOrderCreate,
+    current: TokenData = Depends(require_permission("takeaway.central_order.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_store_central_order(payload))
+
+
+@router.post("/store/central-orders/{order_id}/receive")
+async def receive_store_central_order(
+    order_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("takeaway.central_order.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).receive_store_central_order(order_id))
+
+
+@router.post("/store/central-orders/{order_id}/receive-quantities")
+async def receive_store_central_order_quantities(
+    order_id: uuid.UUID,
+    payload: TakeawayCentralOrderFulfilment,
+    current: TokenData = Depends(require_permission("takeaway.central_order.create")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).receive_central_order_quantities(order_id, payload)
+    )
+
+
+@router.get("/central/orders")
+@router.get("/store/central-orders")
+async def list_central_orders(
+    brand_id: uuid.UUID | None = None,
+    branch_id: uuid.UUID | None = None,
+    limit: int = Query(default=200, ge=1, le=500),
+    current: TokenData = Depends(
+        require_any_permission("takeaway.central_order.create", "takeaway.central_order.manage")
+    ),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_central_orders(
+            brand_id=brand_id, branch_id=branch_id, limit=limit
+        )
+    )
+
+
+@router.post("/central/orders/{order_id}/status")
+async def update_central_order_status(
+    order_id: uuid.UUID,
+    payload: TakeawayCentralOrderStatusUpdate,
+    current: TokenData = Depends(require_permission("takeaway.central_order.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).update_central_order_status(order_id, payload.status)
+    )
+
+
+@router.put("/central/order-items/{item_id}")
+async def resolve_central_order_item(
+    item_id: uuid.UUID,
+    payload: TakeawayCentralOrderItemUpdate,
+    current: TokenData = Depends(require_permission("takeaway.central_order.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).resolve_central_order_item(item_id, payload))
+
+
+@router.post("/central/orders/{order_id}/packed")
+async def pack_central_order(
+    order_id: uuid.UUID,
+    payload: TakeawayCentralOrderFulfilment,
+    current: TokenData = Depends(require_permission("takeaway.central_order.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).fulfil_central_order(order_id, "packed", payload))
+
+
+@router.post("/central/orders/{order_id}/shipped")
+async def ship_central_order(
+    order_id: uuid.UUID,
+    payload: TakeawayCentralOrderFulfilment,
+    current: TokenData = Depends(require_permission("takeaway.central_order.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).fulfil_central_order(order_id, "shipped", payload))
+
+
+@router.post("/central/orders/{order_id}/resolve-discrepancy")
+async def resolve_central_order_discrepancy(
+    order_id: uuid.UUID,
+    payload: TakeawayCentralOrderDiscrepancyResolution,
+    current: TokenData = Depends(require_permission("takeaway.central_order.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).resolve_central_order_discrepancy(order_id, payload)
+    )
+
+
+@router.post("/production/batches", status_code=status.HTTP_201_CREATED)
+async def create_production_batch(
+    payload: TakeawayProductionBatchCreate,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_production_batch(payload))
+
+
+@router.get("/production/batches")
+async def list_production_batches(
+    brand_id: uuid.UUID | None = None,
+    limit: int = Query(default=200, ge=1, le=500),
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_production_batches(
+            brand_id=brand_id, limit=limit
+        )
+    )
+
+
+@router.post("/production/batches/{batch_id}/complete")
+async def complete_production_batch(
+    batch_id: uuid.UUID,
+    payload: TakeawayProductionComplete,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).complete_production_batch(batch_id, payload)
+    )
+
+
+@router.post("/production/batches/{batch_id}/status")
+async def update_production_status(
+    batch_id: uuid.UUID,
+    payload: TakeawayProductionStatusUpdate,
+    current: TokenData = Depends(require_permission("takeaway.production.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).update_production_status(batch_id, payload))
+
+
+@router.get("/stock")
+async def list_stock(
+    location_id: uuid.UUID | None = None,
+    current: TokenData = Depends(require_permission("takeaway.stock.view")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).list_stock(location_id=location_id))
+
+
+@router.get("/stock/locations")
+async def list_stock_locations(
+    current: TokenData = Depends(require_permission("takeaway.stock.view")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).list_stock_locations())
+
+
+@router.get("/stock/movements")
+async def list_stock_movements(
+    location_id: uuid.UUID | None = None,
+    limit: int = Query(default=200, ge=1, le=500),
+    current: TokenData = Depends(require_permission("takeaway.stock.view")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_stock_movements(
+            location_id=location_id,
+            limit=limit,
+        )
+    )
+
+
+@router.post("/stock/movements", status_code=status.HTTP_201_CREATED)
+async def create_stock_movement(
+    payload: TakeawayStockMovementCreate,
+    current: TokenData = Depends(require_permission("takeaway.stock.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_stock_movement(payload))
+
+
+@router.post("/transfers", status_code=status.HTTP_201_CREATED)
+async def create_transfer(
+    payload: TakeawayTransferCreate,
+    current: TokenData = Depends(require_permission("takeaway.transfer.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_transfer(payload))
+
+
+@router.get("/transfers")
+async def list_transfers(
+    brand_id: uuid.UUID | None = None,
+    limit: int = Query(default=200, ge=1, le=500),
+    current: TokenData = Depends(require_permission("takeaway.transfer.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).list_transfers(brand_id=brand_id, limit=limit))
+
+
+@router.get("/store/transfers")
+async def list_store_transfers(
+    current: TokenData = Depends(require_permission("takeaway.transfer.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    if current.branch_id is None:
+        raise HTTPException(403, "Store branch required")
+    return ok(await TakeawayService(db, current).list_store_transfers())
+
+
+@router.post("/transfers/{transfer_id}/status")
+async def update_transfer(
+    transfer_id: uuid.UUID,
+    payload: TakeawayTransferStatusUpdate,
+    current: TokenData = Depends(require_permission("takeaway.transfer.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).update_transfer(transfer_id, payload))
+
+
+@router.post("/transfers/{transfer_id}/ship")
+async def ship_transfer(
+    transfer_id: uuid.UUID,
+    payload: TakeawayTransferFulfilment,
+    current: TokenData = Depends(require_permission("takeaway.transfer.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).fulfil_transfer(transfer_id, "shipped", payload))
+
+
+@router.post("/transfers/{transfer_id}/receive")
+async def receive_transfer(
+    transfer_id: uuid.UUID,
+    payload: TakeawayTransferFulfilment,
+    current: TokenData = Depends(require_permission("takeaway.transfer.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).fulfil_transfer(transfer_id, "received", payload))
+
+
+@router.post("/transfers/{transfer_id}/resolve-discrepancy")
+async def resolve_transfer_discrepancy(
+    transfer_id: uuid.UUID,
+    payload: TakeawayTransferDiscrepancyResolution,
+    current: TokenData = Depends(require_permission("takeaway.transfer.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).resolve_transfer_discrepancy(transfer_id, payload))
+
+
+@router.put("/credit/accounts")
+async def set_credit_limit(
+    payload: TakeawayCreditLimitUpdate,
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).set_credit_limit(payload))
+
+
+@router.get("/credit/accounts")
+async def list_credit_accounts(
+    brand_id: uuid.UUID | None = None,
+    branch_id: uuid.UUID | None = None,
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_credit_accounts(
+            brand_id=brand_id, branch_id=branch_id
+        )
+    )
+
+
+@router.post("/credit/accounts/{account_id}/entries", status_code=status.HTTP_201_CREATED)
+async def create_credit_entry(
+    account_id: uuid.UUID,
+    payload: TakeawayCreditEntryCreate,
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_credit_entry(account_id, payload))
+
+
+@router.get("/credit/accounts/{account_id}/entries")
+async def list_credit_entries(
+    account_id: uuid.UUID,
+    limit: int = Query(default=200, ge=1, le=500),
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).list_credit_entries(account_id, limit=limit))
+
+
+@router.post("/credit/accounts/{account_id}/topups", status_code=status.HTTP_201_CREATED)
+async def create_credit_topup(
+    account_id: uuid.UUID,
+    payload: TakeawayCreditTopupCreate,
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).create_credit_topup(account_id, payload))
+
+
+@router.get("/credit/topups")
+async def list_credit_topups(
+    brand_id: uuid.UUID | None = None,
+    branch_id: uuid.UUID | None = None,
+    request_status: str | None = Query(default=None, alias="status", pattern="^(pending|approved|rejected)$"),
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_credit_topups(
+            brand_id=brand_id,
+            branch_id=branch_id,
+            request_status=request_status,
+        )
+    )
+
+
+@router.post("/credit/topups/{request_id}/review")
+async def review_credit_topup(
+    request_id: uuid.UUID,
+    payload: TakeawayCreditTopupReview,
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).review_credit_topup(request_id, payload))
+
+
+@router.put("/credit/payment-config")
+async def upsert_credit_payment_config(
+    payload: TakeawayCreditPaymentConfigUpsert,
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).upsert_credit_payment_config(payload))
+
+
+@router.get("/credit/payment-config")
+async def get_credit_payment_config(
+    brand_id: uuid.UUID,
+    current: TokenData = Depends(require_permission("takeaway.credit.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).get_credit_payment_config(brand_id))
+
+
+@router.get("/reports/sales-summary")
+async def sales_summary(
+    date_from: date,
+    date_to: date,
+    brand_id: uuid.UUID | None = None,
+    branch_id: uuid.UUID | None = None,
+    current: TokenData = Depends(require_permission("takeaway.report.view")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).sales_summary(
+            date_from=date_from,
+            date_to=date_to,
+            brand_id=brand_id,
+            branch_id=branch_id,
+        )
+    )
+
+
+@router.get("/reports/operational-summary")
+async def operational_summary(
+    date_from: date,
+    date_to: date,
+    brand_id: uuid.UUID | None = None,
+    branch_id: uuid.UUID | None = None,
+    current: TokenData = Depends(require_permission("takeaway.report.view")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).operational_summary(
+            date_from=date_from,
+            date_to=date_to,
+            brand_id=brand_id,
+            branch_id=branch_id,
+        )
+    )
+
+
+@router.post("/imports/dry-run")
+async def validate_import(
+    payload: TakeawayImportDryRun,
+    current: TokenData = Depends(require_permission("takeaway.import.dry_run")),
+) -> dict[str, Any]:
+    report = validate_takeaway_import_package(
+        manifest=payload.manifest,
+        mapping=payload.mapping,
+        records=payload.records,
+        expected_company_id=current.company_id,
+        expected_brand_id=current.brand_id,
+    )
+    return ok(report.as_dict())
+
+
+@router.post("/imports/synthetic-apply", status_code=status.HTTP_201_CREATED)
+async def apply_synthetic_import(
+    payload: TakeawayImportDryRun,
+    current: TokenData = Depends(require_permission("takeaway.import.apply")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    batch, replayed = await TakeawayImportService(db, current).apply_synthetic(
+        manifest=payload.manifest,
+        mapping=payload.mapping,
+        records=payload.records,
+    )
+    return ok(batch, {"idempotent_replay": replayed, "synthetic_only": True})
+
+
+def _trusted_takeaway_import_keys() -> dict[str, str]:
+    try:
+        value = json.loads(settings.takeaway_import_trusted_keys_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Takeaway import trust configuration is invalid",
+        ) from exc
+    if not isinstance(value, dict) or not all(
+        isinstance(key, str) and isinstance(pem, str) for key, pem in value.items()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Takeaway import trust configuration is invalid",
+        )
+    return value
+
+
+@router.post("/cutover/preview")
+async def preview_cutover(
+    payload: TakeawayImportDryRun,
+    current: TokenData = Depends(require_permission("takeaway.import.dry_run")),
+) -> dict[str, Any]:
+    return ok(
+        build_takeaway_cutover_preview(
+            manifest=payload.manifest,
+            mapping=payload.mapping,
+            records=payload.records,
+            expected_company_id=current.company_id,
+            expected_brand_id=current.brand_id,
+            trusted_public_keys=_trusted_takeaway_import_keys(),
+        )
+    )
+
+
+@router.post("/cutover/execute", status_code=status.HTTP_201_CREATED)
+async def execute_cutover(
+    payload: TakeawayCutoverExecute,
+    current: TokenData = Depends(require_permission("takeaway.import.apply")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    run, replayed = await TakeawayImportService(db, current).execute_approved_cutover(
+        manifest=payload.manifest,
+        mapping=payload.mapping,
+        records=payload.records,
+        trusted_public_keys=_trusted_takeaway_import_keys(),
+        preview_digest=payload.preview_digest,
+        execution_key=payload.execution_key,
+        approval_reference=payload.approval_reference,
+        backup_reference=payload.backup_reference,
+        rollback_reference=payload.rollback_reference,
+    )
+    return ok(run, {"idempotent_replay": replayed})
+
+
+@router.get("/cutover/runs")
+async def list_cutover_runs(
+    current: TokenData = Depends(require_permission("takeaway.import.dry_run")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayImportService(db, current).list_cutover_runs())
+
+
+@router.get("/integrations/erp/events")
+async def list_erp_events(
+    event_status: str = Query(default="pending", alias="status", pattern="^(pending|processed|failed)$"),
+    limit: int = Query(default=200, ge=1, le=500),
+    current: TokenData = Depends(require_permission("takeaway.erp.export")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(
+        await TakeawayService(db, current).list_erp_events(
+            event_status=event_status, limit=limit
+        )
+    )
+
+
+@router.post("/integrations/erp/events/{event_id}/acknowledge")
+async def acknowledge_erp_event(
+    event_id: uuid.UUID,
+    payload: TakeawayErpEventAcknowledge,
+    current: TokenData = Depends(require_permission("takeaway.erp.acknowledge")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    row, replayed = await TakeawayService(db, current).acknowledge_erp_event(event_id, payload)
+    return ok(row, {"idempotent_replay": replayed})
+
+
+@router.get("/integrations/erp/reconciliation")
+async def erp_reconciliation(
+    current: TokenData = Depends(require_permission("takeaway.erp.export")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).erp_reconciliation())

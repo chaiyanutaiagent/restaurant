@@ -98,8 +98,8 @@ approver:
 
 ## Known Limitations
 
-- Automated business smoke tests do not create categories, products, stock, sales, payments, or receipts yet.
+- The default production smoke remains non-destructive and does not create categories, products, stock, sales, payments, or receipts.
 - Auth smoke requires an existing test user and company ID.
 - Payment gateway tests must use approved sandbox or business-approved test methods.
 - Restore drills should run only in isolated Compose projects, not against live production data.
-- Browser-level automated UAT is not implemented yet.
+- `rehearse-phase5-readiness.sh` adds isolated standalone Chromium mobile/tablet business UAT, but browser emulation does not replace physical camera, touch, printer, kiosk, network, or power-recovery UAT.

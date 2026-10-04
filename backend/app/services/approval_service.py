@@ -27,13 +27,16 @@ from app.schemas.approval import (
     ManagerPinStatusRead,
 )
 from app.schemas.pos import (
+    CashMovementCreateRequest,
+    CloseShiftRequest,
     CreateSaleRequest,
     PartialRefundRequest,
     RefundRequest,
+    RefundExecuteRequest,
     VoidRequest,
 )
 from app.schemas.stock import AdjustmentRequest
-from app.schemas.restaurant import SessionCheckoutRequest
+from app.schemas.restaurant import RestaurantCancellationRequest, SessionCheckoutRequest
 from app.services.auth_service import AuthService
 from app.utils.security import (
     create_approval_token,
@@ -45,16 +48,26 @@ from app.utils.security import (
 
 DIRECT_PERMISSION_BY_ACTION: dict[str, str] = {
     "pos.discount.override": "pos.discount.override",
+    "pos.price.override": "pos.price.override",
     "pos.sale.void": "pos.sale.void",
     "pos.refund.create": "pos.refund.create",
     "inventory.stock.adjust": "inventory.stock.adjust",
+    "fb.order.cancel_after_kitchen": "fb.order.cancel.approve",
+    "fb.order.cancel.reopen": "fb.order.cancel.reopen",
+    "pos.cash_movement.approve": "pos.cash_movement.approve",
+    "pos.shift.variance.approve": "pos.shift.variance.approve",
 }
 
 REQUEST_PERMISSION_BY_ACTION: dict[str, str] = {
     "pos.discount.override": "pos.discount.apply",
+    "pos.price.override": "pos.price.override.request",
     "pos.sale.void": "pos.sale.void.request",
     "pos.refund.create": "pos.refund.request",
     "inventory.stock.adjust": "inventory.stock.adjust.request",
+    "fb.order.cancel_after_kitchen": "fb.order.cancel.request",
+    "fb.order.cancel.reopen": "fb.order.cancel.reopen.request",
+    "pos.cash_movement.approve": "pos.cash_movement.create",
+    "pos.shift.variance.approve": "pos.cashier.close_shift",
 }
 
 
@@ -86,12 +99,12 @@ def normalize_approval_request_payload(
     values = dict(payload)
     order_id = values.pop("order_id", None)
     try:
-        if action == "pos.discount.override":
+        if action in {"pos.discount.override", "pos.price.override"}:
             session_id = values.pop("session_id", None)
             schema = SessionCheckoutRequest if session_id is not None else CreateSaleRequest
             normalized = schema.model_validate(values).model_dump(
                 mode="json",
-                exclude={"approval_token"},
+                exclude={"approval_token", "price_override_approval_token"},
                 exclude_none=True,
                 exclude_unset=True,
             )
@@ -105,7 +118,16 @@ def normalize_approval_request_payload(
                 exclude_unset=True,
             )
         elif action == "pos.refund.create":
-            schema = PartialRefundRequest if "items" in values else RefundRequest
+            is_quote_execution = "quote_id" in values
+            if is_quote_execution and order_id is not None:
+                values["order_id"] = order_id
+            schema = (
+                RefundExecuteRequest
+                if is_quote_execution
+                else PartialRefundRequest
+                if "items" in values
+                else RefundRequest
+            )
             normalized = schema.model_validate(values).model_dump(
                 mode="json",
                 exclude={"approval_token"},
@@ -119,9 +141,48 @@ def normalize_approval_request_payload(
                 exclude_none=True,
                 exclude_unset=True,
             )
+        elif action == "fb.order.cancel_after_kitchen":
+            normalized = RestaurantCancellationRequest.model_validate(values).model_dump(
+                mode="json",
+                exclude={"approval_token"},
+                exclude_none=True,
+            )
+        elif action == "fb.order.cancel.reopen":
+            cancellation_id = values.get("cancellation_id")
+            idempotency_key = str(values.get("idempotency_key") or "").strip()
+            reason = str(values.get("reason") or "").strip()
+            if cancellation_id is None or not (8 <= len(idempotency_key) <= 100) or not (3 <= len(reason) <= 500):
+                raise ValueError("Invalid cancellation reopen approval payload")
+            normalized = {
+                "cancellation_id": str(uuid.UUID(str(cancellation_id))),
+                "idempotency_key": idempotency_key,
+                "reason": reason,
+            }
+        elif action == "pos.cash_movement.approve":
+            shift_id = values.pop("shift_id", None)
+            normalized = CashMovementCreateRequest.model_validate(values).model_dump(
+                mode="json",
+                exclude={"approval_token"},
+                exclude_none=True,
+            )
+            if shift_id is None:
+                raise ValueError("shift_id is required")
+            normalized["shift_id"] = str(uuid.UUID(str(shift_id)))
+        elif action == "pos.shift.variance.approve":
+            shift_id = values.pop("shift_id", None)
+            normalized = CloseShiftRequest.model_validate(values).model_dump(
+                mode="json",
+                exclude={"approval_token"},
+                exclude_none=True,
+            )
+            if shift_id is None:
+                raise ValueError("shift_id is required")
+            normalized["shift_id"] = str(uuid.UUID(str(shift_id)))
         else:
             raise ValueError("Unsupported approval action")
         if action in {"pos.sale.void", "pos.refund.create"}:
+            if order_id is None:
+                order_id = normalized.get("order_id")
             if order_id is None:
                 raise ValueError("order_id is required for this approval action")
             normalized["order_id"] = str(uuid.UUID(str(order_id)))
@@ -393,9 +454,10 @@ class ApprovalService:
         reason: str,
         resource_type: str | None = None,
         resource_id: str | None = None,
+        allow_direct: bool = True,
     ) -> ApprovalEvidence:
         direct_permission = DIRECT_PERMISSION_BY_ACTION[action]
-        if has_permission(current.permissions, direct_permission):
+        if allow_direct and has_permission(current.permissions, direct_permission):
             return ApprovalEvidence(
                 action=action,
                 requester_id=current.user_id,
@@ -418,7 +480,17 @@ class ApprovalService:
                 detail="Select a branch before using approval",
             )
 
-        claims = decode_token(approval_token)
+        try:
+            claims = decode_token(approval_token)
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "expired_approval",
+                    "action": action,
+                    "message": "Approval is invalid or expired; request a new approval",
+                },
+            ) from exc
         normalized_request = normalize_approval_request_payload(action, request_payload)
         expected_hash = approval_request_hash(normalized_request)
         try:

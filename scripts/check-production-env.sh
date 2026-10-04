@@ -49,6 +49,22 @@ POSTGRES_PASSWORD
 POSTGRES_HOST
 POSTGRES_PORT
 DATABASE_URL
+PLATFORM_POSTGRES_DB
+RESTAURANT_POSTGRES_DB
+RETAIL_POSTGRES_DB
+TAKEAWAY_POSTGRES_DB
+PLATFORM_DATABASE_URL
+RESTAURANT_DATABASE_URL
+RETAIL_DATABASE_URL
+TAKEAWAY_DATABASE_URL
+IDENTITY_DATABASE
+RESTAURANT_SERVICE_DATABASE
+RETAIL_SERVICE_DATABASE
+RETAIL_REFERENCE_PROJECTOR_ENABLED
+TAKEAWAY_SERVICE_DATABASE
+TAKEAWAY_FEATURE_ENABLED
+REFERENCE_PROJECTOR_ENABLED
+SHARED_REPORTING_PROJECTOR_ENABLED
 REDIS_URL
 SECRET_KEY
 DEFAULT_ADMIN_PASSWORD
@@ -66,11 +82,81 @@ UPLOAD_DIR
 MAX_UPLOAD_SIZE_MB
 ALLOWED_UPLOAD_EXTENSIONS
 ALLOWED_UPLOAD_MIME_TYPES
+SAAS_PUBLIC_BASE_URL
+SAAS_EMAIL_DELIVERY_MODE
+SAAS_SMTP_HOST
+SAAS_SMTP_PORT
+SAAS_SMTP_FROM_EMAIL
+SAAS_SMTP_USE_TLS
+SAAS_SMTP_START_TLS
 "
 
 for key in $REQUIRED_VARS; do
   check_required "$key"
 done
+
+database_names="$(value_of POSTGRES_DB) $(value_of PLATFORM_POSTGRES_DB) $(value_of RESTAURANT_POSTGRES_DB) $(value_of RETAIL_POSTGRES_DB) $(value_of TAKEAWAY_POSTGRES_DB)"
+unique_database_count="$(printf '%s\n' $database_names | sort -u | wc -l | tr -d '[:space:]')"
+if [ "$unique_database_count" != "5" ]; then
+  fail "POSTGRES_DB and all four operational boundary database names must be distinct"
+fi
+for database_name in $database_names; do
+  if ! printf '%s' "$database_name" | grep -Eq '^[A-Za-z0-9_]+$'; then
+    fail "database names may contain only letters, numbers and underscores"
+  fi
+done
+
+check_boolean() {
+  key="$1"
+  value="$(value_of "$key" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    true|false) ;;
+    *) fail "$key must be true or false" ;;
+  esac
+}
+
+for key in RETAIL_REFERENCE_PROJECTOR_ENABLED TAKEAWAY_FEATURE_ENABLED REFERENCE_PROJECTOR_ENABLED SHARED_REPORTING_PROJECTOR_ENABLED; do
+  check_boolean "$key"
+done
+
+IDENTITY_DATABASE_VALUE="$(value_of IDENTITY_DATABASE)"
+case "$IDENTITY_DATABASE_VALUE" in
+  legacy|platform_core) ;;
+  *) fail "IDENTITY_DATABASE must be legacy or platform_core" ;;
+esac
+
+RESTAURANT_SERVICE_DATABASE_VALUE="$(value_of RESTAURANT_SERVICE_DATABASE)"
+case "$RESTAURANT_SERVICE_DATABASE_VALUE" in
+  legacy|restaurant) ;;
+  *) fail "RESTAURANT_SERVICE_DATABASE must be legacy or restaurant" ;;
+esac
+
+RETAIL_SERVICE_DATABASE_VALUE="$(value_of RETAIL_SERVICE_DATABASE)"
+case "$RETAIL_SERVICE_DATABASE_VALUE" in
+  legacy|retail) ;;
+  *) fail "RETAIL_SERVICE_DATABASE must be legacy or retail" ;;
+esac
+
+TAKEAWAY_SERVICE_DATABASE_VALUE="$(value_of TAKEAWAY_SERVICE_DATABASE)"
+case "$TAKEAWAY_SERVICE_DATABASE_VALUE" in
+  disabled|takeaway) ;;
+  *) fail "TAKEAWAY_SERVICE_DATABASE must be disabled or takeaway" ;;
+esac
+
+REFERENCE_PROJECTOR_ENABLED_VALUE="$(value_of REFERENCE_PROJECTOR_ENABLED | tr '[:upper:]' '[:lower:]')"
+RETAIL_REFERENCE_PROJECTOR_ENABLED_VALUE="$(value_of RETAIL_REFERENCE_PROJECTOR_ENABLED | tr '[:upper:]' '[:lower:]')"
+TAKEAWAY_FEATURE_ENABLED_VALUE="$(value_of TAKEAWAY_FEATURE_ENABLED | tr '[:upper:]' '[:lower:]')"
+SHARED_REPORTING_PROJECTOR_ENABLED_VALUE="$(value_of SHARED_REPORTING_PROJECTOR_ENABLED | tr '[:upper:]' '[:lower:]')"
+
+if [ "$RETAIL_SERVICE_DATABASE_VALUE" = "retail" ] && { [ "$IDENTITY_DATABASE_VALUE" != "platform_core" ] || [ "$REFERENCE_PROJECTOR_ENABLED_VALUE" != "true" ] || [ "$RETAIL_REFERENCE_PROJECTOR_ENABLED_VALUE" != "true" ]; }; then
+  fail "Retail activation requires Platform identity and both reference projectors"
+fi
+if [ "$TAKEAWAY_FEATURE_ENABLED_VALUE" = "true" ] && { [ "$TAKEAWAY_SERVICE_DATABASE_VALUE" != "takeaway" ] || [ "$IDENTITY_DATABASE_VALUE" != "platform_core" ] || [ "$REFERENCE_PROJECTOR_ENABLED_VALUE" != "true" ]; }; then
+  fail "Takeaway activation requires its dedicated database, Platform identity and reference projector"
+fi
+if [ "$SHARED_REPORTING_PROJECTOR_ENABLED_VALUE" = "true" ] && { [ "$IDENTITY_DATABASE_VALUE" != "platform_core" ] || [ "$REFERENCE_PROJECTOR_ENABLED_VALUE" != "true" ]; }; then
+  fail "Shared reporting activation requires Platform identity and reference projector"
+fi
 
 DEBUG_VALUE="$(value_of DEBUG | tr '[:upper:]' '[:lower:]')"
 if [ "$DEBUG_VALUE" = "true" ]; then
@@ -123,6 +209,52 @@ case "$PUBLIC_BASE_URL_VALUE" in
     fi
     ;;
 esac
+
+SAAS_PUBLIC_BASE_URL_VALUE="$(value_of SAAS_PUBLIC_BASE_URL)"
+case "$SAAS_PUBLIC_BASE_URL_VALUE" in
+  https://*)
+    ;;
+  *)
+    fail "SAAS_PUBLIC_BASE_URL must use https:// in production"
+    ;;
+esac
+
+SAAS_EMAIL_DELIVERY_MODE_VALUE="$(value_of SAAS_EMAIL_DELIVERY_MODE | tr '[:upper:]' '[:lower:]')"
+if [ "$SAAS_EMAIL_DELIVERY_MODE_VALUE" != "smtp" ]; then
+  fail "SAAS_EMAIL_DELIVERY_MODE must be smtp in production"
+fi
+
+SAAS_SMTP_PORT_VALUE="$(value_of SAAS_SMTP_PORT)"
+if ! printf '%s' "$SAAS_SMTP_PORT_VALUE" | grep -Eq '^[0-9]+$'; then
+  fail "SAAS_SMTP_PORT must be an integer from 1 to 65535"
+elif [ "$SAAS_SMTP_PORT_VALUE" -lt 1 ] || [ "$SAAS_SMTP_PORT_VALUE" -gt 65535 ]; then
+  fail "SAAS_SMTP_PORT must be an integer from 1 to 65535"
+fi
+
+SAAS_SMTP_FROM_EMAIL_VALUE="$(value_of SAAS_SMTP_FROM_EMAIL)"
+case "$SAAS_SMTP_FROM_EMAIL_VALUE" in
+  *@*.*)
+    ;;
+  *)
+    fail "SAAS_SMTP_FROM_EMAIL must be an email address"
+    ;;
+esac
+
+SAAS_SMTP_USE_TLS_VALUE="$(value_of SAAS_SMTP_USE_TLS | tr '[:upper:]' '[:lower:]')"
+SAAS_SMTP_START_TLS_VALUE="$(value_of SAAS_SMTP_START_TLS | tr '[:upper:]' '[:lower:]')"
+for value in "$SAAS_SMTP_USE_TLS_VALUE" "$SAAS_SMTP_START_TLS_VALUE"; do
+  case "$value" in
+    true|false)
+      ;;
+    *)
+      fail "SAAS_SMTP_USE_TLS and SAAS_SMTP_START_TLS must be true or false"
+      break
+      ;;
+  esac
+done
+if [ "$SAAS_SMTP_USE_TLS_VALUE" = "true" ] && [ "$SAAS_SMTP_START_TLS_VALUE" = "true" ]; then
+  fail "SAAS_SMTP_USE_TLS and SAAS_SMTP_START_TLS must not both be true"
+fi
 
 SERVER_NAME_VALUE="$(value_of SERVER_NAME)"
 if printf '%s' "$SERVER_NAME_VALUE" | grep -Eq 'https?://|/'; then

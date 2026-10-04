@@ -193,6 +193,7 @@ export default function PayablePage(): JSX.Element {
                     <TableHead>ซัพพลายเออร์</TableHead>
                     <TableHead>เลข PO อ้างอิง</TableHead>
                     <TableHead>วันที่ใบแจ้งหนี้</TableHead>
+                    <TableHead>หลักฐานภาษีซื้อ</TableHead>
                     <TableHead>ครบกำหนด</TableHead>
                     <TableHead>ยอดรวม</TableHead>
                     <TableHead>ชำระแล้ว</TableHead>
@@ -208,6 +209,7 @@ export default function PayablePage(): JSX.Element {
                       <TableCell>{invoice.supplier_name}</TableCell>
                       <TableCell>{invoice.po_id ? invoice.po_id.slice(0, 8) : "-"}</TableCell>
                       <TableCell>{formatThaiDate(invoice.invoice_date)}</TableCell>
+                      <TableCell><div>{invoice.tax_invoice_number || "รอเลขใบกำกับ"}</div><div className="text-xs text-gray-500">{invoice.input_vat_claimable ? "ใช้สิทธิ์ VAT" : `ไม่ใช้สิทธิ์: ${invoice.nonclaimable_reason || "-"}`}</div></TableCell>
                       <TableCell className={invoice.is_overdue ? "font-medium text-red-600" : ""}>{formatThaiDate(invoice.due_date)}</TableCell>
                       <TableCell>{formatCurrency(invoice.total_amount)}</TableCell>
                       <TableCell>{formatCurrency(invoice.paid_amount)}</TableCell>

@@ -23,7 +23,15 @@ class TenantControlPolicy:
         profile = await self._profile(company_id)
         if profile is None:
             return
-        if profile.feature_flags.get(feature_key) is False:
+        canonical_key = {
+            "restaurant": "restaurant_pos",
+            "takeaway": "takeaway_pos",
+        }.get(feature_key, feature_key)
+        enabled = profile.feature_flags.get(
+            canonical_key,
+            profile.feature_flags.get(feature_key),
+        )
+        if enabled is False:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Feature is disabled for this Company: {feature_key}",

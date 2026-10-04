@@ -15,7 +15,7 @@ from app.models.audit import AuditLog
 from app.models.pos import CashierShift, SaleOrder
 from app.models.product import Product, Category
 from app.models.restaurant import (
-    DiningOrder, DiningOrderItem, DiningSession, DiningTable, KitchenTicket,
+    Brand, BrandBranch, DiningOrder, DiningOrderItem, DiningSession, DiningTable, KitchenTicket,
 )
 from app.models.settings import BranchSettings
 from app.models.branch import Branch
@@ -27,6 +27,7 @@ from app.services.approval_service import (
     has_permission,
 )
 from app.schemas.pos import CartItem, CreateSaleRequest, PaymentCreateRequest
+from app.schemas.pricing import PricingCalculateRequest, PricingLineRequest
 from app.schemas.restaurant import (
     DiningOrderItemRead, DiningOrderRead, KitchenTicketRead,
     PlaceOrderRequest, PublicMenuProduct, PublicMenuResponse, PublicOrderHistory,
@@ -34,6 +35,7 @@ from app.schemas.restaurant import (
     SessionOpen, SessionRead, TableRead, WapOrderItemRead, WapOrderRead,
     WapPaidOrderRequest,
 )
+from app.services.pricing_service import PricingService, canonical_hash, pricing_error
 
 
 class DiningService:
@@ -52,6 +54,27 @@ class DiningService:
             return
         if new_status not in allowed.get(current_status, set()):
             raise ValueError(f"ไม่สามารถเปลี่ยนสถานะจาก {current_status} เป็น {new_status} ได้")
+
+    async def _resolve_restaurant_brand_id(
+        self,
+        company_id: uuid.UUID,
+        branch_id: uuid.UUID,
+    ) -> uuid.UUID | None:
+        rows = list((await self.db.scalars(
+            select(BrandBranch.brand_id)
+            .join(Brand, Brand.id == BrandBranch.brand_id)
+            .where(
+                BrandBranch.company_id == company_id,
+                BrandBranch.branch_id == branch_id,
+                BrandBranch.is_active.is_(True),
+                Brand.company_id == company_id,
+                Brand.business_type == "restaurant",
+                Brand.is_active.is_(True),
+            )
+            .limit(2)
+        )).all())
+        unique_ids = list(dict.fromkeys(rows))
+        return unique_ids[0] if len(unique_ids) == 1 else None
 
     @staticmethod
     def _merge_local_print_state(session: DiningSession, payload: WapPaidOrderRequest) -> bool:
@@ -303,16 +326,62 @@ class DiningService:
         source: str = "qr_self",
         settings: BranchSettings | None = None,
         create_tickets: bool = True,
+        commit: bool = True,
     ) -> DiningOrder:
-        from app.models.branch import Branch as BranchModel
-        branch = await self.db.get(BranchModel, branch_id)
         table = await self.db.get(DiningTable, session.table_id) if session.table_id else None
-        products_by_id: dict[uuid.UUID, Product] = {}
-        for item_data in payload.items:
-            product = await self._get_orderable_product(company_id, item_data.product_id)
-            if not product:
-                raise ValueError("มีเมนูที่ไม่พร้อมขาย กรุณาโหลดเมนูใหม่แล้วลองอีกครั้ง")
-            products_by_id[item_data.product_id] = product
+        request_hash = canonical_hash(payload.model_dump(mode="json", exclude={"idempotency_key"}))
+        if payload.idempotency_key:
+            existing = await self.db.scalar(
+                select(DiningOrder)
+                .where(
+                    DiningOrder.company_id == company_id,
+                    DiningOrder.branch_id == branch_id,
+                    DiningOrder.idempotency_key == payload.idempotency_key,
+                )
+                .options(selectinload(DiningOrder.items))
+            )
+            if existing is not None:
+                if existing.request_hash != request_hash:
+                    raise pricing_error(
+                        status.HTTP_409_CONFLICT,
+                        "duplicate_request",
+                        "Dining order idempotency key was replayed with different items",
+                    )
+                return existing
+
+        brand_id = await self._resolve_restaurant_brand_id(company_id, branch_id)
+        if brand_id is None:
+            raise ValueError("Restaurant Brand ของสาขาไม่ชัดเจน กรุณาตรวจ Brand/Branch ก่อนรับออเดอร์")
+        channel = "restaurant_quick_service" if session.table_id is None else (
+            "restaurant_qr" if source == "qr_self" else "restaurant_table"
+        )
+        pricing = await PricingService(self.db).calculate(
+            company_id=company_id,
+            branch_id=branch_id,
+            brand_id=brand_id,
+            payload=PricingCalculateRequest(
+                items=[
+                    PricingLineRequest(
+                        product_id=item.product_id,
+                        qty=Decimal(item.qty),
+                        expected_unit_price=item.expected_unit_price,
+                        expected_price_version=item.expected_price_version,
+                    )
+                    for item in payload.items
+                ],
+                channel=channel,
+                idempotency_key=payload.idempotency_key or f"dining-{uuid.uuid4()}",
+                cart_version=payload.cart_version,
+            ),
+            lock_prices=True,
+        )
+        if pricing.has_price_discrepancy:
+            raise pricing_error(
+                status.HTTP_409_CONFLICT,
+                "stale_price",
+                "Menu price changed; refresh the menu before ordering",
+                calculation_hash=pricing.calculation_hash,
+            )
 
         ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         order_number = f"DO-{ts[-8:]}-{str(session.id)[:4].upper()}"
@@ -321,19 +390,35 @@ class DiningService:
             company_id=company_id, branch_id=branch_id,
             session_id=session.id, order_number=order_number,
             source=source, note=payload.note,
+            idempotency_key=payload.idempotency_key,
+            request_hash=request_hash,
+            pricing_calculation_hash=pricing.calculation_hash,
+            pricing_calculation_version=pricing.calculation_version,
+            pricing_context=pricing.context(),
+            row_version=1,
         )
         self.db.add(order)
         await self.db.flush()
 
-        for item_data in payload.items:
-            product = products_by_id[item_data.product_id]
+        for item_data, price_line in zip(payload.items, pricing.lines, strict=True):
+            product = price_line.product
             station = await self._resolve_station(product, settings)
             item = DiningOrderItem(
                 order_id=order.id,
                 product_id=product.id,
                 product_name=product.name,
                 qty=item_data.qty,
-                unit_price=product.selling_price,
+                unit_price=price_line.applied_unit_price,
+                original_price=price_line.authoritative_unit_price,
+                vat_type=price_line.vat_type,
+                vat_rate=price_line.vat_rate,
+                vat_amount=price_line.vat_amount,
+                line_total=price_line.line_total,
+                price_source=price_line.price_source,
+                price_list_id=price_line.price_list_id,
+                price_list_version=price_line.price_list_version,
+                price_version=price_line.price_version,
+                price_snapshot=price_line.snapshot(),
                 special_request=item_data.special_request,
                 station=station,
             )
@@ -355,8 +440,11 @@ class DiningService:
                 )
                 self.db.add(ticket)
 
-        await self.db.commit()
-        await self.db.refresh(order)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(order)
+        else:
+            await self.db.flush()
         return order
 
     def _queue_display(self, settings: BranchSettings | None, queue_number: int | None) -> str | None:
@@ -523,20 +611,29 @@ class DiningService:
         sale_items: list[CartItem] = []
         expected_total = Decimal("0")
         for item in payload.items:
+            if payload.is_offline and item.expected_unit_price is None:
+                raise pricing_error(
+                    status.HTTP_409_CONFLICT,
+                    "stale_price",
+                    "Offline order has no cached price evidence; refresh online before checkout",
+                    product_id=str(item.product_id),
+                )
             product = await self.db.get(Product, item.product_id)
             if not product:
                 raise ValueError("พบสินค้าที่ไม่มีอยู่ในระบบ กรุณาเชื่อมต่อเพื่อโหลดเมนูใหม่")
-            expected_total += Decimal(product.selling_price) * Decimal(item.qty)
+            cached_price = Decimal(item.expected_unit_price) if item.expected_unit_price is not None else Decimal(product.selling_price)
+            expected_total += cached_price * Decimal(item.qty)
             sale_items.append(CartItem(
                 product_id=item.product_id,
                 variant_id=None,
                 qty=Decimal(item.qty),
-                unit_price=product.selling_price,
-                original_price=product.selling_price,
+                unit_price=cached_price,
+                original_price=cached_price,
                 discount_amount=Decimal("0"),
                 discount_type="amount",
                 vat_type=product.vat_type,
                 vat_rate=Decimal(str(product.vat_rate)),
+                expected_price_version=item.expected_price_version,
             ))
         paid_total = (
             sum((Decimal(item.amount) for item in payload.payments), Decimal("0"))
@@ -581,7 +678,11 @@ class DiningService:
             company_id=company_id,
             branch_id=branch_id,
             session=session,
-            payload=PlaceOrderRequest(items=payload.items, note=payload.note),
+            payload=PlaceOrderRequest(
+                items=payload.items,
+                note=payload.note,
+                idempotency_key=(f"{payload.client_order_id}:dining" if payload.client_order_id else None),
+            ),
             source="staff_wap",
             settings=settings,
             create_tickets=False,
@@ -614,6 +715,7 @@ class DiningService:
                 ])),
                 is_offline=payload.is_offline,
                 client_order_id=payload.client_order_id,
+                channel="restaurant_quick_service",
             ),
             brand_id=brand_id,
             recipe_inventory_location_id=required_location_id,
@@ -666,19 +768,56 @@ class DiningService:
         q = q.order_by(KitchenTicket.created_at)
         return list((await self.db.scalars(q)).all())
 
-    async def update_ticket_status(self, ticket: KitchenTicket, new_status: str) -> KitchenTicket:
+    async def update_ticket_status(
+        self,
+        ticket: KitchenTicket,
+        new_status: str,
+        expected_version: int | None = None,
+    ) -> KitchenTicket:
+        item_reference = await self.db.get(DiningOrderItem, ticket.order_item_id)
+        order = None
+        item = None
+        if item_reference:
+            order = await self.db.scalar(
+                select(DiningOrder).where(DiningOrder.id == item_reference.order_id).with_for_update()
+            )
+            item = await self.db.scalar(
+                select(DiningOrderItem)
+                .where(DiningOrderItem.id == ticket.order_item_id)
+                .with_for_update()
+            )
+        locked_ticket = await self.db.scalar(
+            select(KitchenTicket).where(KitchenTicket.id == ticket.id).with_for_update()
+        )
+        if locked_ticket is None:
+            raise ValueError("ไม่พบ ticket")
+        ticket = locked_ticket
+        if expected_version is not None and ticket.row_version != expected_version:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "stale_kitchen_ticket",
+                    "message": "Ticket changed on another device; refresh and try again",
+                    "current_version": ticket.row_version,
+                },
+            )
         self._validate_ticket_transition(ticket.status, new_status)
+        if ticket.status == new_status:
+            return ticket
         ticket.status = new_status
+        ticket.row_version += 1
         if new_status == "done":
             ticket.done_at = datetime.now(timezone.utc)
-        await self.db.commit()
-        await self.db.refresh(ticket)
 
         # sync order item status
-        item = await self.db.get(DiningOrderItem, ticket.order_item_id)
         if item:
             item.status = new_status
-            await self.db.commit()
+            item.row_version += 1
+            if order:
+                order.row_version += 1
+
+        await self.db.commit()
+        await self.db.refresh(ticket)
 
         # ส่ง Line Notify เมื่อ done — ตรวจว่าทุก ticket ใน session เสร็จหมดแล้ว
         if new_status == "done":
@@ -686,17 +825,61 @@ class DiningService:
 
         return ticket
 
-    async def update_order_item_status(self, item: DiningOrderItem, new_status: str) -> DiningOrderItem:
+    async def update_order_item_status(
+        self,
+        item: DiningOrderItem,
+        new_status: str,
+        expected_version: int | None = None,
+    ) -> DiningOrderItem:
+        item_reference = await self.db.get(DiningOrderItem, item.id)
+        if item_reference is None:
+            raise ValueError("ไม่พบรายการ")
+        order = await self.db.scalar(
+            select(DiningOrder).where(DiningOrder.id == item_reference.order_id).with_for_update()
+        )
+        locked_item = await self.db.scalar(
+            select(DiningOrderItem).where(DiningOrderItem.id == item.id).with_for_update()
+        )
+        if locked_item is None:
+            raise ValueError("ไม่พบรายการ")
+        item = locked_item
+        if expected_version is not None and item.row_version != expected_version:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "stale_order_item",
+                    "message": "Item changed on another device; refresh and try again",
+                    "current_version": item.row_version,
+                },
+            )
         ticket = await self.db.scalar(
-            select(KitchenTicket).where(KitchenTicket.order_item_id == item.id)
+            select(KitchenTicket).where(KitchenTicket.order_item_id == item.id).with_for_update()
         )
         if ticket:
-            await self.update_ticket_status(ticket, new_status)
+            self._validate_ticket_transition(ticket.status, new_status)
+            if ticket.status == new_status:
+                return item
+            ticket.status = new_status
+            ticket.row_version += 1
+            if new_status == "done":
+                ticket.done_at = datetime.now(timezone.utc)
+            item.status = new_status
+            item.row_version += 1
+            if order:
+                order.row_version += 1
+            await self.db.commit()
             await self.db.refresh(item)
+            if new_status == "done":
+                await self._notify_pickup_if_ready(ticket)
             return item
 
         self._validate_ticket_transition(item.status, new_status)
+        if item.status == new_status:
+            return item
         item.status = new_status
+        item.row_version += 1
+        if order:
+            order.row_version += 1
         await self.db.commit()
         await self.db.refresh(item)
         return item
@@ -945,10 +1128,18 @@ class DiningService:
         if not settings or not settings.fb_table_qr_enabled:
             return None
 
+        brand_id = await self._resolve_restaurant_brand_id(
+            active_session.company_id,
+            active_session.branch_id,
+        )
+        if brand_id is None:
+            return None
+
         products_rows = (await self.db.scalars(
             select(Product)
             .where(
                 Product.company_id == active_session.company_id,
+                Product.brand_id == brand_id,
                 Product.product_type == "menu_item",
                 Product.is_active.is_(True),
                 Product.is_for_sale.is_(True),
@@ -956,12 +1147,24 @@ class DiningService:
             .order_by(Product.name)
         )).all()
 
+        category_ids = {product.category_id for product in products_rows if product.category_id is not None}
         categories_raw = (await self.db.scalars(
-            select(Category).where(Category.company_id == active_session.company_id, Category.is_active.is_(True))
-        )).all()
+            select(Category).where(
+                Category.company_id == active_session.company_id,
+                Category.id.in_(category_ids),
+                Category.is_active.is_(True),
+            )
+        )).all() if category_ids else []
 
         cat_map = {c.id: c.name for c in categories_raw}
-        categories = [{"id": str(c.id), "name": c.name} for c in categories_raw]
+        categories: list[dict[str, str]] = []
+        seen_category_names: set[str] = set()
+        for category in categories_raw:
+            normalized_name = " ".join(category.name.split()).casefold()
+            if normalized_name in seen_category_names:
+                continue
+            seen_category_names.add(normalized_name)
+            categories.append({"id": str(category.id), "name": category.name})
 
         products = [
             PublicMenuProduct(
@@ -1130,7 +1333,7 @@ class DiningService:
         current: TokenData,
         payload: SessionCheckoutRequest,
     ) -> SessionCheckoutResult:
-        from app.services.sale_service import SaleService, sale_discount_percentage
+        from app.services.sale_service import SaleService, pricing_request_for_sale
 
         company_id = current.company_id
         branch_id = current.branch_id
@@ -1138,10 +1341,27 @@ class DiningService:
             raise ValueError("Branch context required")
         user_id = current.user_id
 
+        # When a Restaurant branch has a canonical STORE-STOCK mapping, checkout
+        # must use that same location so the Sale handoff can post recipe usage.
+        # Legacy/non-Brand branches keep the existing first-location fallback.
+        recipe_inventory_location_id: uuid.UUID | None = None
+        if current.brand_id is not None:
+            membership = await self.db.scalar(
+                select(BrandBranch).where(
+                    BrandBranch.company_id == company_id,
+                    BrandBranch.brand_id == current.brand_id,
+                    BrandBranch.branch_id == branch_id,
+                    BrandBranch.is_active.is_(True),
+                )
+            )
+            if membership is not None:
+                recipe_inventory_location_id = membership.store_location_id
+
         # resolve shift + location (auto-detect ถ้าไม่ได้ระบุ)
         resolved_shift_id, resolved_location_id = await self._resolve_shift_and_location(
             company_id, branch_id, user_id,
             payload.shift_id, payload.location_id,
+            recipe_inventory_location_id,
         )
 
         # รวบรวม order items ทั้งหมดจาก session
@@ -1176,6 +1396,7 @@ class DiningService:
                 discount_type="amount",
                 vat_type=vat_type,
                 vat_rate=vat_rate,
+                expected_price_version=item.price_version,
             ))
 
         # สร้าง payment rows
@@ -1223,9 +1444,22 @@ class DiningService:
             customer_tax_id=payload.customer_tax_id,
             customer_id=payload.customer_id,
             note=" | ".join(note_parts) if note_parts else None,
+            client_order_id=f"restaurant-session-{session.id}",
+            channel=("restaurant_quick_service" if session.table_id is None else "restaurant_table"),
+            cart_version=max(
+                (int(order.row_version or 1) for order in full_session.orders if order.status != "cancelled"),
+                default=1,
+            ),
         )
 
-        discount_percentage = sale_discount_percentage(create_request)
+        pricing = await PricingService(self.db).calculate(
+            company_id=company_id,
+            branch_id=branch_id,
+            brand_id=current.brand_id,
+            payload=pricing_request_for_sale(create_request),
+            lock_prices=True,
+        )
+        discount_percentage = pricing.discount_percentage
         approval_evidence: ApprovalEvidence | None = None
         if discount_percentage > 0 and not (
             has_permission(current.permissions, "pos.discount.apply")
@@ -1272,7 +1506,9 @@ class DiningService:
             user_id,
             create_request,
             brand_id=current.brand_id,
+            recipe_inventory_location_id=recipe_inventory_location_id,
             approval_evidence=approval_evidence,
+            pricing_result=pricing,
         )
 
         # ปิด session

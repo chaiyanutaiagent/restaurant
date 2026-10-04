@@ -1,15 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ChefHat, Clock, Package, ShoppingCart, TrendingUp, UtensilsCrossed } from "lucide-react";
+import { AlertTriangle, Boxes, ChefHat, Clock, Package, ShoppingCart, TrendingUp, UtensilsCrossed } from "lucide-react";
 import { useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import PageHeader from "@/components/layout/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { platformModule } from "@/config/platformModules";
 import { formatThaiCurrency } from "@/lib/cartUtils";
 import { reportApi } from "@/lib/reportApi";
 import { syncStockBalances } from "@/lib/syncService";
-import { authApi } from "@/lib/api";
+import { authApi, membershipApi } from "@/lib/api";
 import { branchApi } from "@/lib/adminApi";
 import type { ApiResponse } from "@/types/api";
 import type { DashboardStats, HourlySales } from "@/types/report";
@@ -20,6 +21,7 @@ export default function DashboardPage(): JSX.Element {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const branchId = useAuthStore((state) => state.branchId);
+  const companyId = useAuthStore((state) => state.companyId);
   const permissions = useAuthStore((state) => state.permissions);
   const statsQuery = useQuery({
     queryKey: ["dashboard-stats", branchId],
@@ -36,6 +38,12 @@ export default function DashboardPage(): JSX.Element {
       return response.data as ApiResponse<HourlySales[]>;
     },
     staleTime: 300_000
+  });
+  const modulesQuery = useQuery({
+    queryKey: ["membership", "modules", companyId],
+    queryFn: async () => (await membershipApi.modules()).data.data,
+    enabled: Boolean(companyId),
+    staleTime: 60_000,
   });
 
   // F&B data
@@ -165,6 +173,27 @@ export default function DashboardPage(): JSX.Element {
           </Card>
         ))}
       </div>
+
+      <Card className="mt-6">
+        <CardContent className="p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div><p className="font-semibold text-gray-900">โมดูลของบริษัท</p><p className="mt-1 text-sm text-gray-500">สถานะจากแพ็กเกจ บริษัท และระบบส่วนกลาง</p></div>
+            <div className="rounded-xl bg-blue-50 p-3 text-blue-600"><Boxes className="h-5 w-5" /></div>
+          </div>
+          {modulesQuery.isLoading ? <Skeleton className="mt-4 h-16 w-full" /> : null}
+          {modulesQuery.error ? <p className="mt-4 text-sm text-amber-700">ตรวจสอบสถานะโมดูลไม่ได้ชั่วคราว ระบบจึงไม่เปิดทางเข้าใหม่</p> : null}
+          {modulesQuery.data ? (
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {modulesQuery.data.filter((module) => module.user_permitted).map((module) => (
+                <div key={module.module_key} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-3">
+                  <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-900">{platformModule(module.module_key).title}</p><p className="mt-0.5 text-xs text-gray-500">แพ็กเกจ {module.plan_included ? "รวม" : "ไม่รวม"} · บริษัท {module.company_enabled ? "เปิด" : "ปิด"}</p></div>
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${module.effective_access ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{module.effective_access ? "พร้อม" : "ยังไม่เปิด"}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       {/* F&B Widget */}
       {fbEnabled && (

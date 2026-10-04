@@ -116,12 +116,13 @@ class DiningSessionQrHistoryTests(unittest.IsolatedAsyncioTestCase):
         )
         empty_products = MagicMock()
         empty_products.all.return_value = []
-        empty_categories = MagicMock()
-        empty_categories.all.return_value = []
+        brand_rows = MagicMock()
+        brand_id = uuid.uuid4()
+        brand_rows.all.return_value = [brand_id]
         db = AsyncMock()
         db.get.return_value = branch
         db.scalar.return_value = settings
-        db.scalars.side_effect = [empty_products, empty_categories]
+        db.scalars.side_effect = [brand_rows, empty_products]
         service = DiningService(db)
         service.get_session_by_token = AsyncMock(return_value=session)
 
@@ -134,6 +135,8 @@ class DiningSessionQrHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.queue_number, 18)
         self.assertFalse(result.bill_at_table_enabled)
         db.get.assert_awaited_once_with(Branch, branch_id)
+        product_statement = db.scalars.await_args_list[1].args[0]
+        self.assertIn("products.brand_id", str(product_statement))
 
     async def test_history_is_grouped_and_cancelled_items_are_not_totalled(self) -> None:
         first_item = _item(name="ข้าวผัด", qty=2, unit_price="60")

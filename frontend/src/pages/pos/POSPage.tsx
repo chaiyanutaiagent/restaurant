@@ -1,14 +1,34 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { ArrowLeft, Camera, LayoutGrid, LayoutList, Loader2, Search, ShoppingCart, UserRoundCheck, WifiOff } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowLeft,
+  Camera,
+  ChefHat,
+  ClipboardList,
+  CloudUpload,
+  LayoutGrid,
+  LayoutList,
+  Loader2,
+  MonitorCog,
+  Printer,
+  Search,
+  ShoppingBag,
+  ShoppingCart,
+  TabletSmartphone,
+  UserRoundCheck,
+  WifiOff,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useReactToPrint } from "react-to-print";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useLogout } from "@/hooks/useAuth";
 import { authApi } from "@/lib/api";
 import { branchApi } from "@/lib/adminApi";
 import { crmApi } from "@/lib/crmApi";
@@ -21,24 +41,77 @@ import {
   generateClientOrderId,
 } from "@/lib/cartUtils";
 import { db } from "@/lib/db";
+import {
+  connectEscPosUsbPrinter,
+  describeEscPosError,
+  getEscPosPrinterStatus,
+  isEscPosUsbSupported,
+  printEscPosLongTest,
+  type EscPosPrinterStatus,
+} from "@/lib/escPosPrinter";
 import { posApi } from "@/lib/posApi";
 import { productApi } from "@/lib/productApi";
-import { syncPendingSales, syncProductCatalog, syncStockBalances, useOfflineProducts, useOnlineStatus } from "@/lib/syncService";
+import {
+  getQueuedRestaurantOrder,
+  getRestaurantOutboxSummary,
+  loadRestaurantMenu,
+  markRestaurantLocalSlip,
+  queueRestaurantOrder,
+  syncRestaurantPendingOrders,
+  type RestaurantOutboxSummary,
+} from "@/lib/restaurantOffline";
+import { POS_CATALOG_ISOLATION_KEY, syncPendingSales, syncProductCatalog, syncStockBalances, useOfflineProducts, useOnlineStatus } from "@/lib/syncService";
+import { wapApi, type WapOrder } from "@/lib/wapApi";
+import { openConfiguredCashDrawer, printConfiguredSaleReceipt, printConfiguredWapOrderSlip } from "@/lib/takeawayPrinter";
 import { useAuthStore } from "@/stores/auth.store";
+import { useDeviceStore } from "@/stores/device.store";
 import type { BranchReplacementRule, BranchSettings } from "@/types/admin";
-import type { ProductListItem } from "@/types/product";
+import type { ProductListItem, RetailLookupProduct, RetailLookupVariant } from "@/types/product";
 import type { Customer, CustomerSearchResult, LoyaltySettings } from "@/types/crm";
-import type { CartItem, CashierShift, ExchangeContextDraft, HeldSaleDraft, PaymentDraft, PaymentMethod, PendingSale, ReplacementRuleDraft, SaleOrder } from "@/types/pos";
+import type { CartItem, CashierShift, ExchangeContextDraft, HeldSaleDraft, HoldDraftClaimResult, PaymentDraft, PaymentMethod, PendingSale, PricingCalculation, ReplacementRuleDraft, SaleOrder, ServerHoldDraft } from "@/types/pos";
 import type { StockBalance, StockLocation } from "@/types/stock";
 import CreateCustomerDialog from "@/pages/crm/CreateCustomerDialog";
 import RedeemPointsDialog from "@/pages/crm/RedeemPointsDialog";
 import CloseShiftDialog from "@/pages/pos/CloseShiftDialog";
 import ReceiptView from "@/pages/pos/ReceiptView";
 import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
+import BillReceiptCenterDialog from "@/components/pos/BillReceiptCenterDialog";
+import DiscountWorkspaceDialog from "@/components/pos/DiscountWorkspaceDialog";
+import HoldDraftWorkspaceDialog from "@/components/pos/HoldDraftWorkspaceDialog";
+import PosWorkspaceNav from "@/components/pos/PosWorkspaceNav";
+import RefundWorkspaceDialog from "@/components/pos/RefundWorkspaceDialog";
+import TakeawayOrderSlip from "@/components/pos/TakeawayOrderSlip";
 import type { ApprovalAction } from "@/types/approval";
+import { PLATFORM_BRAND } from "@/config/platformBrand";
 
 const SHIFT_CACHE_KEY = "restaurant-pos-current-shift";
 const BARCODE_FORMATS = ["ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e", "qr_code"] as const;
+
+function estimateReceiptPageHeightMm(order: SaleOrder | null): number {
+  if (!order) return 200;
+
+  const wrappedLines = (value: string | null | undefined, charsPerLine: number): number => {
+    if (!value?.trim()) return 0;
+    return value.split("\n").reduce(
+      (total, line) => total + Math.max(1, Math.ceil(line.trim().length / charsPerLine)),
+      0,
+    );
+  };
+
+  const itemLines = order.items.reduce((total, item) => total
+    + Math.max(1, wrappedLines(item.product_name, 20))
+    + wrappedLines(item.variant_name, 22)
+    + (Number(item.refunded_qty ?? 0) > 0 ? 1 : 0), 0);
+  const paymentLines = (order.payments ?? []).reduce(
+    (total, payment) => total + 1 + (payment.reference_no ? 1 : 0),
+    0,
+  );
+  const noteLines = wrappedLines(order.note, 30);
+  const customerLines = 1 + (order.customer_phone ? 1 : 0) + (order.customer_tax_id ? 1 : 0);
+  const estimatedMm = 100 + itemLines * 5 + paymentLines * 4 + noteLines * 4 + customerLines * 4;
+
+  return Math.min(300, Math.max(110, Math.ceil(estimatedMm / 10) * 10));
+}
 
 type BranchOption = {
   branch_id: string;
@@ -130,6 +203,127 @@ function tokenizeSearchTerms(value: string): string[] {
     .filter((item) => item.length >= 2);
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "response" in error) {
+    const response = (error as { response?: { data?: { detail?: string | { message?: string; code?: string } } } }).response;
+    const detail = response?.data?.detail;
+    if (typeof detail === "string") return detail;
+    if (detail?.message) return detail.message;
+  }
+  return error instanceof Error ? error.message : "ทำรายการไม่สำเร็จ";
+}
+
+function getHoldConflict(error: unknown): { message: string; currentVersion?: number; currentStatus?: string; claimedBy?: string } | null {
+  if (!error || typeof error !== "object" || !("response" in error)) return null;
+  const response = (error as { response?: { status?: number; data?: { detail?: Record<string, unknown> } } }).response;
+  const detail = response?.data?.detail;
+  if (response?.status !== 409 || !detail || detail.code !== "draft_conflict") return null;
+  return {
+    message: typeof detail.message === "string" ? detail.message : "บิลพักถูกเปลี่ยนจากอีกเครื่อง",
+    currentVersion: typeof detail.current_version === "number" ? detail.current_version : undefined,
+    currentStatus: typeof detail.current_status === "string" ? detail.current_status : undefined,
+    claimedBy: typeof detail.claimed_by === "string" ? detail.claimed_by : undefined,
+  };
+}
+
+function normalizeHeldCartItem(item: CartItem): CartItem {
+  return {
+    ...item,
+    qty: Number(item.qty),
+    unit_price: Number(item.unit_price),
+    original_price: Number(item.original_price),
+    discount_amount: Number(item.discount_amount),
+    vat_rate: Number(item.vat_rate),
+    subtotal: Number(item.subtotal),
+    vat_amount: Number(item.vat_amount),
+    price_override: item.price_override
+      ? { ...item.price_override, requested_unit_price: Number(item.price_override.requested_unit_price) }
+      : null,
+  };
+}
+
+function normalizeServerHoldDraft(draft: ServerHoldDraft): HeldSaleDraft {
+  return {
+    id: draft.id,
+    server_id: draft.id,
+    draft_no: draft.draft_no,
+    shift_id: draft.origin_shift_id,
+    location_id: draft.location_id,
+    branch_id: draft.branch_id,
+    sales_channel: draft.source_type === "takeaway" ? "takeaway" : "walk_in",
+    label: draft.label,
+    items: (draft.content.items ?? []).map(normalizeHeldCartItem),
+    order_discount: Number(draft.content.order_discount ?? 0),
+    loyalty_discount: Number(draft.content.loyalty_discount_intent ?? 0),
+    payment_method: "cash",
+    paid_amount: 0,
+    payment_reference: null,
+    split_payment_enabled: false,
+    customer_name: draft.customer_display ?? "",
+    customer_phone: "",
+    customer_tax_id: "",
+    customer_search: "",
+    selected_customer: null,
+    note: draft.note ?? "",
+    held_at: new Date(draft.created_at).getTime(),
+    sync_state: "synced",
+    status: draft.status,
+    version: draft.version,
+    expires_at: draft.expires_at,
+    owner_user_id: draft.owner_user_id,
+    owner_display: draft.owner_display,
+    assignee_user_id: draft.assignee_user_id,
+    assignee_display: draft.assignee_display,
+    origin_device_id: draft.origin_device_id,
+    origin_device_code: draft.origin_device_code,
+    origin_shift_number: draft.origin_shift_number,
+    location_name: draft.location_name,
+    table_id: draft.table_id,
+    queue_label: draft.queue_label,
+    claim_id: draft.claim_id,
+    claimed_by: draft.claimed_by,
+    claim_expires_at: draft.claim_expires_at,
+    last_revalidation: draft.last_revalidation,
+    resumed_at: draft.resumed_at,
+    expired_at: draft.expired_at,
+    cancelled_at: draft.cancelled_at,
+    converted_at: draft.converted_at,
+    cancel_reason: draft.cancel_reason,
+    server_backed: true,
+  };
+}
+
+function holdDraftPayload(draft: HeldSaleDraft, idempotencyKey: string): Record<string, unknown> {
+  return {
+    shift_id: draft.shift_id,
+    location_id: draft.location_id,
+    label: draft.label,
+    source_type: draft.sales_channel === "takeaway" ? "takeaway" : "walk_in",
+    customer_id: draft.selected_customer?.id ?? null,
+    customer_display: draft.customer_name || draft.selected_customer?.display_name || null,
+    note: draft.note || null,
+    items: draft.items.map((item) => ({
+      product_id: item.product_id,
+      variant_id: item.variant_id,
+      qty: item.qty,
+      discount_amount: item.discount_amount,
+      discount_type: item.discount_type,
+      expected_unit_price: item.original_price,
+      ...(item.expected_price_version ? { expected_price_version: item.expected_price_version } : {}),
+      ...(item.price_override ? { price_override: item.price_override } : {}),
+      display_name: item.product_name,
+      display_variant_name: item.variant_name,
+      display_sku: item.sku,
+      display_unit_code: item.unit_code,
+    })),
+    order_discount: draft.order_discount,
+    loyalty_discount_intent: draft.loyalty_discount,
+    currency: "THB",
+    cart_version: 1,
+    idempotency_key: idempotencyKey,
+  };
+}
+
 type ReplacementPlanEntry = {
   source: NonNullable<ExchangeContextDraft["source_items"]>[number];
   candidate: ProductListItem | null;
@@ -144,6 +338,29 @@ type PendingManagerApproval = {
   onApproved: (approvalToken: string) => Promise<void>;
 };
 
+type RetailResolvedLine = {
+  product: ProductListItem;
+  variant: RetailLookupVariant | null;
+  qty: number;
+  availableQty: number;
+  serverPrice: number;
+  priceVersion: string;
+};
+
+type RetailExceptionState =
+  | { kind: "not_found"; code: string; message: string }
+  | { kind: "variant_required"; code: string; message: string }
+  | { kind: "unavailable"; code: string; message: string }
+  | { kind: "stock_limit"; code: string; message: string; availableQty: number }
+  | { kind: "price_changed"; code: string; message: string; previousPrice: number; serverPrice: number }
+  | { kind: "permission" | "error"; code: string; message: string };
+
+function maskPhone(phone: string | null | undefined): string {
+  const digits = (phone ?? "").replace(/\D/g, "");
+  if (digits.length < 7) return phone ? "***" : "-";
+  return `${digits.slice(0, 3)}-***-${digits.slice(-4)}`;
+}
+
 const paymentMethodLabels: Record<PaymentMethod, string> = {
   cash: "เงินสด",
   promptpay: "PromptPay",
@@ -152,21 +369,28 @@ const paymentMethodLabels: Record<PaymentMethod, string> = {
   other: "อื่นๆ",
 };
 
-function getOrderStatusLabel(status: SaleOrder["status"]): string {
-  if (status === "voided") return "voided";
-  if (status === "refunded") return "refunded";
-  if (status === "partially_refunded") return "partially refunded";
-  if (status === "completed") return "completed";
-  return "pending sync";
-}
-
 export default function POSPage(): JSX.Element {
   const navigate = useNavigate();
+  const logout = useLogout("/login?next=/pos");
+  const location = useLocation();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const isOnline = useOnlineStatus();
+  const companyId = useAuthStore((state) => state.companyId);
+  const brandId = useAuthStore((state) => state.brandId);
   const branchId = useAuthStore((state) => state.branchId);
+  const businessType = useAuthStore((state) => state.businessType);
+  const targetDatabase = useAuthStore((state) => state.targetDatabase);
   const user = useAuthStore((state) => state.user);
   const hasPermission = useAuthStore((state) => state.hasPermission);
+  const isRetailMode = businessType === "retail_pos";
+  const isTakeawayMode = !isRetailMode && new URLSearchParams(location.search).get("channel") === "takeaway";
+  const retailContextValid = !isRetailMode || Boolean(companyId && brandId && branchId && targetDatabase === "retail_pos");
+  const catalogScope = isRetailMode ? "retail_sale" as const : "restaurant_menu" as const;
+  const catalogIsolationKey = `${companyId ?? "missing-company"}:${brandId ?? "missing-brand"}:${branchId ?? "missing-branch"}:${businessType ?? "missing-type"}:${catalogScope}`;
+  const pairedDevice = useDeviceStore((state) => state.device);
+  const deviceSessionHydrated = useDeviceStore((state) => state.hydrated);
+  const hydrateDeviceSession = useDeviceStore((state) => state.hydrate);
   const [search, setSearch] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -208,42 +432,85 @@ export default function POSPage(): JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastOrder, setLastOrder] = useState<SaleOrder | null>(null);
+  const [takeawayOrder, setTakeawayOrder] = useState<WapOrder | null>(null);
+  const [takeawayResultOpen, setTakeawayResultOpen] = useState(false);
+  const [takeawayPrintBusy, setTakeawayPrintBusy] = useState<"customer" | "kitchen" | null>(null);
+  const [takeawayPendingPrint, setTakeawayPendingPrint] = useState<"customer" | "kitchen" | null>(null);
+  const [takeawayOutboxSummary, setTakeawayOutboxSummary] = useState<RestaurantOutboxSummary>({
+    pending: 0, syncing: 0, acknowledged: 0, reconciled: 0,
+    needsReview: 0, rejected: 0, quarantined: 0, unknown: 0,
+  });
   const [closeShiftOpen, setCloseShiftOpen] = useState(false);
   const [confirm, ConfirmDialog] = useConfirm();
   const [heldBillsOpen, setHeldBillsOpen] = useState(false);
+  const [holdCreateOpen, setHoldCreateOpen] = useState(false);
   const [customerSectionOpen, setCustomerSectionOpen] = useState(false);
   const [cardDensity, setCardDensity] = useState<"normal" | "compact" | "list">(() => {
     return (window.localStorage.getItem("pos-card-density") as "normal" | "compact" | "list") ?? "normal";
   });
   const [holdLabel, setHoldLabel] = useState("");
   const [heldBillsVersion, setHeldBillsVersion] = useState(0);
+  const [heldBillsSearch, setHeldBillsSearch] = useState("");
+  const [heldBillsFilter, setHeldBillsFilter] = useState<"active" | "mine" | "counter" | "history">("active");
+  const [heldBillsBusy, setHeldBillsBusy] = useState<string | null>(null);
+  const [pendingResumeDraft, setPendingResumeDraft] = useState<HeldSaleDraft | null>(null);
+  const [pendingRevalidation, setPendingRevalidation] = useState<{ draft: HeldSaleDraft; claim: HoldDraftClaimResult } | null>(null);
+  const [holdConflict, setHoldConflict] = useState<{ message: string; currentVersion?: number; currentStatus?: string; claimedBy?: string } | null>(null);
+  const [resumedHoldDraft, setResumedHoldDraft] = useState<{ id: string; version: number } | null>(null);
   const [replacementRulesVersion, setReplacementRulesVersion] = useState(0);
   const [recentSalesOpen, setRecentSalesOpen] = useState(false);
-  const [historyOrder, setHistoryOrder] = useState<SaleOrder | null>(null);
+  const [discountWorkspaceOpen, setDiscountWorkspaceOpen] = useState(false);
   const [priceEditorOpen, setPriceEditorOpen] = useState(false);
   const [priceEditProductId, setPriceEditProductId] = useState<string | null>(null);
+  const [priceEditVariantId, setPriceEditVariantId] = useState<string | null>(null);
   const [priceEditValue, setPriceEditValue] = useState("");
+  const [priceEditReason, setPriceEditReason] = useState("");
+  const [priceEditReasonCode, setPriceEditReasonCode] = useState<"customer_recovery" | "price_match" | "manager_comp" | "damaged_item" | "manual_correction" | "other">("other");
   const [voidOrder, setVoidOrder] = useState<SaleOrder | null>(null);
   const [voidReason, setVoidReason] = useState("");
-  const [refundOrder, setRefundOrder] = useState<SaleOrder | null>(null);
-  const [refundReason, setRefundReason] = useState("");
-  const [partialRefundOrder, setPartialRefundOrder] = useState<SaleOrder | null>(null);
-  const [partialRefundReason, setPartialRefundReason] = useState("");
-  const [partialRefundQtys, setPartialRefundQtys] = useState<Record<string, string>>({});
+  const [refundWorkspaceOrder, setRefundWorkspaceOrder] = useState<SaleOrder | null>(null);
   const [pendingManagerApproval, setPendingManagerApproval] = useState<PendingManagerApproval | null>(null);
   const [exchangeContext, setExchangeContext] = useState<ExchangeContextDraft | null>(null);
   const [splitPaymentEnabled, setSplitPaymentEnabled] = useState(false);
   const [secondaryPaymentMethod, setSecondaryPaymentMethod] = useState<PaymentMethod>("promptpay");
   const [secondaryPaymentAmount, setSecondaryPaymentAmount] = useState(0);
   const [secondaryPaymentReference, setSecondaryPaymentReference] = useState("");
+  const [deviceStatusOpen, setDeviceStatusOpen] = useState(false);
+  const [retailException, setRetailException] = useState<RetailExceptionState | null>(null);
+  const [retailLookupBusy, setRetailLookupBusy] = useState(false);
+  const [retailVariantProduct, setRetailVariantProduct] = useState<RetailLookupProduct | null>(null);
+  const [selectedRetailVariantId, setSelectedRetailVariantId] = useState<string | null>(null);
+  const [pendingRetailLine, setPendingRetailLine] = useState<RetailResolvedLine | null>(null);
+  const [pendingRetailQuote, setPendingRetailQuote] = useState<PricingCalculation | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  const [autoPrintReceipt, setAutoPrintReceipt] = useState(() => window.localStorage.getItem("pos-auto-print-receipt") === "true");
+  const [escPosPrinterStatus, setEscPosPrinterStatus] = useState<EscPosPrinterStatus>(() => ({
+    supported: isEscPosUsbSupported(),
+    paired: false,
+    printer: null,
+  }));
+  const [escPosPrinterBusy, setEscPosPrinterBusy] = useState<"connect" | "test" | "print" | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const cashInputRef = useRef<HTMLInputElement | null>(null);
   const receiptRef = useRef<HTMLDivElement | null>(null);
+  const takeawayCustomerSlipRef = useRef<HTMLDivElement | null>(null);
+  const takeawayKitchenSlipRef = useRef<HTMLDivElement | null>(null);
   const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const checkoutIdRef = useRef(generateClientOrderId());
+  const openShiftIdempotencyRef = useRef(`shift-open:${generateClientOrderId()}`);
+
   const scannerStreamRef = useRef<MediaStream | null>(null);
   const scannerFrameRef = useRef<number | null>(null);
-  const offlineProducts = useOfflineProducts(searchTerm);
-  const handlePrint = useReactToPrint({ contentRef: receiptRef });
+  const autoPrintedOrderRef = useRef<string | null>(null);
+  const offlineProducts = useOfflineProducts(searchTerm, catalogRevision);
+  const receiptPageHeightMm = useMemo(() => estimateReceiptPageHeightMm(lastOrder), [lastOrder]);
+  const handleBrowserPrint = useReactToPrint({
+    contentRef: receiptRef,
+    pageStyle: `@page { size: 80mm ${receiptPageHeightMm}mm; margin: 0; } @media print { html, body { margin: 0 !important; padding: 0 !important; } }`,
+  });
+  const printTakeawayCustomerSlip = useReactToPrint({ contentRef: takeawayCustomerSlipRef });
+  const printTakeawayKitchenSlip = useReactToPrint({ contentRef: takeawayKitchenSlipRef });
 
   const branchQuery = useQuery({
     queryKey: ["pos", "branches"],
@@ -253,6 +520,19 @@ export default function POSPage(): JSX.Element {
     },
     enabled: Boolean(user),
   });
+
+  useEffect(() => {
+    if (!deviceSessionHydrated) void hydrateDeviceSession();
+  }, [deviceSessionHydrated, hydrateDeviceSession]);
+
+  useEffect(() => {
+    if (!deviceStatusOpen) return;
+    let active = true;
+    void getEscPosPrinterStatus()
+      .then((status) => { if (active) setEscPosPrinterStatus(status); })
+      .catch(() => { if (active) setEscPosPrinterStatus({ supported: isEscPosUsbSupported(), paired: false, printer: null }); });
+    return () => { active = false; };
+  }, [deviceStatusOpen]);
 
   const locationsQuery = useQuery({
     queryKey: ["pos", "locations", branchId],
@@ -282,13 +562,26 @@ export default function POSPage(): JSX.Element {
     enabled: Boolean(branchId) && isOnline,
   });
 
+  const takeawayMenuQuery = useQuery({
+    queryKey: ["pos", "takeaway-menu", branchId],
+    queryFn: () => loadRestaurantMenu(),
+    enabled: isTakeawayMode && Boolean(branchId),
+    retry: false,
+  });
+
   const onlineSearchQuery = useQuery({
-    queryKey: ["pos", "products", searchTerm],
+    queryKey: ["pos", "products", catalogScope, catalogIsolationKey, searchTerm],
     queryFn: async () => {
-      const response = await productApi.list({ search: searchTerm, is_active: true, page: 1, limit: 100 });
+      const response = await productApi.list({
+        search: searchTerm,
+        is_active: true,
+        catalog_scope: catalogScope,
+        page: 1,
+        limit: 100,
+      });
       return response.data.data as ProductListItem[];
     },
-    enabled: isOnline && searchTerm.trim().length > 0,
+    enabled: isOnline && retailContextValid && searchTerm.trim().length > 0,
   });
   const loyaltySettingsQuery = useQuery({
     queryKey: ["pos", "loyalty-settings"],
@@ -317,15 +610,37 @@ export default function POSPage(): JSX.Element {
     },
   });
   const heldBillsQuery = useQuery({
-    queryKey: ["pos", "held-bills", currentShift?.id, heldBillsVersion],
+    queryKey: ["pos", "held-bills", currentShift?.id, branchId, heldBillsVersion, isOnline, heldBillsSearch, heldBillsFilter],
     queryFn: async () => {
       if (!currentShift) {
         return [] as HeldSaleDraft[];
       }
-      const rows = await db.heldBills.where("shift_id").equals(currentShift.id).toArray();
-      return rows.sort((left, right) => right.held_at - left.held_at);
+      const localRows = await db.heldBills.where("shift_id").equals(currentShift.id).toArray();
+      if (!isOnline || !hasPermission("pos.draft.view")) {
+        return localRows.sort((left, right) => right.held_at - left.held_at);
+      }
+      if (hasPermission("pos.draft.create")) {
+        for (const local of localRows.filter((row) => !row.server_backed)) {
+          try {
+            await posApi.createHoldDraft(holdDraftPayload(local, `offline-hold:${local.id}`));
+            await db.heldBills.delete(local.id);
+          } catch {
+            await db.heldBills.update(local.id, { sync_state: "needs_review" });
+          }
+        }
+      }
+      const response = await posApi.listHoldDrafts({
+        mine: heldBillsFilter === "mine",
+        this_counter: heldBillsFilter === "counter",
+        include_history: heldBillsFilter === "history",
+        search: heldBillsSearch.trim() || undefined,
+      });
+      const serverRows = response.data.data.map(normalizeServerHoldDraft);
+      const remainingLocal = await db.heldBills.where("shift_id").equals(currentShift.id).toArray();
+      return [...serverRows, ...remainingLocal].sort((left, right) => right.held_at - left.held_at);
     },
     enabled: Boolean(currentShift),
+    refetchInterval: heldBillsOpen && isOnline ? 15_000 : false,
   });
   const replacementRulesQuery = useQuery({
     queryKey: ["pos", "local-replacement-rules", branchId, replacementRulesVersion],
@@ -352,7 +667,7 @@ export default function POSPage(): JSX.Element {
       if (!currentShift) {
         return [] as SaleOrder[];
       }
-      const response = await posApi.listSales({ shift_id: currentShift.id, limit: 12, page: 1 });
+      const response = await posApi.listSales({ shift_id: currentShift.id, limit: 100, page: 1 });
       return response.data.data as SaleOrder[];
     },
     enabled: Boolean(currentShift) && isOnline,
@@ -392,12 +707,84 @@ export default function POSPage(): JSX.Element {
   }, [currentShiftQuery.data]);
 
   useEffect(() => {
-    if (isOnline) {
-      void syncProductCatalog();
-      void syncStockBalances(branchId ?? undefined);
-      void syncPendingSales();
-    }
-  }, [branchId, isOnline]);
+    let active = true;
+    if (!isOnline || !retailContextValid) return () => { active = false; };
+    void Promise.all([
+      syncProductCatalog(catalogScope, catalogIsolationKey),
+      syncStockBalances(branchId ?? undefined),
+      companyId && branchId && user && (businessType === "restaurant" || businessType === "retail_pos")
+        ? syncPendingSales({ companyId, branchId, userId: user.id, businessType })
+        : Promise.resolve({ synced: 0, failed: 0 }),
+    ]).then(() => {
+      if (!active) return;
+      setCatalogRevision((current) => current + 1);
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["pos", "categories"] }),
+        queryClient.invalidateQueries({ queryKey: ["pos", "stock-balances"] }),
+      ]);
+      setLastSyncAt(new Date());
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [branchId, businessType, catalogIsolationKey, catalogScope, companyId, isOnline, queryClient, retailContextValid, user]);
+
+  useEffect(() => {
+    if (!isTakeawayMode) return;
+    let active = true;
+    void (async () => {
+      const summary = isOnline
+        ? await syncRestaurantPendingOrders().catch(() => getRestaurantOutboxSummary())
+        : await getRestaurantOutboxSummary();
+      if (!active) return;
+      setTakeawayOutboxSummary(summary);
+      if (isOnline) {
+        await takeawayMenuQuery.refetch();
+        if (takeawayOrder?.client_order_id) {
+          const resolved = await getQueuedRestaurantOrder(takeawayOrder.client_order_id);
+          if (active && resolved) setTakeawayOrder(resolved);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+    // Reconnect or entering Takeaway mode is the trigger; order/query updates must not loop the sync.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline, isTakeawayMode]);
+
+  useEffect(() => {
+    if (!takeawayPendingPrint || !takeawayOrder) return;
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      void (async () => {
+        const type = takeawayPendingPrint;
+        let printedDirectly = false;
+        try {
+          printedDirectly = await printConfiguredWapOrderSlip(
+            takeawayOrder,
+            type,
+            user?.display_name ?? user?.username ?? "Cashier",
+            takeawayMenuQuery.data ?? null,
+            type === "customer" && takeawayOrder.payment_method === "promptpay" ? qrDataUrl : null,
+          );
+        } catch (error) {
+          toast({
+            title: "พิมพ์ตรงไม่สำเร็จ",
+            description: `${describeEscPosError(error)} — เปิดหน้าพิมพ์สำรองให้แทน`,
+            variant: "destructive",
+          });
+        }
+        if (!printedDirectly) {
+          if (type === "customer") void printTakeawayCustomerSlip();
+          else void printTakeawayKitchenSlip();
+        }
+        if (!cancelled) setTakeawayPendingPrint(null);
+      })();
+    }, 150);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [printTakeawayCustomerSlip, printTakeawayKitchenSlip, qrDataUrl, takeawayMenuQuery.data, takeawayOrder, takeawayPendingPrint, toast, user?.display_name, user?.username]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -420,9 +807,49 @@ export default function POSPage(): JSX.Element {
   const branches = branchQuery.data ?? [];
   const branchName = branches.find((item) => item.branch_id === branchId)?.branch_name ?? "สาขาหลัก";
   const locations = locationsQuery.data ?? [];
-  const categories = categoriesQuery.data ?? [];
+  const catalogCategories = categoriesQuery.data ?? [];
   const stockBalances = stockBalancesQuery.data ?? [];
-  const products = (isOnline && searchTerm.trim().length > 0 ? onlineSearchQuery.data : offlineProducts) ?? [];
+  const catalogCacheTrusted = window.localStorage.getItem(POS_CATALOG_ISOLATION_KEY) === catalogIsolationKey;
+  const baseProducts = (isOnline && searchTerm.trim().length > 0
+    ? onlineSearchQuery.data
+    : catalogCacheTrusted ? offlineProducts : []) ?? [];
+  const takeawayMenuByProductId = useMemo(
+    () => new Map((takeawayMenuQuery.data?.products ?? []).map((product) => [product.id, product])),
+    [takeawayMenuQuery.data?.products],
+  );
+  const restaurantProducts = useMemo(
+    () => baseProducts.filter((product) => product.product_type === "menu_item" && product.is_for_sale),
+    [baseProducts],
+  );
+  const retailProducts = useMemo(
+    () => baseProducts.filter((product) => !["menu_item", "raw_material"].includes(product.product_type) && product.is_for_sale),
+    [baseProducts],
+  );
+  const eligibleProducts = isRetailMode ? retailProducts : restaurantProducts;
+  const products = useMemo(() => {
+    if (!isTakeawayMode) return eligibleProducts;
+    if (!takeawayMenuQuery.data) return [];
+    return restaurantProducts
+      .filter((product) => takeawayMenuByProductId.get(product.id)?.is_available)
+      .map((product) => ({
+        ...product,
+        selling_price: Number(takeawayMenuByProductId.get(product.id)?.selling_price ?? product.selling_price),
+      }));
+  }, [eligibleProducts, isTakeawayMode, restaurantProducts, takeawayMenuByProductId, takeawayMenuQuery.data]);
+  const categories = useMemo(() => {
+    const categoryById = new Map(catalogCategories.map((category) => [category.id, category]));
+    const groups = new Map<string, { key: string; name: string; ids: Set<string> }>();
+    for (const product of eligibleProducts) {
+      if (!product.category_id) continue;
+      const category = categoryById.get(product.category_id);
+      if (!category?.is_active) continue;
+      const key = category.name.trim().replace(/\s+/g, " ").toLocaleLowerCase("th-TH");
+      const group = groups.get(key) ?? { key, name: category.name.trim(), ids: new Set<string>() };
+      group.ids.add(category.id);
+      groups.set(key, group);
+    }
+    return [...groups.values()].sort((left, right) => left.name.localeCompare(right.name, "th"));
+  }, [catalogCategories, eligibleProducts]);
   const stockByProduct = useMemo(
     () => new Map(stockBalances.map((item) => [`${item.product_id}:${item.variant_id ?? "base"}`, item])),
     [stockBalances],
@@ -430,14 +857,22 @@ export default function POSPage(): JSX.Element {
 
   const visibleProducts = useMemo(() => {
     return products.filter((item) => {
-      if (selectedCategory && item.category_id !== selectedCategory) {
+      const category = categories.find((entry) => entry.key === selectedCategory);
+      if (category && (!item.category_id || !category.ids.has(item.category_id))) {
         return false;
       }
       return true;
     });
-  }, [products, selectedCategory]);
+  }, [categories, products, selectedCategory]);
 
   const cart = useMemo(() => calcCart(cartItems, orderDiscount, "amount"), [cartItems, orderDiscount]);
+  const takeawayExpectedTotal = useMemo(
+    () => roundMoney(cart.items.reduce((sum, item) => {
+      const menuProduct = takeawayMenuByProductId.get(item.product_id);
+      return sum + Number(menuProduct?.selling_price ?? item.unit_price) * Number(item.qty);
+    }, 0)),
+    [cart.items, takeawayMenuByProductId],
+  );
   const exchangeCreditAvailable = exchangeContext?.refund_amount ?? 0;
   const exchangeCreditApplied = useMemo(
     () => roundMoney(Math.min(exchangeCreditAvailable, Math.max(cart.total_amount - loyaltyDiscount, 0))),
@@ -448,7 +883,11 @@ export default function POSPage(): JSX.Element {
     [exchangeCreditApplied, exchangeCreditAvailable],
   );
   const totalDiscount = orderDiscount + loyaltyDiscount + exchangeCreditApplied;
-  const finalTotal = Math.max(cart.total_amount - loyaltyDiscount - exchangeCreditApplied, 0);
+  useEffect(() => {
+    checkoutIdRef.current = generateClientOrderId();
+  }, [cartItems, orderDiscount, loyaltyDiscount, exchangeCreditApplied, selectedCustomer?.id]);
+  const standardFinalTotal = Math.max(cart.total_amount - loyaltyDiscount - exchangeCreditApplied, 0);
+  const finalTotal = isTakeawayMode ? takeawayExpectedTotal : standardFinalTotal;
   const secondaryAmount = Math.max(0, Math.min(secondaryPaymentAmount, finalTotal));
   const primaryDueAmount = Math.max(finalTotal - (splitPaymentEnabled ? secondaryAmount : 0), 0);
   const currentPaidAmount = useMemo(() => {
@@ -521,7 +960,7 @@ export default function POSPage(): JSX.Element {
     () => cart.items.filter((item) => item.vat_type === "exempt").reduce((sum, item) => sum + item.subtotal, 0),
     [cart.items],
   );
-  const scanSupported = typeof window !== "undefined" && "BarcodeDetector" in window && navigator.mediaDevices?.getUserMedia;
+  const cameraSupported = typeof window !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
 
   useEffect(() => {
     const settings = branchSettingsQuery.data;
@@ -537,6 +976,24 @@ export default function POSPage(): JSX.Element {
       setOrderDiscount(maxDiscountAmount);
     }
   }, [branchSettingsQuery.data, cart.subtotal, orderDiscount]);
+
+  useEffect(() => {
+    if (!isTakeawayMode) return;
+    setOrderDiscount(0);
+    setLoyaltyDiscount(0);
+    setExchangeContext(null);
+  }, [isTakeawayMode]);
+
+  useEffect(() => {
+    if (!isRetailMode) return;
+    // Retail provider and loyalty reservations remain fail-closed until their
+    // Server contracts are available. Cash uses the existing idempotent Sale path.
+    setLoyaltyDiscount(0);
+    setPaymentMethod("cash");
+    setSplitPaymentEnabled(false);
+    setSecondaryPaymentAmount(0);
+    setSecondaryPaymentReference("");
+  }, [isRetailMode]);
 
   useEffect(() => {
     if (paymentMethod === "promptpay" && promptPayAmount > 0) {
@@ -555,31 +1012,9 @@ export default function POSPage(): JSX.Element {
   }, [paymentMethod, promptPayAmount]);
 
   useEffect(() => {
-    if (!scannerOpen) {
-      if (scannerFrameRef.current !== null) {
-        window.cancelAnimationFrame(scannerFrameRef.current);
-        scannerFrameRef.current = null;
-      }
-      if (scannerStreamRef.current) {
-        scannerStreamRef.current.getTracks().forEach((track) => track.stop());
-        scannerStreamRef.current = null;
-      }
-      return;
-    }
-
-    if (!scanSupported) {
-      setScannerError("อุปกรณ์นี้ยังไม่รองรับการสแกนด้วยกล้อง");
-      return;
-    }
-
     let cancelled = false;
-    const BarcodeDetectorClass = (window as Window & { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
-    if (!BarcodeDetectorClass) {
-      setScannerError("ไม่พบตัวสแกนบาร์โค้ดในเบราว์เซอร์");
-      return;
-    }
-
-    const detector = new BarcodeDetectorClass({ formats: [...BARCODE_FORMATS] });
+    let fallbackControls: { stop: () => void } | null = null;
+    let codeHandled = false;
 
     const stopScanner = () => {
       if (scannerFrameRef.current !== null) {
@@ -590,60 +1025,144 @@ export default function POSPage(): JSX.Element {
         scannerStreamRef.current.getTracks().forEach((track) => track.stop());
         scannerStreamRef.current = null;
       }
+      fallbackControls?.stop();
+      fallbackControls = null;
     };
 
-    const scanLoop = async () => {
-      if (cancelled) {
+    if (!scannerOpen) {
+      stopScanner();
+      return;
+    }
+
+    setScannerError("");
+
+    if (!cameraSupported) {
+      setScannerError("อุปกรณ์นี้ยังไม่รองรับการสแกนด้วยกล้อง");
+      return;
+    }
+
+    const handleDetectedCode = (rawCode: string, stop: () => void) => {
+      const code = rawCode.trim();
+      if (!code || cancelled || codeHandled) {
         return;
       }
-      const video = scannerVideoRef.current;
-      if (video && video.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
-        try {
-          const results = await detector.detect(video);
-          const code = results.find((item) => item.rawValue?.trim())?.rawValue?.trim();
-          if (code) {
-            stopScanner();
-            setScannerOpen(false);
-            await handleProductCodeLookup(code);
-            return;
-          }
-        } catch {
-          setScannerError("กล้องเปิดได้ แต่ยังอ่านบาร์โค้ดไม่ได้");
-        }
-      }
-      scannerFrameRef.current = window.requestAnimationFrame(() => {
-        void scanLoop();
-      });
+      codeHandled = true;
+      stop();
+      setScannerOpen(false);
+      void handleProductCodeLookup(code);
     };
 
-    void navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
-      .then(async (stream) => {
+    const startNativeScanner = (BarcodeDetectorClass: BarcodeDetectorCtor) => {
+      let detector: BarcodeDetectorInstance;
+      try {
+        detector = new BarcodeDetectorClass({ formats: [...BARCODE_FORMATS] });
+      } catch {
+        void startFallbackScanner();
+        return;
+      }
+
+      const scanLoop = async () => {
         if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
           return;
         }
-        scannerStreamRef.current = stream;
-        setScannerError("");
-        if (scannerVideoRef.current) {
-          scannerVideoRef.current.srcObject = stream;
-          await scannerVideoRef.current.play();
+        const video = scannerVideoRef.current;
+        if (video && video.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
+          try {
+            const results = await detector.detect(video);
+            const code = results.find((item) => item.rawValue?.trim())?.rawValue;
+            if (code) {
+              handleDetectedCode(code, stopScanner);
+              return;
+            }
+          } catch {
+            setScannerError("กล้องเปิดได้ แต่ยังอ่านบาร์โค้ดไม่ได้");
+          }
         }
-        await scanLoop();
-      })
-      .catch(() => {
-        setScannerError("ไม่สามารถเปิดกล้องเพื่อสแกนบาร์โค้ดได้");
-      });
+        scannerFrameRef.current = window.requestAnimationFrame(() => {
+          void scanLoop();
+        });
+      };
+
+      void navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
+        .then(async (stream) => {
+          if (cancelled) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          scannerStreamRef.current = stream;
+          setScannerError("");
+          if (scannerVideoRef.current) {
+            scannerVideoRef.current.srcObject = stream;
+            await scannerVideoRef.current.play();
+          }
+          await scanLoop();
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setScannerError("ไม่สามารถเปิดกล้องเพื่อสแกนบาร์โค้ดได้ กรุณาอนุญาตสิทธิ์กล้อง");
+          }
+        });
+    };
+
+    async function startFallbackScanner() {
+      try {
+        const { BarcodeFormat, BrowserMultiFormatReader } = await import("@zxing/browser");
+        if (cancelled) {
+          return;
+        }
+        const video = scannerVideoRef.current;
+        if (!video) {
+          return;
+        }
+
+        const reader = new BrowserMultiFormatReader();
+        reader.possibleFormats = [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+          BarcodeFormat.QR_CODE,
+        ];
+        fallbackControls = await reader.decodeFromConstraints(
+          { audio: false, video: { facingMode: { ideal: "environment" } } },
+          video,
+          (result, _error, controls) => {
+            const code = result?.getText();
+            if (code) {
+              handleDetectedCode(code, () => controls.stop());
+            }
+          },
+        );
+      } catch {
+        if (!cancelled) {
+          setScannerError("ไม่สามารถเปิดกล้องเพื่อสแกนบาร์โค้ดได้ กรุณาอนุญาตสิทธิ์กล้อง");
+        }
+      }
+    }
+
+    const BarcodeDetectorClass = (window as Window & { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
+    if (BarcodeDetectorClass) {
+      startNativeScanner(BarcodeDetectorClass);
+    } else {
+      void startFallbackScanner();
+    }
 
     return () => {
       cancelled = true;
       stopScanner();
     };
-  }, [scanSupported, scannerOpen]);
+  }, [cameraSupported, scannerOpen]);
 
-  function updateCartItem(productId: string, updater: (item: CartItem) => CartItem | null): void {
+  function updateCartItem(
+    productId: string,
+    updater: (item: CartItem) => CartItem | null,
+    variantId: string | null = null,
+  ): void {
     setCartItems((current) =>
       current
-        .map((item) => (item.product_id === productId && item.variant_id === null ? updater(item) : item))
+        .map((item) => (item.product_id === productId && item.variant_id === variantId ? updater(item) : item))
         .filter((item): item is CartItem => item !== null)
     );
   }
@@ -654,8 +1173,23 @@ export default function POSPage(): JSX.Element {
   }
 
   function addToCart(product: ProductListItem, qty = 1): void {
+    if (isRetailMode && (!retailContextValid || !catalogCacheTrusted || ["menu_item", "raw_material"].includes(product.product_type))) {
+      toast({
+        title: "เพิ่มสินค้าไม่ได้",
+        description: "Catalog หรือ signed Retail context ไม่ตรงกับ Counter นี้",
+        variant: "destructive",
+      });
+      return;
+    }
     const available = getAvailableStock(product.id, null);
     if (available <= 0) {
+      if (isRetailMode) {
+        setRetailException({
+          kind: "unavailable",
+          code: product.sku,
+          message: `${product.name} ไม่มี Stock ที่ขายได้ในคลังของกะนี้`,
+        });
+      }
       return;
     }
     setCartItems((current) => {
@@ -663,6 +1197,14 @@ export default function POSPage(): JSX.Element {
       const safeQty = Math.max(1, Math.floor(qty));
       if (existing) {
         if (existing.qty >= available) {
+          if (isRetailMode) {
+            setRetailException({
+              kind: "stock_limit",
+              code: product.sku,
+              message: `${product.name} ขายได้สูงสุด ${available} ชิ้น`,
+              availableQty: available,
+            });
+          }
           return current;
         }
         const nextQty = Math.min(existing.qty + safeQty, available);
@@ -676,16 +1218,224 @@ export default function POSPage(): JSX.Element {
     });
   }
 
+  function addRetailResolvedLine(line: RetailResolvedLine): void {
+    const variantId = line.variant?.id ?? null;
+    const safeQty = Math.max(1, Math.floor(line.qty));
+    setCartItems((current) => {
+      const existing = current.find(
+        (item) => item.product_id === line.product.id && item.variant_id === variantId,
+      );
+      const currentQty = existing?.qty ?? 0;
+      const nextQty = currentQty + safeQty;
+      if (nextQty > line.availableQty) {
+        setRetailException({
+          kind: "stock_limit",
+          code: line.variant?.sku ?? line.product.sku,
+          message: `${line.product.name} ขายได้สูงสุด ${line.availableQty} ชิ้น`,
+          availableQty: line.availableQty,
+        });
+        return current;
+      }
+      if (existing) {
+        return current.map((item) => item.product_id === line.product.id && item.variant_id === variantId
+          ? {
+              ...item,
+              qty: nextQty,
+              unit_price: line.serverPrice,
+              original_price: line.serverPrice,
+              expected_price_version: line.priceVersion,
+              subtotal: nextQty * line.serverPrice,
+            }
+          : item);
+      }
+      const item = buildCartItem(line.product, safeQty, line.serverPrice);
+      return [...current, {
+        ...item,
+        variant_id: variantId,
+        variant_name: line.variant?.name ?? null,
+        sku: line.variant?.sku ?? line.product.sku,
+        unit_code: line.product.unit?.code ?? null,
+        expected_price_version: line.priceVersion,
+      }];
+    });
+    setRetailException(null);
+    setPendingRetailLine(null);
+    setPendingRetailQuote(null);
+    setSearch("");
+    window.setTimeout(() => searchRef.current?.focus(), 0);
+  }
+
+  function updateCartQuantity(item: CartItem, requestedQty: number): void {
+    const available = getAvailableStock(item.product_id, item.variant_id);
+    const safeQty = Math.max(0, Math.floor(Number.isFinite(requestedQty) ? requestedQty : 1));
+    if (safeQty > available) {
+      if (isRetailMode) {
+        setRetailException({
+          kind: "stock_limit",
+          code: item.sku,
+          message: `${item.product_name} ขายได้สูงสุด ${available} ชิ้น`,
+          availableQty: available,
+        });
+      }
+      return;
+    }
+    updateCartItem(
+      item.product_id,
+      (current) => safeQty <= 0 ? null : { ...current, qty: safeQty, subtotal: safeQty * current.unit_price },
+      item.variant_id,
+    );
+    setRetailException(null);
+  }
+
+  async function validateRetailLine(
+    lookup: RetailLookupProduct,
+    sourceProduct: ProductListItem,
+    variant: RetailLookupVariant | null,
+    qty = 1,
+  ): Promise<void> {
+    const serverLookupPrice = Number(variant?.server_price ?? lookup.server_price);
+    const expectedPrice = Number(variant?.server_price ?? sourceProduct.selling_price);
+    const quote = (await posApi.calculatePricing({
+      items: [{
+        product_id: lookup.id,
+        variant_id: variant?.id ?? lookup.selected_variant_id,
+        qty,
+        discount_amount: 0,
+        discount_type: "amount",
+        expected_unit_price: expectedPrice,
+      }],
+      discount_amount: 0,
+      discount_type: "amount",
+      channel: "pos",
+      currency: "THB",
+      idempotency_key: `retail-add:${checkoutIdRef.current}:${lookup.id}:${variant?.id ?? lookup.selected_variant_id ?? "base"}`,
+      cart_version: Math.max(1, cartItems.length + 1),
+    })).data.data;
+    const pricedLine = quote.lines[0];
+    if (!pricedLine) {
+      throw new Error("Server ไม่ส่งผลตรวจราคาสินค้า")
+    }
+    const selectedVariant = variant ?? lookup.variants.find((item) => item.id === lookup.selected_variant_id) ?? null;
+    const resolved: RetailResolvedLine = {
+      product: sourceProduct,
+      variant: selectedVariant,
+      qty,
+      availableQty: Number(selectedVariant?.available_qty ?? lookup.available_qty),
+      serverPrice: Number(pricedLine.authoritative_unit_price),
+      priceVersion: pricedLine.price_version,
+    };
+    const cachedPrice = Number(sourceProduct.selling_price);
+    if (
+      pricedLine.discrepancy
+      || Math.abs(Number(pricedLine.authoritative_unit_price) - serverLookupPrice) >= 0.01
+      || (!selectedVariant && Math.abs(Number(pricedLine.authoritative_unit_price) - cachedPrice) >= 0.01)
+    ) {
+      setPendingRetailLine(resolved);
+      setRetailException({
+        kind: "price_changed",
+        code: selectedVariant?.sku ?? sourceProduct.sku,
+        message: `ราคา ${sourceProduct.name} เปลี่ยนหลัง Server ตรวจสอบ`,
+        previousPrice: selectedVariant ? serverLookupPrice : cachedPrice,
+        serverPrice: resolved.serverPrice,
+      });
+      return;
+    }
+    addRetailResolvedLine(resolved);
+  }
+
+  async function handleRetailLookup(code: string, source?: ProductListItem, qty = 1): Promise<void> {
+    if (!currentShift?.location_id) {
+      setRetailException({ kind: "permission", code, message: "ต้องเปิดกะและเลือกคลังก่อนสแกนสินค้า" });
+      return;
+    }
+    setRetailLookupBusy(true);
+    setRetailVariantProduct(null);
+    setSelectedRetailVariantId(null);
+    setPendingRetailLine(null);
+    try {
+      const response = await productApi.retailLookup({ code, location_id: currentShift.location_id, qty });
+      const result = response.data.data;
+      if (result.result === "not_found" || !result.product) {
+        setRetailException({
+          kind: "not_found",
+          code,
+          message: result.error_code === "ambiguous_code"
+            ? "รหัสนี้ตรงกับสินค้ามากกว่าหนึ่งรายการ Server จึงบล็อกไว้"
+            : "ไม่พบบาร์โค้ดหรือ SKU ใน Retail Catalog ของ Brand นี้",
+        });
+        return;
+      }
+      let sourceProduct = source ?? eligibleProducts.find((item) => item.id === result.product?.id);
+      if (!sourceProduct) {
+        const catalogResponse = await productApi.list({
+          search: code,
+          is_active: true,
+          catalog_scope: "retail_sale",
+          page: 1,
+          limit: 20,
+        });
+        const signedRows = catalogResponse.data.data as ProductListItem[];
+        sourceProduct = signedRows.find((item) => item.id === result.product?.id);
+      }
+      if (!sourceProduct) {
+        setRetailException({ kind: "permission", code, message: "สินค้าอยู่นอก Catalog ที่ Server ลงนามให้ Counter นี้" });
+        return;
+      }
+      if (result.result === "variant_required") {
+        setRetailVariantProduct(result.product);
+        setSelectedRetailVariantId(null);
+        setRetailException({ kind: "variant_required", code, message: "เลือก Variant ที่ต้องการก่อนเพิ่มลงตะกร้า" });
+        return;
+      }
+      if (result.result === "unavailable") {
+        setRetailException({
+          kind: "unavailable",
+          code,
+          message: `${result.product.name} ไม่มี Stock ที่ขายได้ในคลังของกะนี้`,
+        });
+        return;
+      }
+      await validateRetailLine(result.product, sourceProduct, null, qty);
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setRetailException({
+        kind: /permission|required|context/i.test(message) ? "permission" : "error",
+        code,
+        message,
+      });
+    } finally {
+      setRetailLookupBusy(false);
+    }
+  }
+
   async function handleProductCodeLookup(rawKeyword: string): Promise<void> {
     const keyword = rawKeyword.trim().toLowerCase();
     if (!keyword) {
       return;
     }
+    if (isRetailMode && (!retailContextValid || !catalogCacheTrusted)) {
+      toast({
+        title: "ยังสแกนสินค้าไม่ได้",
+        description: "รอ Server ยืนยัน Retail Catalog ของ Company / Brand / Branch นี้ก่อน",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (isRetailMode) {
+      await handleRetailLookup(rawKeyword);
+      return;
+    }
     let candidate =
       visibleProducts.find((item) => item.barcode?.toLowerCase() === keyword || item.sku.toLowerCase() === keyword) ??
-      offlineProducts.find((item) => item.barcode?.toLowerCase() === keyword || item.sku.toLowerCase() === keyword);
+      eligibleProducts.find((item) => item.barcode?.toLowerCase() === keyword || item.sku.toLowerCase() === keyword);
     if (!candidate && isOnline) {
-      const response = await productApi.list({ search: keyword, is_active: true, page: 1, limit: 20 });
+      const response = await productApi.list({
+        search: keyword,
+        is_active: true,
+        catalog_scope: catalogScope,
+        page: 1,
+        limit: 20,
+      });
       const rows = response.data.data as ProductListItem[];
       candidate = rows.find((item) => item.barcode?.toLowerCase() === keyword || item.sku.toLowerCase() === keyword);
     }
@@ -696,6 +1446,14 @@ export default function POSPage(): JSX.Element {
       return;
     }
     toast({ title: "ไม่พบสินค้า", description: `ไม่พบบาร์โค้ดหรือ SKU: ${rawKeyword}` });
+  }
+
+  function handleProductSelection(product: ProductListItem, qty = 1): void {
+    if (isRetailMode) {
+      void handleRetailLookup(product.barcode?.trim() || product.sku, product, qty);
+      return;
+    }
+    addToCart(product, qty);
   }
 
   async function handleBarcodeLookup(): Promise<void> {
@@ -773,25 +1531,49 @@ export default function POSPage(): JSX.Element {
   }
 
   async function handleOpenShift(): Promise<void> {
-    if (!selectedLocationId) {
+    if (!selectedLocationId || !isOnline || !pairedDevice) {
+      toast({
+        title: "ยังเปิดกะไม่ได้",
+        description: !isOnline ? "ต้องออนไลน์เพื่อให้ Server ยืนยันกะ" : !pairedDevice ? "กรุณาจับคู่เครื่อง Counter ก่อน" : "กรุณาเลือกคลัง",
+        variant: "destructive",
+      });
       return;
     }
-    const response = await posApi.openShift({ location_id: selectedLocationId, opening_cash: openingCash });
-    const shift = response.data.data as CashierShift;
-    setCurrentShift(shift);
-    window.localStorage.setItem(SHIFT_CACHE_KEY, JSON.stringify(shift));
-    setShiftGateOpen(false);
+    try {
+      const response = await posApi.openShift({
+        location_id: selectedLocationId,
+        opening_cash: openingCash,
+        shift_type: "staff_cashier",
+        idempotency_key: openShiftIdempotencyRef.current,
+      });
+      const shift = response.data.data;
+      setCurrentShift(shift);
+      window.localStorage.setItem(SHIFT_CACHE_KEY, JSON.stringify(shift));
+      openShiftIdempotencyRef.current = `shift-open:${generateClientOrderId()}`;
+      setShiftGateOpen(false);
+      toast({ title: "Server ยืนยันเปิดกะแล้ว", description: `${shift.shift_number} · Counter ${shift.opened_device_code ?? pairedDevice.device_code}` });
+    } catch (error) {
+      toast({ title: "เปิดกะไม่สำเร็จ", description: error instanceof Error ? error.message : "ตรวจสอบ Counter และลองใหม่", variant: "destructive" });
+    }
   }
 
-  async function handleCloseShift(closingCash: number, shiftNote: string): Promise<void> {
-    if (!currentShift) {
-      return;
-    }
-    const response = await posApi.closeShift(currentShift.id, { closing_cash: closingCash, note: shiftNote });
-    setCurrentShift(response.data.data as CashierShift);
+  function handleShiftUpdated(shift: CashierShift): void {
+    setCurrentShift(shift);
+    window.localStorage.setItem(SHIFT_CACHE_KEY, JSON.stringify(shift));
+  }
+
+  function handleShiftClosed(shift: CashierShift): void {
+    setCurrentShift(shift);
     window.localStorage.removeItem(SHIFT_CACHE_KEY);
     setCartItems([]);
     navigate("/admin");
+  }
+
+  function handleShiftHandover(shift: CashierShift): void {
+    setCurrentShift(shift);
+    window.localStorage.removeItem(SHIFT_CACHE_KEY);
+    setCartItems([]);
+    logout();
   }
 
   function handleOrderDiscountChange(nextValue: number): void {
@@ -814,7 +1596,10 @@ export default function POSPage(): JSX.Element {
 
   function openPriceEditor(item: CartItem): void {
     setPriceEditProductId(item.product_id);
-    setPriceEditValue(item.original_price.toString());
+    setPriceEditVariantId(item.variant_id);
+    setPriceEditValue((item.price_override?.requested_unit_price ?? item.original_price).toString());
+    setPriceEditReason(item.price_override?.reason ?? "");
+    setPriceEditReasonCode(item.price_override?.reason_code ?? "other");
     setPriceEditorOpen(true);
   }
 
@@ -827,15 +1612,26 @@ export default function POSPage(): JSX.Element {
       toast({ title: "กรอกราคาใหม่ไม่ถูกต้อง" });
       return;
     }
+    if (priceEditReason.trim().length < 3) {
+      toast({ title: "กรุณาระบุเหตุผลอย่างน้อย 3 ตัวอักษร" });
+      return;
+    }
     updateCartItem(priceEditProductId, (current) => ({
       ...current,
-      original_price: nextPrice,
       unit_price: nextPrice,
-    }));
+      price_override: {
+        requested_unit_price: nextPrice,
+        reason_code: priceEditReasonCode,
+        reason: priceEditReason.trim(),
+      },
+    }), priceEditVariantId);
     setPriceEditorOpen(false);
     setPriceEditProductId(null);
+    setPriceEditVariantId(null);
     setPriceEditValue("");
-    toast({ title: "อัปเดตราคาในบิลแล้ว" });
+    setPriceEditReason("");
+    setPriceEditReasonCode("other");
+    toast({ title: "บันทึกคำขอเปลี่ยนราคาแล้ว", description: "Server จะตรวจนโยบายและสิทธิ์อีกครั้งก่อนชำระเงิน" });
   }
 
   async function executeVoidSale(approvalToken?: string): Promise<void> {
@@ -871,152 +1667,6 @@ export default function POSPage(): JSX.Element {
     }
   }
 
-  async function executeRefundSale(approvalToken?: string): Promise<void> {
-    if (!refundOrder) return;
-    await posApi.refundSale(refundOrder.id, refundReason.trim(), approvalToken);
-    toast({ title: "Refund สำเร็จ", description: refundOrder.order_number });
-    setRefundOrder(null);
-    setRefundReason("");
-    await recentSalesQuery.refetch();
-  }
-
-  async function handleRefundSale(): Promise<void> {
-    if (!refundOrder || !refundReason.trim()) {
-      toast({ title: "กรุณาระบุเหตุผลในการคืนสินค้า" });
-      return;
-    }
-    if (!hasPermission("pos.refund.create")) {
-      const orderId = refundOrder.id;
-      const reason = refundReason.trim();
-      setPendingManagerApproval({
-        action: "pos.refund.create",
-        requestPayload: { order_id: orderId, refund_reason: reason },
-        reason,
-        description: `คืนเงินเต็มบิล ${refundOrder.order_number} ต้องได้รับอนุมัติจาก Manager`,
-        onApproved: executeRefundSale
-      });
-      return;
-    }
-    try {
-      await executeRefundSale();
-    } catch (error) {
-      toast({ title: "Refund ไม่สำเร็จ", description: error instanceof Error ? error.message : "ลองใหม่อีกครั้ง" });
-    }
-  }
-
-  async function beginExchangeFlow(
-    order: SaleOrder,
-    refundAmount: number,
-    refundReasonValue: string,
-    refundedItemNames: string[],
-    refundedSourceItems: Array<{ product_id: string; product_name: string }>,
-  ): Promise<void> {
-    if (cart.items.length > 0) {
-      const ok = await confirm({ title: "เริ่มบิลแลกสินค้า", description: "มีสินค้าอยู่ในตะกร้าปัจจุบัน ต้องการล้างแล้วเริ่มบิลแลกหรือไม่", confirmLabel: "ล้างและเริ่ม", variant: "destructive" });
-      if (!ok) return;
-    }
-    resetActiveSale();
-    setCustomerName(order.customer_name ?? "");
-    setCustomerPhone(order.customer_phone ?? "");
-    setCustomerTaxId(order.customer_tax_id ?? "");
-    setSelectedCustomer(null);
-    setExchangeContext({
-      source_order_id: order.id,
-      source_order_number: order.order_number,
-      refund_amount: refundAmount,
-      refunded_items: refundedItemNames,
-      source_items: refundedSourceItems,
-      refund_reason: refundReasonValue,
-    });
-    const noteLines = [
-      `EXCHANGE FROM ${order.order_number}`,
-      `Refund ${formatThaiCurrency(refundAmount)}`,
-      refundedItemNames.length > 0 ? `Returned: ${refundedItemNames.join(", ")}` : "",
-      refundReasonValue ? `Reason: ${refundReasonValue}` : "",
-    ].filter(Boolean);
-    setNote(noteLines.join("\n"));
-    setRecentSalesOpen(false);
-    searchRef.current?.focus();
-    toast({
-      title: "เริ่มบิลแลกสินค้าแล้ว",
-      description: `อ้างอิง ${order.order_number} และพร้อมเพิ่มสินค้าใหม่ต่อได้เลย`,
-    });
-  }
-
-  async function handlePartialRefundSale(
-    startExchange = false,
-    approvalToken?: string
-  ): Promise<void> {
-    if (!partialRefundOrder || !partialRefundReason.trim()) {
-      toast({ title: "กรุณาระบุเหตุผลในการคืนสินค้า" });
-      return;
-    }
-    const refundItems = partialRefundOrder.items
-      .map((item) => {
-        const qty = Number(partialRefundQtys[item.id] ?? 0);
-        return {
-          order_item_id: item.id,
-          qty: Number.isFinite(qty) ? qty : 0,
-        };
-      })
-      .filter((item) => item.qty > 0);
-    if (refundItems.length === 0) {
-      toast({ title: "เลือกสินค้าที่ต้องการคืนก่อน" });
-      return;
-    }
-    if (!hasPermission("pos.refund.create") && !approvalToken) {
-      const orderId = partialRefundOrder.id;
-      const reason = partialRefundReason.trim();
-      setPendingManagerApproval({
-        action: "pos.refund.create",
-        requestPayload: {
-          order_id: orderId,
-          refund_reason: reason,
-          items: refundItems
-        },
-        reason,
-        description: `คืนบางรายการจากบิล ${partialRefundOrder.order_number} ต้องได้รับอนุมัติจาก Manager`,
-        onApproved: (token) => handlePartialRefundSale(startExchange, token)
-      });
-      return;
-    }
-    const refundedItemNames = partialRefundOrder.items
-      .filter((item) => refundItems.some((entry) => entry.order_item_id === item.id))
-      .map((item) => item.product_name);
-    try {
-      const response = await posApi.partialRefundSale(partialRefundOrder.id, {
-        refund_reason: partialRefundReason.trim(),
-        items: refundItems,
-        approval_token: approvalToken,
-      });
-      const updatedOrder = response.data.data as SaleOrder;
-      const refundAmount = partialRefundPreview.amount;
-      toast({ title: "คืนบางรายการสำเร็จ", description: partialRefundOrder.order_number });
-      setPartialRefundOrder(null);
-      setPartialRefundReason("");
-      setPartialRefundQtys({});
-      await recentSalesQuery.refetch();
-      if (startExchange) {
-        await beginExchangeFlow(
-          updatedOrder,
-          refundAmount,
-          partialRefundReason.trim(),
-          refundedItemNames,
-          partialRefundOrder.items
-            .filter((item) => refundItems.some((entry) => entry.order_item_id === item.id))
-            .map((item) => ({
-              product_id: item.product_id,
-              product_name: item.product_name,
-              qty: refundItems.find((entry) => entry.order_item_id === item.id)?.qty ?? 1,
-            })),
-        );
-      }
-    } catch (error) {
-      if (approvalToken) throw error;
-      toast({ title: "คืนบางรายการไม่สำเร็จ", description: error instanceof Error ? error.message : "ลองใหม่อีกครั้ง" });
-    }
-  }
-
   function resetActiveSale(): void {
     setCartItems([]);
     setOrderDiscount(0);
@@ -1038,81 +1688,325 @@ export default function POSPage(): JSX.Element {
     setLoyaltyDiscount(0);
     setNote("");
     setExchangeContext(null);
+    setResumedHoldDraft(null);
+    setRetailException(null);
+    setRetailVariantProduct(null);
+    setPendingRetailLine(null);
+    setPendingRetailQuote(null);
+    checkoutIdRef.current = generateClientOrderId();
   }
 
   async function refreshHeldBills(): Promise<void> {
     setHeldBillsVersion((value) => value + 1);
   }
 
-  async function handleHoldBill(): Promise<void> {
-    if (!currentShift || cart.items.length === 0) {
-      return;
-    }
-    const defaultLabel = customerName.trim() || selectedCustomer?.display_name || `${cart.items[0]?.product_name ?? "บิล"} +${Math.max(cart.items.length - 1, 0)}`;
-    const draft: HeldSaleDraft = {
-      id: generateClientOrderId(),
+  function currentHoldDraft(label: string, id: string): HeldSaleDraft {
+    if (!currentShift) throw new Error("ต้องเปิดกะก่อนพักบิล");
+    return {
+      id,
       shift_id: currentShift.id,
       location_id: currentShift.location_id,
       branch_id: branchId ?? null,
-      label: holdLabel.trim() || defaultLabel,
+      sales_channel: isTakeawayMode ? "takeaway" : "walk_in",
+      label,
       items: cart.items,
       order_discount: orderDiscount,
       loyalty_discount: loyaltyDiscount,
-      payment_method: paymentMethod,
-      paid_amount: paidAmount,
-      payment_reference: paymentReference,
-      split_payment_enabled: splitPaymentEnabled,
-      secondary_payment_method: secondaryPaymentMethod,
-      secondary_payment_amount: secondaryPaymentAmount,
-      secondary_payment_reference: secondaryPaymentReference,
+      payment_method: "cash",
+      paid_amount: 0,
+      payment_reference: null,
+      split_payment_enabled: false,
+      secondary_payment_method: "promptpay",
+      secondary_payment_amount: 0,
+      secondary_payment_reference: null,
       customer_name: customerName,
-      customer_phone: customerPhone,
-      customer_tax_id: customerTaxId,
-      customer_search: customerSearch,
+      customer_phone: "",
+      customer_tax_id: "",
+      customer_search: "",
       selected_customer: selectedCustomer,
       note,
       exchange_context: exchangeContext,
       held_at: Date.now(),
+      sync_state: isOnline ? "pending_sync" : "local_only",
+      server_backed: false,
     };
-    await db.heldBills.put(draft);
-    resetActiveSale();
-    setHoldLabel("");
-    await refreshHeldBills();
-    toast({ title: "พักบิลแล้ว", description: `${draft.label} ถูกเก็บไว้เรียบร้อย` });
+  }
+
+  async function handleHoldBill(): Promise<boolean> {
+    if (!currentShift || cart.items.length === 0) {
+      return false;
+    }
+    if (isRetailMode && !isOnline) {
+      toast({
+        title: "Retail ต้องเชื่อมต่อ Server ก่อนพักบิล",
+        description: "ไม่สร้าง Local shadow เพื่อป้องกันบิลซ้ำและข้อมูลราคาไม่ตรงกัน",
+        variant: "destructive",
+      });
+      return false;
+    }
+    const defaultLabel = customerName.trim() || selectedCustomer?.display_name || `${cart.items[0]?.product_name ?? "บิล"} +${Math.max(cart.items.length - 1, 0)}`;
+    const id = generateClientOrderId();
+    const draft = currentHoldDraft(holdLabel.trim() || defaultLabel, id);
+    setHeldBillsBusy("create");
+    try {
+      if (isOnline) {
+        if (!hasPermission("pos.draft.create")) {
+          throw new Error("คุณไม่มีสิทธิ์พักบิลบน Server");
+        }
+        await posApi.createHoldDraft(holdDraftPayload(draft, `hold:${id}`));
+      } else {
+        await db.heldBills.put(draft);
+      }
+      resetActiveSale();
+      setHoldLabel("");
+      setHoldCreateOpen(false);
+      await refreshHeldBills();
+      toast({
+        title: "พักบิลแล้ว",
+        description: isOnline ? `${draft.label} พร้อมเรียกต่อจากทุก Counter` : `${draft.label} อยู่ในเครื่องนี้และรอซิงก์`,
+      });
+      return true;
+    } catch (error) {
+      toast({
+        title: "ยังพักบิลไม่สำเร็จ",
+        description: `${getErrorMessage(error)} ตะกร้ายังอยู่ครบ`,
+        variant: "destructive",
+      });
+      return false;
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  function restoreHeldCart(draft: HeldSaleDraft, items: CartItem[]): void {
+    setCartItems(items.map(normalizeHeldCartItem));
+    setOrderDiscount(draft.order_discount);
+    setPaymentMethod("cash");
+    setPaidAmount(0);
+    setCreditRef("");
+    setSplitPaymentEnabled(false);
+    setSecondaryPaymentMethod("promptpay");
+    setSecondaryPaymentAmount(0);
+    setSecondaryPaymentReference("");
+    setCustomerName(draft.customer_name);
+    setCustomerPhone("");
+    setCustomerTaxId("");
+    setCustomerSearch("");
+    setDebouncedCustomerSearch("");
+    setSelectedCustomer(draft.selected_customer);
+    setLoyaltyDiscount(isRetailMode ? 0 : draft.loyalty_discount);
+    setNote(draft.note);
+    setExchangeContext(draft.exchange_context ?? null);
+    navigate(isRetailMode ? "/retail/pos" : draft.sales_channel === "takeaway" ? "/restaurant/pos?channel=takeaway" : "/restaurant/pos", { replace: true });
+  }
+
+  async function resumeHeldBillNow(draft: HeldSaleDraft): Promise<void> {
+    if (!currentShift) return;
+    setHeldBillsBusy(draft.id);
+    try {
+      if (!draft.server_backed || !draft.server_id) {
+        restoreHeldCart(draft, draft.items);
+        await db.heldBills.delete(draft.id);
+        setResumedHoldDraft(null);
+      } else {
+        if (!isOnline) throw new Error("เชื่อมต่อ Server ก่อนเรียกบิลจากทุก Counter");
+        const claimKey = `claim:${draft.server_id}:${generateClientOrderId()}`;
+        const claim = (await posApi.claimHoldDraft(draft.server_id, {
+          expected_version: draft.version,
+          idempotency_key: claimKey,
+          shift_id: currentShift.id,
+          location_id: currentShift.location_id,
+        })).data.data as HoldDraftClaimResult;
+        if (claim.requires_review) {
+          setPendingRevalidation({ draft, claim });
+          await refreshHeldBills();
+          return;
+        }
+        await finalizeHeldResume(draft, claim, false);
+        return;
+      }
+      await refreshHeldBills();
+      setHeldBillsOpen(false);
+      setPendingResumeDraft(null);
+      toast({ title: "เรียกบิลกลับแล้ว", description: `${draft.label} พร้อมขายต่อ และจะตรวจราคาอีกครั้งตอนชำระ` });
+    } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
+      toast({ title: "เรียกบิลกลับไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+      await refreshHeldBills();
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function finalizeHeldResume(draft: HeldSaleDraft, claim: HoldDraftClaimResult, acceptRevalidation: boolean): Promise<void> {
+    if (!currentShift || !draft.server_id) return;
+    setHeldBillsBusy(draft.id);
+    try {
+      const resumed = (await posApi.resumeHoldDraft(draft.server_id, {
+        expected_version: claim.draft.version,
+        idempotency_key: `resume:${draft.server_id}:${generateClientOrderId()}`,
+        claim_id: claim.draft.claim_id,
+        shift_id: currentShift.id,
+        location_id: currentShift.location_id,
+        accept_revalidation: acceptRevalidation,
+      })).data.data as ServerHoldDraft;
+      restoreHeldCart(draft, claim.resume_cart.items);
+      setResumedHoldDraft({ id: resumed.id, version: resumed.version });
+      setPendingRevalidation(null);
+      setPendingResumeDraft(null);
+      setHeldBillsOpen(false);
+      await refreshHeldBills();
+      toast({ title: "เรียกบิลกลับแล้ว", description: `${draft.label} พร้อมขายต่อ และจะตรวจราคาอีกครั้งตอนชำระ` });
+    } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
+      toast({ title: "เรียกบิลกลับไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+      await refreshHeldBills();
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function rejectHeldRevalidation(): Promise<void> {
+    const pending = pendingRevalidation;
+    if (!pending?.draft.server_id || !currentShift) return;
+    setHeldBillsBusy(pending.draft.id);
+    try {
+      await posApi.releaseHoldDraft(pending.draft.server_id, {
+        expected_version: pending.claim.draft.version,
+        idempotency_key: `release:${pending.draft.server_id}:${generateClientOrderId()}`,
+        claim_id: pending.claim.draft.claim_id,
+        shift_id: currentShift.id,
+        reason: "Cashier rejected revalidation changes",
+      });
+      setPendingRevalidation(null);
+      await refreshHeldBills();
+    } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
+      toast({ title: "ปล่อยสิทธิ์ไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setHeldBillsBusy(null);
+    }
   }
 
   async function handleResumeHeldBill(draft: HeldSaleDraft): Promise<void> {
-    if (cart.items.length > 0 && !window.confirm("มีสินค้าอยู่ในตะกร้าปัจจุบัน ต้องการแทนที่ด้วยบิลที่พักไว้หรือไม่")) {
+    if (cart.items.length > 0) {
+      setPendingResumeDraft(draft);
       return;
     }
-    setCartItems(draft.items);
-    setOrderDiscount(draft.order_discount);
-    setPaymentMethod(draft.payment_method);
-    setPaidAmount(draft.paid_amount);
-    setCreditRef(draft.payment_reference ?? "");
-    setSplitPaymentEnabled(draft.split_payment_enabled ?? false);
-    setSecondaryPaymentMethod(draft.secondary_payment_method ?? "promptpay");
-    setSecondaryPaymentAmount(draft.secondary_payment_amount ?? 0);
-    setSecondaryPaymentReference(draft.secondary_payment_reference ?? "");
-    setCustomerName(draft.customer_name);
-    setCustomerPhone(draft.customer_phone);
-    setCustomerTaxId(draft.customer_tax_id);
-    setCustomerSearch(draft.customer_search);
-    setDebouncedCustomerSearch("");
-    setSelectedCustomer(draft.selected_customer);
-    setLoyaltyDiscount(draft.loyalty_discount);
-    setNote(draft.note);
-    setExchangeContext(draft.exchange_context ?? null);
-    await db.heldBills.delete(draft.id);
-    await refreshHeldBills();
-    setHeldBillsOpen(false);
-    toast({ title: "เรียกบิลกลับแล้ว", description: `${draft.label} พร้อมขายต่อ` });
+    await resumeHeldBillNow(draft);
   }
 
-  async function handleDeleteHeldBill(draftId: string): Promise<void> {
-    await db.heldBills.delete(draftId);
-    await refreshHeldBills();
-    toast({ title: "ลบบิลที่พักไว้แล้ว" });
+  async function handleDeleteHeldBill(draft: HeldSaleDraft, reason: string): Promise<void> {
+    setHeldBillsBusy(draft.id);
+    try {
+      if (draft.server_backed && draft.server_id) {
+        await posApi.discardHoldDraft(draft.server_id, {
+          expected_version: draft.version,
+          idempotency_key: `discard:${draft.server_id}:${generateClientOrderId()}`,
+          reason,
+          shift_id: currentShift?.id,
+        });
+      } else {
+        await db.heldBills.delete(draft.id);
+      }
+      await refreshHeldBills();
+      toast({ title: "ยกเลิกบิลที่พักไว้แล้ว" });
+    } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
+      toast({ title: "ยกเลิกบิลไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function handleReleaseHeldBill(draft: HeldSaleDraft): Promise<void> {
+    if (!draft.server_id || !draft.claim_id || !currentShift) return;
+    setHeldBillsBusy(draft.id);
+    try {
+      await posApi.releaseHoldDraft(draft.server_id, {
+        expected_version: draft.version,
+        idempotency_key: `release:${draft.server_id}:${generateClientOrderId()}`,
+        claim_id: draft.claim_id,
+        shift_id: currentShift.id,
+        reason: "Operator released Hold Draft claim",
+      });
+      await refreshHeldBills();
+      toast({ title: "ปล่อยสิทธิ์บิลแล้ว" });
+    } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
+      toast({ title: "ปล่อยสิทธิ์ไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function handleReassignHeldBill(draft: HeldSaleDraft, assigneeUserId: string, reason: string): Promise<void> {
+    if (!draft.server_id) return;
+    setHeldBillsBusy(draft.id);
+    try {
+      await posApi.updateHoldDraft(draft.server_id, {
+        expected_version: draft.version,
+        idempotency_key: `reassign:${draft.server_id}:${generateClientOrderId()}`,
+        assignee_user_id: assigneeUserId,
+        reason,
+      });
+      await refreshHeldBills();
+      toast({ title: "มอบหมายบิลแล้ว" });
+    } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
+      toast({ title: "มอบหมายไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function handleReopenHeldBill(draft: HeldSaleDraft): Promise<void> {
+    if (!draft.server_backed || !draft.server_id || !currentShift || !isOnline) return;
+    setHeldBillsBusy(draft.id);
+    try {
+      await posApi.reopenHoldDraft(draft.server_id, {
+        expected_version: draft.version,
+        idempotency_key: `reopen:${draft.server_id}:${generateClientOrderId()}`,
+        shift_id: currentShift.id,
+        location_id: currentShift.location_id,
+        reason: "Manual recovery from Hold Draft history",
+      });
+      await refreshHeldBills();
+      toast({ title: "สร้างบิลกู้คืนแล้ว", description: "ตรวจราคาและรายการล่าสุดก่อนเรียกกลับ" });
+    } catch (error) {
+      const conflict = getHoldConflict(error);
+      if (conflict) setHoldConflict(conflict);
+      toast({ title: "กู้คืนบิลไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setHeldBillsBusy(null);
+    }
+  }
+
+  async function openCashDrawerAfterPayment(payments: PaymentDraft[]): Promise<void> {
+    const hasCash = payments.some((payment) => payment.payment_method === "cash" && Number(payment.amount) > 0);
+    if (!hasCash) return;
+    try {
+      const opened = await openConfiguredCashDrawer();
+      if (!opened) {
+        toast({
+          title: "ชำระเงินสำเร็จ แต่ลิ้นชักไม่เปิด",
+          description: "ยังไม่ได้เชื่อมเครื่องพิมพ์ ESC/POS กับอุปกรณ์นี้",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "ชำระเงินสำเร็จ แต่ลิ้นชักไม่เปิด",
+        description: describeEscPosError(error),
+        variant: "destructive",
+      });
+    }
   }
 
   async function queueOfflineSale(): Promise<void> {
@@ -1121,6 +2015,12 @@ export default function POSPage(): JSX.Element {
     }
     const pendingSale: PendingSale = {
       client_order_id: generateClientOrderId(),
+      company_id: companyId ?? undefined,
+      brand_id: brandId,
+      branch_id: branchId,
+      user_id: user.id,
+      device_id: pairedDevice?.device_id ?? null,
+      business_type: "restaurant",
       shift_id: currentShift.id,
       location_id: currentShift.location_id,
       items: cart.items,
@@ -1139,7 +2039,10 @@ export default function POSPage(): JSX.Element {
       total_amount: finalTotal,
       change_amount: changeAmount,
       created_at: Date.now(),
+      updated_at: Date.now(),
       synced: false,
+      status: "pending",
+      attempt_count: 0,
     };
     await db.pendingSales.put(pendingSale);
     await db.transaction("rw", db.stockBalances, async () => {
@@ -1158,11 +2061,38 @@ export default function POSPage(): JSX.Element {
     const offlineOrder = buildOfflineOrder(pendingSale, branchId, user.id);
     setLastOrder(offlineOrder);
     setShowReceipt(true);
+    await openCashDrawerAfterPayment(pendingSale.payments ?? []);
     resetActiveSale();
     toast({ title: "บันทึกออฟไลน์แล้ว", description: "รายการขายถูกคิวไว้เพื่อ sync ภายหลัง" });
   }
 
-  function buildCheckoutPayload(approvalToken?: string): Record<string, unknown> {
+  function buildPricingPayload(): Record<string, unknown> {
+    return {
+      items: cart.items.map((item) => ({
+        product_id: item.product_id,
+        variant_id: item.variant_id,
+        qty: item.qty,
+        discount_amount: item.discount_amount,
+        discount_type: item.discount_type,
+        expected_unit_price: item.original_price,
+        ...(item.expected_price_version ? { expected_price_version: item.expected_price_version } : {}),
+        ...(item.price_override ? { price_override: item.price_override } : {}),
+      })),
+      discount_amount: totalDiscount,
+      discount_type: "amount",
+      channel: "pos",
+      currency: "THB",
+      customer_id: selectedCustomer?.id ?? null,
+      idempotency_key: `${checkoutIdRef.current}:price`,
+      cart_version: 1,
+    };
+  }
+
+  function buildCheckoutPayload(
+    approvalToken?: string,
+    priceOverrideApprovalToken?: string,
+    quote?: PricingCalculation,
+  ): Record<string, unknown> {
     if (!currentShift) return {};
     return {
         shift_id: currentShift.id,
@@ -1177,6 +2107,8 @@ export default function POSPage(): JSX.Element {
           discount_type: item.discount_type,
           vat_type: item.vat_type,
           vat_rate: item.vat_rate,
+          ...(item.expected_price_version ? { expected_price_version: item.expected_price_version } : {}),
+          ...(item.price_override ? { price_override: item.price_override } : {}),
         })),
         discount_amount: totalDiscount,
         discount_type: "amount",
@@ -1189,60 +2121,227 @@ export default function POSPage(): JSX.Element {
         customer_tax_id: customerTaxId || selectedCustomer?.tax_id || null,
         customer_id: selectedCustomer?.id ?? null,
         note: exchangeNote,
-        ...(approvalToken ? { approval_token: approvalToken } : {})
+        client_order_id: checkoutIdRef.current,
+        channel: "pos",
+        currency: "THB",
+        cart_version: quote?.cart_version ?? 1,
+        ...(quote ? {
+          pricing_quote_id: quote.quote_id,
+          pricing_calculation_hash: quote.calculation_hash,
+        } : {}),
+        ...(approvalToken ? { approval_token: approvalToken } : {}),
+        ...(priceOverrideApprovalToken ? { price_override_approval_token: priceOverrideApprovalToken } : {}),
+        ...(resumedHoldDraft ? {
+          source_hold_draft_id: resumedHoldDraft.id,
+          source_hold_draft_version: resumedHoldDraft.version,
+        } : {}),
     };
   }
 
-  async function executeOnlineCheckout(approvalToken?: string): Promise<void> {
-      const response = await posApi.createSale(buildCheckoutPayload(approvalToken));
+  function acceptRetailServerPrice(): void {
+    if (pendingRetailLine) {
+      addRetailResolvedLine(pendingRetailLine);
+      return;
+    }
+    if (pendingRetailQuote) {
+      setCartItems((current) => current.map((item) => {
+        const line = pendingRetailQuote.lines.find(
+          (entry) => entry.product_id === item.product_id && entry.variant_id === item.variant_id,
+        );
+        if (!line) return item;
+        const price = Number(line.authoritative_unit_price);
+        return {
+          ...item,
+          unit_price: price,
+          original_price: price,
+          expected_price_version: line.price_version,
+          subtotal: price * item.qty,
+        };
+      }));
+      setPendingRetailQuote(null);
+      setRetailException(null);
+      checkoutIdRef.current = generateClientOrderId();
+      window.setTimeout(() => searchRef.current?.focus(), 0);
+    }
+  }
+
+  async function executeOnlineCheckout(
+    approvalToken?: string,
+    priceOverrideApprovalToken?: string,
+    existingQuote?: PricingCalculation,
+  ): Promise<void> {
+      const quote = existingQuote ?? (await posApi.calculatePricing(buildPricingPayload())).data.data;
+      const serverTotal = Number(quote.total_amount);
+      const totalsDiffer = Math.abs(serverTotal - finalTotal) >= 0.01 || quote.has_price_discrepancy;
+      if (!existingQuote && totalsDiffer) {
+        if (isRetailMode) {
+          const firstChangedLine = quote.lines.find((line) => line.discrepancy) ?? quote.lines[0];
+          setPendingRetailQuote(quote);
+          setRetailException({
+            kind: "price_changed",
+            code: firstChangedLine?.product_id ?? "retail-cart",
+            message: "ยอดหรือราคาบิลเปลี่ยนหลัง Server ตรวจสอบ กรุณารับราคาล่าสุดแล้วตรวจบิลอีกครั้ง",
+            previousPrice: finalTotal,
+            serverPrice: serverTotal,
+          });
+          return;
+        }
+        const accepted = window.confirm(
+          `ราคาจาก Server เปลี่ยนจาก ${formatThaiCurrency(finalTotal)} เป็น ${formatThaiCurrency(serverTotal)} ต้องการตรวจสอบและใช้ราคาใหม่หรือไม่?`
+        );
+        if (!accepted) return;
+      }
+      if (currentPaidAmount < serverTotal) {
+        toast({
+          title: "ยอดรับชำระไม่พอหลังตรวจราคากับ Server",
+          description: `ยอดที่ต้องชำระ ${formatThaiCurrency(serverTotal)}`,
+          variant: "destructive",
+        });
+        return;
+      }
+      const exactPayload = buildCheckoutPayload(approvalToken, priceOverrideApprovalToken, quote);
+      if (Number(quote.discount_percentage) > cashierDiscountLimit && !canOverrideDiscount && !approvalToken) {
+        setPendingManagerApproval({
+          action: "pos.discount.override",
+          requestPayload: exactPayload,
+          reason: `ส่วนลด ${Number(quote.discount_percentage).toFixed(2)}% เกินเพดาน Cashier ${cashierDiscountLimit.toFixed(2)}%`,
+          description: "ส่วนลดรวมทั้งส่วนลดสินค้า ส่วนลดบิล แต้ม และเครดิตเกินเพดาน Cashier",
+          onApproved: (token) => executeOnlineCheckout(token, priceOverrideApprovalToken, quote),
+        });
+        return;
+      }
+      const selfApprovalAllowed = branchSettings?.pos_price_override_self_approval ?? false;
+      if (
+        quote.requires_price_override_approval
+        && !priceOverrideApprovalToken
+        && !(canApprovePriceOverride && selfApprovalAllowed)
+      ) {
+        setPendingManagerApproval({
+          action: "pos.price.override",
+          requestPayload: exactPayload,
+          reason: cart.items.map((item) => item.price_override?.reason).filter(Boolean).join("; "),
+          description: "ราคาที่ขอเปลี่ยนเกินเกณฑ์อัตโนมัติ ต้องได้รับอนุมัติจาก Manager คนอื่น",
+          onApproved: (token) => executeOnlineCheckout(approvalToken, token, quote),
+        });
+        return;
+      }
+      const response = await posApi.createSale(exactPayload);
       const order = response.data.data as SaleOrder;
       setLastOrder(order);
       setShowReceipt(true);
+      await openCashDrawerAfterPayment(checkoutPayments);
       resetActiveSale();
       await db.completedOrders.put({ ...order, synced_at: Date.now() });
       await syncStockBalances(branchId ?? undefined);
+      await queryClient.invalidateQueries({ queryKey: ["pos", "stock-balances"] });
       toast({ title: "ชำระเงินสำเร็จ" });
+  }
+
+  async function executeTakeawayCheckout(): Promise<void> {
+    if (!currentShift || !takeawayMenuQuery.data) {
+      throw new Error("ยังโหลดเมนูรับกลับและสิทธิ์ออฟไลน์ไม่สำเร็จ");
+    }
+    const result = await queueRestaurantOrder(undefined, {
+      items: cart.items.map((item) => ({
+        product_id: item.product_id,
+        qty: Number(item.qty),
+        special_request: null,
+      })),
+      payment_method: paymentMethod,
+      paid_amount: currentPaidAmount,
+      payments: checkoutPayments,
+      customer_name: customerName || selectedCustomer?.display_name || [selectedCustomer?.first_name, selectedCustomer?.last_name].filter(Boolean).join(" ") || null,
+      customer_phone: customerPhone || selectedCustomer?.phone || null,
+      customer_tax_id: customerTaxId || selectedCustomer?.tax_id || null,
+      note: note.trim() || null,
+      shift_id: currentShift.id,
+      location_id: currentShift.location_id,
+    }, takeawayMenuQuery.data);
+
+    setTakeawayOrder(result.order);
+    setTakeawayResultOpen(true);
+    await openCashDrawerAfterPayment(checkoutPayments);
+    resetActiveSale();
+    setTakeawayOutboxSummary(await getRestaurantOutboxSummary());
+    if (result.status === "reconciled") {
+      await syncStockBalances(branchId ?? undefined);
+      await queryClient.invalidateQueries({ queryKey: ["pos", "stock-balances"] });
+      toast({ title: "รับเงินและออกคิวสำเร็จ", description: `คิว ${result.order.queue_display ?? "-"} พร้อมพิมพ์สลิป` });
+    } else if (result.status === "needs_review") {
+      toast({ title: "เก็บรายการไว้แล้ว แต่ต้องตรวจสอบ", description: result.error ?? "ตรวจสอบกะ ราคา และสต๊อก", variant: "destructive" });
+    } else {
+      toast({ title: "บันทึกออเดอร์ในเครื่องแล้ว", description: `คิวออฟไลน์ ${result.order.queue_display ?? "-"} จะซิงก์อัตโนมัติ` });
+    }
+    if (result.order.recipe_stock_warnings?.length) {
+      toast({
+        title: "ออกคิวแล้ว แต่สต๊อกต้องตรวจสอบ",
+        description: result.order.recipe_stock_warnings.join(" · "),
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function handleTakeawaySlip(type: "customer" | "kitchen"): Promise<void> {
+    if (!takeawayOrder) return;
+    setTakeawayPrintBusy(type);
+    try {
+      const updated = takeawayOrder.client_order_id
+        ? await markRestaurantLocalSlip(takeawayOrder.client_order_id, type)
+        : type === "customer"
+          ? (await wapApi.markCustomerSlip(takeawayOrder.session_id)).data.data
+          : (await wapApi.markKitchenSlip(takeawayOrder.session_id)).data.data;
+      setTakeawayOrder(updated);
+      setTakeawayPendingPrint(type);
+      setTakeawayOutboxSummary(await getRestaurantOutboxSummary());
+      if (type === "kitchen") {
+        toast({ title: "ส่งเข้าครัวแล้ว", description: `คิว ${updated.queue_display ?? "-"} แสดงใน KDS แล้ว` });
+      }
+    } catch (error) {
+      toast({
+        title: type === "customer" ? "พิมพ์สลิปลูกค้าไม่ได้" : "ส่งออเดอร์เข้าครัวไม่ได้",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    } finally {
+      setTakeawayPrintBusy(null);
+    }
   }
 
   async function handleCheckout(): Promise<void> {
     if (!currentShift || cart.items.length === 0) {
       return;
     }
+    if (!retailContextValid) {
+      toast({
+        title: "Retail context ไม่ครบ",
+        description: "ต้องใช้ Company, Brand, Branch และ Retail target ที่ Server ลงนามก่อนขาย",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsSubmitting(true);
     try {
-      if (!isOnline) {
-        if (effectiveDiscountPct > cashierDiscountLimit && !canOverrideDiscount) {
-          toast({
-            title: "ส่วนลดนี้ต้องอนุมัติขณะออนไลน์",
-            description: "ลดส่วนลดให้อยู่ในเพดาน Cashier หรือเชื่อมต่ออินเทอร์เน็ตก่อนบันทึก",
-            variant: "destructive"
-          });
-          return;
-        }
-        await queueOfflineSale();
+      if (isTakeawayMode) {
+        await executeTakeawayCheckout();
         return;
       }
-      if (effectiveDiscountPct > cashierDiscountLimit && !canOverrideDiscount) {
-        const payload = buildCheckoutPayload();
-        setPendingManagerApproval({
-          action: "pos.discount.override",
-          requestPayload: payload,
-          reason: `ส่วนลด ${effectiveDiscountPct.toFixed(2)}% เกินเพดาน Cashier ${cashierDiscountLimit.toFixed(2)}%`,
-          description: "ส่วนลดรวมของบิลนี้เกินเพดาน Cashier และต้องได้รับอนุมัติจาก Manager",
-          onApproved: async (token) => {
-            setIsSubmitting(true);
-            try {
-              await executeOnlineCheckout(token);
-            } finally {
-              setIsSubmitting(false);
-            }
-          }
+      if (!isOnline) {
+        toast({
+          title: "ตะกร้านี้อยู่ในสถานะ Stale",
+          description: "เชื่อมต่ออินเทอร์เน็ตเพื่อตรวจราคา VAT และสิทธิ์กับ Server ก่อนชำระเงิน",
+          variant: "destructive"
         });
         return;
       }
       await executeOnlineCheckout();
     } catch (error) {
-      toast({ title: "ชำระเงินไม่สำเร็จ", description: error instanceof Error ? error.message : "ลองใหม่อีกครั้ง" });
+      toast({
+        title: "ชำระเงินไม่สำเร็จ",
+        description: loyaltyDiscount > 0
+          ? "มีการใช้แต้มแล้วแต่การขายยังไม่สำเร็จ กรุณาตรวจรายการแต้มของลูกค้าก่อนลองใหม่"
+          : (error instanceof Error ? error.message : "ลองใหม่อีกครั้ง"),
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -1271,6 +2370,7 @@ export default function POSPage(): JSX.Element {
   }, [paymentMethod]);
   const amountDue = Math.max(finalTotal - currentPaidAmount, 0);
   const heldBills = heldBillsQuery.data ?? [];
+  const activeHeldBillCount = heldBills.filter((draft) => !draft.status || draft.status === "active" || draft.status === "claimed").length;
   const replacementRules = replacementRulesQuery.data ?? [];
   const recentSales = recentSalesQuery.data ?? [];
   const branchSettings = branchSettingsQuery.data;
@@ -1279,9 +2379,85 @@ export default function POSPage(): JSX.Element {
   const staffAuditLabel = `${staffDisplayName} · ID ${staffIdentifier}`;
   const canApplyDiscount = hasPermission("pos.discount.apply") || hasPermission("pos.discount.override");
   const canOverrideDiscount = hasPermission("pos.discount.override");
+  const canApprovePriceOverride = hasPermission("pos.price.override");
+  const canRequestPriceOverride = canApprovePriceOverride || hasPermission("pos.price.override.request");
   const canVoidSale = hasPermission("pos.sale.void") || hasPermission("pos.sale.void.request");
   const canRefundSale = hasPermission("pos.refund.create") || hasPermission("pos.refund.request");
   const canManageCentralReplacementRules = hasPermission("system.branch.edit");
+  const canViewDevices = hasPermission("system.device.view");
+  const canEditBranchSettings = hasPermission("system.branch.edit") || hasPermission("system.company.edit");
+  const currentCounterDevice = pairedDevice?.branch_id === branchId && pairedDevice.device_type === "counter" ? pairedDevice : null;
+  const cameraReady = typeof navigator.mediaDevices?.getUserMedia === "function";
+  const receiptCompany = useMemo(() => ({
+    name: branchSettings?.pos_receipt_header?.trim() || (isRetailMode ? "Retail POS" : "Restaurant POS"),
+    logo_url: branchSettings?.receipt_show_logo ? branchSettings.receipt_logo_url : undefined,
+  }), [branchSettings?.pos_receipt_header, branchSettings?.receipt_logo_url, branchSettings?.receipt_show_logo, isRetailMode]);
+  const receiptBranch = useMemo(() => ({ name: branchName }), [branchName]);
+  const receiptCashier = user?.display_name ?? user?.username ?? "Cashier";
+
+  const handleReceiptPrint = useCallback(async (order: SaleOrder | null = lastOrder) => {
+    if (!order) return;
+    try {
+      setEscPosPrinterStatus(await getEscPosPrinterStatus());
+    } catch {
+      setEscPosPrinterStatus({ supported: isEscPosUsbSupported(), paired: false, printer: null });
+    }
+
+    setEscPosPrinterBusy("print");
+    try {
+      if (await printConfiguredSaleReceipt(order, receiptCompany, receiptBranch, receiptCashier)) {
+        toast({ title: "พิมพ์ใบเสร็จและตัดกระดาษแล้ว", description: "ความยาวกระดาษปรับตามจำนวนรายการอัตโนมัติ" });
+        return;
+      }
+    } catch (error) {
+      toast({
+        title: "ส่งตรงเข้าเครื่องพิมพ์ไม่สำเร็จ",
+        description: `${describeEscPosError(error)} — เปิดหน้าพิมพ์สำรองให้แทน`,
+        variant: "destructive",
+      });
+    } finally {
+      setEscPosPrinterBusy(null);
+    }
+    void handleBrowserPrint();
+  }, [handleBrowserPrint, lastOrder, receiptBranch, receiptCashier, receiptCompany, toast]);
+
+  const handleConnectEscPosPrinter = useCallback(async () => {
+    setEscPosPrinterBusy("connect");
+    try {
+      const printer = await connectEscPosUsbPrinter();
+      const status = await getEscPosPrinterStatus();
+      setEscPosPrinterStatus(status);
+      toast({ title: "เชื่อมเครื่องพิมพ์แล้ว", description: `${printer.name} พร้อมรับใบเสร็จแบบความยาวอัตโนมัติ` });
+    } catch (error) {
+      toast({ title: "เชื่อมเครื่องพิมพ์ไม่สำเร็จ", description: describeEscPosError(error), variant: "destructive" });
+    } finally {
+      setEscPosPrinterBusy(null);
+    }
+  }, [toast]);
+
+  const handleLongEscPosTest = useCallback(async () => {
+    setEscPosPrinterBusy("test");
+    try {
+      await printEscPosLongTest();
+      toast({ title: "ส่งบิลทดสอบ 60 รายการแล้ว", description: "ตรวจว่าข้อมูลต่อเนื่องและเครื่องตัดที่ท้ายใบเสร็จ" });
+    } catch (error) {
+      toast({ title: "ทดสอบพิมพ์ไม่สำเร็จ", description: describeEscPosError(error), variant: "destructive" });
+    } finally {
+      setEscPosPrinterBusy(null);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (!showReceipt || !lastOrder || !autoPrintReceipt || autoPrintedOrderRef.current === lastOrder.id) {
+      return;
+    }
+    autoPrintedOrderRef.current = lastOrder.id;
+    const timeout = window.setTimeout(() => {
+      void handleReceiptPrint(lastOrder);
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [autoPrintReceipt, handleReceiptPrint, lastOrder, showReceipt]);
+
   const discountAllowed = (branchSettings?.pos_allow_discount ?? true) && canApplyDiscount;
   const maxDiscountPct = branchSettings?.pos_max_discount_pct ?? 100;
   const maxDiscountAmount = (cart.subtotal * maxDiscountPct) / 100;
@@ -1294,63 +2470,6 @@ export default function POSPage(): JSX.Element {
   const effectiveDiscountPct = grossBeforeDiscount > 0
     ? Math.max(0, ((grossBeforeDiscount - netAfterDiscount) * 100) / grossBeforeDiscount)
     : 0;
-  const refundableStatuses: SaleOrder["status"][] = ["completed", "partially_refunded"];
-  const paymentAuditSummary = useMemo(() => {
-    const totals = new Map<string, number>();
-    recentSales
-      .filter((order) => order.status === "completed" || order.status === "partially_refunded" || order.status === "refunded")
-      .forEach((order) => {
-        order.payments.forEach((payment) => {
-          totals.set(payment.payment_method, (totals.get(payment.payment_method) ?? 0) + Number(payment.amount));
-        });
-      });
-    return Array.from(totals.entries()).map(([method, amount]) => ({
-      method: paymentMethodLabels[method as PaymentMethod] ?? "อื่นๆ",
-      amount,
-    }));
-  }, [recentSales]);
-  const expectedCashNow = useMemo(() => {
-    const cashPayments = recentSales
-      .filter((order) => order.status === "completed" || order.status === "partially_refunded" || order.status === "refunded")
-      .flatMap((order) => order.payments.filter((payment) => payment.payment_method === "cash"))
-      .reduce((sum, payment) => sum + Number(payment.amount), 0);
-    const totalChange = recentSales
-      .filter((order) => order.status === "completed" || order.status === "partially_refunded" || order.status === "refunded")
-      .reduce((sum, order) => sum + Number(order.change_amount), 0);
-    return Number(currentShift?.opening_cash ?? 0) + cashPayments - totalChange;
-  }, [currentShift?.opening_cash, recentSales]);
-  const partialRefundPreview = useMemo(() => {
-    if (!partialRefundOrder) {
-      return { amount: 0, itemCount: 0 };
-    }
-    let amount = 0;
-    let itemCount = 0;
-    partialRefundOrder.items.forEach((item) => {
-      const requestedQty = Number(partialRefundQtys[item.id] ?? 0);
-      if (!Number.isFinite(requestedQty) || requestedQty <= 0 || item.qty <= 0) {
-        return;
-      }
-      const safeQty = Math.min(requestedQty, Math.max(Number(item.qty) - Number(item.refunded_qty ?? 0), 0));
-      if (safeQty <= 0) {
-        return;
-      }
-      const ratio = safeQty / Number(item.qty);
-      const lineSubtotal = Number(item.subtotal) * ratio;
-      const orderDiscountShare = partialRefundOrder.subtotal > 0
-        ? Number(partialRefundOrder.discount_amount) * (lineSubtotal / Number(partialRefundOrder.subtotal))
-        : 0;
-      const excludedVat = item.vat_type === "excluded" ? Number(item.vat_amount) * ratio : 0;
-      amount += lineSubtotal - orderDiscountShare + excludedVat;
-      itemCount += 1;
-    });
-    return { amount: roundMoney(amount), itemCount };
-  }, [partialRefundOrder, partialRefundQtys]);
-  const historyRefundableAmount = historyOrder
-    ? Math.max(Number(historyOrder.total_amount) - Number(historyOrder.refund_amount ?? 0), 0)
-    : 0;
-  const historySalePayments = historyOrder?.payments.filter((payment) => Number(payment.amount) >= 0) ?? [];
-  const historyRefundPayments = historyOrder?.payments.filter((payment) => Number(payment.amount) < 0) ?? [];
-  const historyNoteLines = historyOrder?.note?.split("\n").map((line) => line.trim()).filter(Boolean) ?? [];
   const exchangeNote = useMemo(() => {
     if (!exchangeContext) {
       return note || null;
@@ -1440,23 +2559,44 @@ export default function POSPage(): JSX.Element {
     });
   }, [centralReplacementRuleMap, exchangeContext, products, replacementRuleMap, stockByProduct]);
 
+  function openWorkspace(path: string, label: string): void {
+    if (cart.items.length > 0 && !window.confirm(`มีสินค้าอยู่ในตะกร้า กรุณาพักบิลก่อนออกจากหน้าขาย\nต้องการไปที่ ${label} ต่อหรือไม่`)) {
+      return;
+    }
+    if (cart.items.length > 0 && (path.startsWith("/restaurant/pos") || path.startsWith("/retail/pos"))) {
+      resetActiveSale();
+    }
+    navigate(path);
+  }
+
   return (
-    <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] xl:h-screen">
-      <div className="flex flex-1 flex-col xl:overflow-hidden">
-        {/* P2: Compact Header — 1 แถว */}
+    <div data-pos-touch-surface className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] md:h-screen">
+      <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
+        {/* Tablet v2: compact identity and health header */}
         <div className="border-b border-slate-200/80 bg-white/90 px-4 py-2.5 backdrop-blur">
-          <div className="flex items-center gap-3">
-            <span className="text-base font-bold text-slate-900">Restaurant POS</span>
-            <div className="flex flex-wrap gap-1.5 text-xs">
+          <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-base font-black text-white shadow-sm" aria-hidden="true">F</span>
+              <span className="hidden whitespace-nowrap text-base font-black text-blue-700 xl:inline">{PLATFORM_BRAND.productName}</span>
+              <span className="hidden h-7 w-px bg-slate-200 xl:block" aria-hidden="true" />
+              <span className="whitespace-nowrap text-base font-black text-slate-900">{isRetailMode ? "Retail POS" : "ขายหน้าร้าน"}</span>
+            </div>
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto text-xs">
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-700">{branchName}</span>
-              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-600">{currentLocationName}</span>
+              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-600">
+                {isRetailMode ? (currentCounterDevice?.device_code ?? "Counter ยังไม่จับคู่") : currentLocationName}
+              </span>
               {currentShift ? (
                 <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 font-medium text-emerald-700">
                   {currentShift.shift_number}
                 </span>
               ) : null}
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${isTakeawayMode || isRetailMode ? "bg-amber-100 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>
+                {isTakeawayMode ? <ShoppingBag className="h-3.5 w-3.5" /> : null}
+                {isRetailMode ? "Pilot · Production ใช้ Legacy" : isTakeawayMode ? "รับกลับ · ออกคิว/KDS" : "ขายหน้าร้าน"}
+              </span>
               {user ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700">
+                <span className="hidden items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700 xl:inline-flex">
                   <UserRoundCheck className="h-3.5 w-3.5" /> ID {staffIdentifier}
                 </span>
               ) : null}
@@ -1468,21 +2608,48 @@ export default function POSPage(): JSX.Element {
               <span className={`rounded-full px-2.5 py-0.5 font-medium ${isOnline ? "bg-blue-50 text-blue-700" : "bg-red-100 text-red-700"}`}>
                 {isOnline ? "●" : "○"} {isOnline ? "ONLINE" : "OFFLINE"}
               </span>
+              {isTakeawayMode && takeawayOutboxSummary.pending + takeawayOutboxSummary.syncing + takeawayOutboxSummary.acknowledged + takeawayOutboxSummary.unknown > 0 ? (
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 items-center gap-1 rounded-full bg-blue-50 px-3 py-1 font-medium text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  onClick={() => openWorkspace("/restaurant/offline-sync", "ศูนย์ซิงก์รายการขาย")}
+                >
+                  <CloudUpload className="h-3.5 w-3.5" /> รอผล {takeawayOutboxSummary.pending + takeawayOutboxSummary.syncing + takeawayOutboxSummary.acknowledged + takeawayOutboxSummary.unknown}
+                </button>
+              ) : null}
+              {isTakeawayMode && takeawayOutboxSummary.needsReview + takeawayOutboxSummary.rejected + takeawayOutboxSummary.quarantined > 0 ? (
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 items-center gap-1 rounded-full bg-red-50 px-3 py-1 font-medium text-red-700 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                  onClick={() => openWorkspace("/restaurant/offline-sync", "ศูนย์ซิงก์รายการขาย")}
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" /> ตรวจสอบ {takeawayOutboxSummary.needsReview + takeawayOutboxSummary.rejected + takeawayOutboxSummary.quarantined}
+                </button>
+              ) : null}
             </div>
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              {isRetailMode ? (
+                <Button size="sm" variant="outline" className="min-h-11" onClick={() => openWorkspace("/retail/offline-sync", "ศูนย์สถานะและการกู้คืน")}>
+                  <CloudUpload className="h-4 w-4" />สถานะซิงก์
+                </Button>
+              ) : null}
+              {isRetailMode && canViewDevices ? (
+                <Button size="sm" variant="outline" className="min-h-11" onClick={() => openWorkspace("/devices/uat-readiness", "Counter Readiness")}>
+                  <TabletSmartphone className="h-4 w-4" />ความพร้อม
+                </Button>
+              ) : null}
               <Button size="sm" variant="outline" onClick={() => setRecentSalesOpen(true)} disabled={!currentShift}>
-                ล่าสุด
+                ศูนย์บิล
               </Button>
-              <Button size="sm" variant="outline" onClick={() => setCloseShiftOpen(true)} disabled={!currentShift}>ปิดกะ</Button>
+              <Button size="sm" variant="outline" className="min-h-11" onClick={() => setCloseShiftOpen(true)} disabled={!currentShift}>จัดการกะ</Button>
+              <Button size="sm" variant="outline" aria-label="สถานะเครื่องและการพิมพ์" onClick={() => setDeviceStatusOpen(true)}>
+                <MonitorCog className="h-4 w-4" />
+              </Button>
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  if (cart.items.length > 0 && !window.confirm("มีสินค้าอยู่ในตะกร้า ต้องการย้อนกลับหรือไม่")) {
-                    return;
-                  }
-                  navigate("/admin");
-                }}
+                aria-label="กลับหน้าผู้ดูแล"
+                onClick={() => openWorkspace("/admin", "หน้าผู้ดูแล")}
               >
                 <ArrowLeft className="h-4 w-4" />
               </Button>
@@ -1490,8 +2657,19 @@ export default function POSPage(): JSX.Element {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col xl:overflow-hidden xl:flex-row">
-          <div className="flex flex-1 flex-col p-4 md:p-6 xl:overflow-hidden">
+        <PosWorkspaceNav
+          mode={isRetailMode ? "retail" : "restaurant"}
+          heldBillCount={activeHeldBillCount}
+          holdEnabled
+          onHeldBills={() => setHeldBillsOpen(true)}
+          onBillCenter={() => setRecentSalesOpen(true)}
+          onShift={() => setCloseShiftOpen(true)}
+          onDeviceStatus={() => setDeviceStatusOpen(true)}
+          onNavigate={openWorkspace}
+        />
+
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row md:overflow-hidden">
+          <div className="flex min-w-0 flex-1 flex-col p-3 md:overflow-hidden md:p-4">
             <div className="rounded-[28px] border border-white/80 bg-white/85 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
                 <div className="relative flex-1">
@@ -1499,7 +2677,7 @@ export default function POSPage(): JSX.Element {
                   <input
                     ref={searchRef}
                     className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-4 text-sm shadow-sm"
-                    placeholder="ค้นหาสินค้า / สแกนบาร์โค้ด / ยิง QR"
+                    placeholder={isRetailMode ? "สแกนบาร์โค้ด / ค้นหาชื่อ / SKU" : "ค้นหาสินค้า / สแกนบาร์โค้ด / ยิง QR"}
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                     onKeyDown={(event) => {
@@ -1531,25 +2709,166 @@ export default function POSPage(): JSX.Element {
               </div>
             </div>
 
-            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-              <button
-                type="button"
-                className={`rounded-full px-4 py-2 text-sm ${selectedCategory === "" ? "bg-blue-600 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
-                onClick={() => setSelectedCategory("")}
+            {isTakeawayMode ? (
+              <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${takeawayMenuQuery.isError ? "border-red-200 bg-red-50 text-red-800" : "border-orange-200 bg-orange-50 text-orange-900"}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-semibold">โหมดรับกลับ — รับเงิน ออกเลขคิว และส่งรายการเข้า KDS</div>
+                    <div className="mt-1 text-xs opacity-80">
+                      {takeawayMenuQuery.isLoading
+                        ? "กำลังโหลดเมนูและสิทธิ์ออฟไลน์"
+                        : takeawayMenuQuery.isError
+                          ? "โหลดเมนูรับกลับไม่สำเร็จ กรุณากดโหลดใหม่ก่อนรับเงิน"
+                          : `พร้อมขาย ${takeawayMenuQuery.data?.products.filter((product) => product.is_available).length ?? 0} เมนู${isOnline ? "" : " · เก็บออเดอร์รอซิงก์ได้"}`}
+                    </div>
+                  </div>
+                  {takeawayMenuQuery.isError ? (
+                    <Button size="sm" variant="outline" onClick={() => void takeawayMenuQuery.refetch()}>โหลดใหม่</Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {isRetailMode ? (
+              <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${retailContextValid ? "border-blue-200 bg-blue-50 text-blue-900" : "border-red-200 bg-red-50 text-red-800"}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-semibold">Retail Scan-first · Pilot</div>
+                    <div className="mt-1 text-xs opacity-80">
+                      {retailContextValid
+                        ? "Catalog ถูกจำกัดด้วย signed Company / Brand / Branch · ระบบจริงยังใช้ Legacy data source"
+                        : "Signed Retail context ไม่ครบ — ปิดการขายและไม่อ่าน Catalog จาก cache อื่น"}
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold shadow-sm">
+                    {isOnline ? "Online" : "Offline"} · {catalogCacheTrusted ? "Catalog ตรงบริบท" : "รอ Catalog"}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
+            {isRetailMode && retailLookupBusy ? (
+              <div role="status" aria-live="polite" className="mt-3 flex items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                <Loader2 className="h-4 w-4 animate-spin" /> Server กำลังตรวจสินค้า ราคา และ Stock
+              </div>
+            ) : null}
+
+            {isRetailMode && retailException ? (
+              <section
+                role="alert"
+                aria-live="assertive"
+                tabIndex={-1}
+                className={`mt-3 rounded-2xl border px-4 py-4 text-sm ${retailException.kind === "price_changed" ? "border-amber-300 bg-amber-50 text-amber-950" : "border-red-200 bg-red-50 text-red-900"}`}
               >
-                ทั้งหมด
-              </button>
-              {categories.map((category) => (
-                <button
-                  key={category.id}
-                  type="button"
-                  className={`rounded-full px-4 py-2 text-sm ${selectedCategory === category.id ? "bg-blue-600 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
-                  onClick={() => setSelectedCategory(category.id)}
-                >
-                  {category.name}
-                </button>
-              ))}
-            </div>
+                <div className="font-bold">
+                  {retailException.kind === "not_found" ? "ไม่พบบาร์โค้ด"
+                    : retailException.kind === "variant_required" ? "ต้องเลือก Variant"
+                    : retailException.kind === "unavailable" ? "สินค้าหมด"
+                    : retailException.kind === "stock_limit" ? "จำนวนเกิน Stock"
+                    : retailException.kind === "price_changed" ? "ราคามีการเปลี่ยนแปลง"
+                    : retailException.kind === "permission" ? "ไม่มีสิทธิ์หรือ Context ไม่ถูกต้อง"
+                    : "ตรวจสินค้าไม่สำเร็จ"}
+                </div>
+                <div className="mt-1 font-mono text-xs opacity-70">{retailException.code}</div>
+                <div className="mt-2">{retailException.message}</div>
+                {retailException.kind === "price_changed" ? (
+                  <div className="mt-3 grid gap-2 rounded-xl bg-white/80 p-3 sm:grid-cols-2">
+                    <div><div className="text-xs text-slate-500">ราคาเดิมบนเครื่อง</div><div className="font-semibold">{formatThaiCurrency(retailException.previousPrice)}</div></div>
+                    <div><div className="text-xs text-slate-500">ราคา Server</div><div className="font-semibold text-amber-800">{formatThaiCurrency(retailException.serverPrice)}</div></div>
+                  </div>
+                ) : null}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {retailException.kind === "price_changed" ? (
+                    <Button className="min-h-14 bg-amber-600 hover:bg-amber-700" onClick={acceptRetailServerPrice}>
+                      ใช้ราคา Server {formatThaiCurrency(retailException.serverPrice)}
+                    </Button>
+                  ) : retailException.kind === "variant_required" ? (
+                    <Button className="min-h-14" onClick={() => setRetailVariantProduct((current) => current)}>เลือก Variant</Button>
+                  ) : retailException.kind === "permission" || retailException.kind === "error" ? (
+                    <Button className="min-h-14" onClick={() => void handleRetailLookup(retailException.code)}>ตรวจใหม่กับ Server</Button>
+                  ) : retailException.kind === "not_found" ? (
+                    <Button
+                      className="min-h-14"
+                      onClick={() => {
+                        setSearch(retailException.code);
+                        window.setTimeout(() => { searchRef.current?.focus(); searchRef.current?.select(); }, 0);
+                      }}
+                    >
+                      ค้นหาชื่อ / SKU
+                    </Button>
+                  ) : (
+                    <Button
+                      className="min-h-14"
+                      onClick={() => {
+                        setSearch("");
+                        setRetailException(null);
+                        window.setTimeout(() => searchRef.current?.focus(), 0);
+                      }}
+                    >
+                      สแกนสินค้าอื่น
+                    </Button>
+                  )}
+                  <button
+                    type="button"
+                    className="min-h-14 rounded-xl px-4 font-semibold text-slate-600 underline-offset-4 hover:underline"
+                    onClick={() => {
+                      setRetailException(null);
+                      setPendingRetailLine(null);
+                      setPendingRetailQuote(null);
+                      setRetailVariantProduct(null);
+                      window.setTimeout(() => searchRef.current?.focus(), 0);
+                    }}
+                  >
+                    ยกเลิกและกลับไปสแกน
+                  </button>
+                </div>
+              </section>
+            ) : null}
+
+            <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+              <nav data-testid="pos-category-panel" aria-label="หมวดสินค้า" className="shrink-0 rounded-2xl border border-white/80 bg-white/80 p-2 shadow-sm lg:w-40 lg:overflow-y-auto">
+                <div className="hidden px-2 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 lg:block">หมวดสินค้า</div>
+                <div className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-x-visible">
+                  <button
+                    type="button"
+                    className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-left text-sm font-medium ${selectedCategory === "" ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
+                    onClick={() => setSelectedCategory("")}
+                  >
+                    ทั้งหมด
+                  </button>
+                  {categories.map((category) => (
+                    <button
+                      key={category.key}
+                      type="button"
+                      className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-left text-sm font-medium ${selectedCategory === category.key ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
+                      onClick={() => setSelectedCategory(category.key)}
+                    >
+                      {category.name}
+                    </button>
+                  ))}
+                </div>
+              </nav>
+
+              <section data-testid="pos-product-panel" aria-label="รายการสินค้า" className="flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-hidden">
+
+            {isRetailMode && !retailContextValid ? (
+              <div role="alert" className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-800">
+                <div className="font-semibold">Permission / Context denied</div>
+                <div className="mt-1">ออกจากระบบแล้วเข้า Retail POS ผ่าน Company App Launcher ใหม่ เพื่อรับ signed Brand และ Branch context</div>
+              </div>
+            ) : null}
+            {isRetailMode && retailContextValid && !catalogCacheTrusted ? (
+              <div role="status" className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+                <div className="font-semibold">{isOnline ? "กำลังโหลด Retail Catalog" : "Offline และไม่มี Catalog ของบริบทนี้"}</div>
+                <div className="mt-1">{isOnline ? "ระบบจะเปิดสินค้าเมื่อ Server ยืนยัน Company / Brand / Branch แล้ว" : "เชื่อมต่ออินเทอร์เน็ตเพื่อรับ Catalog ก่อนเริ่มขาย"}</div>
+              </div>
+            ) : null}
+            {isRetailMode && onlineSearchQuery.isError ? (
+              <div role="alert" className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-800">
+                <div className="font-semibold">โหลดผลค้นหาไม่สำเร็จ</div>
+                <button type="button" className="mt-2 min-h-11 rounded-xl border border-red-300 bg-white px-4 font-semibold" onClick={() => void onlineSearchQuery.refetch()}>ลองใหม่อย่างปลอดภัย</button>
+              </div>
+            ) : null}
 
             {exchangeContext && exchangeSuggestedProducts.length > 0 ? (
               <div className="mt-4 rounded-[28px] border border-amber-200 bg-amber-50/80 p-4 shadow-[0_16px_40px_rgba(180,83,9,0.08)]">
@@ -1606,7 +2925,7 @@ export default function POSPage(): JSX.Element {
                                 <Button
                                   variant="outline"
                                   className="border-amber-300 bg-white text-amber-800"
-                                  onClick={() => addToCart(entry.candidate as ProductListItem, Math.max(1, Math.floor(Number(entry.source.qty ?? 1))))}
+                                  onClick={() => handleProductSelection(entry.candidate as ProductListItem, Math.max(1, Math.floor(Number(entry.source.qty ?? 1))))}
                                 >
                                   เพิ่มสินค้าทดแทนนี้
                                 </Button>
@@ -1651,7 +2970,7 @@ export default function POSPage(): JSX.Element {
                         key={`exchange-suggestion-${product.id}`}
                         type="button"
                         disabled={stock <= 0}
-                        onClick={() => addToCart(product)}
+                        onClick={() => handleProductSelection(product)}
                         className="rounded-2xl border border-amber-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -1673,6 +2992,12 @@ export default function POSPage(): JSX.Element {
             ) : null}
 
             {/* P5: Product Card Density — toggle bar */}
+            {isRetailMode && retailContextValid && catalogCacheTrusted && !onlineSearchQuery.isLoading && visibleProducts.length === 0 ? (
+              <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-white/80 px-6 py-10 text-center text-sm text-slate-600">
+                <div className="font-semibold text-slate-900">{searchTerm.trim() ? "ไม่พบสินค้าใน Retail Catalog" : "Retail Catalog ยังไม่มีสินค้าพร้อมขาย"}</div>
+                <div className="mt-1">{searchTerm.trim() ? "ตรวจบาร์โค้ด ชื่อ หรือ SKU แล้วลองใหม่" : "ให้ผู้ดูแลเพิ่มสินค้าของ Brand นี้ก่อนเริ่มขาย"}</div>
+              </div>
+            ) : null}
             <div className="mt-3 flex items-center justify-between gap-2">
               <span className="text-xs text-slate-400">{visibleProducts.length} รายการ</span>
               <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1">
@@ -1703,7 +3028,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Normal Mode */}
             {cardDensity === "normal" && (
-              <div className="mt-3 grid flex-1 grid-cols-2 gap-3 md:grid-cols-3 xl:overflow-y-auto xl:grid-cols-4">
+              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-2 gap-3 overflow-x-hidden overflow-y-auto xl:grid-cols-3 2xl:grid-cols-4">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const stockLabel = stock <= 0 ? "หมด" : stock <= 5 ? "ใกล้หมด" : `${stock}`;
@@ -1712,8 +3037,8 @@ export default function POSPage(): JSX.Element {
                     <button
                       key={product.id}
                       type="button"
-                      disabled={stock <= 0}
-                      onClick={() => addToCart(product)}
+                      disabled={!isRetailMode && stock <= 0}
+                      onClick={() => handleProductSelection(product)}
                       className="flex items-start gap-3 rounded-3xl border border-white/70 bg-white/90 p-4 text-left shadow-[0_16px_40px_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-[0_20px_48px_rgba(37,99,235,0.16)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-slate-100">
@@ -1735,7 +3060,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Compact Mode (มากขึ้นต่อแถว) */}
             {cardDensity === "compact" && (
-              <div className="mt-3 grid flex-1 grid-cols-3 gap-2 md:grid-cols-4 xl:overflow-y-auto xl:grid-cols-5 2xl:grid-cols-6">
+              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-3 gap-2 overflow-x-hidden overflow-y-auto lg:grid-cols-4 2xl:grid-cols-5">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const outOfStock = stock <= 0;
@@ -1744,8 +3069,8 @@ export default function POSPage(): JSX.Element {
                     <button
                       key={product.id}
                       type="button"
-                      disabled={outOfStock}
-                      onClick={() => addToCart(product)}
+                      disabled={!isRetailMode && outOfStock}
+                      onClick={() => handleProductSelection(product)}
                       className={`relative flex flex-col items-center rounded-2xl border bg-white/90 p-3 text-center shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 disabled:cursor-not-allowed disabled:opacity-40 ${
                         outOfStock ? "border-red-100" : lowStock ? "border-orange-200" : "border-white/70"
                       }`}
@@ -1770,7 +3095,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product List — List Mode */}
             {cardDensity === "list" && (
-              <div className="mt-3 flex-1 space-y-1.5 xl:overflow-y-auto">
+              <div className="mt-3 flex-1 space-y-1.5 overflow-x-hidden md:overflow-y-auto">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const outOfStock = stock <= 0;
@@ -1779,8 +3104,8 @@ export default function POSPage(): JSX.Element {
                     <button
                       key={product.id}
                       type="button"
-                      disabled={outOfStock}
-                      onClick={() => addToCart(product)}
+                      disabled={!isRetailMode && outOfStock}
+                      onClick={() => handleProductSelection(product)}
                       className="flex w-full items-center gap-3 rounded-2xl border border-white/70 bg-white/90 px-4 py-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/40 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-slate-100">
@@ -1803,35 +3128,51 @@ export default function POSPage(): JSX.Element {
                 })}
               </div>
             )}
+              </section>
+            </div>
           </div>
 
-          <aside className="flex w-full flex-col border-t border-slate-200/80 bg-white/92 backdrop-blur xl:w-[28rem] xl:border-l xl:border-t-0 xl:max-h-none xl:h-full">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <aside data-testid="pos-cart-panel" className="flex w-full flex-col overflow-y-auto border-t border-slate-200/80 bg-white/92 backdrop-blur md:h-full md:w-[22rem] md:max-h-none md:border-l md:border-t-0 lg:w-[25rem] xl:w-[28rem]">
+            <div data-testid="pos-cart-header" className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-semibold text-slate-900">ตะกร้า</h2>
+                <h2 className="text-lg font-semibold text-slate-900">{isTakeawayMode ? "ตะกร้ารับกลับ" : "ตะกร้า"}</h2>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">{cart.items.length}</span>
-                <button
-                  type="button"
-                  className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
-                  onClick={() => setHeldBillsOpen(true)}
-                >
-                  พักไว้ {heldBills.length}
-                </button>
+                {!isRetailMode ? (
+                  <button
+                    type="button"
+                    className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
+                    onClick={() => setHeldBillsOpen(true)}
+                  >
+                    พักไว้ {activeHeldBillCount}
+                  </button>
+                ) : null}
               </div>
               <div className="flex items-center gap-2">
+                {!isRetailMode ? (
+                  <button
+                    type="button"
+                    className="min-h-11 rounded-xl bg-amber-50 px-3 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-40"
+                    onClick={() => setHoldCreateOpen(true)}
+                    disabled={cart.items.length === 0 || !currentShift}
+                  >
+                    พักบิล
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className="text-sm text-amber-700"
-                  onClick={() => void handleHoldBill()}
-                  disabled={cart.items.length === 0 || !currentShift}
+                  className="min-h-11 rounded-xl border border-red-100 px-3 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-40"
+                  disabled={cart.items.length === 0}
+                  onClick={() => {
+                    if (cart.items.length > 0 && !window.confirm("ยืนยันล้างรายการสินค้าในตะกร้าทั้งหมด?\nบิลนี้จะไม่ถูกพักไว้")) return;
+                    resetActiveSale();
+                  }}
                 >
-                  พักบิล
+                  ล้างรายการ
                 </button>
-                <button type="button" className="text-sm text-slate-400 hover:text-red-500" onClick={() => { if (cart.items.length > 0 && !window.confirm("ล้างตะกร้าหรือไม่")) return; resetActiveSale(); }}>ล้าง</button>
               </div>
             </div>
 
-            <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+            <div data-testid="pos-cart-body" className="min-h-64 shrink-0 space-y-3 px-5 py-4">
               <div className="grid grid-cols-3 gap-2">
                 <div className={`rounded-2xl border px-3 py-3 text-xs ${cart.items.length > 0 ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
                   <div className="font-semibold uppercase tracking-[0.2em]">1</div>
@@ -1928,7 +3269,7 @@ export default function POSPage(): JSX.Element {
                             }}
                           >
                             <div className="font-medium">{customer.customer_code} • {customer.display_name || "-"}</div>
-                            <div className="text-xs text-slate-500">{customer.phone || "-"} • {customer.tier_name || "-"} • {customer.points_balance} ⭐</div>
+                            <div className="text-xs text-slate-500">{maskPhone(customer.phone)} • {customer.tier_name || "-"} • {customer.points_balance} ⭐</div>
                           </button>
                         ))}
                       </div>
@@ -1937,7 +3278,10 @@ export default function POSPage(): JSX.Element {
                       <div className="flex items-center justify-between rounded-lg border bg-blue-50 px-3 py-2">
                         <div>
                           <div className="font-medium text-sm">{selectedCustomer.display_name || [selectedCustomer.first_name, selectedCustomer.last_name].filter(Boolean).join(" ")}</div>
-                          <div className="text-xs text-slate-500">{selectedCustomer.tier?.name ?? "-"} • แต้ม {selectedCustomer.points_balance} ⭐</div>
+                          <div className="text-xs text-slate-500">
+                            {selectedCustomer.tier?.name ?? "-"} • {maskPhone(selectedCustomer.phone)} • แต้ม {selectedCustomer.points_balance} ⭐
+                            {selectedCustomer.is_blacklisted ? " • ระงับสิทธิ์ Loyalty" : ""}
+                          </div>
                         </div>
                         <button type="button" className="text-xs text-slate-500 hover:text-red-500"
                           onClick={() => { setSelectedCustomer(null); setLoyaltyDiscount(0); setCustomerSearch(""); setDebouncedCustomerSearch(""); }}>×</button>
@@ -1959,7 +3303,11 @@ export default function POSPage(): JSX.Element {
               {cart.items.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-center text-slate-400">
                   <ShoppingCart className="mb-3 h-10 w-10" />
-                  <p>ยังไม่มีสินค้า</p>
+                  <p className="font-medium text-slate-600">ยังไม่มีสินค้าในบิล</p>
+                  <p className="mt-1 max-w-56 text-xs">แตะสินค้าจากตรงกลาง หรือใช้กล้องสแกนบาร์โค้ดเพื่อเริ่มขาย</p>
+                  <button type="button" className="mt-4 min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm text-blue-600" onClick={() => setScannerOpen(true)}>
+                    เปิดกล้องสแกน
+                  </button>
                 </div>
               ) : (
                 cart.items.map((item) => (
@@ -1971,25 +3319,25 @@ export default function POSPage(): JSX.Element {
                         {item.variant_name ? <p className="text-xs text-slate-400">{item.variant_name}</p> : null}
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-1.5">
-                        {canOverrideDiscount ? (
+                        {canRequestPriceOverride && !isTakeawayMode ? (
                           <button type="button" className="text-xs text-blue-500 hover:text-blue-700" onClick={() => openPriceEditor(item)}>
                             แก้
                           </button>
                         ) : null}
-                        <button type="button" className="text-slate-300 hover:text-red-400" onClick={() => updateCartItem(item.product_id, () => null)}>×</button>
+                        <button type="button" className="text-slate-300 hover:text-red-400" onClick={() => updateCartItem(item.product_id, () => null, item.variant_id)}>×</button>
                       </div>
                     </div>
                     <div className="mt-1.5 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1">
-                        <button type="button" className="h-7 w-7 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
-                          onClick={() => updateCartItem(item.product_id, (c) => c.qty <= 1 ? null : { ...c, qty: c.qty - 1, subtotal: (c.qty - 1) * c.unit_price })}>
+                        <button type="button" aria-label={`ลดจำนวน ${item.product_name}`} className="h-11 w-11 rounded-xl border border-slate-200 text-lg text-slate-700 hover:bg-slate-50"
+                          onClick={() => updateCartQuantity(item, item.qty - 1)}>
                           −
                         </button>
-                        <input type="number" className="h-7 w-12 rounded-md border border-slate-200 text-center text-sm"
+                        <input aria-label={`จำนวน ${item.product_name}`} type="number" className="h-11 w-14 rounded-xl border border-slate-200 text-center text-base font-semibold"
                           value={item.qty} min={1} max={getAvailableStock(item.product_id, item.variant_id)}
-                          onChange={(e) => updateCartItem(item.product_id, (c) => ({ ...c, qty: Math.max(1, Math.min(Number(e.target.value), getAvailableStock(item.product_id, item.variant_id))) }))} />
-                        <button type="button" className="h-7 w-7 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
-                          onClick={() => updateCartItem(item.product_id, (c) => ({ ...c, qty: Math.min(c.qty + 1, getAvailableStock(item.product_id, item.variant_id)) }))}>
+                          onChange={(e) => updateCartQuantity(item, Number(e.target.value))} />
+                        <button type="button" aria-label={`เพิ่มจำนวน ${item.product_name}`} className="h-11 w-11 rounded-xl border border-slate-200 text-lg text-slate-700 hover:bg-slate-50"
+                          onClick={() => updateCartQuantity(item, item.qty + 1)}>
                           +
                         </button>
                       </div>
@@ -2001,22 +3349,26 @@ export default function POSPage(): JSX.Element {
             </div>
 
             {/* P1: Sticky Checkout Footer */}
-            <div className="sticky bottom-0 space-y-4 border-t border-slate-200 bg-white/95 px-5 py-4 backdrop-blur shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+            <div data-testid="pos-checkout-panel" className="shrink-0 space-y-4 border-t border-slate-200 bg-white/95 px-5 py-4 backdrop-blur shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
               <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between"><span>ยอดรวม</span><span>{formatThaiCurrency(cart.subtotal)}</span></div>
                   <div className="flex items-center justify-between gap-3">
                     <span>ส่วนลด</span>
-                    <input
-                      type="number"
-                      className="h-9 w-28 rounded-md border border-slate-300 bg-white px-2 text-right disabled:bg-slate-100 disabled:text-slate-400"
-                      value={orderDiscount}
-                      disabled={!discountAllowed}
-                      onChange={(event) => handleOrderDiscountChange(Number(event.target.value))}
-                    />
+                    <Button
+                      type="button"
+                      className="h-11 min-w-28 justify-end"
+                      variant="outline"
+                      disabled={isTakeawayMode || !discountAllowed || cart.subtotal <= 0}
+                      onClick={() => setDiscountWorkspaceOpen(true)}
+                    >
+                      {orderDiscount > 0 ? `- ${formatThaiCurrency(orderDiscount)}` : "กำหนดส่วนลด"}
+                    </Button>
                   </div>
                   <div className="text-xs text-slate-500">
-                    {discountAllowed
+                    {isTakeawayMode
+                      ? "โหมดรับกลับใช้ราคาเมนูกลาง เพื่อให้ยอดขาย สต๊อก และ KDS ตรงกัน"
+                      : discountAllowed
                       ? canOverrideDiscount
                         ? "คุณมีสิทธิ์ override ส่วนลดได้"
                         : `ส่วนลดสูงสุด ${maxDiscountPct}% (${formatThaiCurrency(maxDiscountAmount)})`
@@ -2046,8 +3398,15 @@ export default function POSPage(): JSX.Element {
                   </div>
                 </div>
               </div>
-              {selectedCustomer && loyaltySettingsQuery.data?.enabled ? (
-                <Button variant="outline" onClick={() => setRedeemOpen(true)}>แลกแต้มส่วนลด</Button>
+              {!isTakeawayMode && selectedCustomer && loyaltySettingsQuery.data?.enabled ? (
+                isRetailMode ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <div className="font-semibold">Loyalty ยังไม่เปิดใน Retail Pilot</div>
+                    <div className="mt-1 text-xs">แต้มจะไม่ถูกตัดจนกว่า Server รองรับ Reserve → Commit/Release พร้อม Sale แบบ atomic</div>
+                  </div>
+                ) : (
+                  <Button variant="outline" onClick={() => setRedeemOpen(true)}>แลกแต้มส่วนลด</Button>
+                )
               ) : null}
 
               <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -2066,16 +3425,22 @@ export default function POSPage(): JSX.Element {
                 </div>
 
               <div className="grid grid-cols-2 gap-2">
-                {(["cash", "promptpay", "credit_card", "bank_transfer", "other"] as PaymentMethod[]).map((method) => (
-                  <button
-                    key={method}
-                    type="button"
-                    className={`rounded-xl border px-3 py-2 text-sm ${paymentMethod === method ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-300 bg-white text-slate-700"}`}
-                    onClick={() => setPaymentMethod(method)}
-                  >
-                    {method === "cash" ? "เงินสด" : method === "promptpay" ? "PromptPay" : method === "credit_card" ? "บัตรเครดิต" : method === "bank_transfer" ? "โอนเงิน" : "อื่นๆ"}
-                  </button>
-                ))}
+                {(["cash", "promptpay", "credit_card", "bank_transfer", "other"] as PaymentMethod[]).map((method) => {
+                  const retailBlocked = isRetailMode && method !== "cash";
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      disabled={retailBlocked}
+                      aria-describedby={retailBlocked ? `retail-payment-${method}` : undefined}
+                      className={`min-h-16 rounded-xl border px-3 py-2 text-sm ${paymentMethod === method ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-300 bg-white text-slate-700"} disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
+                      onClick={() => setPaymentMethod(method)}
+                    >
+                      <span className="block font-semibold">{method === "cash" ? "เงินสด" : method === "promptpay" ? "PromptPay" : method === "credit_card" ? "บัตรเครดิต" : method === "bank_transfer" ? "โอนเงิน" : "อื่นๆ"}</span>
+                      {retailBlocked ? <span id={`retail-payment-${method}`} className="mt-1 block text-[10px]">รอ Provider/Policy UAT</span> : null}
+                    </button>
+                  );
+                })}
               </div>
               {/* end payment method card */}
               </div>
@@ -2083,7 +3448,8 @@ export default function POSPage(): JSX.Element {
               <div className="mt-3 rounded-2xl border border-slate-200">
                 <button
                   type="button"
-                  className={`flex w-full items-center justify-between px-4 py-2.5 text-sm ${splitPaymentEnabled ? "text-amber-700" : "text-slate-600"}`}
+                  disabled={isRetailMode}
+                  className={`flex min-h-14 w-full items-center justify-between px-4 py-2.5 text-sm ${splitPaymentEnabled ? "text-amber-700" : "text-slate-600"} disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400`}
                   onClick={() => {
                     const next = !splitPaymentEnabled;
                     setSplitPaymentEnabled(next);
@@ -2095,7 +3461,7 @@ export default function POSPage(): JSX.Element {
                 >
                   <span className="font-medium">⇄ แยกชำระ 2 ช่องทาง</span>
                   <span className={`rounded-full px-2 py-0.5 text-xs ${splitPaymentEnabled ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
-                    {splitPaymentEnabled ? "เปิดอยู่" : "ปิด"}
+                    {isRetailMode ? "รอ Provider UAT" : splitPaymentEnabled ? "เปิดอยู่" : "ปิด"}
                   </span>
                 </button>
                 {splitPaymentEnabled ? (
@@ -2179,60 +3545,250 @@ export default function POSPage(): JSX.Element {
                 />
               ) : null}
 
+              {isRetailMode ? (
+                <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-900">
+                  <div className="font-semibold">Cash Pilot · Server-authoritative</div>
+                  <div className="mt-1">ระบบจะตรวจ Pricing quote/version, สิทธิ์, Stock และ idempotency ก่อนบันทึก Sale</div>
+                  <div className="mt-1 text-amber-800">เครื่องพิมพ์และลิ้นชักเงินสด: ยังไม่ยืนยัน Physical UAT</div>
+                </div>
+              ) : null}
+
               <Button
-                className="h-12 w-full rounded-2xl bg-green-600 text-base hover:bg-green-700"
+                className={`h-16 w-full rounded-2xl text-lg font-bold ${isRetailMode ? "bg-blue-600 hover:bg-blue-700" : "bg-green-600 hover:bg-green-700"}`}
                 disabled={
                   cart.items.length === 0 ||
                   !currentShift ||
+                  (isRetailMode && (!isOnline || !retailContextValid || !catalogCacheTrusted)) ||
+                  (isRetailMode && paymentMethod !== "cash") ||
+                  (isTakeawayMode && !takeawayMenuQuery.data) ||
                   (paymentMethod === "cash" && currentPaidAmount < finalTotal) ||
                   isSubmitting
                 }
                 onClick={() => void handleCheckout()}
               >
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                ชำระเงิน {formatThaiCurrency(finalTotal)}
+                {isTakeawayMode ? "รับเงินและออกคิว" : isRetailMode ? "ยืนยันรับเงิน" : "ชำระเงิน"} {formatThaiCurrency(finalTotal)}
               </Button>
+              {isRetailMode ? (
+                <div className="text-center text-xs text-slate-500">
+                  {!retailContextValid
+                    ? "ปิดรับชำระ: signed Retail context ไม่ครบ"
+                    : !isOnline
+                      ? "ปิดรับชำระ Offline จนกว่าจะมี signed Retail offline policy"
+                      : !catalogCacheTrusted
+                        ? "ปิดรับชำระระหว่างรอ Server ยืนยัน Catalog"
+                        : "Server จะตรวจราคา สิทธิ์ สต๊อก และ idempotency ก่อนชำระ"}
+                </div>
+              ) : null}
             </div>
           </aside>
         </div>
       </div>
 
-      <Dialog open={shiftGateOpen} onOpenChange={setShiftGateOpen}>
-        <DialogContent>
+      <Dialog
+        open={Boolean(retailVariantProduct)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRetailVariantProduct(null);
+            setSelectedRetailVariantId(null);
+            window.setTimeout(() => searchRef.current?.focus(), 0);
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>เปิดกะก่อนเริ่มขาย</DialogTitle>
+            <DialogTitle>เลือก Variant</DialogTitle>
+            <DialogDescription>
+              เลือกขนาดหรือรูปแบบที่ตรงกับสินค้า Server จะตรวจราคาและ Stock อีกครั้งก่อนเพิ่มลงตะกร้า
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-              <p className="font-semibold">ผู้เปิดกะ: {staffDisplayName}</p>
-              <p className="mt-1 text-blue-700">Employee ID: {staffIdentifier} · ระบบบันทึกเวลาและเครื่อง Counter ให้อัตโนมัติ</p>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">คลังสินค้า</label>
-              <select
-                className="h-11 w-full rounded-md border border-slate-300 px-3"
-                value={selectedLocationId}
-                onChange={(event) => setSelectedLocationId(event.target.value)}
-              >
-                <option value="">เลือกคลัง</option>
-                {locations.map((location) => (
-                  <option key={location.id} value={location.id}>{location.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">เงินเปิดลิ้นชัก</label>
-              <input
-                type="number"
-                className="h-11 w-full rounded-md border border-slate-300 px-3"
-                value={openingCash}
-                onChange={(event) => setOpeningCash(Number(event.target.value))}
-              />
-            </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(retailVariantProduct?.variants ?? []).map((variant) => {
+              const available = Number(variant.available_qty);
+              const selected = selectedRetailVariantId === variant.id;
+              return (
+                <button
+                  key={variant.id}
+                  type="button"
+                  disabled={!variant.is_active || available <= 0}
+                  aria-pressed={selected}
+                  className={`min-h-14 rounded-2xl border p-4 text-left ${selected ? "border-blue-600 bg-blue-50 ring-2 ring-blue-100" : "border-slate-200 bg-white"} disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
+                  onClick={() => setSelectedRetailVariantId(variant.id)}
+                >
+                  <div className="font-semibold">{variant.name}</div>
+                  <div className="mt-1 text-xs text-slate-500">{variant.sku}{variant.barcode ? ` · ${variant.barcode}` : ""}</div>
+                  <div className="mt-2 flex items-center justify-between text-sm">
+                    <span className="font-semibold text-blue-700">{formatThaiCurrency(Number(variant.server_price))}</span>
+                    <span className={available > 0 ? "text-emerald-700" : "text-red-600"}>{available > 0 ? `ขายได้ ${available}` : "สินค้าหมด"}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
           <DialogFooter>
-            <Button onClick={() => void handleOpenShift()} disabled={!selectedLocationId}>เปิดกะ</Button>
+            <Button
+              className="min-h-14"
+              disabled={!selectedRetailVariantId || retailLookupBusy}
+              onClick={() => {
+                const lookup = retailVariantProduct;
+                const variant = lookup?.variants.find((item) => item.id === selectedRetailVariantId) ?? null;
+                const source = lookup ? eligibleProducts.find((item) => item.id === lookup.id) : null;
+                if (!lookup || !variant || !source) {
+                  setRetailException({ kind: "permission", code: lookup?.sku ?? "variant", message: "Variant ไม่อยู่ใน signed Retail Catalog" });
+                  return;
+                }
+                setRetailVariantProduct(null);
+                setSelectedRetailVariantId(null);
+                setRetailLookupBusy(true);
+                void validateRetailLine(lookup, source, variant)
+                  .catch((error) => setRetailException({ kind: "error", code: variant.sku, message: getErrorMessage(error) }))
+                  .finally(() => setRetailLookupBusy(false));
+              }}
+            >
+              {retailLookupBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {selectedRetailVariantId
+                ? `เพิ่มลงตะกร้า ${formatThaiCurrency(Number(retailVariantProduct?.variants.find((item) => item.id === selectedRetailVariantId)?.server_price ?? 0))}`
+                : "เลือก Variant ก่อน"}
+            </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deviceStatusOpen} onOpenChange={setDeviceStatusOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><MonitorCog className="h-5 w-5" />สถานะเครื่องขายและการพิมพ์</DialogTitle>
+            <DialogDescription>
+              ตรวจสถานะเครือข่าย Counter กล้อง และการพิมพ์ก่อนเริ่มขาย โดยสถานะ Browser ไม่ถือเป็นผลทดสอบอุปกรณ์จริง
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className={`rounded-2xl border p-4 ${isOnline ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
+              <div className="flex items-center gap-2 text-sm font-semibold"><Activity className="h-4 w-4" />เครือข่ายและการซิงก์</div>
+              <div className={`mt-3 text-lg font-bold ${isOnline ? "text-emerald-700" : "text-red-700"}`}>{isOnline ? "ออนไลน์" : "ออฟไลน์ — ราคา Stale / ปิดชำระเงิน"}</div>
+              <div className="mt-1 text-xs text-slate-500">ซิงก์ล่าสุด {lastSyncAt ? lastSyncAt.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "ยังไม่มีข้อมูลรอบนี้"}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold"><TabletSmartphone className="h-4 w-4" />อุปกรณ์ Counter</div>
+              {currentCounterDevice ? (
+                <>
+                  <div className="mt-3 text-lg font-bold text-slate-900">{currentCounterDevice.name}</div>
+                  <div className="mt-1 font-mono text-xs text-slate-500">{currentCounterDevice.device_code} · จับคู่กับสาขานี้</div>
+                </>
+              ) : (
+                <>
+                  <div className="mt-3 text-lg font-bold text-amber-700">โหมดผู้ใช้ทั่วไป</div>
+                  <div className="mt-1 text-xs text-slate-500">ยังไม่ได้ล็อกเครื่องนี้ด้วย Counter Device ของสาขา</div>
+                </>
+              )}
+            </div>
+            <div className={`rounded-2xl border p-4 ${cameraReady ? "border-blue-200 bg-blue-50" : "border-amber-200 bg-amber-50"}`}>
+              <div className="flex items-center gap-2 text-sm font-semibold"><Camera className="h-4 w-4" />กล้องและสแกนเนอร์</div>
+              <div className={`mt-3 text-lg font-bold ${cameraReady ? "text-blue-700" : "text-amber-700"}`}>{cameraReady ? "พร้อมขอสิทธิ์กล้อง" : "อุปกรณ์นี้ไม่มีกล้องที่เว็บเข้าถึงได้"}</div>
+              <div className="mt-1 text-xs text-slate-500">รองรับ QR, EAN, UPC, Code 39 และ Code 128</div>
+            </div>
+            <div className={`rounded-2xl border p-4 ${escPosPrinterStatus.paired ? "border-emerald-200 bg-emerald-50" : "border-violet-200 bg-violet-50"}`}>
+              <div className="flex items-center gap-2 text-sm font-semibold"><ClipboardList className="h-4 w-4" />ใบเสร็จและเครื่องพิมพ์</div>
+              <div className={`mt-3 text-lg font-bold ${escPosPrinterStatus.paired ? "text-emerald-700" : "text-violet-700"}`}>
+                {escPosPrinterStatus.paired
+                  ? `เชื่อมตรงแล้ว · ${escPosPrinterStatus.printer?.name ?? "POS-80"}`
+                  : escPosPrinterStatus.supported
+                    ? "ยังไม่ได้อนุญาตเครื่องพิมพ์โดยตรง"
+                    : "Browser นี้ไม่รองรับ USB โดยตรง"}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {escPosPrinterStatus.paired
+                  ? "ความยาวตามรายการจริง · ตัดกระดาษอัตโนมัติ"
+                  : `ตั้งไว้ ${branchSettings?.receipt_copies ?? 1} สำเนา · หากไม่เชื่อมตรงจะใช้หน้าพิมพ์สำรอง`}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoPrintReceipt}
+            className="flex min-h-14 w-full items-center justify-between rounded-2xl border border-slate-200 px-4 text-left"
+            onClick={() => {
+              const next = !autoPrintReceipt;
+              setAutoPrintReceipt(next);
+              window.localStorage.setItem("pos-auto-print-receipt", String(next));
+            }}
+          >
+            <span><span className="block font-semibold text-slate-900">พิมพ์ใบเสร็จอัตโนมัติหลังชำระ</span><span className="block text-xs text-slate-500">ตั้งค่าเฉพาะเครื่องนี้และปิดไว้เป็นค่าเริ่มต้น</span></span>
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${autoPrintReceipt ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{autoPrintReceipt ? "เปิด" : "ปิด"}</span>
+          </button>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button
+              type="button"
+              variant={escPosPrinterStatus.paired ? "outline" : "default"}
+              disabled={!escPosPrinterStatus.supported || escPosPrinterBusy !== null}
+              onClick={() => void handleConnectEscPosPrinter()}
+            >
+              {escPosPrinterBusy === "connect" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
+              {escPosPrinterStatus.paired ? "เลือกเครื่องพิมพ์ใหม่" : "เชื่อมเครื่องพิมพ์ ESC/POS"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!escPosPrinterStatus.paired || escPosPrinterBusy !== null}
+              onClick={() => void handleLongEscPosTest()}
+            >
+              {escPosPrinterBusy === "test" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardList className="mr-2 h-4 w-4" />}
+              ทดสอบบิลยาว 60 รายการ
+            </Button>
+          </div>
+          <div className="rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            ครั้งแรก Chrome จะให้เลือกและอนุญาตเครื่องพิมพ์ หลังจากนั้นระบบจะพิมพ์ตรงโดยไม่เปิดหน้าพรีวิว และไม่จำกัดความสูงไว้ที่ 200 มม.
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {canViewDevices ? <Button variant="outline" onClick={() => { setDeviceStatusOpen(false); openWorkspace("/devices", "จัดการอุปกรณ์"); }}>จัดการอุปกรณ์</Button> : null}
+              {canEditBranchSettings && branchId ? <Button variant="outline" onClick={() => { setDeviceStatusOpen(false); openWorkspace(`/branches/${branchId}/settings`, "ตั้งค่าสาขาและใบเสร็จ"); }}>ตั้งค่าใบเสร็จ</Button> : null}
+            </div>
+            <Button
+              disabled={!lastOrder}
+              onClick={() => {
+                setDeviceStatusOpen(false);
+                setShowReceipt(true);
+              }}
+            >
+              {lastOrder ? "เปิดใบเสร็จล่าสุดเพื่อทดสอบพิมพ์" : "ยังไม่มีใบเสร็จให้ทดสอบ"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={shiftGateOpen} onOpenChange={setShiftGateOpen}>
+        <DialogContent className="max-w-3xl p-0">
+          <div className="border-b border-slate-200 px-5 py-5 pr-16 md:px-7">
+          <DialogHeader>
+            <DialogTitle className="text-xl">เปิดกะพนักงานก่อนเริ่มขาย</DialogTitle>
+            <DialogDescription>Server จะผูกพนักงาน สาขา คลัง และ Counter ให้เป็นกะเดียวกัน</DialogDescription>
+          </DialogHeader>
+          </div>
+          <div className="space-y-5 p-5 md:p-7">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900"><p className="text-xs font-semibold text-blue-600">พนักงาน</p><p className="mt-1 font-bold">{staffDisplayName}</p><p className="text-xs">ID {staffIdentifier}</p></div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm"><p className="text-xs font-semibold text-slate-500">สาขา</p><p className="mt-1 font-bold text-slate-900">{branchName}</p></div>
+              <div className={`rounded-2xl border p-4 text-sm ${pairedDevice ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-800"}`}><p className="text-xs font-semibold">Counter</p><p className="mt-1 font-bold">{pairedDevice?.name ?? "ยังไม่จับคู่เครื่อง"}</p><p className="text-xs">{pairedDevice?.device_code ?? "ต้องจับคู่ก่อนเปิดกะ"}</p></div>
+            </div>
+            <section>
+              <h3 className="text-sm font-bold text-slate-900">เลือกคลังที่ขาย</h3>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {locations.map((stockLocation) => <button key={stockLocation.id} type="button" onClick={() => setSelectedLocationId(stockLocation.id)} className={`min-h-14 rounded-xl border px-4 text-left text-sm font-semibold ${selectedLocationId === stockLocation.id ? "border-blue-600 bg-blue-50 text-blue-800 ring-2 ring-blue-100" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>{stockLocation.name}</button>)}
+              </div>
+              {locations.length === 0 ? <div className="mt-2 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">สาขานี้ยังไม่มีคลังสำหรับ POS</div> : null}
+            </section>
+            <section>
+              <label className="text-sm font-bold text-slate-900">เงินทอนตั้งต้น</label>
+              <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                <input aria-label="เงินทอนตั้งต้น" type="number" min={0} inputMode="decimal" className="h-14 w-full rounded-xl border border-slate-300 px-4 text-xl font-bold" value={openingCash} onChange={(event) => setOpeningCash(Math.max(0, Number(event.target.value) || 0))} />
+                <div className="flex gap-2">{[500, 1000, 2000].map((amount) => <button key={amount} type="button" onClick={() => setOpeningCash(amount)} className="min-h-14 rounded-xl border border-slate-200 px-3 text-sm font-bold hover:bg-slate-50">฿{amount.toLocaleString()}</button>)}</div>
+              </div>
+            </section>
+            {!isOnline ? <div className="flex min-h-12 items-center gap-2 rounded-xl bg-amber-50 px-4 text-sm font-semibold text-amber-800"><WifiOff className="h-5 w-5" />เปิดกะใหม่ไม่ได้ขณะ Offline</div> : null}
+            <Button className="h-14 w-full text-base" onClick={() => void handleOpenShift()} disabled={!selectedLocationId || !isOnline || !pairedDevice}>ยืนยันเปิดกะกับ Server</Button>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -2241,10 +3797,16 @@ export default function POSPage(): JSX.Element {
           open={closeShiftOpen}
           onOpenChange={setCloseShiftOpen}
           shift={currentShift}
-          expectedCashNow={expectedCashNow}
-          paymentSummary={paymentAuditSummary}
+          online={isOnline}
           operatorLabel={staffAuditLabel}
-          onConfirm={handleCloseShift}
+          cashMovementApprovalThreshold={Number(branchSettingsQuery.data?.pos_cash_movement_approval_threshold ?? 1000)}
+          varianceSoftThreshold={Number(branchSettingsQuery.data?.pos_shift_variance_soft_threshold ?? 100)}
+          varianceApprovalThreshold={Number(branchSettingsQuery.data?.pos_shift_variance_approval_threshold ?? 500)}
+          canCreateCashMovement={hasPermission("pos.cash_movement.create")}
+          canHandover={hasPermission("pos.cashier.handover") && Boolean(pairedDevice)}
+          onShiftUpdated={handleShiftUpdated}
+          onClosed={handleShiftClosed}
+          onHandover={handleShiftHandover}
         />
       ) : null}
 
@@ -2252,333 +3814,278 @@ export default function POSPage(): JSX.Element {
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>ใบเสร็จ</DialogTitle>
+            <DialogDescription>
+              รายละเอียดใบเสร็จจาก Server สำหรับตรวจสอบและพิมพ์ซ้ำ
+            </DialogDescription>
           </DialogHeader>
           {lastOrder ? (
             <ReceiptView
               ref={receiptRef}
               order={lastOrder}
-              company={{
-                name: "Restaurant POS",
-                phone: "0812345678",
-                logo_url: branchSettingsQuery.data?.receipt_show_logo
-                  ? branchSettingsQuery.data.receipt_logo_url
-                  : undefined,
-              }}
-              branch={{ name: branchName }}
-              cashier={user?.display_name ?? user?.username ?? "Cashier"}
+              company={receiptCompany}
+              branch={receiptBranch}
+              cashier={receiptCashier}
             />
           ) : null}
           <DialogFooter>
-            <Button variant="outline" onClick={() => void handlePrint()}>พิมพ์</Button>
+            <Button variant="outline" disabled={escPosPrinterBusy === "print"} onClick={() => void handleReceiptPrint()}>
+              {escPosPrinterBusy === "print" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              พิมพ์
+            </Button>
             <Button onClick={() => setShowReceipt(false)}>ขายต่อ</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={heldBillsOpen} onOpenChange={setHeldBillsOpen}>
-        <DialogContent className="max-w-2xl">
+      <Dialog open={takeawayResultOpen} onOpenChange={setTakeawayResultOpen}>
+        <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>บิลที่พักไว้</DialogTitle>
+            <DialogTitle>ออเดอร์รับกลับ</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
-            <Input
-              placeholder="ตั้งชื่อบิลก่อนพัก เช่น โต๊ะ 2 / ลูกค้าฝากไว้ / คิวถัดไป"
-              value={holdLabel}
-              onChange={(event) => setHoldLabel(event.target.value)}
-            />
-            {heldBills.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
-                ยังไม่มีบิลที่พักไว้
+          {takeawayOrder ? (
+            <div className="space-y-4">
+              <div className="rounded-2xl bg-slate-950 p-5 text-center text-white">
+                <div className="text-xs uppercase tracking-[0.25em] text-slate-400">Queue</div>
+                <div className="mt-1 text-6xl font-black">{takeawayOrder.queue_display ?? "-"}</div>
+                <div className="mt-2 text-sm text-slate-300">รับเงินแล้ว {formatThaiCurrency(Number(takeawayOrder.total_amount))}</div>
+                {takeawayOrder.is_offline_pending ? (
+                  <div className="mt-3 inline-flex rounded-full bg-amber-400/20 px-3 py-1 text-xs font-semibold text-amber-200">คิวออฟไลน์ · รอซิงก์</div>
+                ) : (
+                  <div className="mt-3 inline-flex rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-semibold text-emerald-200">บันทึกบนเซิร์ฟเวอร์แล้ว</div>
+                )}
               </div>
-            ) : (
-              <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
-                {heldBills.map((draft) => {
-                  const itemCount = draft.items.reduce((sum, item) => sum + item.qty, 0);
-                  const draftTotal = draft.items.reduce((sum, item) => sum + item.subtotal, 0) - draft.order_discount - draft.loyalty_discount;
-                  return (
-                    <div key={draft.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="font-semibold text-slate-900">{draft.label}</div>
-                          <div className="mt-1 text-sm text-slate-500">
-                            {draft.customer_name || "ลูกค้าทั่วไป"} • {itemCount} ชิ้น • {formatThaiCurrency(Math.max(draftTotal, 0))}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-400">
-                            พักไว้ {new Date(draft.held_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" onClick={() => void handleDeleteHeldBill(draft.id)}>ลบ</Button>
-                          <Button onClick={() => void handleResumeHeldBill(draft)}>เรียกบิลกลับ</Button>
-                        </div>
-                      </div>
+              <div className="max-h-48 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 p-4">
+                {takeawayOrder.items.map((item) => (
+                  <div key={`${item.product_id}-${item.special_request ?? ""}`} className="flex items-start justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
+                    <div>
+                      <div className="font-medium text-slate-900">{item.product_name}</div>
+                      {item.special_request ? <div className="text-xs text-slate-500">{item.special_request}</div> : null}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setHeldBillsOpen(false)}>ปิด</Button>
-            <Button onClick={() => void handleHoldBill()} disabled={cart.items.length === 0 || !currentShift}>
-              พักบิลปัจจุบัน
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={recentSalesOpen} onOpenChange={setRecentSalesOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>ออเดอร์ล่าสุดในกะนี้</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            {recentSales.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
-                ยังไม่มีออเดอร์ในกะนี้
-              </div>
-            ) : (
-              <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
-                {recentSales.map((order) => (
-                  <div key={order.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    {(() => {
-                      const refundedAmount = Number(order.refund_amount ?? 0);
-                      const remainingRefund = Math.max(Number(order.total_amount) - refundedAmount, 0);
-                      const refundableItemCount = order.items.filter((item) => Number(item.qty) - Number(item.refunded_qty ?? 0) > 0).length;
-                      return (
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <div className="font-semibold text-slate-900">{order.order_number}</div>
-                        <div className="mt-1 text-sm text-slate-500">
-                          {order.customer_name || "ลูกค้าทั่วไป"} • {formatThaiCurrency(order.total_amount)} • {formatThaiDate(order.created_at)}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-400">
-                          สถานะ {getOrderStatusLabel(order.status)}
-                        </div>
-                        {refundedAmount > 0 ? (
-                          <div className="mt-2 text-xs text-amber-700">
-                            คืนแล้ว {formatThaiCurrency(refundedAmount)} • คงเหลือคืนได้ {formatThaiCurrency(remainingRefund)}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            setHistoryOrder(order);
-                          }}
-                        >
-                          รายละเอียด
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            setLastOrder(order);
-                            setShowReceipt(true);
-                            setRecentSalesOpen(false);
-                            }}
-                          >
-                          พิมพ์ซ้ำ
-                        </Button>
-                        {canVoidSale && order.status === "completed" ? (
-                          <Button variant="outline" onClick={() => { setVoidOrder(order); setVoidReason(""); }}>
-                            Void บิล
-                          </Button>
-                        ) : null}
-                        {canRefundSale && refundableStatuses.includes(order.status) && refundableItemCount > 0 ? (
-                          <Button
-                            variant="outline"
-                          onClick={() => {
-                              const nextQtys = Object.fromEntries(
-                                order.items.map((item) => [item.id, ""])
-                              ) as Record<string, string>;
-                              setPartialRefundOrder(order);
-                              setPartialRefundReason("");
-                              setPartialRefundQtys(nextQtys);
-                            }}
-                          >
-                            คืนบางรายการ / แลก
-                          </Button>
-                        ) : null}
-                        {canRefundSale && refundableStatuses.includes(order.status) && remainingRefund > 0 ? (
-                          <Button variant="outline" onClick={() => { setRefundOrder(order); setRefundReason(""); }}>
-                            คืนทั้งหมด
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                      );
-                    })()}
+                    <div className="font-semibold text-slate-900">x{item.qty}</div>
                   </div>
                 ))}
               </div>
-            )}
-          </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button
+                  className="h-12"
+                  onClick={() => void handleTakeawaySlip("customer")}
+                  disabled={takeawayPrintBusy !== null}
+                >
+                  {takeawayPrintBusy === "customer" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                  {takeawayOrder.customer_slip_printed_at ? "พิมพ์สลิปลูกค้าซ้ำ" : "พิมพ์สลิปลูกค้า"}
+                </Button>
+                <Button
+                  className="h-12 bg-orange-600 hover:bg-orange-700"
+                  onClick={() => void handleTakeawaySlip("kitchen")}
+                  disabled={takeawayPrintBusy !== null || !takeawayOrder.customer_slip_printed_at}
+                >
+                  {takeawayPrintBusy === "kitchen" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChefHat className="h-4 w-4" />}
+                  {!takeawayOrder.customer_slip_printed_at
+                    ? "พิมพ์สลิปลูกค้าก่อน"
+                    : takeawayOrder.kitchen_slip_printed_at
+                      ? "พิมพ์ส่งครัวซ้ำ"
+                      : "พิมพ์และส่งเข้า KDS"}
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">ระบบจะสร้างงานใน KDS เมื่อกดพิมพ์และส่งเข้า KDS เพื่อป้องกันครัวทำรายการก่อนหน้าร้านยืนยันสลิปลูกค้า</p>
+            </div>
+          ) : null}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRecentSalesOpen(false)}>ปิด</Button>
+            <Button onClick={() => setTakeawayResultOpen(false)}>เริ่มออเดอร์ถัดไป</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(historyOrder)} onOpenChange={(open) => { if (!open) setHistoryOrder(null); }}>
-        <DialogContent className="max-w-4xl">
+      <HoldDraftWorkspaceDialog
+        open={heldBillsOpen}
+        onOpenChange={setHeldBillsOpen}
+        drafts={heldBills}
+        isLoading={heldBillsQuery.isLoading}
+        isError={heldBillsQuery.isError}
+        isOnline={isOnline}
+        canView={hasPermission("pos.draft.view")}
+        canCreate={hasPermission("pos.draft.create") && Boolean(currentShift) && cart.items.length > 0}
+        canResume={hasPermission("pos.draft.resume")}
+        canDiscard={hasPermission("pos.draft.discard")}
+        canReassign={hasPermission("pos.draft.reassign")}
+        currentUserId={user?.id}
+        branchId={branchId}
+        hasCounter={Boolean(currentCounterDevice)}
+        busyId={heldBillsBusy}
+        search={heldBillsSearch}
+        onSearchChange={setHeldBillsSearch}
+        filter={heldBillsFilter}
+        onFilterChange={setHeldBillsFilter}
+        onRetry={() => void heldBillsQuery.refetch()}
+        onCreate={() => { setHeldBillsOpen(false); setHoldCreateOpen(true); }}
+        onResume={handleResumeHeldBill}
+        onRelease={handleReleaseHeldBill}
+        onDiscard={handleDeleteHeldBill}
+        onReassign={handleReassignHeldBill}
+        onReopen={handleReopenHeldBill}
+      />
+
+      <Dialog open={holdCreateOpen} onOpenChange={setHoldCreateOpen}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>รายละเอียดบิลย้อนหลัง</DialogTitle>
+            <DialogTitle>พักบิลปัจจุบัน</DialogTitle>
+            <DialogDescription>บันทึก Draft สำเร็จก่อนจึงล้างตะกร้า รายการนี้ยังไม่ส่งครัว ไม่ตัดสต๊อก ไม่สร้างภาษี และไม่รับชำระ</DialogDescription>
           </DialogHeader>
-          {historyOrder ? (
-            <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-4">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">บิล</div>
-                  <div className="mt-1 font-semibold text-slate-900">{historyOrder.order_number}</div>
-                  <div className="mt-1 text-xs text-slate-500">{formatThaiDate(historyOrder.created_at)}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">สถานะ</div>
-                  <div className="mt-1 font-semibold text-slate-900">{getOrderStatusLabel(historyOrder.status)}</div>
-                  <div className="mt-1 text-xs text-slate-500">{historyOrder.customer_name || "ลูกค้าทั่วไป"}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">ยอดขายเดิม</div>
-                  <div className="mt-1 font-semibold text-slate-900">{formatThaiCurrency(historyOrder.total_amount)}</div>
-                  <div className="mt-1 text-xs text-slate-500">VAT {formatThaiCurrency(historyOrder.vat_amount)}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">คืนสะสม</div>
-                  <div className="mt-1 font-semibold text-amber-700">{formatThaiCurrency(Number(historyOrder.refund_amount ?? 0))}</div>
-                  <div className="mt-1 text-xs text-slate-500">คงเหลือคืนได้ {formatThaiCurrency(historyRefundableAmount)}</div>
-                </div>
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-[1.3fr_0.9fr]">
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-slate-200">
-                    <div className="border-b border-slate-200 px-4 py-3">
-                      <div className="font-semibold text-slate-900">รายการสินค้า</div>
-                    </div>
-                    <div className="max-h-[22rem] space-y-3 overflow-y-auto p-4">
-                      {historyOrder.items.map((item) => {
-                        const refundedQty = Number(item.refunded_qty ?? 0);
-                        const refundableQty = Math.max(Number(item.qty) - refundedQty, 0);
-                        return (
-                          <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                              <div>
-                                <div className="font-medium text-slate-900">{item.product_name}</div>
-                                {item.variant_name ? <div className="text-xs text-slate-500">{item.variant_name}</div> : null}
-                                <div className="mt-2 text-sm text-slate-500">
-                                  {formatThaiCurrency(item.unit_price)} x {item.qty} • รวม {formatThaiCurrency(item.subtotal)}
-                                </div>
-                              </div>
-                              <div className="text-sm text-right">
-                                <div className="text-slate-600">คืนแล้ว {refundedQty}</div>
-                                <div className="text-slate-500">คืนได้อีก {refundableQty}</div>
-                                {Number(item.refunded_amount ?? 0) > 0 ? (
-                                  <div className="text-amber-700">ยอดคืนสะสม {formatThaiCurrency(Number(item.refunded_amount ?? 0))}</div>
-                                ) : null}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {historyNoteLines.length > 0 ? (
-                    <div className="rounded-2xl border border-slate-200">
-                      <div className="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">หมายเหตุและประวัติ</div>
-                      <div className="space-y-2 p-4 text-sm text-slate-600">
-                        {historyNoteLines.map((line, index) => (
-                          <div key={`${historyOrder.id}-timeline-${index}`} className="rounded-xl bg-slate-50 px-3 py-2">
-                            {line}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-slate-200">
-                    <div className="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">ข้อมูลลูกค้า</div>
-                    <div className="space-y-2 p-4 text-sm text-slate-600">
-                      <div>ชื่อ: {historyOrder.customer_name || "ลูกค้าทั่วไป"}</div>
-                      <div>โทร: {historyOrder.customer_phone || "-"}</div>
-                      <div>เลขผู้เสียภาษี: {historyOrder.customer_tax_id || "-"}</div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200">
-                    <div className="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">ประวัติการชำระเงิน</div>
-                    <div className="space-y-3 p-4">
-                      {historySalePayments.length === 0 ? (
-                        <div className="text-sm text-slate-500">ไม่มีข้อมูลการชำระเงิน</div>
-                      ) : (
-                        historySalePayments.map((payment) => (
-                          <div key={payment.id} className="rounded-xl bg-slate-50 px-3 py-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="font-medium text-slate-900">{paymentMethodLabels[payment.payment_method] ?? "อื่นๆ"}</div>
-                                <div className="text-xs text-slate-500">{formatThaiDate(payment.paid_at)}</div>
-                                {payment.reference_no ? <div className="text-xs text-slate-500">อ้างอิง {payment.reference_no}</div> : null}
-                              </div>
-                              <div className="font-semibold text-slate-900">{formatThaiCurrency(Number(payment.amount))}</div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50">
-                    <div className="border-b border-amber-200 px-4 py-3 font-semibold text-amber-900">ประวัติคืนสินค้า / คืนเงิน</div>
-                    <div className="space-y-3 p-4">
-                      <div className="flex items-center justify-between text-sm text-amber-900">
-                        <span>คืนสะสม</span>
-                        <span className="font-semibold">{formatThaiCurrency(Number(historyOrder.refund_amount ?? 0))}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-sm text-amber-900">
-                        <span>คงเหลือคืนได้</span>
-                        <span className="font-semibold">{formatThaiCurrency(historyRefundableAmount)}</span>
-                      </div>
-                      {historyRefundPayments.length === 0 ? (
-                        <div className="text-sm text-amber-800">ยังไม่มี payment ติดลบจากการ refund</div>
-                      ) : (
-                        historyRefundPayments.map((payment) => (
-                          <div key={payment.id} className="rounded-xl bg-white/70 px-3 py-3 text-sm text-amber-900">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="font-medium">{paymentMethodLabels[payment.payment_method] ?? "อื่นๆ"}</div>
-                                <div className="text-xs text-amber-800">{formatThaiDate(payment.paid_at)}</div>
-                                {payment.reference_no ? <div className="text-xs text-amber-800">อ้างอิง {payment.reference_no}</div> : null}
-                              </div>
-                              <div className="font-semibold">{formatThaiCurrency(Number(payment.amount))}</div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
+          <div className="space-y-4">
+            <Input className="h-14" placeholder="ชื่อบิล เช่น โต๊ะ 2 / ลูกค้ารอรับ" value={holdLabel} onChange={(event) => setHoldLabel(event.target.value)} autoFocus />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 p-4"><div className="text-xs font-semibold text-slate-400">Context</div><div className="mt-1 font-bold">{currentCounterDevice?.device_code ?? "เครื่องนี้"} · {currentShift?.shift_number ?? "ยังไม่เปิดกะ"}</div><div className="text-sm text-slate-500">{currentLocationName} · {staffDisplayName}</div></div>
+              <div className="rounded-2xl border border-slate-200 p-4"><div className="text-xs font-semibold text-slate-400">ยอดประมาณการ</div><div className="mt-1 text-2xl font-black">{formatThaiCurrency(finalTotal)}</div><div className="text-sm text-slate-500">{cart.items.reduce((sum, item) => sum + Number(item.qty), 0)} ชิ้น</div></div>
             </div>
-          ) : null}
+            <div className={`rounded-2xl border p-4 text-sm ${isOnline ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+              {isOnline
+                ? "บันทึกบน Server และเรียกต่อได้จาก Counter อื่นในสาขา"
+                : isRetailMode
+                  ? "Retail Offline: ปิดการพักบิลเพื่อป้องกันบิลซ้ำ กรุณาเชื่อมต่อ Server"
+                  : "ออฟไลน์: เก็บ Local shadow เฉพาะเครื่องนี้ และต้องตรวจสอบหลังเชื่อมต่อ"}
+            </div>
+          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setHistoryOrder(null)}>ปิด</Button>
-            <Button
-              onClick={() => {
-                if (!historyOrder) {
-                  return;
-                }
-                setLastOrder(historyOrder);
-                setShowReceipt(true);
-              }}
-            >
-              เปิดใบเสร็จเพื่อพิมพ์ซ้ำ
+            <Button className="h-12" variant="outline" onClick={() => setHoldCreateOpen(false)}>กลับ</Button>
+            <Button className="h-14 min-w-52" onClick={() => void handleHoldBill()} disabled={cart.items.length === 0 || !currentShift || heldBillsBusy === "create"}>
+              {heldBillsBusy === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}พักบิล • ล้างตะกร้า
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={Boolean(pendingResumeDraft)} onOpenChange={(open) => { if (!open) setPendingResumeDraft(null); }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>ตะกร้าปัจจุบันมีสินค้า</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-slate-600">
+            <p>เลือกวิธีจัดการก่อนเรียก <strong>{pendingResumeDraft?.label}</strong> กลับมา ห้ามรวมรายการอัตโนมัติเพราะอาจทำให้สินค้าและส่วนลดซ้ำ</p>
+            <Button
+              className="h-16 w-full justify-start text-base"
+              disabled={heldBillsBusy !== null}
+              onClick={() => void (async () => {
+                const target = pendingResumeDraft;
+                if (!target) return;
+                const held = await handleHoldBill();
+                if (held) await resumeHeldBillNow(target);
+              })()}
+            >
+              พักตะกร้าปัจจุบันก่อน แล้วเรียกบิล
+            </Button>
+            <Button
+              className="h-16 w-full justify-start text-base"
+              variant="destructive"
+              disabled={heldBillsBusy !== null}
+              onClick={() => void (async () => {
+                const target = pendingResumeDraft;
+                if (!target) return;
+                const accepted = await confirm({
+                  title: "แทนที่ตะกร้าปัจจุบัน",
+                  description: `สินค้า ${cart.items.length} รายการในตะกร้าปัจจุบันจะถูกแทนที่`,
+                  confirmLabel: "แทนที่ตะกร้า",
+                  variant: "destructive",
+                });
+                if (accepted) await resumeHeldBillNow(target);
+              })()}
+            >
+              แทนที่ตะกร้า
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button className="h-14" variant="outline" onClick={() => setPendingResumeDraft(null)}>กลับ</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(pendingRevalidation)} onOpenChange={(open) => { if (!open) void rejectHeldRevalidation(); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>ตรวจความเปลี่ยนแปลงก่อนเรียกบิล</DialogTitle>
+            <DialogDescription>Server ตรวจราคา ภาษี และจำนวนพร้อมขายใหม่แล้ว กรุณาเลือกยอมรับข้อมูลล่าสุดหรือกลับโดยไม่เปลี่ยนตะกร้า</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[55vh] space-y-3 overflow-y-auto">
+            {(pendingRevalidation?.claim.price_changes ?? []).map((change, index) => {
+              const kind = typeof change.kind === "string" ? change.kind : "price";
+              return (
+                <div key={`${kind}-${index}`} className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                  {kind === "total" ? (
+                    <><div className="font-bold">ยอดรวมเปลี่ยน</div><div className="mt-1">{formatThaiCurrency(Number(change.old_total ?? 0))} → {formatThaiCurrency(Number(change.new_total ?? 0))}</div></>
+                  ) : kind === "availability" ? (
+                    <><div className="font-bold">จำนวนพร้อมขายเปลี่ยน · {String(change.product_name ?? "สินค้า")}</div><div className="mt-1">ต้องการ {String(change.requested_qty ?? "-")} · พร้อมขาย {String(change.available_qty ?? "-")}</div></>
+                  ) : (
+                    <><div className="font-bold">ราคาเปลี่ยน · {String(change.product_name ?? "สินค้า")}</div><div className="mt-1">{formatThaiCurrency(Number(change.old_unit_price ?? 0))} → {formatThaiCurrency(Number(change.new_unit_price ?? 0))}</div></>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button className="h-12" variant="outline" disabled={heldBillsBusy !== null} onClick={() => void rejectHeldRevalidation()}>ไม่ยอมรับ · ปล่อยบิลไว้</Button>
+            <Button className="h-14" disabled={!pendingRevalidation || heldBillsBusy !== null} onClick={() => { if (pendingRevalidation) void finalizeHeldResume(pendingRevalidation.draft, pendingRevalidation.claim, true); }}>
+              {heldBillsBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}ยอมรับข้อมูลล่าสุดและเรียกกลับ
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(holdConflict)} onOpenChange={(open) => { if (!open) setHoldConflict(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>บิลถูกเปลี่ยนจากอีกเครื่อง</DialogTitle>
+            <DialogDescription>Server เป็นผู้ตัดสินผลล่าสุด ระบบไม่รวมข้อมูลและไม่เขียนทับอัตโนมัติ</DialogDescription>
+          </DialogHeader>
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+            <div className="font-bold">{holdConflict?.message}</div>
+            <div className="mt-2">สถานะล่าสุด: {holdConflict?.currentStatus ?? "ต้องโหลดใหม่"} · version {holdConflict?.currentVersion ?? "ล่าสุดบน Server"}</div>
+            {holdConflict?.claimedBy ? <div className="mt-1">ผู้ถือสิทธิ์: {holdConflict.claimedBy}</div> : null}
+          </div>
+          <DialogFooter>
+            <Button className="h-12" onClick={() => { setHoldConflict(null); void refreshHeldBills(); setHeldBillsOpen(true); }}>โหลดข้อมูลล่าสุด</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <BillReceiptCenterDialog
+        open={recentSalesOpen}
+        orders={recentSales}
+        isLoading={recentSalesQuery.isLoading}
+        isError={recentSalesQuery.isError}
+        isRefreshing={recentSalesQuery.isFetching}
+        updatedAt={recentSalesQuery.dataUpdatedAt}
+        online={isOnline}
+        canVoid={canVoidSale}
+        canRefund={canRefundSale}
+        onOpenChange={setRecentSalesOpen}
+        onRetry={() => { void recentSalesQuery.refetch(); }}
+        onPrint={(order) => {
+          setLastOrder(order);
+          setShowReceipt(true);
+          setRecentSalesOpen(false);
+        }}
+        onVoid={(order) => {
+          setVoidOrder(order);
+          setVoidReason("");
+          setRecentSalesOpen(false);
+        }}
+        onRefund={(order) => {
+          setRefundWorkspaceOrder(order);
+          setRecentSalesOpen(false);
+        }}
+      />
+
+      <DiscountWorkspaceDialog
+        open={discountWorkspaceOpen}
+        subtotal={cart.subtotal}
+        currentAmount={orderDiscount}
+        enabled={!isTakeawayMode && discountAllowed}
+        online={isOnline}
+        canOverride={canOverrideDiscount}
+        cashierLimitPct={cashierDiscountLimit}
+        hardLimitPct={maxDiscountPct}
+        onOpenChange={setDiscountWorkspaceOpen}
+        onApply={handleOrderDiscountChange}
+      />
 
       <Dialog open={priceEditorOpen} onOpenChange={setPriceEditorOpen}>
         <DialogContent className="max-w-md">
@@ -2592,7 +4099,26 @@ export default function POSPage(): JSX.Element {
               onChange={(event) => setPriceEditValue(event.target.value)}
               placeholder="ราคาใหม่"
             />
-            <p className="text-sm text-slate-500">ใช้สำหรับ override ราคาเฉพาะบิลนี้เท่านั้น</p>
+            <textarea
+              className="min-h-20 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              value={priceEditReason}
+              onChange={(event) => setPriceEditReason(event.target.value)}
+              placeholder="เหตุผลที่เปลี่ยนราคา (อย่างน้อย 3 ตัวอักษร)"
+              maxLength={500}
+            />
+            <select
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
+              value={priceEditReasonCode}
+              onChange={(event) => setPriceEditReasonCode(event.target.value as typeof priceEditReasonCode)}
+            >
+              <option value="customer_recovery">ดูแลลูกค้า</option>
+              <option value="price_match">เทียบราคาตลาด</option>
+              <option value="manager_comp">ผู้จัดการให้ส่วนลด</option>
+              <option value="damaged_item">สินค้ามีตำหนิ</option>
+              <option value="manual_correction">แก้ราคาที่ตั้งผิด</option>
+              <option value="other">อื่น ๆ</option>
+            </select>
+            <p className="text-sm text-slate-500">ใช้เฉพาะบิลนี้ และ Server จะบันทึกผู้ขอ ผู้อนุมัติ เหตุผล และราคาก่อน–หลัง</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPriceEditorOpen(false)}>ยกเลิก</Button>
@@ -2624,114 +4150,6 @@ export default function POSPage(): JSX.Element {
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={Boolean(partialRefundOrder)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPartialRefundOrder(null);
-            setPartialRefundReason("");
-            setPartialRefundQtys({});
-          }
-        }}
-      >
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>คืนบางรายการ / Partial Refund</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="text-sm text-slate-600">
-              {partialRefundOrder ? `บิล ${partialRefundOrder.order_number} • คาดว่าจะคืน ${formatThaiCurrency(partialRefundPreview.amount)}` : ""}
-            </div>
-            {partialRefundOrder ? (
-              <div className="max-h-[24rem] space-y-3 overflow-y-auto pr-1">
-                {partialRefundOrder.items.map((item) => {
-                  const availableQty = Math.max(Number(item.qty) - Number(item.refunded_qty ?? 0), 0);
-                  return (
-                    <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div>
-                          <div className="font-medium text-slate-900">{item.product_name}</div>
-                          <div className="mt-1 text-sm text-slate-500">
-                            ขาย {item.qty} • คืนแล้ว {item.refunded_qty ?? 0} • คงเหลือคืนได้ {availableQty}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-400">
-                            มูลค่าต่อรายการ {formatThaiCurrency(item.subtotal)}{item.refunded_amount ? ` • คืนสะสม ${formatThaiCurrency(item.refunded_amount)}` : ""}
-                          </div>
-                        </div>
-                        <Input
-                          className="w-full md:w-32"
-                          type="number"
-                          min="0"
-                          max={availableQty.toString()}
-                          step="1"
-                          value={partialRefundQtys[item.id] ?? ""}
-                          onChange={(event) => {
-                            const nextValue = event.target.value;
-                            setPartialRefundQtys((current) => ({ ...current, [item.id]: nextValue }));
-                          }}
-                          placeholder="จำนวนคืน"
-                          disabled={availableQty <= 0}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-            <textarea
-              className="min-h-24 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              placeholder="เหตุผลที่ต้องคืนสินค้า / ใช้กรณี exchange ได้เช่น คืนชิ้นเดิมแล้วขายชิ้นใหม่ต่อ"
-              value={partialRefundReason}
-              onChange={(event) => setPartialRefundReason(event.target.value)}
-            />
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              เลือกสินค้าที่ต้องคืน แล้วค่อยสร้างบิลขายใหม่ถ้าต้องการ exchange ต่อในหน้า POS เดิม
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setPartialRefundOrder(null);
-                setPartialRefundReason("");
-                setPartialRefundQtys({});
-              }}
-            >
-              ยกเลิก
-            </Button>
-            <Button variant="outline" onClick={() => void handlePartialRefundSale()}>
-              คืนอย่างเดียว
-            </Button>
-            <Button onClick={() => void handlePartialRefundSale(true)}>
-              คืนและเปิดบิลแลก {partialRefundPreview.itemCount > 0 ? formatThaiCurrency(partialRefundPreview.amount) : ""}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={Boolean(refundOrder)} onOpenChange={(open) => { if (!open) { setRefundOrder(null); setRefundReason(""); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Refund / คืนทั้งหมดที่เหลือในบิล</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="text-sm text-slate-600">
-              {refundOrder ? `บิล ${refundOrder.order_number} • คงเหลือคืนได้ ${formatThaiCurrency(Math.max(Number(refundOrder.total_amount) - Number(refundOrder.refund_amount ?? 0), 0))}` : ""}
-            </div>
-            <textarea
-              className="min-h-24 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              placeholder="เหตุผลที่ต้องคืนสินค้า / refund"
-              value={refundReason}
-              onChange={(event) => setRefundReason(event.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setRefundOrder(null); setRefundReason(""); }}>ยกเลิก</Button>
-            <Button onClick={() => void handleRefundSale()}>ยืนยัน refund</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={scannerOpen} onOpenChange={setScannerOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -2743,7 +4161,7 @@ export default function POSPage(): JSX.Element {
             </div>
             <p className="text-sm text-slate-500">วางบาร์โค้ดหรือ QR ของสินค้าไว้กลางกล้อง ระบบจะเพิ่มสินค้าเข้าตะกร้าอัตโนมัติ</p>
             {scannerError ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{scannerError}</p> : null}
-            {!scanSupported ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">เบราว์เซอร์นี้ยังไม่รองรับตัวสแกนในตัว ให้ใช้การยิงบาร์โค้ดผ่านช่องค้นหาด้านบนแทน</p> : null}
+            {!cameraSupported ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">เบราว์เซอร์นี้ไม่อนุญาตให้เว็บไซต์เปิดกล้อง ให้ใช้การยิงบาร์โค้ดผ่านช่องค้นหาด้านบนแทน</p> : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setScannerOpen(false)}>ปิด</Button>
@@ -2773,6 +4191,17 @@ export default function POSPage(): JSX.Element {
         settings={loyaltySettingsQuery.data ?? null}
         onRedeemed={(discountAmount) => setLoyaltyDiscount(discountAmount)}
       />
+      <RefundWorkspaceDialog
+        open={Boolean(refundWorkspaceOrder)}
+        order={refundWorkspaceOrder}
+        shift={currentShift}
+        online={isOnline}
+        cashPilot={isRetailMode}
+        onOpenChange={(next) => { if (!next) setRefundWorkspaceOrder(null); }}
+        onCompleted={async () => {
+          await recentSalesQuery.refetch();
+        }}
+      />
       {pendingManagerApproval ? (
         <ManagerApprovalDialog
           open
@@ -2786,6 +4215,25 @@ export default function POSPage(): JSX.Element {
           onApproved={pendingManagerApproval.onApproved}
         />
       ) : null}
+      <div className="fixed -left-[9999px] top-0">
+        <div ref={takeawayCustomerSlipRef} className="wap-print-slip">
+          <TakeawayOrderSlip
+            order={takeawayOrder}
+            type="customer"
+            employeeName={staffDisplayName}
+            menu={takeawayMenuQuery.data ?? null}
+            promptpayQrDataUrl={takeawayOrder?.payment_method === "promptpay" ? qrDataUrl : null}
+          />
+        </div>
+        <div ref={takeawayKitchenSlipRef} className="wap-print-slip">
+          <TakeawayOrderSlip
+            order={takeawayOrder}
+            type="kitchen"
+            employeeName={staffDisplayName}
+            menu={takeawayMenuQuery.data ?? null}
+          />
+        </div>
+      </div>
     </div>
   );
 }

@@ -85,7 +85,7 @@ export default function RestaurantAdminPage(): JSX.Element {
       />
 
       {visibleItems.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
           ยังไม่มีเมนู Restaurant Admin สำหรับสิทธิ์ของผู้ใช้นี้
         </div>
       ) : (
@@ -94,9 +94,9 @@ export default function RestaurantAdminPage(): JSX.Element {
             <Link
               key={`${item.title}-${item.to}`}
               to={item.to}
-              className="flex min-h-[8rem] items-start gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              className="flex min-h-[9rem] items-start gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-orange-300 hover:shadow-md"
             >
-              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-white ${item.tone}`}>
+              <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-white shadow-sm ${item.tone}`}>
                 <item.icon className="h-5 w-5" />
               </div>
               <div>

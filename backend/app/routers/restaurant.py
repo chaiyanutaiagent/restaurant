@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import Any
+import hashlib
+import json
 import uuid
 from zoneinfo import ZoneInfo
 
@@ -33,6 +35,7 @@ from app.models.restaurant import (
     Brand, BrandBranch,
     BranchReplenishmentPolicy,
     DiningTable, DiningSession, DiningOrder, DiningOrderItem, KitchenTicket,
+    RestaurantCancellation,
     Recipe, RecipeIngredient, WapShiftClosure, WapShiftClosureItem,
     CentralOrder, CentralOrderItem, CentralOrderShiftClosure, CreditAccount, CreditLedger,
     CreditTopupRequest as CreditTopupRequestModel,
@@ -44,8 +47,11 @@ from app.schemas.restaurant import (
     TableCreate, TableUpdate, FBSetupRequest, FBSettingsUpdate,
     SessionOpen, PlaceOrderRequest,
     CancelRequest, TicketStatusUpdate, SessionCheckoutRequest,
+    RestaurantCancellationRequest, RestaurantCancellationReopenRequest,
+    KitchenCancellationAckRequest,
     WapPaidOrderRequest, WapOfflineSyncRequest, WapOfflineSyncItemRead,
-    WapOfflineSyncRead, CentralOrderSubmitRequest, CentralOrderQtyUpdateRequest,
+    WapOfflineSyncRead, WapOfflinePurgeRead, WapOfflineResolveRequest,
+    CentralOrderSubmitRequest, CentralOrderQtyUpdateRequest,
     CentralOrderReceiveRequest,
     CreditTopupRequest, CreditAdjustmentRequest, BrandBranchTypeUpdateRequest,
     BrandTransferConfigUpdateRequest, BrandCreateRequest, BrandUpdateRequest,
@@ -61,10 +67,18 @@ from app.schemas.product import ProductCreate, ProductListItem
 from app.schemas.stock import StockBalanceRead, StockMovementRead
 from app.schemas.pos import CloseShiftRequest, ShiftRead
 from app.services.dining_service import DiningService
+from app.services.restaurant_cancellation_service import RestaurantCancellationService
+from app.services.pricing_service import pricing_error
 from app.services.sale_service import SaleService
 from app.services.offline_sale_authorization import (
     OFFLINE_POLICY_VERSION,
     OfflineSaleAuthorizationService,
+)
+from app.services.offline_sync_service import (
+    OfflineSyncError,
+    OfflineSyncService,
+    offline_scope_enabled,
+    serialize_offline_operation,
 )
 from app.services.report_scope_policy import require_brand_report_scope
 from app.services.restaurant_report_service import build_financial_reconciliation
@@ -87,6 +101,7 @@ from app.services.replenishment_service import ReplenishmentService, serialize_r
 from app.services.stock_cutover_service import StockCutoverService
 from app.services.transfer_service import TransferService
 from app.utils.promptpay import generate_promptpay_payload
+from app.utils.public_rate_limit import require_public_rate_limit
 from app.schemas.transfer import (
     ApproveTORequest,
     CreateTORequest,
@@ -1635,6 +1650,34 @@ async def delete_table(
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
+def _serialize_order_center_session(session: DiningSession, table: DiningTable | None) -> dict[str, Any]:
+    active_orders = [order for order in session.orders if order.status != "cancelled"]
+    active_orders.sort(key=lambda order: order.created_at or session.opened_at)
+    all_items = [item for order in active_orders for item in order.items]
+    total = sum(float(item.unit_price) * item.qty for item in all_items)
+    return {
+        "id": str(session.id),
+        "status": session.status,
+        "source_type": "dine_in" if session.table_id else "quick_service",
+        "table_name": table.name if table else None,
+        "queue_number": session.queue_number,
+        "customer_name": session.customer_name,
+        "customer_phone": session.customer_phone,
+        "note": session.note,
+        "order_numbers": [order.order_number for order in active_orders],
+        "latest_order_number": active_orders[-1].order_number if active_orders else None,
+        "opened_at": session.opened_at.isoformat(),
+        "updated_at": session.updated_at.isoformat() if session.updated_at else session.opened_at.isoformat(),
+        "closed_at": session.closed_at.isoformat() if session.closed_at else None,
+        "item_count": len(all_items),
+        "pending_count": sum(item.qty for item in all_items if item.status == "pending"),
+        "cooking_count": sum(item.qty for item in all_items if item.status == "cooking"),
+        "ready_count": sum(item.qty for item in all_items if item.status == "done"),
+        "served_count": sum(item.qty for item in all_items if item.status == "served"),
+        "total_amount": round(total, 2),
+        "sale_order_id": str(session.sale_order_id) if session.sale_order_id else None,
+    }
+
 @router.get("/sessions")
 async def list_sessions(
     status_filter: str | None = Query(default=None, alias="status"),
@@ -1669,26 +1712,7 @@ async def list_sessions(
     result = []
     for s in sessions:
         table = await db.get(DiningTable, s.table_id) if s.table_id else None
-        all_items = [i for o in s.orders if o.status != "cancelled" for i in o.items]
-        total = sum(float(i.unit_price) * i.qty for i in all_items)
-        result.append({
-            "id": str(s.id),
-            "status": s.status,
-            "source_type": "dine_in" if s.table_id else "quick_service",
-            "table_name": table.name if table else None,
-            "queue_number": s.queue_number,
-            "customer_name": s.customer_name,
-            "customer_phone": s.customer_phone,
-            "opened_at": s.opened_at.isoformat(),
-            "closed_at": s.closed_at.isoformat() if s.closed_at else None,
-            "item_count": len(all_items),
-            "pending_count": sum(i.qty for i in all_items if i.status == "pending"),
-            "cooking_count": sum(i.qty for i in all_items if i.status == "cooking"),
-            "ready_count": sum(i.qty for i in all_items if i.status == "done"),
-            "served_count": sum(i.qty for i in all_items if i.status == "served"),
-            "total_amount": round(total, 2),
-            "sale_order_id": str(s.sale_order_id) if s.sale_order_id else None,
-        })
+        result.append(_serialize_order_center_session(s, table))
     return ok(result)
 
 
@@ -1727,7 +1751,11 @@ async def get_session(
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session(session_id)
-    if not session or session.company_id != current.company_id:
+    if (
+        not session
+        or session.company_id != current.company_id
+        or session.branch_id != current.branch_id
+    ):
         raise HTTPException(status_code=404, detail="ไม่พบ session")
     return ok({"id": str(session.id), "status": session.status, "queue_number": session.queue_number})
 
@@ -1740,7 +1768,11 @@ async def get_session_detail(
 ) -> dict[str, Any]:
     svc = DiningService(db)
     session = await svc.get_session(session_id)
-    if not session or session.company_id != current.company_id:
+    if (
+        not session
+        or session.company_id != current.company_id
+        or session.branch_id != current.branch_id
+    ):
         raise HTTPException(status_code=404, detail="ไม่พบ session")
     table = await db.get(DiningTable, session.table_id) if session.table_id else None
     active_orders = [order for order in session.orders if order.status != "cancelled"]
@@ -1764,17 +1796,20 @@ async def get_session_detail(
                 "id": str(o.id),
                 "order_number": o.order_number,
                 "status": o.status,
+                "row_version": o.row_version,
                 "source": o.source,
                 "note": o.note,
                 "created_at": o.created_at.isoformat() if o.created_at else None,
                 "items": [
                     {
                         "id": str(i.id),
+                        "product_id": str(i.product_id),
                         "product_name": i.product_name,
                         "qty": i.qty,
                         "unit_price": float(i.unit_price),
                         "special_request": i.special_request,
                         "status": i.status,
+                        "row_version": i.row_version,
                     }
                     for i in o.items
                 ],
@@ -1809,6 +1844,107 @@ async def place_order(
     return ok({"id": str(order.id), "order_number": order.order_number})
 
 
+@router.post("/cancellations/preview")
+async def preview_restaurant_cancellation(
+    payload: RestaurantCancellationRequest,
+    current: TokenData = Depends(
+        require_any_permission(
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.approve",
+        )
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    result = await RestaurantCancellationService(db).preview(
+        current=current,
+        payload=payload,
+        device=counter_device,
+    )
+    return ok(result)
+
+
+@router.post("/cancellations", status_code=status.HTTP_201_CREATED)
+async def create_restaurant_cancellation(
+    payload: RestaurantCancellationRequest,
+    current: TokenData = Depends(
+        require_any_permission(
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.approve",
+        )
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    result = await RestaurantCancellationService(db).execute(
+        current=current,
+        payload=payload,
+        device=counter_device,
+    )
+    return ok(result)
+
+
+@router.get("/cancellations")
+async def list_restaurant_cancellations(
+    session_id: uuid.UUID | None = Query(default=None),
+    order_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=250),
+    current: TokenData = Depends(
+        require_any_permission(
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.approve",
+            "fb.report.view",
+        )
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    if current.branch_id is None or current.brand_id is None:
+        raise HTTPException(status_code=409, detail="Brand and Branch context required")
+    statement = (
+        select(RestaurantCancellation)
+        .where(
+            RestaurantCancellation.company_id == current.company_id,
+            RestaurantCancellation.branch_id == current.branch_id,
+        )
+        .order_by(RestaurantCancellation.created_at.desc())
+        .limit(limit)
+    )
+    if current.brand_id is not None:
+        statement = statement.where(RestaurantCancellation.brand_id == current.brand_id)
+    if session_id is not None:
+        statement = statement.where(RestaurantCancellation.session_id == session_id)
+    if order_id is not None:
+        statement = statement.where(RestaurantCancellation.order_id == order_id)
+    rows = list((await db.scalars(statement)).all())
+    service = RestaurantCancellationService(db)
+    return ok([await service.serialize(row) for row in rows])
+
+
+@router.post("/cancellations/{cancellation_id}/reopen")
+async def reopen_restaurant_cancellation(
+    cancellation_id: uuid.UUID,
+    payload: RestaurantCancellationReopenRequest,
+    current: TokenData = Depends(
+        require_any_permission(
+            "fb.order.cancel.reopen.request",
+            "fb.order.cancel.reopen",
+        )
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
+) -> dict[str, Any]:
+    result = await RestaurantCancellationService(db).reopen(
+        cancellation_id=cancellation_id,
+        current=current,
+        payload=payload,
+        device=counter_device,
+    )
+    return ok(result)
+
+
 @router.post("/orders/{order_id}/cancel")
 async def cancel_order(
     order_id: uuid.UUID,
@@ -1816,20 +1952,14 @@ async def cancel_order(
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
-    if not payload.reason.strip():
-        raise HTTPException(status_code=400, detail="กรุณาระบุเหตุผลการยกเลิก")
-    order = await db.get(DiningOrder, order_id)
-    if not order or order.company_id != current.company_id:
-        raise HTTPException(status_code=404, detail="ไม่พบออเดอร์")
-    session = await db.get(DiningSession, order.session_id)
-    if not session or session.status == "closed":
-        raise HTTPException(status_code=400, detail="Session ปิดแล้ว")
-    svc = DiningService(db)
-    try:
-        updated = await svc.cancel_order(order, payload.reason)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ok({"id": str(updated.id), "status": updated.status})
+    del order_id, payload, current, db
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "structured_cancellation_required",
+            "message": "Use /restaurant/cancellations/preview and /restaurant/cancellations",
+        },
+    )
 
 
 @router.post("/order-items/{item_id}/cancel")
@@ -1839,23 +1969,14 @@ async def cancel_order_item(
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
-    if not payload.reason.strip():
-        raise HTTPException(status_code=400, detail="กรุณาระบุเหตุผลการยกเลิก")
-    item = await db.get(DiningOrderItem, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="ไม่พบรายการ")
-    order = await db.get(DiningOrder, item.order_id)
-    if not order or order.company_id != current.company_id:
-        raise HTTPException(status_code=404, detail="ไม่พบออเดอร์")
-    session = await db.get(DiningSession, order.session_id)
-    if not session or session.status == "closed":
-        raise HTTPException(status_code=400, detail="Session ปิดแล้ว")
-    svc = DiningService(db)
-    try:
-        updated = await svc.cancel_order_item(item, payload.reason)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ok({"id": str(updated.id), "status": updated.status})
+    del item_id, payload, current, db
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "structured_cancellation_required",
+            "message": "Use /restaurant/cancellations/preview and /restaurant/cancellations",
+        },
+    )
 
 
 @router.patch("/order-items/{item_id}/status")
@@ -1878,10 +1999,10 @@ async def update_order_item_status(
         raise HTTPException(status_code=400, detail="status ไม่ถูกต้อง")
     svc = DiningService(db)
     try:
-        updated = await svc.update_order_item_status(item, payload.status)
+        updated = await svc.update_order_item_status(item, payload.status, payload.expected_version)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ok({"id": str(updated.id), "status": updated.status})
+    return ok({"id": str(updated.id), "status": updated.status, "row_version": updated.row_version})
 
 
 @router.post("/sessions/{session_id}/bill")
@@ -2016,6 +2137,7 @@ async def list_kitchen_tickets(
         "table_name": t.table_name,
         "source_type": "dine_in" if t.table_name else "quick_service",
         "status": t.status,
+        "row_version": t.row_version,
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "done_at": t.done_at.isoformat() if t.done_at else None,
     } for t in tickets])
@@ -2046,10 +2168,59 @@ async def update_ticket(
         raise HTTPException(status_code=400, detail=f"status ต้องเป็น {valid}")
     svc = DiningService(db)
     try:
-        updated = await svc.update_ticket_status(ticket, payload.status)
+        updated = await svc.update_ticket_status(ticket, payload.status, payload.expected_version)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ok({"id": str(updated.id), "status": updated.status})
+    return ok({"id": str(updated.id), "status": updated.status, "row_version": updated.row_version})
+
+
+@router.get("/kitchen-cancellation-events")
+async def list_kitchen_cancellations(
+    station: str | None = Query(default=None),
+    include_acknowledged: bool = Query(default=False),
+    current: TokenData = Depends(
+        require_any_permission("fb.kitchen.ticket.manage", "fb.kitchen.manage")
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    if current.branch_id is None or current.brand_id is None:
+        raise HTTPException(status_code=409, detail="Brand and Branch context required")
+    if current.station_key is not None:
+        if station is not None and normalized_station_key(station) != normalized_station_key(current.station_key):
+            raise HTTPException(status_code=403, detail="Kitchen station scope mismatch")
+        station = current.station_key
+    rows = await RestaurantCancellationService(db).list_kds_events(
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        station=station,
+        include_acknowledged=include_acknowledged,
+    )
+    return ok(rows)
+
+
+@router.post("/kitchen-cancellation-events/{event_id}/acknowledge")
+async def acknowledge_kitchen_cancellation(
+    event_id: uuid.UUID,
+    payload: KitchenCancellationAckRequest,
+    current: TokenData = Depends(
+        require_any_permission("fb.kitchen.ticket.manage", "fb.kitchen.manage")
+    ),
+    db: AsyncSession = Depends(get_restaurant_service_db),
+) -> dict[str, Any]:
+    if current.branch_id is None or current.brand_id is None:
+        raise HTTPException(status_code=409, detail="Brand and Branch context required")
+    result = await RestaurantCancellationService(db).acknowledge_kds_event(
+        event_id=event_id,
+        company_id=current.company_id,
+        brand_id=current.brand_id,
+        branch_id=current.branch_id,
+        station=current.station_key,
+        actor_user_id=current.user_id,
+        device_id=None,
+        payload=payload,
+    )
+    return ok(result)
 
 
 @router.get("/pickup-queue")
@@ -2112,6 +2283,20 @@ async def _wap_get_menu_data(
     ):
         raise HTTPException(status_code=403, detail="Counter device Branch does not match staff Branch")
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
+    if brand is None and current.brand_id is not None:
+        brand = await db.scalar(
+            select(Brand).where(
+                Brand.id == current.brand_id,
+                Brand.company_id == current.company_id,
+                Brand.business_type == RESTAURANT,
+                Brand.is_active.is_(True),
+            )
+        )
+    if brand is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Restaurant menu requires a signed Restaurant Brand context",
+        )
     _require_brand_assignment(current, brand)
     brand_branch = await _ensure_brand_branch(db, current.company_id, current.branch_id, brand)
     if brand is not None and (brand_branch is None or brand_branch.store_location_id is None):
@@ -2173,22 +2358,48 @@ async def _wap_get_menu_data(
         for recipe in recipe_rows:
             if recipe.product_id not in menu_recipes:
                 menu_recipes[recipe.product_id] = recipe
+    category_ids = {item.category_id for item in products if item.category_id is not None}
     categories = list((await db.scalars(
         select(CategoryModel).where(
             CategoryModel.company_id == current.company_id,
+            CategoryModel.id.in_(category_ids),
             CategoryModel.is_active.is_(True),
         ).order_by(CategoryModel.sort_order, CategoryModel.name)
-    )).all())
+    )).all()) if category_ids else []
+    unique_categories: list[CategoryModel] = []
+    seen_category_names: set[str] = set()
+    for category in categories:
+        normalized_name = " ".join(category.name.split()).casefold()
+        if normalized_name in seen_category_names:
+            continue
+        seen_category_names.add(normalized_name)
+        unique_categories.append(category)
     cat_map = {item.id: item.name for item in categories}
-    offline_authorization, offline_authorization_expires_at = (
-        OfflineSaleAuthorizationService.issue(
+    offline_enabled = counter_device is not None and offline_scope_enabled(
+        current.company_id,
+        current.branch_id,
+    )
+    offline_authorization: str | None = None
+    offline_authorization_expires_at: datetime | None = None
+    if offline_enabled:
+        offline_authorization, offline_authorization_expires_at = OfflineSaleAuthorizationService.issue(
             current,
             shift_id=shift_id,
             location_id=location_id,
             brand_id=brand.id if brand else None,
             device=counter_device,
         )
-    )
+    snapshot_material = [
+        {
+            "id": str(item.id),
+            "price": str(item.selling_price),
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        }
+        for item in products
+    ]
+    offline_snapshot_version = hashlib.sha256(
+        json.dumps(snapshot_material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
     def _serialize_store_menu_recipe(recipe: Recipe | None) -> dict[str, Any] | None:
         if not recipe:
@@ -2214,6 +2425,9 @@ async def _wap_get_menu_data(
     return ok({
         "brand_slug": brand.slug if brand else None,
         "brand_name": brand.name if brand else None,
+        "brand_id": str(brand.id) if brand else None,
+        "company_id": str(current.company_id),
+        "branch_id": str(current.branch_id),
         "branch_name": branch.name,
         "shift_id": str(shift_id) if shift_id else None,
         "location_id": str(location_id) if location_id else None,
@@ -2221,10 +2435,13 @@ async def _wap_get_menu_data(
         "promptpay_name": settings.promptpay_name if settings else None,
         "promptpay_payload": _branch_promptpay_payload(settings),
         "offline_policy_version": OFFLINE_POLICY_VERSION,
+        "offline_mode_enabled": offline_enabled,
+        "offline_snapshot_version": offline_snapshot_version,
+        "offline_snapshot_stale_at": offline_authorization_expires_at.isoformat() if offline_authorization_expires_at else None,
         "offline_authorization": offline_authorization,
-        "offline_authorization_expires_at": offline_authorization_expires_at.isoformat(),
+        "offline_authorization_expires_at": offline_authorization_expires_at.isoformat() if offline_authorization_expires_at else None,
         "offline_device_id": str(counter_device.device_id) if counter_device else None,
-        "categories": [{"id": str(item.id), "name": item.name} for item in categories],
+        "categories": [{"id": str(item.id), "name": item.name} for item in unique_categories],
         "products": [
             {
                 "id": str(item.id),
@@ -5600,6 +5817,12 @@ async def wap_create_paid_order(
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
+    if payload.is_offline:
+        raise pricing_error(
+            status.HTTP_409_CONFLICT,
+            "stale_price",
+            "Offline orders must be submitted through the authorized sync endpoint",
+        )
     svc = DiningService(db)
     try:
         result = await svc.create_wap_paid_order(current.company_id, current.branch_id, current.user_id, payload)
@@ -5617,6 +5840,12 @@ async def store_create_paid_order(
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
+    if payload.is_offline:
+        raise pricing_error(
+            status.HTTP_409_CONFLICT,
+            "stale_price",
+            "Offline orders must be submitted through the authorized sync endpoint",
+        )
     brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
     _require_brand_assignment(current, brand)
     brand_branch = await _ensure_brand_branch(db, current.company_id, current.branch_id, brand)
@@ -5648,6 +5877,155 @@ async def store_create_paid_order(
     return ok(result.model_dump())
 
 
+async def _sync_one_offline_order(
+    *,
+    offline_order: Any,
+    current: TokenData,
+    counter_device: DeviceTokenData | None,
+    db: AsyncSession,
+    identity_db: AsyncSession,
+    brand_id: uuid.UUID | None,
+    required_location_id: uuid.UUID | None,
+    valid_product_ids: set[uuid.UUID],
+    invalid_product_message: str,
+) -> WapOfflineSyncItemRead:
+    sync_service = OfflineSyncService(db)
+    try:
+        operation, replay = await sync_service.prepare(
+            current,
+            counter_device,
+            offline_order,
+            brand_id=brand_id,
+        )
+    except OfflineSyncError as exc:
+        await sync_service.record_rejected_request(current, offline_order, exc)
+        return WapOfflineSyncItemRead(
+            client_order_id=offline_order.client_order_id,
+            status=exc.state,
+            sync_state=exc.state,
+            error_code=exc.code,
+            error=str(exc),
+        )
+
+    if replay and operation.status == "reconciled" and operation.result_snapshot:
+        return WapOfflineSyncItemRead(
+            client_order_id=offline_order.client_order_id,
+            status="synced",
+            sync_state="reconciled",
+            operation_id=operation.id,
+            order=operation.result_snapshot,
+            acknowledged_at=operation.acknowledged_at,
+            reconciled_at=operation.reconciled_at,
+        )
+    if replay and operation.status in {"rejected", "quarantined", "needs_review"}:
+        return WapOfflineSyncItemRead(
+            client_order_id=offline_order.client_order_id,
+            status=operation.status,
+            sync_state=operation.status,
+            operation_id=operation.id,
+            error_code=operation.error_code,
+            error=operation.error_message,
+            acknowledged_at=operation.acknowledged_at,
+            reconciled_at=operation.reconciled_at,
+        )
+
+    await sync_service.transition(
+        operation,
+        "syncing",
+        actor_user_id=current.user_id,
+        event_type="sync_attempt",
+    )
+    try:
+        await OfflineSaleAuthorizationService.validate(
+            identity_db,
+            current,
+            offline_order,
+            brand_id=brand_id,
+        )
+        order_product_ids = {item.product_id for item in offline_order.items}
+        if not order_product_ids.issubset(valid_product_ids):
+            raise OfflineSyncError("product_scope_mismatch", invalid_product_message, state="needs_review")
+        result = await DiningService(db).create_wap_paid_order(
+            current.company_id,
+            current.branch_id,
+            current.user_id,
+            offline_order.model_copy(update={"is_offline": True}),
+            brand_id=brand_id,
+            required_location_id=required_location_id,
+        )
+    except OfflineSyncError as exc:
+        await db.rollback()
+        operation = await sync_service.get_scoped(current, offline_order.client_order_id)
+        if operation is not None:
+            await sync_service.transition(
+                operation,
+                exc.state,
+                actor_user_id=current.user_id,
+                event_type="validation_failed",
+                error_code=exc.code,
+                error_message=str(exc),
+            )
+        return WapOfflineSyncItemRead(
+            client_order_id=offline_order.client_order_id,
+            status=exc.state,
+            sync_state=exc.state,
+            operation_id=operation.id if operation else None,
+            error_code=exc.code,
+            error=str(exc),
+        )
+    except (HTTPException, ValueError) as exc:
+        await db.rollback()
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        error_code = detail.get("code") if isinstance(detail, dict) else "server_validation_failed"
+        message = detail.get("message", str(detail)) if isinstance(detail, dict) else str(detail)
+        state = "unknown" if isinstance(exc, HTTPException) and exc.status_code >= 500 else "needs_review"
+        operation = await sync_service.get_scoped(current, offline_order.client_order_id)
+        if operation is not None:
+            await sync_service.transition(
+                operation,
+                state,
+                actor_user_id=current.user_id,
+                event_type="server_validation_failed" if state == "needs_review" else "server_outcome_unknown",
+                error_code=error_code,
+                error_message=message,
+            )
+        return WapOfflineSyncItemRead(
+            client_order_id=offline_order.client_order_id,
+            status=state,
+            sync_state=state,
+            operation_id=operation.id if operation else None,
+            error_code=error_code,
+            error=message,
+        )
+
+    result_snapshot = result.model_dump(mode="json")
+    await sync_service.transition(
+        operation,
+        "server_acknowledged",
+        actor_user_id=current.user_id,
+        event_type="server_acknowledged",
+        sale_order_id=result.sale_order_id,
+        result_snapshot=result_snapshot,
+    )
+    operation = await sync_service.transition(
+        operation,
+        "reconciled",
+        actor_user_id=current.user_id,
+        event_type="reconciled",
+        sale_order_id=result.sale_order_id,
+        result_snapshot=result_snapshot,
+    )
+    return WapOfflineSyncItemRead(
+        client_order_id=offline_order.client_order_id,
+        status="synced",
+        sync_state="reconciled",
+        operation_id=operation.id,
+        order=result,
+        acknowledged_at=operation.acknowledged_at,
+        reconciled_at=operation.reconciled_at,
+    )
+
+
 @router.post("/store/{brand_slug}/orders/sync")
 async def store_sync_offline_orders(
     brand_slug: str,
@@ -5655,6 +6033,7 @@ async def store_sync_offline_orders(
     current: TokenData = Depends(require_any_permission("brand.store.order.create", "fb.order.create")),
     db: AsyncSession = Depends(get_db),
     identity_db: AsyncSession = Depends(get_identity_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
@@ -5663,79 +6042,23 @@ async def store_sync_offline_orders(
     brand_branch = await _ensure_brand_branch(db, current.company_id, current.branch_id, brand)
     if brand_branch is None or brand_branch.store_location_id is None:
         raise HTTPException(status_code=400, detail="กรุณาตั้งค่าคลัง STORE-STOCK ของสาขาก่อนขาย")
-
-    product_ids = {
-        item.product_id
-        for offline_order in payload.orders
-        for item in offline_order.items
-    }
-    valid_product_ids: set[uuid.UUID] = set()
-    if product_ids:
-        valid_product_ids = set((await db.scalars(
-            select(Product.id).where(
-                Product.company_id == current.company_id,
-                Product.brand_id == brand.id,
-                Product.id.in_(product_ids),
-            )
-        )).all())
-
-    svc = DiningService(db)
-    results: list[WapOfflineSyncItemRead] = []
-    for offline_order in payload.orders:
-        try:
-            await OfflineSaleAuthorizationService.validate(
-                identity_db,
-                current,
-                offline_order,
-                brand_id=brand.id,
-            )
-        except ValueError as exc:
-            results.append(WapOfflineSyncItemRead(
-                client_order_id=offline_order.client_order_id,
-                status="needs_review",
-                error=str(exc),
-            ))
-            continue
-        order_product_ids = {item.product_id for item in offline_order.items}
-        if not order_product_ids.issubset(valid_product_ids):
-            results.append(WapOfflineSyncItemRead(
-                client_order_id=offline_order.client_order_id,
-                status="needs_review",
-                error="พบสินค้าที่ไม่อยู่ในแบรนด์นี้ กรุณาโหลดเมนูใหม่",
-            ))
-            continue
-        try:
-            result = await svc.create_wap_paid_order(
-                current.company_id,
-                current.branch_id,
-                current.user_id,
-                offline_order.model_copy(update={"is_offline": True}),
-                brand_id=brand.id,
-                required_location_id=brand_branch.store_location_id,
-            )
-        except HTTPException as exc:
-            if exc.status_code >= 500:
-                raise
-            await db.rollback()
-            results.append(WapOfflineSyncItemRead(
-                client_order_id=offline_order.client_order_id,
-                status="needs_review",
-                error=str(exc.detail),
-            ))
-            continue
-        except ValueError as exc:
-            await db.rollback()
-            results.append(WapOfflineSyncItemRead(
-                client_order_id=offline_order.client_order_id,
-                status="needs_review",
-                error=str(exc),
-            ))
-            continue
-        results.append(WapOfflineSyncItemRead(
-            client_order_id=offline_order.client_order_id,
-            status="synced",
-            order=result,
-        ))
+    product_ids = {item.product_id for order in payload.orders for item in order.items}
+    valid_product_ids = set((await db.scalars(select(Product.id).where(
+        Product.company_id == current.company_id,
+        Product.brand_id == brand.id,
+        Product.id.in_(product_ids),
+    ))).all()) if product_ids else set()
+    results = [await _sync_one_offline_order(
+        offline_order=order,
+        current=current,
+        counter_device=counter_device,
+        db=db,
+        identity_db=identity_db,
+        brand_id=brand.id,
+        required_location_id=brand_branch.store_location_id,
+        valid_product_ids=valid_product_ids,
+        invalid_product_message="พบสินค้าที่ไม่อยู่ในแบรนด์นี้ กรุณาโหลดเมนูใหม่",
+    ) for order in payload.orders]
     return ok(WapOfflineSyncRead(results=results).model_dump())
 
 
@@ -5745,82 +6068,84 @@ async def wap_sync_offline_orders(
     current: TokenData = Depends(require_permission("fb.order.create")),
     db: AsyncSession = Depends(get_db),
     identity_db: AsyncSession = Depends(get_identity_db),
+    counter_device: DeviceTokenData | None = Depends(get_optional_counter_device),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
-
-    product_ids = {
-        item.product_id
-        for offline_order in payload.orders
-        for item in offline_order.items
-    }
-    valid_product_ids: set[uuid.UUID] = set()
-    if product_ids:
-        valid_product_ids = set((await db.scalars(
-            select(Product.id).where(
-                Product.company_id == current.company_id,
-                Product.brand_id.is_(None),
-                Product.product_type == "menu_item",
-                Product.id.in_(product_ids),
-            )
-        )).all())
-
-    svc = DiningService(db)
-    results: list[WapOfflineSyncItemRead] = []
-    for offline_order in payload.orders:
-        try:
-            await OfflineSaleAuthorizationService.validate(
-                identity_db,
-                current,
-                offline_order,
-                brand_id=None,
-            )
-        except ValueError as exc:
-            results.append(WapOfflineSyncItemRead(
-                client_order_id=offline_order.client_order_id,
-                status="needs_review",
-                error=str(exc),
-            ))
-            continue
-        order_product_ids = {item.product_id for item in offline_order.items}
-        if not order_product_ids.issubset(valid_product_ids):
-            results.append(WapOfflineSyncItemRead(
-                client_order_id=offline_order.client_order_id,
-                status="needs_review",
-                error="พบสินค้าที่ไม่อยู่ในเมนูร้านอาหาร กรุณาโหลดเมนูใหม่",
-            ))
-            continue
-        try:
-            result = await svc.create_wap_paid_order(
-                current.company_id,
-                current.branch_id,
-                current.user_id,
-                offline_order.model_copy(update={"is_offline": True}),
-            )
-        except HTTPException as exc:
-            if exc.status_code >= 500:
-                raise
-            await db.rollback()
-            results.append(WapOfflineSyncItemRead(
-                client_order_id=offline_order.client_order_id,
-                status="needs_review",
-                error=str(exc.detail),
-            ))
-            continue
-        except ValueError as exc:
-            await db.rollback()
-            results.append(WapOfflineSyncItemRead(
-                client_order_id=offline_order.client_order_id,
-                status="needs_review",
-                error=str(exc),
-            ))
-            continue
-        results.append(WapOfflineSyncItemRead(
-            client_order_id=offline_order.client_order_id,
-            status="synced",
-            order=result,
-        ))
+    product_ids = {item.product_id for order in payload.orders for item in order.items}
+    valid_product_ids = set((await db.scalars(select(Product.id).where(
+        Product.company_id == current.company_id,
+        Product.brand_id.is_(None),
+        Product.product_type == "menu_item",
+        Product.id.in_(product_ids),
+    ))).all()) if product_ids else set()
+    results = [await _sync_one_offline_order(
+        offline_order=order,
+        current=current,
+        counter_device=counter_device,
+        db=db,
+        identity_db=identity_db,
+        brand_id=None,
+        required_location_id=None,
+        valid_product_ids=valid_product_ids,
+        invalid_product_message="พบสินค้าที่ไม่อยู่ในเมนูร้านอาหาร กรุณาโหลดเมนูใหม่",
+    ) for order in payload.orders]
     return ok(WapOfflineSyncRead(results=results).model_dump())
+
+
+@router.get("/offline-sync")
+async def list_offline_sync_operations(
+    limit: int = Query(default=250, ge=1, le=1000),
+    current: TokenData = Depends(require_permission("fb.order.create")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    rows = await OfflineSyncService(db).list_scoped(current, limit=limit)
+    return ok([serialize_offline_operation(row) for row in rows])
+
+
+@router.get("/offline-sync/{client_operation_id}")
+async def inquire_offline_sync_operation(
+    client_operation_id: str,
+    current: TokenData = Depends(require_permission("fb.order.create")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    row = await OfflineSyncService(db).get_scoped(current, client_operation_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Offline operation not found")
+    return ok(serialize_offline_operation(row))
+
+
+@router.post("/offline-sync/purge")
+async def purge_offline_sync_operations(
+    current: TokenData = Depends(require_permission("system.device.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    purged = await OfflineSyncService(db).purge_reconciled(current)
+    return ok(WapOfflinePurgeRead(
+        purged=purged,
+        retention_days=settings.pos_offline_retention_days,
+    ).model_dump())
+
+
+@router.post("/offline-sync/{client_operation_id}/resolve")
+async def resolve_offline_sync_operation(
+    client_operation_id: str,
+    payload: WapOfflineResolveRequest,
+    current: TokenData = Depends(require_permission("system.device.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        operation = await OfflineSyncService(db).resolve_exception(
+            current,
+            client_operation_id,
+            reason=payload.reason,
+        )
+    except OfflineSyncError as exc:
+        raise HTTPException(
+            status_code=404 if exc.code == "operation_not_found" else 409,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    return ok(serialize_offline_operation(operation))
 
 
 @router.get("/wap/orders/{session_id}")
@@ -5935,8 +6260,10 @@ async def test_fb_line_notify(
 @public_router.get("/{qr_token}")
 async def public_get_menu(
     qr_token: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-menu", subject=str(qr_token), limit=120)
     svc = DiningService(db)
     menu = await svc.get_public_menu(qr_token)
     if not menu:
@@ -5948,8 +6275,10 @@ async def public_get_menu(
 async def public_place_order(
     qr_token: uuid.UUID,
     payload: PlaceOrderRequest,
+    request: Request,
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-order", subject=str(qr_token), limit=20)
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
     if not session:
@@ -5983,9 +6312,11 @@ async def public_place_order(
 @public_router.get("/{qr_token}/status")
 async def public_order_status(
     qr_token: uuid.UUID,
+    request: Request,
     session_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-status", subject=str(qr_token), limit=300)
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
     if not session:
@@ -6001,9 +6332,11 @@ async def public_order_status(
 @public_router.post("/{qr_token}/bill")
 async def public_request_bill(
     qr_token: uuid.UUID,
+    request: Request,
     session_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-bill", subject=str(qr_token), limit=10)
     svc = DiningService(db)
     session = await svc.get_session_by_token(qr_token)
     if not session:
@@ -6050,8 +6383,10 @@ async def _get_qs_settings(db: AsyncSession, qs_token: uuid.UUID) -> BranchSetti
 @qs_router.get("/{qs_token}")
 async def qs_get_menu(
     qs_token: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-qs-menu", subject=str(qs_token), limit=120)
     settings = await _get_qs_settings(db, qs_token)
     if not settings:
         raise HTTPException(status_code=404, detail="ไม่พบ QR นี้")
@@ -6105,10 +6440,12 @@ async def qs_get_menu(
 async def qs_place_order(
     qs_token: uuid.UUID,
     payload: PlaceOrderRequest,
+    request: Request,
     customer_name: str | None = Query(default=None),
     customer_phone: str | None = Query(default=None),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-qs-order", subject=str(qs_token), limit=20)
     settings = await _get_qs_settings(db, qs_token)
     if not settings:
         raise HTTPException(status_code=404, detail="ไม่พบ QR นี้")
@@ -6148,9 +6485,11 @@ async def qs_place_order(
 @qs_router.get("/{qs_token}/status")
 async def qs_order_status(
     qs_token: uuid.UUID,
+    request: Request,
     session_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
+    await require_public_rate_limit(request, "restaurant-qs-status", subject=str(qs_token), limit=300)
     settings = await _get_qs_settings(db, qs_token)
     if not settings:
         raise HTTPException(status_code=404, detail="ไม่พบ QR นี้")

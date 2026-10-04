@@ -1,6 +1,19 @@
 from app.models.base import TimestampMixin, UUIDMixin, SoftDeleteMixin
 from app.models.company import Company
-from app.models.platform import PlatformOperator, PlatformTenantProfile
+from app.models.platform import (
+    CompanyReportingEventReceipt,
+    CompanyReportingFact,
+    CompanyReportingSourceState,
+    PlatformOperator,
+    PlatformOperatorInvitation,
+    PlatformOperatorRoleAssignment,
+    PlatformOperationsSnapshot,
+    PlatformSession,
+    PlatformTenantProfile,
+    PlatformTenantUsageSnapshot,
+    SaasAccountCredential,
+    SaasTenantMembership,
+)
 from app.models.branch import Branch
 from app.models.role import Role, Permission, role_permissions_table
 from app.models.user import User, UserBranch
@@ -8,7 +21,15 @@ from app.models.staff_assignment import StaffRoleAssignment
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.approval import ApprovalGrantUsage, ManagerPinCredential
+from app.models.pricing import PriceCalculation, PriceOverrideAudit
 from app.models.device import DeviceRegistration
+from app.models.offline_sync import (
+    OfflinePosOperation,
+    OfflinePosOperationEvent,
+    PhysicalUATAudit,
+    PhysicalUATCheck,
+    PhysicalUATSession,
+)
 from app.models.product import (
     Unit,
     Category,
@@ -19,7 +40,32 @@ from app.models.product import (
     PriceListItem,
 )
 from app.models.stock import StockLocation, StockBalance, StockMovement
-from app.models.pos import CashierShift, SaleOrder, SaleOrderItem, Payment
+from app.models.shared_kitchen import (
+    CompanyIngredient,
+    CompanyIngredientAlias,
+    CompanyIngredientLot,
+    CompanyKitchen,
+    CompanyKitchenMovement,
+    CompanyProductionDemand,
+    CompanyProductionInput,
+    CompanyProductionOrder,
+)
+from app.models.distribution import (
+    CompanyDistributionDemand,
+    CompanyDistributionEvent,
+    CompanyDistributionShipment,
+)
+from app.models.pos import CashierShift, Payment, PosHoldDraft, PosHoldDraftAudit, SaleOrder, SaleOrderItem
+from app.models.refund import (
+    ProviderRefundAttempt,
+    ProviderRefundEvent,
+    RefundOperation,
+    RefundOperationAudit,
+    RefundOperationItem,
+    RefundPaymentLeg,
+    RefundQuote,
+    RefundTaxLink,
+)
 from app.models.purchase import (
     Supplier,
     PurchaseOrder,
@@ -34,7 +80,17 @@ from app.models.user_access import UserAccessRequest
 from app.models.accounting import Account, JournalEntry, JournalLine, AccountBalance
 from app.models.integration import OperationalOutboxEvent
 from app.models.entitlement import BrandModuleEntitlement
+from app.models.saas_billing import SaasBillingEvent, SaasInvoice, SaasPlan, SaasSubscription
+from app.models.saas_privacy_support import (
+    SaasPrivacyRequest,
+    SaasRetentionDecision,
+    SaasSupportAccessGrant,
+    SaasSupportMessage,
+    SaasSupportTicket,
+)
 from app.models.etax import TaxDocument, TaxDocumentItem
+from app.models.tax_settings import BranchTaxProfile, CompanyTaxProfile, TaxRateRule
+from app.models.tax_operations import TaxExportBatch, TaxLedgerEntry, TaxPeriod, TaxReconciliationIssue
 from app.models.payable import SupplierInvoice, APPayment, APPaymentAllocation, WHTCertificate
 from app.models.hr import (
     Department,
@@ -68,10 +124,48 @@ from app.models.restaurant import (
     BranchReplenishmentPolicy,
     Recipe, RecipeIngredient,
     DiningTable, DiningSession, DiningOrder, DiningOrderItem, KitchenTicket,
+    RestaurantCancellation, RestaurantCancellationWaste,
+    KitchenCancellationEvent, RestaurantCancellationAudit,
     WapShiftClosure, WapShiftClosureItem, CentralOrder, CentralOrderItem, CentralOrderShiftClosure,
     CreditAccount, CreditLedger,
     ProductionBatch, ProductionBatchLine,
     StockCutoverRun, StockCutoverItem,
+)
+from app.models.takeaway import (
+    TakeawayBranchCatalogItem,
+    TakeawayCatalogItem,
+    TakeawayCategory,
+    TakeawayCentralOrder,
+    TakeawayCentralOrderItem,
+    TakeawayCentralOrderRound,
+    TakeawayCreditAccount,
+    TakeawayCreditEntry,
+    TakeawayCreditPaymentConfig,
+    TakeawayCreditTopupRequest,
+    TakeawayCutoverRun,
+    TakeawayHistoricalArchive,
+    TakeawayImportBatch,
+    TakeawayImportRecord,
+    TakeawayKitchenTicket,
+    TakeawayOperationalOutbox,
+    TakeawayOrder,
+    TakeawayOrderItem,
+    TakeawayPayment,
+    TakeawayPickupToken,
+    TakeawayProductionBatch,
+    TakeawayProductionLine,
+    TakeawayRecipe,
+    TakeawayRecipeIngredient,
+    TakeawayReceipt,
+    TakeawayReferenceProjection,
+    TakeawayShift,
+    TakeawayStockLocation,
+    TakeawayStockBalance,
+    TakeawayStockMovement,
+    TakeawayTransfer,
+    TakeawayTransferItem,
+    TakeawayUnit,
+    TakeawayReplenishmentPolicy,
 )
 
 __all__ = [
@@ -79,8 +173,26 @@ __all__ = [
     "UUIDMixin",
     "SoftDeleteMixin",
     "Company",
+    "CompanyReportingEventReceipt",
+    "CompanyReportingFact",
+    "CompanyReportingSourceState",
     "PlatformOperator",
+    "PlatformOperatorInvitation",
+    "PlatformOperatorRoleAssignment",
+    "PlatformOperationsSnapshot",
     "PlatformTenantProfile",
+    "PlatformTenantUsageSnapshot",
+    "SaasAccountCredential",
+    "SaasTenantMembership",
+    "SaasBillingEvent",
+    "SaasInvoice",
+    "SaasPlan",
+    "SaasSubscription",
+    "SaasPrivacyRequest",
+    "SaasRetentionDecision",
+    "SaasSupportTicket",
+    "SaasSupportMessage",
+    "SaasSupportAccessGrant",
     "Branch",
     "Role",
     "Permission",
@@ -92,6 +204,8 @@ __all__ = [
     "RefreshToken",
     "ManagerPinCredential",
     "ApprovalGrantUsage",
+    "PriceCalculation",
+    "PriceOverrideAudit",
     "DeviceRegistration",
     "Unit",
     "Category",
@@ -103,10 +217,31 @@ __all__ = [
     "StockLocation",
     "StockBalance",
     "StockMovement",
+    "CompanyKitchen",
+    "CompanyIngredient",
+    "CompanyIngredientAlias",
+    "CompanyIngredientLot",
+    "CompanyKitchenMovement",
+    "CompanyProductionDemand",
+    "CompanyProductionOrder",
+    "CompanyProductionInput",
+    "CompanyDistributionDemand",
+    "CompanyDistributionShipment",
+    "CompanyDistributionEvent",
     "CashierShift",
     "SaleOrder",
     "SaleOrderItem",
     "Payment",
+    "PosHoldDraft",
+    "PosHoldDraftAudit",
+    "RefundQuote",
+    "RefundOperation",
+    "RefundOperationItem",
+    "RefundPaymentLeg",
+    "ProviderRefundAttempt",
+    "ProviderRefundEvent",
+    "RefundTaxLink",
+    "RefundOperationAudit",
     "Supplier",
     "PurchaseOrder",
     "PurchaseOrderItem",
@@ -125,6 +260,13 @@ __all__ = [
     "AccountBalance",
     "TaxDocument",
     "TaxDocumentItem",
+    "CompanyTaxProfile",
+    "BranchTaxProfile",
+    "TaxRateRule",
+    "TaxLedgerEntry",
+    "TaxPeriod",
+    "TaxReconciliationIssue",
+    "TaxExportBatch",
     "SupplierInvoice",
     "APPayment",
     "APPaymentAllocation",
@@ -171,6 +313,10 @@ __all__ = [
     "DiningOrder",
     "DiningOrderItem",
     "KitchenTicket",
+    "RestaurantCancellation",
+    "RestaurantCancellationWaste",
+    "KitchenCancellationEvent",
+    "RestaurantCancellationAudit",
     "WapShiftClosure",
     "WapShiftClosureItem",
     "CentralOrder",
@@ -180,6 +326,45 @@ __all__ = [
     "CreditLedger",
     "ProductionBatch",
     "ProductionBatchLine",
+    "OfflinePosOperation",
+    "OfflinePosOperationEvent",
+    "PhysicalUATAudit",
+    "PhysicalUATCheck",
+    "PhysicalUATSession",
     "StockCutoverRun",
     "StockCutoverItem",
+    "TakeawayBranchCatalogItem",
+    "TakeawayCatalogItem",
+    "TakeawayCategory",
+    "TakeawayCentralOrder",
+    "TakeawayCentralOrderItem",
+    "TakeawayCentralOrderRound",
+    "TakeawayCreditAccount",
+    "TakeawayCreditEntry",
+    "TakeawayCreditPaymentConfig",
+    "TakeawayCreditTopupRequest",
+    "TakeawayCutoverRun",
+    "TakeawayHistoricalArchive",
+    "TakeawayImportBatch",
+    "TakeawayImportRecord",
+    "TakeawayKitchenTicket",
+    "TakeawayOperationalOutbox",
+    "TakeawayOrder",
+    "TakeawayOrderItem",
+    "TakeawayPayment",
+    "TakeawayPickupToken",
+    "TakeawayProductionBatch",
+    "TakeawayProductionLine",
+    "TakeawayRecipe",
+    "TakeawayRecipeIngredient",
+    "TakeawayReceipt",
+    "TakeawayReferenceProjection",
+    "TakeawayShift",
+    "TakeawayStockLocation",
+    "TakeawayStockBalance",
+    "TakeawayStockMovement",
+    "TakeawayTransfer",
+    "TakeawayTransferItem",
+    "TakeawayUnit",
+    "TakeawayReplenishmentPolicy",
 ]

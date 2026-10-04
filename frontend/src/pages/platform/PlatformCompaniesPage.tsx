@@ -10,6 +10,7 @@ import type { PlatformCompanyCreate } from "@/types/platform";
 
 const initialForm: PlatformCompanyCreate = {
   name: "",
+  business_slug: "",
   name_en: "",
   tax_id: "",
   email: "",
@@ -72,6 +73,7 @@ export default function PlatformCompaniesPage(): JSX.Element {
           <p className="mt-1 text-sm text-slate-400">Owner จะได้สิทธิ์ระดับ Company แต่ไม่ใช่ Platform Owner</p>
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             <Field label="ชื่อบริษัท *"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
+            <Field label="Business URL *"><Input value={form.business_slug ?? ""} minLength={3} maxLength={63} pattern="[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])" placeholder="coffee-house" onChange={(e) => setForm({ ...form, business_slug: e.target.value.toLowerCase() })} required /></Field>
             <Field label="ชื่ออังกฤษ"><Input value={form.name_en ?? ""} onChange={(e) => setForm({ ...form, name_en: e.target.value })} /></Field>
             <Field label="เลขประจำตัวผู้เสียภาษี"><Input value={form.tax_id ?? ""} onChange={(e) => setForm({ ...form, tax_id: e.target.value })} /></Field>
             <Field label="อีเมลบริษัท"><Input type="email" value={form.email ?? ""} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
@@ -118,7 +120,7 @@ export default function PlatformCompaniesPage(): JSX.Element {
             <div className="flex items-start justify-between gap-3">
               <div className="flex gap-3">
                 <div className="rounded-lg bg-slate-800 p-2"><Building2 className="h-5 w-5 text-emerald-300" /></div>
-                <div><h3 className="font-semibold">{company.name}</h3><p className="mt-1 text-xs text-slate-400">{company.id}</p></div>
+                <div><h3 className="font-semibold">{company.name}</h3><p className="mt-1 text-xs text-emerald-300">/{company.business_slug}</p><p className="mt-1 text-xs text-slate-500">{company.id}</p></div>
               </div>
               <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${company.is_active ? "bg-emerald-400/15 text-emerald-300" : "bg-red-400/15 text-red-300"}`}>{company.is_active ? "ACTIVE" : "SUSPENDED"}</span>
             </div>

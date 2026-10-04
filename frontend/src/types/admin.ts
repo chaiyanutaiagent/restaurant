@@ -26,6 +26,13 @@ export interface UserDetail {
   is_active: boolean;
   is_superuser: boolean;
   last_login_at: string | null;
+  credential_version: number;
+  mfa_enabled: boolean;
+  access_reviewed_at: string | null;
+  access_review_due_at: string | null;
+  access_review_outcome: string | null;
+  deactivated_at: string | null;
+  deactivation_reason: string | null;
   created_at: string;
   branches: UserBranchDetail[];
 }
@@ -100,6 +107,15 @@ export interface BranchSettings {
   pos_allow_discount: boolean;
   pos_max_discount_pct: number;
   pos_cashier_discount_limit_pct: number;
+  pos_price_override_auto_limit_pct: number;
+  pos_price_override_auto_limit_amount: number;
+  pos_price_override_max_deviation_pct: number;
+  pos_price_override_min_margin_pct: number;
+  pos_price_override_self_approval: boolean;
+  pos_hold_draft_ttl_minutes: number;
+  pos_cash_movement_approval_threshold: number;
+  pos_shift_variance_soft_threshold: number;
+  pos_shift_variance_approval_threshold: number;
   stock_adjust_approval_threshold_qty: number;
   promptpay_target: string | null;
   promptpay_name: string | null;

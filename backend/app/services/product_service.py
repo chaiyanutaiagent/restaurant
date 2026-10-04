@@ -19,6 +19,9 @@ from app.models.product import (
     ProductVariant,
     Unit,
 )
+from app.models.branch import Branch
+from app.models.crm import Customer
+from app.models.restaurant import Brand
 from app.schemas.product import (
     CategoryCreate,
     CategoryUpdate,
@@ -137,14 +140,27 @@ class ProductService:
         category_id: uuid.UUID | None = None,
         product_type: str | None = None,
         is_active: bool | None = None,
+        is_for_sale: bool | None = None,
+        brand_id: uuid.UUID | None = None,
+        include_company_wide: bool = False,
+        excluded_product_types: set[str] | None = None,
     ) -> tuple[list[Product], int]:
         filters = [Product.company_id == company_id, Product.deleted_at.is_(None)]
         if category_id:
             filters.append(Product.category_id == category_id)
         if product_type:
             filters.append(Product.product_type == product_type)
+        if excluded_product_types:
+            filters.append(Product.product_type.not_in(sorted(excluded_product_types)))
         if is_active is not None:
             filters.append(Product.is_active.is_(is_active))
+        if is_for_sale is not None:
+            filters.append(Product.is_for_sale.is_(is_for_sale))
+        if brand_id is not None:
+            brand_filter = Product.brand_id == brand_id
+            if include_company_wide:
+                brand_filter = or_(brand_filter, Product.brand_id.is_(None))
+            filters.append(brand_filter)
         if search:
             like = f"%{search.strip()}%"
             filters.append(
@@ -325,6 +341,25 @@ class ProductService:
         return rows.all()
 
     async def create_price_list(self, company_id: uuid.UUID, data: PriceListCreate) -> PriceList:
+        for model, entity_id, label in (
+            (Brand, data.brand_id, "Brand"),
+            (Branch, data.branch_id, "Branch"),
+            (Customer, data.customer_id, "Customer"),
+        ):
+            if entity_id is None:
+                continue
+            entity = await self.db.scalar(
+                select(model.id).where(
+                    model.id == entity_id,
+                    model.company_id == company_id,
+                    model.deleted_at.is_(None),
+                )
+            )
+            if entity is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"{label} does not belong to the active Company",
+                )
         if data.is_default:
             await self._unset_default_price_lists(company_id)
         price_list = PriceList(company_id=company_id, **data.model_dump())
@@ -351,6 +386,18 @@ class ProductService:
         else:
             item.price = data.price
             item.min_qty = data.min_qty
+        price_list = await self.db.scalar(
+            select(PriceList)
+            .where(
+                PriceList.id == data.price_list_id,
+                PriceList.company_id == company_id,
+                PriceList.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if price_list is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Price list not found")
+        price_list.version = int(price_list.version or 1) + 1
         await self.db.commit()
         await self.db.refresh(item)
         return item

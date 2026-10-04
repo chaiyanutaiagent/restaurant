@@ -318,6 +318,10 @@ class PaymentGatewayService:
                     payment_method=session.gateway,
                     amount=q2(session.amount),
                     reference_no=session.gateway_ref or session.session_ref,
+                    currency=session.currency,
+                    provider_name=session.gateway,
+                    provider_payment_ref=session.gateway_ref or session.session_ref,
+                    settlement_state="captured",
                 )
             )
 

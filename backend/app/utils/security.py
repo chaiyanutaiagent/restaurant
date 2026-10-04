@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 import uuid
 
 from fastapi import HTTPException, status
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError
 from passlib.context import CryptContext
 
 from app.config import settings
@@ -34,6 +35,12 @@ def create_access_token(
     assignment_ids: list[str] | None = None,
     scope_types: list[str] | None = None,
     company_credential_version: int = 1,
+    user_credential_version: int = 1,
+    session_id: str | None = None,
+    qa_persona: str | None = None,
+    qa_deadline: datetime | None = None,
+    client_surface: str | None = None,
+    store_device_id: str | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     expire = now + (
@@ -51,7 +58,14 @@ def create_access_token(
         "scope_types": scope_types or [],
         "permissions": permissions,
         "company_credential_version": company_credential_version,
+        "user_credential_version": user_credential_version,
+        "sid": session_id,
+        "qa_mode": qa_persona is not None,
+        "qa_persona": qa_persona,
+        "qa_deadline": int(qa_deadline.timestamp()) if qa_deadline else None,
         "type": "access",
+        "client_surface": client_surface,
+        "store_device_id": store_device_id,
         "exp": expire,
         "iat": now,
     }
@@ -65,6 +79,13 @@ def create_refresh_token(
     branch_id: str | None = None,
     station_key: str | None = None,
     company_credential_version: int = 1,
+    user_credential_version: int = 1,
+    session_id: str | None = None,
+    expires_delta: timedelta | None = None,
+    qa_persona: str | None = None,
+    qa_deadline: datetime | None = None,
+    client_surface: str | None = None,
+    store_device_id: str | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     payload = {
@@ -73,9 +94,16 @@ def create_refresh_token(
         "branch_id": branch_id,
         "station_key": station_key,
         "company_credential_version": company_credential_version,
+        "user_credential_version": user_credential_version,
+        "sid": session_id,
+        "qa_mode": qa_persona is not None,
+        "qa_persona": qa_persona,
+        "qa_deadline": int(qa_deadline.timestamp()) if qa_deadline else None,
         "type": "refresh",
+        "client_surface": client_surface,
+        "store_device_id": store_device_id,
         "jti": str(uuid.uuid4()),
-        "exp": now + timedelta(days=settings.refresh_token_expire_days),
+        "exp": now + (expires_delta or timedelta(days=settings.refresh_token_expire_days)),
         "iat": now,
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
@@ -124,6 +152,8 @@ def create_device_access_token(
     station_key: str | None,
     credential_version: int,
     company_credential_version: int = 1,
+    business_type: str = "restaurant",
+    target_database: str = "restaurant",
     expires_delta: timedelta | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
@@ -135,8 +165,8 @@ def create_device_access_token(
         "company_id": str(company_id),
         "brand_id": str(brand_id),
         "branch_id": str(branch_id),
-        "business_type": "restaurant",
-        "target_database": "restaurant",
+        "business_type": business_type,
+        "target_database": target_database,
         "device_type": device_type,
         "station_key": station_key,
         "credential_version": credential_version,
@@ -152,9 +182,11 @@ def create_device_access_token(
 def create_platform_access_token(
     *,
     operator_id: uuid.UUID,
+    session_id: uuid.UUID,
     credential_version: int,
     is_superuser: bool,
     expires_delta: timedelta | None = None,
+    qa_persona: str | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     expire = now + (
@@ -162,8 +194,11 @@ def create_platform_access_token(
     )
     payload = {
         "sub": str(operator_id),
+        "sid": str(session_id),
         "credential_version": credential_version,
         "is_superuser": is_superuser,
+        "qa_mode": qa_persona is not None,
+        "qa_persona": qa_persona,
         "type": "platform_access",
         "jti": str(uuid.uuid4()),
         "exp": expire,
@@ -214,7 +249,7 @@ def decode_offline_sale_authorization(token: str) -> dict:
             algorithms=[settings.algorithm],
             options={"verify_exp": False},
         )
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid offline sale authorization",
@@ -224,7 +259,7 @@ def decode_offline_sale_authorization(token: str) -> dict:
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",

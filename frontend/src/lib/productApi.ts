@@ -1,5 +1,6 @@
 import api from "@/lib/api";
-import type { Category, PriceList, Product, Unit } from "@/types/product";
+import type { Category, PriceList, Product, RetailLookupResult, Unit } from "@/types/product";
+import type { ApiResponse } from "@/types/api";
 
 export const categoryApi = {
   list: (tree = false) => api.get(`/categories?tree=${tree}`),
@@ -26,7 +27,10 @@ export const productApi = {
     limit?: number;
     search?: string;
     category_id?: string;
+    product_type?: string;
     is_active?: boolean;
+    is_for_sale?: boolean;
+    catalog_scope?: "all" | "restaurant_menu" | "retail_sale";
   }) => api.get("/products", { params }),
   get: (id: string) => api.get(`/products/${id}`),
   create: (data: Partial<Product>) => api.post("/products", data),
@@ -47,7 +51,9 @@ export const productApi = {
   deleteVariant: (productId: string, variantId: string) =>
     api.delete(`/products/${productId}/variants/${variantId}`),
   getPrice: (productId: string, params?: { price_list_id?: string; variant_id?: string; qty?: number }) =>
-    api.get(`/products/${productId}/price`, { params })
+    api.get(`/products/${productId}/price`, { params }),
+  retailLookup: (params: { code: string; location_id: string; qty?: number }) =>
+    api.get<ApiResponse<RetailLookupResult>>("/products/retail/lookup", { params })
 };
 
 export const priceListApi = {

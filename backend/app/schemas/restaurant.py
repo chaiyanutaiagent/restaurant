@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Literal
 import uuid
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from app.schemas import BaseSchema
 
@@ -329,15 +329,83 @@ class OrderItemCreate(BaseSchema):
     product_id: uuid.UUID
     qty: int = Field(default=1, ge=1, le=99)
     special_request: str | None = Field(default=None, max_length=500)
+    expected_unit_price: Decimal | None = Field(default=None, ge=0)
+    expected_price_version: str | None = Field(default=None, max_length=128)
 
 
 class PlaceOrderRequest(BaseSchema):
     items: list[OrderItemCreate] = Field(min_length=1, max_length=50)
     note: str | None = Field(default=None, max_length=1000)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=100)
+    cart_version: int = Field(default=1, ge=1)
 
 
 class CancelRequest(BaseSchema):
     reason: str
+
+
+CancellationReasonCode = Literal[
+    "customer_changed_mind",
+    "wrong_item",
+    "duplicate_order",
+    "out_of_stock",
+    "quality_failed",
+    "kitchen_error",
+    "other",
+]
+
+
+class RestaurantCancellationRequest(BaseSchema):
+    target_type: Literal["item", "order"]
+    target_id: uuid.UUID
+    expected_order_version: int = Field(ge=1)
+    expected_item_version: int | None = Field(default=None, ge=1)
+    reason_code: CancellationReasonCode
+    reason_note: str | None = Field(default=None, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    approval_token: str | None = None
+
+    @model_validator(mode="after")
+    def validate_target_and_reason(self) -> "RestaurantCancellationRequest":
+        if self.target_type == "item" and self.expected_item_version is None:
+            raise ValueError("expected_item_version is required for item cancellation")
+        if self.reason_code == "other" and not (self.reason_note or "").strip():
+            raise ValueError("reason_note is required when reason_code is other")
+        if self.reason_note is not None:
+            self.reason_note = self.reason_note.strip() or None
+        return self
+
+    def approval_payload(self) -> dict:
+        return self.model_dump(
+            mode="json",
+            exclude={"approval_token"},
+            exclude_none=True,
+        )
+
+
+class RestaurantCancellationReopenRequest(BaseSchema):
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    reason: str = Field(min_length=3, max_length=500)
+    approval_token: str | None = None
+
+    @model_validator(mode="after")
+    def strip_reason(self) -> "RestaurantCancellationReopenRequest":
+        self.reason = self.reason.strip()
+        if len(self.reason) < 3:
+            raise ValueError("reason must contain at least 3 characters")
+        return self
+
+    def approval_payload(self, cancellation_id: uuid.UUID) -> dict:
+        return {
+            "cancellation_id": str(cancellation_id),
+            "idempotency_key": self.idempotency_key,
+            "reason": self.reason,
+        }
+
+
+class KitchenCancellationAckRequest(BaseSchema):
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
 
 
 class DiningOrderItemRead(BaseSchema):
@@ -348,6 +416,14 @@ class DiningOrderItemRead(BaseSchema):
     unit_price: Decimal
     special_request: str | None
     status: str
+    original_price: Decimal = Decimal("0")
+    vat_type: str = "included"
+    vat_rate: Decimal = Decimal("7")
+    vat_amount: Decimal = Decimal("0")
+    line_total: Decimal = Decimal("0")
+    price_source: str | None = None
+    price_version: str | None = None
+    row_version: int = 1
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -358,6 +434,7 @@ class DiningOrderRead(BaseSchema):
     order_number: str
     source: str
     status: str
+    row_version: int = 1
     items: list[DiningOrderItemRead] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -376,6 +453,7 @@ class KitchenTicketRead(BaseSchema):
     queue_number: int | None
     table_name: str | None
     status: str
+    row_version: int = 1
     created_at: str
     done_at: str | None = None
 
@@ -384,6 +462,7 @@ class KitchenTicketRead(BaseSchema):
 
 class TicketStatusUpdate(BaseSchema):
     status: str
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 # ── Session Checkout ──────────────────────────────────────────────────────────
@@ -449,6 +528,18 @@ class WapPaidOrderRequest(BaseSchema):
 
 class WapOfflinePaidOrderRequest(WapPaidOrderRequest):
     client_order_id: str = Field(min_length=1, max_length=100)
+    client_operation_id: str | None = Field(default=None, min_length=1, max_length=100)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=180)
+    schema_version: Literal["offline-pos-v1"] | None = None
+    request_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    company_id: uuid.UUID | None = None
+    brand_id: uuid.UUID | None = None
+    branch_id: uuid.UUID | None = None
+    station_key: str | None = Field(default=None, min_length=1, max_length=100)
+    operation_type: Literal["cash_sale", "hold_draft"] | None = None
+    sequence_no: int | None = Field(default=None, ge=1)
+    price_snapshot_version: str | None = Field(default=None, min_length=1, max_length=120)
+    currency: Literal["THB"] = "THB"
     is_offline: bool = True
 
 
@@ -493,13 +584,42 @@ class WapOrderRead(BaseSchema):
 
 class WapOfflineSyncItemRead(BaseSchema):
     client_order_id: str
-    status: Literal["synced", "needs_review"]
+    status: Literal["synced", "needs_review", "rejected", "quarantined", "unknown"]
+    sync_state: Literal[
+        "pending_sync",
+        "syncing",
+        "server_acknowledged",
+        "reconciled",
+        "needs_review",
+        "rejected",
+        "quarantined",
+        "unknown",
+        "purged",
+    ] | None = None
+    operation_id: uuid.UUID | None = None
     order: WapOrderRead | None = None
+    error_code: str | None = None
     error: str | None = None
+    acknowledged_at: datetime | None = None
+    reconciled_at: datetime | None = None
 
 
 class WapOfflineSyncRead(BaseSchema):
     results: list[WapOfflineSyncItemRead] = Field(default_factory=list)
+
+
+class WapOfflinePurgeRead(BaseSchema):
+    purged: int
+    retention_days: int
+
+
+class WapOfflineResolveRequest(BaseSchema):
+    reason: str = Field(min_length=5, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def strip_reason(cls, value: str) -> str:
+        return value.strip()
 
 
 class StoreStockAdjustmentRequest(BaseSchema):

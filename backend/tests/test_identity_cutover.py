@@ -9,10 +9,14 @@ from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
     RestaurantSessionLocal,
+    get_db,
+    get_identity_db,
     identity_session_factory_for,
     restaurant_service_session_factory_for,
+    retail_service_session_factory_for,
     validate_runtime_database_names,
 )
+from app.routers.system import router as system_router
 from app.models.user import User
 from app.services.auth_service import AuthService
 from app.services.platform_reference_projection import ProjectionBatchResult
@@ -24,6 +28,30 @@ from app.routers.auth import ok
 
 
 class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
+    def test_user_admin_routes_use_identity_database(self) -> None:
+        user_routes = (
+            ("GET", "/api/v1/system/users"),
+            ("POST", "/api/v1/system/users"),
+            ("GET", "/api/v1/system/users/{user_id}"),
+            ("PATCH", "/api/v1/system/users/{user_id}"),
+            ("POST", "/api/v1/system/users/{user_id}/deactivate"),
+            ("POST", "/api/v1/system/users/{user_id}/change-password"),
+            ("POST", "/api/v1/system/users/{user_id}/branches"),
+            ("DELETE", "/api/v1/system/users/{user_id}/branches/{branch_id}"),
+            ("POST", "/api/v1/system/invitations"),
+            ("POST", "/api/v1/system/invitations/accept"),
+        )
+
+        for method, path in user_routes:
+            route = next(
+                item
+                for item in system_router.routes
+                if getattr(item, "path", None) == path and method in getattr(item, "methods", set())
+            )
+            dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
+            self.assertIn(get_identity_db, dependency_calls, f"{method} {path}")
+            self.assertNotIn(get_db, dependency_calls, f"{method} {path}")
+
     def test_identity_session_factory_is_server_owned(self) -> None:
         self.assertIs(identity_session_factory_for("legacy"), AsyncSessionLocal)
         self.assertIs(identity_session_factory_for("platform_core"), PlatformSessionLocal)
@@ -41,6 +69,11 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaisesRegex(ValueError, "Unsupported Restaurant service database"):
             restaurant_service_session_factory_for("client_selected_database")
+
+    def test_retail_service_session_factory_is_server_owned(self) -> None:
+        self.assertIs(retail_service_session_factory_for("legacy"), AsyncSessionLocal)
+        with self.assertRaisesRegex(ValueError, "Unsupported Retail service database"):
+            retail_service_session_factory_for("client_selected_database")
 
     def test_restaurant_cutover_requires_platform_identity(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "IDENTITY_DATABASE=platform_core"):
@@ -92,6 +125,65 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
             restaurant_database_name="shared",
         )
 
+    def test_takeaway_cutover_requires_four_distinct_databases(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "distinct legacy"):
+            validate_runtime_database_names(
+                identity_database="platform_core",
+                restaurant_service_database="restaurant",
+                takeaway_service_database="takeaway",
+                takeaway_feature_enabled=True,
+                reference_projector_enabled=True,
+                legacy_database_name="legacy",
+                platform_database_name="platform",
+                restaurant_database_name="restaurant",
+                takeaway_database_name="restaurant",
+            )
+        validate_runtime_database_names(
+            identity_database="platform_core",
+            restaurant_service_database="restaurant",
+            takeaway_service_database="takeaway",
+            takeaway_feature_enabled=True,
+            reference_projector_enabled=True,
+            legacy_database_name="legacy",
+            platform_database_name="platform",
+            restaurant_database_name="restaurant",
+            takeaway_database_name="takeaway",
+        )
+
+    def test_retail_cutover_requires_platform_projection_and_distinct_database(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "IDENTITY_DATABASE=platform_core"):
+            validate_runtime_database_names(
+                identity_database="legacy",
+                retail_service_database="retail",
+                reference_projector_enabled=True,
+                legacy_database_name="legacy",
+                platform_database_name="platform",
+                restaurant_database_name="restaurant",
+                retail_database_name="retail",
+                retail_reference_projector_enabled=True,
+            )
+        with self.assertRaisesRegex(RuntimeError, "distinct legacy"):
+            validate_runtime_database_names(
+                identity_database="platform_core",
+                retail_service_database="retail",
+                reference_projector_enabled=True,
+                legacy_database_name="legacy",
+                platform_database_name="platform",
+                restaurant_database_name="restaurant",
+                retail_database_name="restaurant",
+                retail_reference_projector_enabled=True,
+            )
+        validate_runtime_database_names(
+            identity_database="platform_core",
+            retail_service_database="retail",
+            reference_projector_enabled=True,
+            legacy_database_name="legacy",
+            platform_database_name="platform",
+            restaurant_database_name="restaurant",
+            retail_database_name="retail",
+            retail_reference_projector_enabled=True,
+        )
+
     def test_auth_metadata_exposes_server_owned_identity_source(self) -> None:
         response = ok({"message": "test"})
         self.assertEqual(response["meta"]["identity_database"], "legacy")
@@ -106,7 +198,8 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
             is_active=True,
         )
         session = AsyncMock()
-        session.scalar.return_value = user
+        # User lookup succeeds; legacy Company has no SaaS membership row.
+        session.scalar.side_effect = [user, None]
 
         with (
             patch("app.services.auth_service.verify_password", return_value=True),
@@ -142,7 +235,8 @@ class IdentityCutoverTests(unittest.IsolatedAsyncioTestCase):
             is_active=True,
         )
         session = AsyncMock()
-        session.scalar.return_value = user
+        # User lookup succeeds; legacy Company has no SaaS membership row.
+        session.scalar.side_effect = [user, None]
 
         with (
             patch("app.services.auth_service.verify_password", return_value=True),

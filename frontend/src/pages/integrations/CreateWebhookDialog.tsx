@@ -21,6 +21,7 @@ export default function CreateWebhookDialog({ open, onOpenChange }: Props): JSX.
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [secret, setSecret] = useState("");
+  const [incomingSource, setIncomingSource] = useState("");
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
 
   useEffect(() => {
@@ -28,12 +29,13 @@ export default function CreateWebhookDialog({ open, onOpenChange }: Props): JSX.
       setName("");
       setUrl("");
       setSecret("");
+      setIncomingSource("");
       setSelectedEvents([]);
     }
   }, [open]);
 
   const mutation = useMutation({
-    mutationFn: async () => integrationApi.createWebhook({ name, url, events: selectedEvents, secret: secret || null }),
+    mutationFn: async () => integrationApi.createWebhook({ name, url, events: selectedEvents, secret, incoming_source: incomingSource.trim() || null }),
     onSuccess: async () => {
       toast({ title: "เพิ่ม Webhook แล้ว" });
       onOpenChange(false);
@@ -84,15 +86,19 @@ export default function CreateWebhookDialog({ open, onOpenChange }: Props): JSX.
             ))}
           </div>
           <div className="space-y-2">
-            <Label>Secret</Label>
-            <Input value={secret} onChange={(event) => setSecret(event.target.value)} />
+            <Label>Secret* (อย่างน้อย 32 ตัวอักษร)</Label>
+            <Input type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>ชื่อแหล่งข้อมูลขาเข้า (ถ้ามี)</Label>
+            <Input value={incomingSource} onChange={(event) => setIncomingSource(event.target.value.toLowerCase())} placeholder="เช่น partner-shop" />
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>ยกเลิก</Button>
           <Button
             onClick={() => mutation.mutate()}
-            disabled={mutation.isPending || !name.trim() || !validUrl || selectedEvents.length === 0}
+            disabled={mutation.isPending || !name.trim() || !validUrl || secret.length < 32 || selectedEvents.length === 0}
           >
             {mutation.isPending ? "กำลังบันทึก..." : "บันทึก"}
           </Button>

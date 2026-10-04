@@ -10,11 +10,20 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
-from app.database import AsyncSessionLocal, engine
+from app.database import (
+    AsyncSessionLocal,
+    PlatformSessionLocal,
+    engine,
+    platform_engine,
+    restaurant_engine,
+    retail_engine,
+    takeaway_engine,
+)
 from app.main import app
 from app.models.approval import ApprovalGrantUsage, ManagerPinCredential
 from app.models.audit import AuditLog
 from app.models.branch import Branch
+from app.models.company import Company
 from app.models.pos import Payment
 from app.models.product import Product, Unit
 from app.models.restaurant import (
@@ -31,6 +40,8 @@ from app.models.user import User, UserBranch
 from app.utils.create_superuser import DEFAULT_COMPANY_ID, ensure_default_company_seed_in_session
 from app.utils.security import hash_password, verify_password
 from app.utils.seed_permissions import seed_default_permissions
+from app.services.platform_reference_projection import process_projection_batch, seed_snapshot_events
+from app.services.retail_reference_projector import project_retail_reference_snapshot
 
 
 PASSWORD = "ApprovalSmoke123!"
@@ -55,7 +66,7 @@ def expect_detail_code(response, expected_status: int, code: str) -> None:
         raise RuntimeError(f"Expected detail code {code}, got: {response.text}")
 
 
-async def prepare() -> dict[str, str]:
+async def prepare(*, password: str = PASSWORD) -> dict[str, str]:
     marker = uuid.uuid4().hex[:8]
     async with AsyncSessionLocal() as db:
         await seed_default_permissions(db)
@@ -113,8 +124,8 @@ async def prepare() -> dict[str, str]:
             product_type="simple",
             selling_price=Decimal("100"),
             cost_price=Decimal("20"),
-            vat_type="none",
-            vat_rate=Decimal("0"),
+            vat_type="included",
+            vat_rate=Decimal("7"),
             is_active=True,
             is_for_sale=True,
             is_for_purchase=False,
@@ -140,6 +151,11 @@ async def prepare() -> dict[str, str]:
                 pos_allow_discount=True,
                 pos_max_discount_pct=Decimal("50"),
                 pos_cashier_discount_limit_pct=Decimal("10"),
+                pos_price_override_auto_limit_pct=Decimal("10"),
+                pos_price_override_auto_limit_amount=Decimal("100"),
+                pos_price_override_max_deviation_pct=Decimal("50"),
+                pos_price_override_min_margin_pct=Decimal("0"),
+                pos_price_override_self_approval=False,
                 stock_adjust_approval_threshold_qty=Decimal("1"),
             )
         )
@@ -151,13 +167,33 @@ async def prepare() -> dict[str, str]:
             "pos.sale.void.request",
             "pos.discount.apply",
             "pos.discount.override",
+            "pos.price.override",
+            "pos.price.override.request",
             "pos.refund.create",
             "pos.refund.request",
             "pos.cashier.open_shift",
+            "pos.cashier.close_shift",
+            "pos.cashier.handover",
+            "pos.cash_movement.create",
+            "pos.cash_movement.approve",
+            "pos.shift.variance.approve",
+            "pos.draft.view",
+            "pos.draft.create",
+            "pos.draft.update",
+            "pos.draft.resume",
+            "pos.draft.discard",
+            "pos.draft.reassign",
             "inventory.stock.view",
             "inventory.stock.adjust",
             "inventory.stock.adjust.request",
             "fb.order.create",
+            "fb.order.cancel",
+            "fb.order.cancel.request",
+            "fb.order.cancel.approve",
+            "fb.order.cancel.reopen.request",
+            "fb.order.cancel.reopen",
+            "fb.menu.view",
+            "fb.kitchen.ticket.manage",
             "system.role.view",
             "system.device.view",
             "system.device.manage",
@@ -181,12 +217,29 @@ async def prepare() -> dict[str, str]:
             allowed_scope_types=["branch"],
         )
         manager_role.permissions = [
+            permissions["pos.sale.create"],
             permissions["pos.sale.void"],
             permissions["pos.discount.override"],
+            permissions["pos.price.override"],
+            permissions["pos.price.override.request"],
             permissions["pos.refund.create"],
+            permissions["pos.cash_movement.approve"],
+            permissions["pos.shift.variance.approve"],
+            permissions["pos.draft.view"],
+            permissions["pos.draft.update"],
+            permissions["pos.draft.resume"],
+            permissions["pos.draft.discard"],
+            permissions["pos.draft.reassign"],
             permissions["inventory.stock.adjust"],
             permissions["inventory.stock.view"],
             permissions["system.role.view"],
+            permissions["fb.order.cancel"],
+            permissions["fb.order.cancel.request"],
+            permissions["fb.order.cancel.approve"],
+            permissions["fb.order.cancel.reopen.request"],
+            permissions["fb.order.cancel.reopen"],
+            permissions["fb.menu.view"],
+            permissions["fb.kitchen.ticket.manage"],
         ]
         cashier_role = Role(
             company_id=DEFAULT_COMPANY_ID,
@@ -199,11 +252,24 @@ async def prepare() -> dict[str, str]:
             permissions["pos.sale.create"],
             permissions["pos.sale.void.request"],
             permissions["pos.discount.apply"],
+            permissions["pos.price.override.request"],
             permissions["pos.refund.request"],
             permissions["pos.cashier.open_shift"],
+            permissions["pos.cashier.close_shift"],
+            permissions["pos.cashier.handover"],
+            permissions["pos.cash_movement.create"],
+            permissions["pos.draft.view"],
+            permissions["pos.draft.create"],
+            permissions["pos.draft.update"],
+            permissions["pos.draft.resume"],
+            permissions["pos.draft.discard"],
             permissions["inventory.stock.view"],
             permissions["inventory.stock.adjust.request"],
             permissions["fb.order.create"],
+            permissions["fb.order.cancel"],
+            permissions["fb.order.cancel.request"],
+            permissions["fb.order.cancel.reopen.request"],
+            permissions["fb.menu.view"],
         ]
         db.add_all([manager_role, cashier_role])
         await db.flush()
@@ -214,14 +280,14 @@ async def prepare() -> dict[str, str]:
             company_id=DEFAULT_COMPANY_ID,
             username=manager_username,
             display_name="Approval Manager",
-            hashed_password=hash_password(PASSWORD),
+            hashed_password=hash_password(password),
             is_active=True,
         )
         cashier = User(
             company_id=DEFAULT_COMPANY_ID,
             username=cashier_username,
             display_name="Approval Cashier",
-            hashed_password=hash_password(PASSWORD),
+            hashed_password=hash_password(password),
             is_active=True,
         )
         db.add_all([manager, cashier])
@@ -282,13 +348,199 @@ async def prepare() -> dict[str, str]:
             "branch_id": str(branch.id),
             "location_id": str(location.id),
             "product_id": str(product.id),
+            "brand_id": str(brand.id),
+            "manager_role_id": str(manager_role.id),
+            "cashier_role_id": str(cashier_role.id),
             "manager_id": str(manager.id),
             "manager_username": manager_username,
             "cashier_id": str(cashier.id),
             "cashier_username": cashier_username,
             "restaurant_session_id": str(restaurant_session.id),
         }
-    await engine.dispose()
+    if settings.platform_database_url_effective != settings.database_url:
+        async with PlatformSessionLocal() as identity_db:
+            await seed_default_permissions(identity_db)
+            identity_company = await identity_db.get(Company, DEFAULT_COMPANY_ID)
+            if identity_company is None:
+                identity_db.add(
+                    Company(
+                        id=DEFAULT_COMPANY_ID,
+                        name="Restaurant POS UAT",
+                        business_slug=f"approval-smoke-company-{marker}",
+                        is_active=True,
+                    )
+                )
+                await identity_db.flush()
+            branch_id = uuid.UUID(result["branch_id"])
+            brand_id = uuid.UUID(result["brand_id"])
+            identity_db.add_all(
+                [
+                    Branch(
+                        id=branch_id,
+                        company_id=DEFAULT_COMPANY_ID,
+                        code=f"APPROVAL-{marker}",
+                        name=f"Approval Smoke {marker}",
+                        is_active=True,
+                    ),
+                    Brand(
+                        id=brand_id,
+                        company_id=DEFAULT_COMPANY_ID,
+                        slug=f"approval-smoke-{marker}",
+                        name=f"Approval Smoke {marker}",
+                        business_type="restaurant",
+                        is_active=True,
+                    ),
+                    BrandBranch(
+                        company_id=DEFAULT_COMPANY_ID,
+                        brand_id=brand_id,
+                        branch_id=branch_id,
+                        is_active=True,
+                    ),
+                ]
+            )
+            identity_permissions = {
+                permission.code: permission
+                for permission in (
+                    await identity_db.scalars(
+                        select(Permission).where(Permission.code.in_(permission_codes))
+                    )
+                ).all()
+            }
+            identity_manager_role = Role(
+                id=uuid.UUID(result["manager_role_id"]),
+                company_id=DEFAULT_COMPANY_ID,
+                name=f"approval_manager_{marker}",
+                is_branch_assignable=True,
+                allowed_scope_types=["branch"],
+            )
+            identity_manager_role.permissions = [
+                identity_permissions[code]
+                for code in (
+                    "pos.sale.create",
+                    "pos.sale.void",
+                    "pos.discount.override",
+                    "pos.price.override",
+                    "pos.price.override.request",
+                    "pos.refund.create",
+                    "pos.cash_movement.approve",
+                    "pos.shift.variance.approve",
+                    "pos.draft.view",
+                    "pos.draft.update",
+                    "pos.draft.resume",
+                    "pos.draft.discard",
+                    "pos.draft.reassign",
+                    "inventory.stock.adjust",
+                    "inventory.stock.view",
+                    "system.role.view",
+                    "fb.order.cancel",
+                    "fb.order.cancel.request",
+                    "fb.order.cancel.approve",
+                    "fb.order.cancel.reopen.request",
+                    "fb.order.cancel.reopen",
+                    "fb.menu.view",
+                    "fb.kitchen.ticket.manage",
+                )
+            ]
+            identity_cashier_role = Role(
+                id=uuid.UUID(result["cashier_role_id"]),
+                company_id=DEFAULT_COMPANY_ID,
+                name=f"approval_cashier_{marker}",
+                is_branch_assignable=True,
+                allowed_scope_types=["branch"],
+            )
+            identity_cashier_role.permissions = [
+                identity_permissions[code]
+                for code in (
+                    "pos.sale.view",
+                    "pos.sale.create",
+                    "pos.sale.void.request",
+                    "pos.discount.apply",
+                    "pos.price.override.request",
+                    "pos.refund.request",
+                    "pos.cashier.open_shift",
+                    "pos.cashier.close_shift",
+                    "pos.cashier.handover",
+                    "pos.cash_movement.create",
+                    "pos.draft.view",
+                    "pos.draft.create",
+                    "pos.draft.update",
+                    "pos.draft.resume",
+                    "pos.draft.discard",
+                    "inventory.stock.view",
+                    "inventory.stock.adjust.request",
+                    "fb.order.create",
+                    "fb.order.cancel",
+                    "fb.order.cancel.request",
+                    "fb.order.cancel.reopen.request",
+                    "fb.menu.view",
+                )
+            ]
+            identity_db.add_all([identity_manager_role, identity_cashier_role])
+            await identity_db.flush()
+            identity_manager = User(
+                id=uuid.UUID(result["manager_id"]),
+                company_id=DEFAULT_COMPANY_ID,
+                username=result["manager_username"],
+                display_name="Approval Manager",
+                hashed_password=hash_password(password),
+                is_active=True,
+            )
+            identity_cashier = User(
+                id=uuid.UUID(result["cashier_id"]),
+                company_id=DEFAULT_COMPANY_ID,
+                username=result["cashier_username"],
+                display_name="Approval Cashier",
+                hashed_password=hash_password(password),
+                is_active=True,
+            )
+            identity_db.add_all([identity_manager, identity_cashier])
+            await identity_db.flush()
+            identity_db.add_all(
+                [
+                    UserBranch(
+                        user_id=identity_manager.id,
+                        branch_id=branch_id,
+                        brand_id=brand_id,
+                        business_type="restaurant",
+                        target_database="restaurant",
+                        role_id=identity_manager_role.id,
+                        is_default=True,
+                    ),
+                    UserBranch(
+                        user_id=identity_cashier.id,
+                        branch_id=branch_id,
+                        brand_id=brand_id,
+                        business_type="restaurant",
+                        target_database="restaurant",
+                        role_id=identity_cashier_role.id,
+                        is_default=True,
+                    ),
+                ]
+            )
+            await identity_db.commit()
+        async with PlatformSessionLocal() as identity_db:
+            await seed_snapshot_events(identity_db)
+            await identity_db.commit()
+        while True:
+            batch = await process_projection_batch(limit=100)
+            if batch.failed:
+                raise RuntimeError("Restaurant reference projection failed during approval smoke setup")
+            if batch.claimed == 0:
+                break
+        if settings.retail_database_url:
+            await project_retail_reference_snapshot()
+    database_engines = {
+        id(database_engine): database_engine
+        for database_engine in (
+            engine,
+            platform_engine,
+            restaurant_engine,
+            retail_engine,
+            takeaway_engine,
+        )
+        if database_engine is not None
+    }
+    await asyncio.gather(*(database_engine.dispose() for database_engine in database_engines.values()))
     return result
 
 
@@ -381,12 +633,21 @@ def run() -> None:
             "company-owner",
             "brand-manager",
             "branch-manager",
+            "accountant",
+            "purchasing",
+            "warehouse",
+            "hr",
+            "auditor",
+            "area-manager",
+            "service-staff",
+            "kitchen-manager",
             "cashier",
+            "takeaway-store-operator",
             "kitchen-staff",
         ]:
             raise RuntimeError("Phase 2 role preset order is invalid")
         if any(
-            preset["policy_version"] != "2026-08-01.4"
+            preset["policy_version"] != "2026-09-27.1"
             or not preset["is_available"]
             for preset in presets
         ):
@@ -532,6 +793,7 @@ def run() -> None:
             "location_id": context["location_id"],
             "payment_method": "cash",
             "paid_amount": 80,
+            "client_order_id": f"approval-sale-{uuid.uuid4()}",
             "payments": [],
             "discount_amount": 20,
         }
@@ -588,6 +850,7 @@ def run() -> None:
             "discount_type": "amount",
             "payment_method": "cash",
             "paid_amount": 80,
+            "client_order_id": f"approval-pos-{uuid.uuid4()}",
         }
         expect_detail_code(
             client.post("/api/v1/pos/sales", headers=cashier_headers, json=sale_payload),
@@ -682,6 +945,7 @@ def run() -> None:
             **sale_payload,
             "discount_amount": 0,
             "paid_amount": 100,
+            "client_order_id": f"approval-refund-{uuid.uuid4()}",
         }
         refundable_sale = expect(
             client.post(

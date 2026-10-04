@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import uuid
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,12 +14,15 @@ from app.config import settings
 from app.database import (
     AsyncSessionLocal,
     active_restaurant_service_session_factory,
+    active_retail_service_session_factory,
+    active_takeaway_service_session_factory,
     get_identity_db,
     get_restaurant_service_db,
 )
 from app.models.device import DeviceRegistration
+from app.models.auth import RefreshToken
 from app.models.company import Company
-from app.models.platform import PlatformOperator
+from app.models.platform import PlatformOperator, PlatformSession
 from app.models.settings import BranchSettings
 from app.models.user import User
 from app.services.business_context_service import (
@@ -27,7 +30,10 @@ from app.services.business_context_service import (
     resolve_user_branch_context,
 )
 from app.services.staff_scope_policy import normalized_station_key
+from app.services.tenant_control_policy import TenantControlPolicy
+from app.services.platform_access_service import effective_platform_access, platform_environment
 from app.utils.security import decode_token
+from app.services.mobile_store_policy import MOBILE_STORE_SURFACE, enforce_store_request, store_permissions
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 platform_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/platform/auth/login")
@@ -45,6 +51,10 @@ class TokenData:
     station_key: str | None = None
     assignment_ids: list[uuid.UUID] = field(default_factory=list)
     scope_types: list[str] = field(default_factory=list)
+    qa_persona: str | None = None
+    qa_deadline: datetime | None = None
+    client_surface: str | None = None
+    store_device_id: str | None = None
 
 
 @dataclass
@@ -67,9 +77,14 @@ class DeviceTokenData:
 @dataclass
 class PlatformTokenData:
     operator_id: uuid.UUID
+    session_id: uuid.UUID
     username: str
     display_name: str
     is_superuser: bool
+    mfa_verified: bool
+    role_codes: list[str] = field(default_factory=list)
+    permissions: list[str] = field(default_factory=list)
+    environment: str = "uat"
 
 
 def _device_unauthorized() -> HTTPException:
@@ -82,6 +97,7 @@ def _device_unauthorized() -> HTTPException:
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_identity_db),
+    request: Request = None,
 ) -> TokenData:
     payload = decode_token(token)
     if payload.get("type") != "access":
@@ -117,6 +133,35 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User session has been revoked",
         )
+    if int(payload.get("user_credential_version", 1)) != getattr(user, "credential_version", 1):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User session has been revoked",
+        )
+    if payload.get("qa_mode") and not settings.qa_access_mode_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="QA access mode is disabled",
+        )
+    if payload.get("sid"):
+        try:
+            session_id = uuid.UUID(payload["sid"])
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user session") from exc
+        active_session = await db.scalar(
+            select(RefreshToken.id).where(
+                RefreshToken.id == session_id,
+                RefreshToken.user_id == user_id,
+                RefreshToken.company_id == company_id,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > datetime.now(timezone.utc),
+            )
+        )
+        if active_session is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User session has been revoked",
+            )
     branch_id = uuid.UUID(payload["branch_id"]) if payload.get("branch_id") else None
     context = None
     if branch_id is not None:
@@ -126,17 +171,34 @@ async def get_current_user(
             branch_id,
             station_key=payload.get("station_key"),
         )
+    permissions = payload.get("permissions", [])
+    scopes = list(payload.get("scope_types", []))
+    if payload.get("client_surface") == MOBILE_STORE_SURFACE:
+        from app.services.auth_service import AuthService
+        effective, _, _, _, _, _ = await AuthService(db).get_user_permissions(user, branch_id, payload.get("station_key"))
+        permissions = store_permissions(user=user, context=context, permissions=effective, device_id=payload.get("store_device_id"))
+        scopes = ["branch"]
+        if request is None:
+            raise HTTPException(403, "Store request context is required")
+        enforce_store_request(payload, request.method, request.url.path, request.headers)
     return TokenData(
         user_id=user_id,
         company_id=company_id,
         branch_id=branch_id,
-        permissions=payload.get("permissions", []),
+        permissions=permissions,
         brand_id=context.brand_id if context else None,
         business_type=context.business_type if context else None,
         target_database=context.target_database if context else None,
         station_key=payload.get("station_key"),
         assignment_ids=[uuid.UUID(value) for value in payload.get("assignment_ids", [])],
-        scope_types=list(payload.get("scope_types", [])),
+        scope_types=scopes,
+        client_surface=payload.get("client_surface"),
+        store_device_id=payload.get("store_device_id"),
+        qa_persona=payload.get("qa_persona"),
+        qa_deadline=(
+            datetime.fromtimestamp(int(payload["qa_deadline"]), tz=timezone.utc)
+            if payload.get("qa_deadline") else None
+        ),
     )
 
 
@@ -150,31 +212,66 @@ async def get_current_platform_operator(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token type",
         )
+    if payload.get("qa_mode") and not settings.qa_access_mode_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="QA access mode is disabled",
+        )
     try:
         operator_id = uuid.UUID(payload["sub"])
+        session_id = uuid.UUID(payload["sid"])
         credential_version = int(payload["credential_version"])
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Platform credential",
         ) from exc
-    operator = await db.scalar(
-        select(PlatformOperator).where(
-            PlatformOperator.id == operator_id,
-            PlatformOperator.is_active.is_(True),
-            PlatformOperator.credential_version == credential_version,
+    now = datetime.now(timezone.utc)
+    row = (
+        await db.execute(
+            select(PlatformOperator, PlatformSession)
+            .join(
+                PlatformSession,
+                PlatformSession.operator_id == PlatformOperator.id,
+            )
+            .where(
+                PlatformOperator.id == operator_id,
+                PlatformOperator.is_active.is_(True),
+                PlatformOperator.credential_version == credential_version,
+                PlatformSession.id == session_id,
+                PlatformSession.credential_version == credential_version,
+                PlatformSession.revoked_at.is_(None),
+                PlatformSession.expires_at > now,
+            )
         )
-    )
-    if operator is None:
+    ).one_or_none()
+    if row is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Platform operator is inactive or no longer exists",
+            detail="Platform session is inactive or no longer exists",
+        )
+    operator, session = row
+    if operator.mfa_enabled and session.mfa_verified_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Platform MFA verification is required",
+        )
+    role_codes, permissions = await effective_platform_access(db, operator)
+    if not role_codes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform operator has no active role in this environment",
         )
     return PlatformTokenData(
         operator_id=operator.id,
+        session_id=session.id,
         username=operator.username,
         display_name=operator.display_name,
         is_superuser=operator.is_superuser,
+        mfa_verified=session.mfa_verified_at is not None,
+        role_codes=role_codes,
+        permissions=permissions,
+        environment=platform_environment(),
     )
 
 
@@ -187,16 +284,57 @@ async def get_scoped_operational_db(
         yield session
 
 
-def operational_session_factory_for(current: TokenData):
-    if current.target_database == "restaurant":
-        return active_restaurant_service_session_factory()
-    elif current.target_database in {None, "retail_pos"}:
-        return AsyncSessionLocal
-    elif current.target_database == "takeaway":
+async def get_legacy_model_operational_db(
+    current: TokenData = Depends(get_current_user),
+) -> AsyncGenerator[AsyncSession, None]:
+    """Route generic Restaurant/Retail models without leaking them into Takeaway."""
+    session_factory = legacy_model_session_factory_for(current)
+    async with session_factory() as session:
+        yield session
+
+
+def legacy_model_session_factory_for(current: TokenData):
+    if current.target_database == "takeaway":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operational API is unavailable for Takeaway context",
+        )
+    return operational_session_factory_for(current)
+
+
+async def get_takeaway_operational_db() -> AsyncGenerator[AsyncSession, None]:
+    try:
+        session_factory = active_takeaway_service_session_factory()
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Takeaway operational service is not available",
-        )
+        ) from exc
+    async with session_factory() as session:
+        yield session
+
+
+def operational_session_factory_for(current: TokenData):
+    if current.target_database == "restaurant":
+        return active_restaurant_service_session_factory()
+    elif current.target_database is None:
+        return AsyncSessionLocal
+    elif current.target_database == "retail_pos":
+        try:
+            return active_retail_service_session_factory()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Retail operational service is not available",
+            ) from exc
+    elif current.target_database == "takeaway":
+        try:
+            return active_takeaway_service_session_factory()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Takeaway operational service is not available",
+            ) from exc
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -249,14 +387,29 @@ async def resolve_device_token(
     if (
         context is None
         or context.brand_id != brand_id
-        or context.business_type != "restaurant"
-        or context.target_database != "restaurant"
-        or payload.get("business_type") != "restaurant"
-        or payload.get("target_database") != "restaurant"
+        or context.business_type not in {"restaurant", "retail_pos", "takeaway"}
+        or context.target_database != context.business_type
+        or payload.get("business_type") != context.business_type
+        or payload.get("target_database") != context.target_database
     ):
         raise _device_unauthorized()
 
-    if device.device_type == "kitchen":
+    if context.business_type == "takeaway" and not settings.takeaway_feature_enabled:
+        raise _device_unauthorized()
+    if context.business_type == "takeaway":
+        try:
+            await TenantControlPolicy(db).require_feature(company_id, "takeaway")
+        except HTTPException as exc:
+            raise _device_unauthorized() from exc
+    if context.business_type == "retail_pos":
+        if device.device_type != "counter":
+            raise _device_unauthorized()
+        try:
+            await TenantControlPolicy(db).require_feature(company_id, "retail_pos")
+        except HTTPException as exc:
+            raise _device_unauthorized() from exc
+
+    if device.device_type == "kitchen" and context.business_type == "restaurant":
         settings_row = await restaurant_db.scalar(
             select(BranchSettings).where(
                 BranchSettings.company_id == company_id,
@@ -301,6 +454,27 @@ async def get_current_device(
     restaurant_db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> DeviceTokenData:
     return await resolve_device_token(token, db, restaurant_db)
+
+
+async def get_device_operational_db(
+    current: DeviceTokenData = Depends(get_current_device),
+) -> AsyncGenerator[AsyncSession, None]:
+    if current.target_database == "restaurant":
+        session_factory = active_restaurant_service_session_factory()
+    elif current.target_database == "takeaway":
+        try:
+            session_factory = active_takeaway_service_session_factory()
+        except ValueError as exc:
+            raise _device_unauthorized() from exc
+    elif current.target_database == "retail_pos":
+        try:
+            session_factory = active_retail_service_session_factory()
+        except ValueError as exc:
+            raise _device_unauthorized() from exc
+    else:
+        raise _device_unauthorized()
+    async with session_factory() as session:
+        yield session
 
 
 async def get_optional_counter_device(

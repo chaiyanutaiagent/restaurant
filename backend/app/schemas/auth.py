@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.user import UserRead
 
@@ -14,12 +14,18 @@ class LoginRequest(BaseModel):
     company_id: uuid.UUID | None = None
     station_key: str | None = None
 
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        return value.strip().lower()
+
 
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+    business_slug: str
     user: UserRead
 
 
@@ -39,6 +45,7 @@ class BranchSwitchRequest(BaseModel):
 class MeResponse(BaseModel):
     user: UserRead
     company_id: uuid.UUID
+    business_slug: str
     branch_id: uuid.UUID | None
     brand_id: uuid.UUID | None = None
     business_type: str | None = None

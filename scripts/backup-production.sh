@@ -14,6 +14,14 @@ fail() {
   exit 1
 }
 
+checksum_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
 wait_for_postgres() {
   tries=0
   until docker compose -f "$COMPOSE_FILE" exec -T postgres \
@@ -37,6 +45,15 @@ wait_for_redis() {
   done
 }
 
+ensure_service_running() {
+  service="$1"
+  if docker compose -f "$COMPOSE_FILE" ps --status running --services | grep -qx "$service"; then
+    printf '%s is already running; backup will not recreate it.\n' "$service"
+    return
+  fi
+  docker compose -f "$COMPOSE_FILE" up -d "$service" >/dev/null
+}
+
 if [ ! -f "$COMPOSE_FILE" ]; then
   fail "compose file not found: $COMPOSE_FILE"
 fi
@@ -55,8 +72,9 @@ docker compose -f "$COMPOSE_FILE" config >/dev/null
 
 mkdir -p "$BACKUP_DIR"
 
-printf 'Starting PostgreSQL and Redis backup dependencies...\n'
-docker compose -f "$COMPOSE_FILE" up -d postgres redis >/dev/null
+printf 'Checking PostgreSQL and Redis backup dependencies...\n'
+ensure_service_running postgres
+ensure_service_running redis
 wait_for_postgres
 wait_for_redis
 
@@ -64,6 +82,20 @@ printf 'Creating PostgreSQL backup...\n'
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
   sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
   > "$BACKUP_DIR/postgres.dump"
+
+printf 'Creating Platform, Restaurant, Retail and Takeaway boundary backups...\n'
+docker compose -f "$COMPOSE_FILE" exec -T postgres \
+  sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$PLATFORM_POSTGRES_DB"' \
+  > "$BACKUP_DIR/platform-core.dump"
+docker compose -f "$COMPOSE_FILE" exec -T postgres \
+  sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$RESTAURANT_POSTGRES_DB"' \
+  > "$BACKUP_DIR/restaurant.dump"
+docker compose -f "$COMPOSE_FILE" exec -T postgres \
+  sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$RETAIL_POSTGRES_DB"' \
+  > "$BACKUP_DIR/retail.dump"
+docker compose -f "$COMPOSE_FILE" exec -T postgres \
+  sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$TAKEAWAY_POSTGRES_DB"' \
+  > "$BACKUP_DIR/takeaway.dump"
 
 printf 'Creating uploads backup...\n'
 # Do not mount uploads at Redis' /data path; that image-owned path can change the volume UID/GID.
@@ -91,7 +123,14 @@ env_file=$ENV_FILE
 postgres_service=postgres
 redis_service=redis
 uploads_source=volume:$UPLOADS_VOLUME
-contents=postgres.dump uploads.tar.gz redis.tar.gz redis-backup-note.txt manifest.txt
+contents=postgres.dump platform-core.dump restaurant.dump retail.dump takeaway.dump uploads.tar.gz redis.tar.gz redis-backup-note.txt manifest.txt
+postgres_sha256=$(checksum_file "$BACKUP_DIR/postgres.dump")
+platform_sha256=$(checksum_file "$BACKUP_DIR/platform-core.dump")
+restaurant_sha256=$(checksum_file "$BACKUP_DIR/restaurant.dump")
+retail_sha256=$(checksum_file "$BACKUP_DIR/retail.dump")
+takeaway_sha256=$(checksum_file "$BACKUP_DIR/takeaway.dump")
 EOF
+
+chmod 600 "$BACKUP_DIR"/*.dump "$BACKUP_DIR"/*.tar.gz "$BACKUP_DIR"/*.txt
 
 printf 'Production backup completed: %s\n' "$BACKUP_DIR"

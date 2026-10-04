@@ -86,6 +86,7 @@ export interface ProductListItem {
   vat_type: VatType;
   vat_rate: string | number;
   is_active: boolean;
+  is_for_sale: boolean;
   image_url: string | null;
   category_id: string | null;
   unit_id: string | null;
@@ -95,16 +96,60 @@ export interface ProductListItem {
   created_at: string;
 }
 
+export interface RetailLookupVariant {
+  id: string;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  server_price: string | number;
+  available_qty: string | number;
+  is_active: boolean;
+}
+
+export interface RetailLookupProduct {
+  id: string;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  product_type: ProductType | string;
+  vat_type: VatType;
+  vat_rate: string | number;
+  unit_code: string | null;
+  server_price: string | number;
+  available_qty: string | number;
+  selected_variant_id: string | null;
+  selected_variant_name: string | null;
+  variants: RetailLookupVariant[];
+}
+
+export interface RetailLookupResult {
+  result: "matched" | "not_found" | "variant_required" | "unavailable";
+  code: string;
+  product: RetailLookupProduct | null;
+  validation_time: string;
+  error_code: string | null;
+}
+
 export interface PriceList {
   id: string;
   company_id: string;
   name: string;
   description: string | null;
   currency: string;
+  brand_id?: string | null;
+  branch_id?: string | null;
+  customer_id?: string | null;
+  channel?: string | null;
+  priority?: number;
+  version?: number;
+  price_kind?: "standard" | "promotion";
+  promotion_code?: string | null;
+  valid_from_at?: string | null;
+  valid_until_at?: string | null;
   is_default: boolean;
   is_active: boolean;
 }
 
-export type VatType = "included" | "excluded" | "exempt";
+export type VatType = "included" | "excluded" | "zero" | "exempt";
 export type ProductType = "simple" | "variant" | "service" | "bundle" | "menu_item" | "raw_material";
 export type InventoryRole = "central_raw" | "central_ready" | "store_local" | "not_stocked";

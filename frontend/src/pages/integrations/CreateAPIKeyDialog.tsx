@@ -18,14 +18,15 @@ type Props = {
 const scopeOptions = [
   { value: "products:read", label: "products:read", description: "อ่านข้อมูลสินค้า" },
   { value: "orders:read", label: "orders:read", description: "อ่านออเดอร์" },
-  { value: "orders:write", label: "orders:write", description: "รับออเดอร์จากเว็บ" },
-  { value: "*", label: "*", description: "ทุกสิทธิ์ - admin only" }
+  { value: "orders:write", label: "orders:write", description: "รับออเดอร์จากเว็บ" }
 ];
 
 export default function CreateAPIKeyDialog({ open, onOpenChange }: Props): JSX.Element {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [ownerContact, setOwnerContact] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [scopes, setScopes] = useState<string[]>(["products:read", "orders:write"]);
   const [created, setCreated] = useState<APIKeyCreated | null>(null);
@@ -33,6 +34,8 @@ export default function CreateAPIKeyDialog({ open, onOpenChange }: Props): JSX.E
   useEffect(() => {
     if (!open) {
       setName("");
+      setPurpose("");
+      setOwnerContact("");
       setExpiresAt("");
       setScopes(["products:read", "orders:write"]);
       setCreated(null);
@@ -43,8 +46,10 @@ export default function CreateAPIKeyDialog({ open, onOpenChange }: Props): JSX.E
     mutationFn: async () =>
       integrationApi.createApiKey({
         name,
+        purpose,
+        owner_contact: ownerContact,
         scopes,
-        expires_at: expiresAt ? new Date(expiresAt).toISOString() : undefined
+        expires_at: new Date(`${expiresAt}T23:59:59`).toISOString()
       }),
     onSuccess: async (response) => {
       setCreated(response.data.data as APIKeyCreated);
@@ -101,6 +106,10 @@ export default function CreateAPIKeyDialog({ open, onOpenChange }: Props): JSX.E
                 <Label>ชื่อ API Key*</Label>
                 <Input value={name} onChange={(event) => setName(event.target.value)} />
               </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2"><Label>วัตถุประสงค์*</Label><Input value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="เช่น เชื่อมร้านค้าออนไลน์" /></div>
+                <div className="space-y-2"><Label>ผู้รับผิดชอบ / ช่องทางติดต่อ*</Label><Input value={ownerContact} onChange={(event) => setOwnerContact(event.target.value)} placeholder="ชื่อหรืออีเมลทีม" /></div>
+              </div>
               <div className="space-y-3">
                 <Label>Scopes</Label>
                 {scopeOptions.map((scope) => (
@@ -117,13 +126,13 @@ export default function CreateAPIKeyDialog({ open, onOpenChange }: Props): JSX.E
                 ))}
               </div>
               <div className="space-y-2">
-                <Label>หมดอายุ</Label>
+                <Label>หมดอายุ*</Label>
                 <Input type="date" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} />
               </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => onOpenChange(false)}>ยกเลิก</Button>
-              <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !name.trim() || scopes.length === 0}>
+              <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !name.trim() || !purpose.trim() || !ownerContact.trim() || !expiresAt || scopes.length === 0}>
                 {mutation.isPending ? "กำลังสร้าง..." : "สร้าง API Key"}
               </Button>
             </DialogFooter>

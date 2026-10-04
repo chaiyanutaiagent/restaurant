@@ -3,15 +3,15 @@ import type { CapacitorConfig } from "@capacitor/cli";
 const isUatBuild = process.env.CAPACITOR_UAT === "true";
 
 const config: CapacitorConfig = {
-  appId: "com.chaiyanutaiagent.restaurant",
-  appName: "Restaurant POS",
-  webDir: "dist",
+  appId: "com.foodchainservice.takeaway",
+  appName: "Foodchainservice Takeaway Store",
+  webDir: isUatBuild ? "dist-mobile-store" : "dist",
   android: {
-    allowMixedContent: isUatBuild,
+    allowMixedContent: false,
   },
   server: {
     androidScheme: "https",
-    cleartext: isUatBuild,
+    cleartext: false,
   },
 };
 

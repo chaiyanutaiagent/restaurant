@@ -1,0 +1,24 @@
+{
+  "scope": "WP25-TAKEAWAY-APPROVED-DATA-DRY-RUN",
+  "environment": "isolated",
+  "bundle": {
+    "export_id": "REQUIRED_UUID",
+    "manifest_sha256": "REQUIRED_64_CHAR_SHA256",
+    "seal_status": "not_verified",
+    "source_snapshot": "REQUIRED"
+  },
+  "controls": {
+    "record_count": {"source": "0", "target": "0"},
+    "historical_sales_total": {"source": "0.00", "target": "0.00"},
+    "opening_stock_on_hand": {"source": "0.0000", "target": "0.0000"},
+    "opening_stock_reserved": {"source": "0.0000", "target": "0.0000"},
+    "opening_stock_value": {"source": "0.00", "target": "0.00"},
+    "opening_credit_balance": {"source": "0.00", "target": "0.00"}
+  },
+  "unresolved_count": 0,
+  "waiver": null,
+  "idempotent_replay": false,
+  "historical_side_effects": 0,
+  "runtime_side_effects_disabled": true,
+  "approval": {"status": "pending", "data_owner": "REQUIRED", "privacy_owner": "REQUIRED", "approved_at": null}
+}

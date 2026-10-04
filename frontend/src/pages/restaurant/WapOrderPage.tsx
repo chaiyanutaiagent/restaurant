@@ -28,6 +28,7 @@ import {
   type RestaurantOutboxSummary,
 } from "@/lib/restaurantOffline";
 import { useOnlineStatus } from "@/lib/syncService";
+import { printConfiguredWapOrderSlip } from "@/lib/takeawayPrinter";
 import { wapApi, type WapMenu, type WapMenuProduct, type WapOrder } from "@/lib/wapApi";
 import { useAuthStore } from "@/stores/auth.store";
 
@@ -158,7 +159,10 @@ export default function WapOrderPage(): JSX.Element {
   const [currentOrder, setCurrentOrder] = useState<WapOrder | null>(null);
   const [showSummary, setShowSummary] = useState(false);
   const [pendingPrint, setPendingPrint] = useState<"customer" | "kitchen" | null>(null);
-  const [outboxSummary, setOutboxSummary] = useState<RestaurantOutboxSummary>({ pending: 0, syncing: 0, needsReview: 0 });
+  const [outboxSummary, setOutboxSummary] = useState<RestaurantOutboxSummary>({
+    pending: 0, syncing: 0, acknowledged: 0, reconciled: 0,
+    needsReview: 0, rejected: 0, quarantined: 0, unknown: 0,
+  });
   const [handoverOpen, setHandoverOpen] = useState(false);
   const [closingCash, setClosingCash] = useState(0);
   const [handoverNote, setHandoverNote] = useState("");
@@ -261,23 +265,48 @@ export default function WapOrderPage(): JSX.Element {
 
   useEffect(() => {
     if (!pendingPrint || !currentOrder) return;
+    let cancelled = false;
     const printTimer = window.setTimeout(() => {
-      if (pendingPrint === "customer") {
-        customerPrint();
-      } else {
-        kitchenPrint();
-      }
-      setPendingPrint(null);
+      void (async () => {
+        const type = pendingPrint;
+        let printedDirectly = false;
+        try {
+          printedDirectly = await printConfiguredWapOrderSlip(
+            currentOrder,
+            type,
+            employeeName,
+            menuQuery.data ?? null,
+            type === "customer" && currentOrder.payment_method === "promptpay" ? promptpayQrDataUrl : null,
+          );
+        } catch (error) {
+          toast({
+            title: "พิมพ์ตรงไม่สำเร็จ",
+            description: `${getErrorMessage(error)} — เปิดหน้าพิมพ์สำรองให้แทน`,
+            variant: "destructive",
+          });
+        }
+        if (!printedDirectly) {
+          if (type === "customer") customerPrint();
+          else kitchenPrint();
+        }
+        if (!cancelled) setPendingPrint(null);
+      })();
     }, 150);
-    return () => window.clearTimeout(printTimer);
-  }, [currentOrder, customerPrint, kitchenPrint, pendingPrint]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(printTimer);
+    };
+  }, [currentOrder, customerPrint, employeeName, kitchenPrint, menuQuery.data, pendingPrint, promptpayQrDataUrl, toast]);
 
   const createOrderMutation = useMutation({
     mutationFn: async (method: "cash" | "promptpay") => {
+      if (!menuQuery.data) throw new Error("ยังไม่มีเมนูสำหรับรับออเดอร์");
+      if (!isOnline && method !== "cash") throw new Error("ออฟไลน์รับได้เฉพาะเงินสด");
       const orderItems = cart.map((item) => ({
         product_id: item.product.id,
         qty: item.qty,
         special_request: item.note.trim() || null,
+        expected_unit_price: Number(item.product.selling_price),
       }));
       return queueRestaurantOrder(offlineBrandSlug, {
         items: orderItems,
@@ -291,22 +320,24 @@ export default function WapOrderPage(): JSX.Element {
         customer_name: null,
         customer_phone: null,
         note: null,
-      }, menuQuery.data!);
+        client_order_id: `wap-${crypto.randomUUID()}`,
+      }, menuQuery.data);
     },
-    onSuccess: ({ order, status, error }) => {
+    onSuccess: ({ order, status }) => {
       setCurrentOrder(order);
       setShowSummary(true);
       setCart([]);
-      if (status === "pending" || status === "syncing") {
-        toast({ title: "บันทึกการขายในเครื่องแล้ว", description: "ระบบจะส่งข้อมูลขึ้นเซิร์ฟเวอร์อัตโนมัติเมื่ออินเทอร์เน็ตกลับมา" });
-      } else if (status === "needs_review") {
-        toast({ title: "เก็บรายการไว้แล้ว แต่ต้องตรวจสอบ", description: error, variant: "destructive" });
-      }
       if (order.recipe_stock_warnings?.length) {
         toast({
           title: "ขายสำเร็จ แต่ stock ต้องตรวจสอบ",
           description: order.recipe_stock_warnings.join(" · "),
           variant: "destructive",
+        });
+      }
+      if (status !== "reconciled") {
+        toast({
+          title: "รับเงินสดไว้ใน Outbox แล้ว",
+          description: "รายการยังไม่เป็นยอดขายบน Server จนกว่าจะเชื่อมต่อและกระทบยอดสำเร็จ",
         });
       }
     },
@@ -377,7 +408,8 @@ export default function WapOrderPage(): JSX.Element {
       toast({ title: "ยังเปลี่ยนกะไม่ได้", description: "กรุณาจบหรือยกเลิกออเดอร์ในตะกร้าก่อน", variant: "destructive" });
       return;
     }
-    if (outboxSummary.pending + outboxSummary.syncing + outboxSummary.needsReview > 0) {
+    if (outboxSummary.pending + outboxSummary.syncing + outboxSummary.acknowledged
+      + outboxSummary.needsReview + outboxSummary.quarantined + outboxSummary.unknown > 0) {
       toast({ title: "ยังมีรายการที่ต้องซิงก์หรือตรวจสอบ", description: "จัดการ Outbox ให้เรียบร้อยก่อนเปลี่ยนพนักงาน", variant: "destructive" });
       return;
     }
@@ -405,14 +437,14 @@ export default function WapOrderPage(): JSX.Element {
     setShowSummary(false);
   }
 
-  const canSubmit = cart.length > 0 && total > 0;
+  const canSubmit = cart.length > 0 && total > 0 && (isOnline || Boolean(menuQuery.data?.offline_mode_enabled));
   const customerSlipPrinted = Boolean(currentOrder?.customer_slip_printed_at);
   const isSummaryVisible = showSummary || Boolean(currentOrder);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="grid min-h-0 flex-1 gap-4">
-        <section className={`${isSummaryVisible ? "hidden" : "flex"} min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white`}>
+        <section className={`${isSummaryVisible ? "hidden" : "flex"} min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/80 bg-white/90 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur`}>
           <div className="border-b border-slate-200 px-3 py-2 lg:px-4 lg:py-3">
             <div className="flex items-center gap-3">
               <DropdownMenu>
@@ -426,6 +458,12 @@ export default function WapOrderPage(): JSX.Element {
                     <Link to={orderPath} className="flex items-center">
                       <ReceiptText className="mr-2 h-4 w-4" />
                       รับออเดอร์
+                    </Link>
+                      </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to={brandSlug ? `/store/${brandSlug}/sync` : "/counter/sync"} className="flex items-center">
+                      <CloudUpload className="mr-2 h-4 w-4" />
+                      Offline Sync Center
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
@@ -481,7 +519,7 @@ export default function WapOrderPage(): JSX.Element {
                 </DropdownMenuContent>
               </DropdownMenu>
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-700">เมนูขายหน้าร้าน · {menuQuery.data?.branch_name ?? "สาขา"}</p>
+                <h1 className="truncate text-sm font-semibold text-slate-700">เมนูขายหน้าร้าน · {menuQuery.data?.branch_name ?? "สาขา"}</h1>
                 <p className="flex items-center gap-1 truncate text-xs text-slate-500"><UserRoundCheck className="h-3.5 w-3.5" />พนักงาน: {employeeName} · ID {employeeIdentifier}</p>
               </div>
               <div className="ml-auto flex shrink-0 items-center gap-2 text-xs">
@@ -489,10 +527,10 @@ export default function WapOrderPage(): JSX.Element {
                   {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
                   {isOnline ? "ออนไลน์" : "ออฟไลน์"}
                 </span>
-                {outboxSummary.pending + outboxSummary.syncing > 0 ? (
+                  {outboxSummary.pending + outboxSummary.syncing + outboxSummary.acknowledged + outboxSummary.unknown > 0 ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 font-semibold text-blue-700">
                     <CloudUpload className="h-3.5 w-3.5" />
-                    รอส่ง {outboxSummary.pending + outboxSummary.syncing}
+                    รอซิงก์ {outboxSummary.pending + outboxSummary.syncing + outboxSummary.acknowledged + outboxSummary.unknown}
                   </span>
                 ) : null}
                 {outboxSummary.needsReview > 0 ? (
@@ -525,6 +563,13 @@ export default function WapOrderPage(): JSX.Element {
               >
                 ลองส่งอีกครั้ง
               </Button>
+            </div>
+          ) : null}
+
+          {!isOnline ? (
+            <div className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900" role="alert">
+              <p className="font-bold">ออฟไลน์ — รับได้เฉพาะเงินสด</p>
+              <p className="text-xs">รายการจะอยู่ใน Outbox แบบเข้ารหัส และยังไม่เป็นยอดขายจริงจนกว่า Server จะตรวจราคา VAT สต๊อกและสิทธิ์</p>
             </div>
           ) : null}
 
@@ -601,7 +646,7 @@ export default function WapOrderPage(): JSX.Element {
           </div>
         </section>
 
-        <aside className={`${isSummaryVisible ? "flex" : "hidden"} min-h-0 flex-col rounded-lg border border-slate-200 bg-white`}>
+        <aside className={`${isSummaryVisible ? "flex" : "hidden"} min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/80 bg-white/90 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur`}>
           <div className="border-b border-slate-200 p-3 lg:p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -726,7 +771,7 @@ export default function WapOrderPage(): JSX.Element {
                 </Button>
                 <Button
                   className="h-12 px-2 text-sm bg-emerald-600 hover:bg-emerald-700"
-                  disabled={!canSubmit || createOrderMutation.isPending}
+                  disabled={!canSubmit || createOrderMutation.isPending || !isOnline}
                   onClick={() => createOrderMutation.mutate("promptpay")}
                 >
                   {createOrderMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

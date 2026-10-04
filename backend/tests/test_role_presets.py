@@ -24,14 +24,27 @@ class RolePresetPolicyTests(unittest.TestCase):
         self.assertEqual(
             list(self.policies),
             [
+                "takeaway-cashier",
+                "takeaway-branch-manager",
+                "takeaway-stock-receiving",
+                "takeaway-central-kitchen",
                 "company-owner",
                 "brand-manager",
                 "branch-manager",
+                "accountant",
+                "purchasing",
+                "warehouse",
+                "hr",
+                "auditor",
+                "area-manager",
+                "service-staff",
+                "kitchen-manager",
                 "cashier",
+                "takeaway-store-operator",
                 "kitchen-staff",
             ],
         )
-        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-08-01.4")
+        self.assertEqual(ROLE_PRESET_POLICY_VERSION, "2026-09-29.1")
 
     def test_every_preset_uses_registered_permissions_without_duplicates(self) -> None:
         for policy in ROLE_PRESET_POLICIES:
@@ -54,6 +67,7 @@ class RolePresetPolicyTests(unittest.TestCase):
         denied = {
             "pos.sale.void",
             "pos.discount.override",
+            "pos.price.override",
             "pos.refund.create",
             "inventory.stock.adjust",
             "accounting.report.view",
@@ -62,6 +76,7 @@ class RolePresetPolicyTests(unittest.TestCase):
         self.assertEqual(codes.intersection(denied), set())
         self.assertIn("pos.sale.create", codes)
         self.assertIn("pos.discount.apply", codes)
+        self.assertIn("pos.price.override.request", codes)
         self.assertIn("pos.sale.void.request", codes)
         self.assertIn("pos.refund.request", codes)
 
@@ -71,7 +86,24 @@ class RolePresetPolicyTests(unittest.TestCase):
         self.assertEqual(policy.allowed_scopes, ("station",))
         self.assertEqual(
             set(policy.permission_codes),
-            {"fb.menu.view", "fb.kitchen.ticket.manage"},
+            {
+                "fb.menu.view",
+                "fb.kitchen.ticket.manage",
+            },
+        )
+
+    def test_takeaway_operator_combines_counter_preparation_handoff_and_receiving(self) -> None:
+        policy = self.policies["takeaway-store-operator"]
+        self.assertEqual(policy.default_scope, "branch")
+        self.assertTrue(
+            {
+                "takeaway.sale.create",
+                "takeaway.kitchen.manage",
+                "takeaway.pickup.manage",
+                "takeaway.central_order.create",
+                "takeaway.stock.view",
+                "takeaway.transfer.manage",
+            }.issubset(policy.permission_codes)
         )
 
     def test_device_management_is_limited_to_manager_presets(self) -> None:

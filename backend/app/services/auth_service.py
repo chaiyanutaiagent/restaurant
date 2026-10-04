@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
+import logging
 import uuid
 
 from fastapi import HTTPException, status
@@ -9,22 +10,36 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.company import Company
 from app.models.role import Role
+from app.models.platform import SaasTenantMembership
 from app.models.staff_assignment import StaffRoleAssignment
 from app.models.user import User, UserBranch
 from app.services.business_context_service import resolve_user_branch_context
-from app.services.platform_reference_projection import enqueue_reference_event
+from app.services.platform_reference_projection import (
+    enqueue_reference_event,
+    ensure_legacy_operational_user_reference,
+)
 from app.business_context import CanonicalBusinessContext
 from app.services.staff_scope_policy import assignment_applies_to_context, normalized_station_key
+from app.services.saas_membership_service import membership_access_error
+from app.services.mobile_store_policy import (
+    MOBILE_STORE_SURFACE,
+    store_permissions,
+    uat_superadmin_store_access,
+)
 from app.utils.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
     verify_password,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -55,6 +70,19 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",
             )
+
+        membership = await self.db.scalar(
+            select(SaasTenantMembership).where(
+                SaasTenantMembership.company_id == company_id
+            )
+        )
+        if membership is not None:
+            access_error = membership_access_error(membership)
+            if access_error:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=access_error,
+                )
 
         user.last_login_at = datetime.now(timezone.utc)
         await self.db.flush()
@@ -173,6 +201,10 @@ class AuthService:
         ip_address: str | None,
         user_agent: str | None,
         station_key: str | None = None,
+        qa_persona: str | None = None,
+        qa_deadline: datetime | None = None,
+        client_surface: str | None = None,
+        store_device_id: str | None = None,
     ) -> tuple[str, str]:
         company = await self.db.get(Company, user.company_id)
         if company is None or not company.is_active:
@@ -180,6 +212,19 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Company is inactive or no longer exists",
             )
+        temporary_uat_superadmin = uat_superadmin_store_access(user)
+        if temporary_uat_superadmin:
+            try:
+                await ensure_legacy_operational_user_reference(user)
+            except Exception as exc:
+                logger.error(
+                    "UAT superadmin operational identity projection failed: %s",
+                    f"{type(exc).__module__}.{type(exc).__name__}",
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="UAT superadmin operational identity is not ready",
+                ) from exc
         (
             permissions,
             resolved_branch_id,
@@ -188,6 +233,17 @@ class AuthService:
             assignment_ids,
             scope_types,
         ) = await self.get_user_permissions(user, branch_id, station_key)
+        if client_surface == MOBILE_STORE_SURFACE:
+            permissions = store_permissions(user=user, context=context, permissions=permissions, device_id=store_device_id)
+            scope_types = ["branch"]
+            resolved_station_key = resolved_station_key or normalized_station_key(station_key)
+        session_id = uuid.uuid4()
+        now = datetime.now(timezone.utc)
+        qa_deadline = qa_deadline or (
+            now + timedelta(minutes=settings.qa_access_session_minutes)
+            if qa_persona else None
+        )
+        expires_delta = (qa_deadline - now) if qa_deadline else None
         access_token = create_access_token(
             subject=str(user.id),
             company_id=str(user.company_id),
@@ -200,6 +256,13 @@ class AuthService:
             assignment_ids=[str(value) for value in assignment_ids],
             scope_types=scope_types,
             company_credential_version=company.credential_version,
+            user_credential_version=getattr(user, "credential_version", 1),
+            session_id=str(session_id),
+            client_surface=client_surface,
+            store_device_id=store_device_id,
+            expires_delta=expires_delta,
+            qa_persona=qa_persona,
+            qa_deadline=qa_deadline,
         )
         refresh_token = create_refresh_token(
             subject=str(user.id),
@@ -207,10 +270,18 @@ class AuthService:
             branch_id=str(resolved_branch_id) if resolved_branch_id else None,
             station_key=resolved_station_key,
             company_credential_version=company.credential_version,
+            user_credential_version=getattr(user, "credential_version", 1),
+            session_id=str(session_id),
+            client_surface=client_surface,
+            store_device_id=store_device_id,
+            expires_delta=expires_delta,
+            qa_persona=qa_persona,
+            qa_deadline=qa_deadline,
         )
         expires_at = self._extract_expiration(refresh_token)
         self.db.add(
             RefreshToken(
+                id=session_id,
                 user_id=user.id,
                 company_id=user.company_id,
                 token_hash=self._hash_token(refresh_token),
@@ -224,11 +295,23 @@ class AuthService:
                 company_id=user.company_id,
                 branch_id=resolved_branch_id,
                 user_id=user.id,
-                action="user.login",
+                action=(
+                    "uat.superadmin.store.login"
+                    if temporary_uat_superadmin and client_surface == MOBILE_STORE_SURFACE
+                    else "uat.superadmin.login"
+                    if temporary_uat_superadmin
+                    else "qa.user.session.issue" if qa_persona else "user.login"
+                ),
                 resource="User",
                 resource_id=str(user.id),
                 ip_address=ip_address,
                 user_agent=user_agent,
+                new_value={
+                    "qa_mode": bool(qa_persona),
+                    "temporary_uat_superadmin": temporary_uat_superadmin,
+                    "persona": qa_persona,
+                    "expires_at": qa_deadline.isoformat() if qa_deadline else None,
+                },
             )
         )
         await self.db.commit()
@@ -245,6 +328,8 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token type",
             )
+        if payload.get("qa_mode") and not settings.qa_access_mode_enabled:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="QA access mode is disabled")
 
         token_hash = self._hash_token(raw_refresh_token)
         refresh_record = await self.db.scalar(
@@ -284,6 +369,26 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Refresh token has been revoked",
             )
+        if int(payload.get("user_credential_version", 1)) != getattr(user, "credential_version", 1):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User session has been revoked",
+            )
+        if payload.get("sid") and payload["sid"] != str(refresh_record.id):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh session is invalid",
+            )
+        membership = await self.db.scalar(
+            select(SaasTenantMembership).where(
+                SaasTenantMembership.company_id == company.id
+            )
+        )
+        if membership is not None and membership_access_error(membership):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="SaaS membership no longer authorizes this session",
+            )
 
         refresh_record.revoked_at = now
         refresh_branch_id = (
@@ -301,6 +406,21 @@ class AuthService:
             refresh_branch_id,
             payload.get("station_key"),
         )
+        new_session_id = uuid.uuid4()
+        client_surface = payload.get("client_surface")
+        store_device_id = payload.get("store_device_id")
+        if client_surface == MOBILE_STORE_SURFACE:
+            permissions = store_permissions(user=user, context=context, permissions=permissions, device_id=store_device_id)
+            scope_types = ["branch"]
+            resolved_station_key = resolved_station_key or normalized_station_key(payload.get("station_key"))
+        qa_persona = payload.get("qa_persona")
+        qa_deadline = (
+            datetime.fromtimestamp(int(payload["qa_deadline"]), tz=timezone.utc)
+            if payload.get("qa_deadline") else None
+        )
+        expires_delta = (qa_deadline - now) if qa_deadline else None
+        if expires_delta is not None and expires_delta.total_seconds() <= 0:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="QA session has expired")
         access_token = create_access_token(
             subject=str(user.id),
             company_id=str(user.company_id),
@@ -313,6 +433,13 @@ class AuthService:
             assignment_ids=[str(value) for value in assignment_ids],
             scope_types=scope_types,
             company_credential_version=company.credential_version,
+            user_credential_version=getattr(user, "credential_version", 1),
+            session_id=str(new_session_id),
+            client_surface=client_surface,
+            store_device_id=store_device_id,
+            expires_delta=expires_delta,
+            qa_persona=qa_persona,
+            qa_deadline=qa_deadline,
         )
         new_refresh_token = create_refresh_token(
             subject=str(user.id),
@@ -320,9 +447,17 @@ class AuthService:
             branch_id=str(resolved_branch_id) if resolved_branch_id else None,
             station_key=resolved_station_key,
             company_credential_version=company.credential_version,
+            user_credential_version=getattr(user, "credential_version", 1),
+            session_id=str(new_session_id),
+            client_surface=client_surface,
+            store_device_id=store_device_id,
+            expires_delta=expires_delta,
+            qa_persona=qa_persona,
+            qa_deadline=qa_deadline,
         )
         self.db.add(
             RefreshToken(
+                id=new_session_id,
                 user_id=user.id,
                 company_id=user.company_id,
                 token_hash=self._hash_token(new_refresh_token),
@@ -336,7 +471,7 @@ class AuthService:
                 company_id=user.company_id,
                 branch_id=None,
                 user_id=user.id,
-                action="user.token_refresh",
+                action="qa.user.session.refresh" if qa_persona else "user.token_refresh",
                 resource="User",
                 resource_id=str(user.id),
                 ip_address=ip_address,
@@ -372,6 +507,8 @@ class AuthService:
         new_branch_id: uuid.UUID,
         *,
         station_key: str | None = None,
+        qa_persona: str | None = None,
+        qa_deadline: datetime | None = None,
     ) -> tuple[str, str]:
         access_token, refresh_token = await self.create_session(
             user=user,
@@ -379,6 +516,8 @@ class AuthService:
             station_key=station_key,
             ip_address=None,
             user_agent=None,
+            qa_persona=qa_persona,
+            qa_deadline=qa_deadline,
         )
         self.db.add(
             AuditLog(

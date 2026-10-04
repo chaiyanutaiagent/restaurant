@@ -1,0 +1,16 @@
+{
+  "scope": "WP26-TAKEAWAY-CANARY-CUTOVER",
+  "release": {"git_commit": "REQUIRED_40_CHAR_COMMIT", "version": "REQUIRED", "artifact_sha256": "REQUIRED_64_CHAR_SHA256"},
+  "dependencies": {
+    "wp24_status": "blocked",
+    "wp24_evidence_sha256": "REQUIRED_64_CHAR_SHA256",
+    "wp25_status": "blocked",
+    "wp25_evidence_sha256": "REQUIRED_64_CHAR_SHA256"
+  },
+  "final_backup": {"status": "not_run", "reference": "", "sha256": "", "restore_verified": false},
+  "canary": {"branch_id": "REQUIRED_UUID", "status": "not_run", "started_at": null, "ended_at": null, "evidence": []},
+  "monitoring": {"status": "not_run", "duration_minutes": 0, "error_rate_percent": "0.00", "duplicate_orders": 0, "stock_mismatches": 0, "payment_mismatches": 0},
+  "rollback_drill": {"status": "not_run", "reference": "", "recovery_minutes": 0},
+  "owner_decision": {"decision": "pending", "owner": "REQUIRED", "decided_at": null},
+  "production_activation": {"status": "not_started", "activated_at": null, "operator": null}
+}

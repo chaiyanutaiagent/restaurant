@@ -10,7 +10,9 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
@@ -31,6 +33,7 @@ class User(SoftDeleteMixin, Base):
     __tablename__ = "users"
     __table_args__ = (
         UniqueConstraint("company_id", "username", name="uq_users_company_id_username"),
+        CheckConstraint("credential_version > 0", name="ck_users_credential_version_positive"),
         Index(
             "ix_users_company_id_email_unique",
             "company_id",
@@ -66,6 +69,23 @@ class User(SoftDeleteMixin, Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    credential_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
+    )
+    mfa_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
+    access_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    access_review_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    access_reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    access_review_outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deactivated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    deactivation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     company: Mapped["Company"] = relationship("Company", back_populates="users")
     user_branches: Mapped[list["UserBranch"]] = relationship("UserBranch", back_populates="user")

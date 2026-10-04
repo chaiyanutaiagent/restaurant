@@ -31,6 +31,38 @@ class BranchSettings(UUIDMixin, TimestampMixin, Base):
             "stock_adjust_approval_threshold_qty >= 0",
             name="stock_adjust_approval_threshold_nonnegative",
         ),
+        CheckConstraint(
+            "pos_price_override_auto_limit_pct >= 0 "
+            "AND pos_price_override_auto_limit_pct <= pos_price_override_max_deviation_pct",
+            name="pos_price_override_auto_within_max",
+        ),
+        CheckConstraint(
+            "pos_price_override_max_deviation_pct >= 0 "
+            "AND pos_price_override_max_deviation_pct <= 100",
+            name="pos_price_override_max_range",
+        ),
+        CheckConstraint(
+            "pos_price_override_auto_limit_amount >= 0",
+            name="pos_price_override_auto_amount_nonnegative",
+        ),
+        CheckConstraint(
+            "pos_price_override_min_margin_pct >= -100 "
+            "AND pos_price_override_min_margin_pct <= 100",
+            name="pos_price_override_margin_range",
+        ),
+        CheckConstraint(
+            "pos_hold_draft_ttl_minutes >= 15 AND pos_hold_draft_ttl_minutes <= 1440",
+            name="pos_hold_draft_ttl_range",
+        ),
+        CheckConstraint(
+            "pos_cash_movement_approval_threshold >= 0",
+            name="pos_cash_movement_approval_threshold_nonnegative",
+        ),
+        CheckConstraint(
+            "pos_shift_variance_soft_threshold >= 0 AND "
+            "pos_shift_variance_approval_threshold >= pos_shift_variance_soft_threshold",
+            name="pos_shift_variance_thresholds_nonnegative",
+        ),
     )
 
     company_id: Mapped[uuid.UUID] = mapped_column(
@@ -66,6 +98,33 @@ class BranchSettings(UUIDMixin, TimestampMixin, Base):
         Numeric(5, 2),
         nullable=False,
         server_default=text("10"),
+    )
+    pos_price_override_auto_limit_pct: Mapped[float] = mapped_column(
+        Numeric(5, 2), nullable=False, server_default=text("10")
+    )
+    pos_price_override_auto_limit_amount: Mapped[float] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("100")
+    )
+    pos_price_override_max_deviation_pct: Mapped[float] = mapped_column(
+        Numeric(5, 2), nullable=False, server_default=text("50")
+    )
+    pos_price_override_min_margin_pct: Mapped[float] = mapped_column(
+        Numeric(6, 2), nullable=False, server_default=text("0")
+    )
+    pos_price_override_self_approval: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    pos_hold_draft_ttl_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("120")
+    )
+    pos_cash_movement_approval_threshold: Mapped[float] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("1000")
+    )
+    pos_shift_variance_soft_threshold: Mapped[float] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("100")
+    )
+    pos_shift_variance_approval_threshold: Mapped[float] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("500")
     )
     stock_adjust_approval_threshold_qty: Mapped[float] = mapped_column(
         Numeric(12, 4),

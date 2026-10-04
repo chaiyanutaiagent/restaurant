@@ -28,6 +28,7 @@ type SupplierFormValues = {
   name_en: string;
   tax_id: string;
   branch_code: string;
+  tax_entity_type: "individual" | "juristic" | "unknown";
   address: string;
   phone: string;
   email: string;
@@ -49,6 +50,7 @@ const EMPTY_FORM: SupplierFormValues = {
   name_en: "",
   tax_id: "",
   branch_code: "00000",
+  tax_entity_type: "unknown",
   address: "",
   phone: "",
   email: "",
@@ -108,6 +110,7 @@ export default function SuppliersPage(): JSX.Element {
       name_en: supplier.name_en ?? "",
       tax_id: supplier.tax_id ?? "",
       branch_code: supplier.branch_code ?? "00000",
+      tax_entity_type: supplier.tax_entity_type ?? "unknown",
       address: supplier.address ?? "",
       phone: supplier.phone ?? "",
       email: supplier.email ?? "",
@@ -218,6 +221,7 @@ export default function SuppliersPage(): JSX.Element {
                   <TableHead>รหัส</TableHead>
                   <TableHead>ชื่อบริษัท</TableHead>
                   <TableHead>เลขผู้เสียภาษี</TableHead>
+                  <TableHead>ประเภทภาษี</TableHead>
                   <TableHead>เบอร์โทร | อีเมล</TableHead>
                   <TableHead>เงื่อนไข</TableHead>
                   <TableHead>WHT</TableHead>
@@ -236,6 +240,7 @@ export default function SuppliersPage(): JSX.Element {
                       <div className="text-xs text-gray-500">{supplier.name_en ?? "-"}</div>
                     </TableCell>
                     <TableCell>{formatTaxId(supplier.tax_id)}</TableCell>
+                    <TableCell>{supplier.tax_entity_type === "individual" ? "บุคคลธรรมดา" : supplier.tax_entity_type === "juristic" ? "นิติบุคคล" : "รอระบุ"}</TableCell>
                     <TableCell>
                       <div>{supplier.phone ?? "-"}</div>
                       <div className="text-xs text-gray-500">{supplier.email ?? "-"}</div>
@@ -305,6 +310,14 @@ export default function SuppliersPage(): JSX.Element {
               <div className="grid gap-2">
                 <Label>รหัสสาขา</Label>
                 <Input value={form.branch_code} onChange={(event) => updateField("branch_code", event.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label>ประเภทผู้เสียภาษี (สำหรับ ภ.ง.ด.3/53)</Label>
+                <select className="h-10 rounded-md border border-gray-300 bg-white px-3 text-sm" value={form.tax_entity_type} onChange={(event) => updateField("tax_entity_type", event.target.value as SupplierFormValues["tax_entity_type"])}>
+                  <option value="unknown">รอระบุ</option>
+                  <option value="individual">บุคคลธรรมดา — ภ.ง.ด.3</option>
+                  <option value="juristic">นิติบุคคล — ภ.ง.ด.53</option>
+                </select>
               </div>
               <label className="flex items-center gap-2 pt-8 text-sm">
                 <input

@@ -1,0 +1,20 @@
+{
+  "status": "ok",
+  "checks": {
+    "database": {"status": "ok"},
+    "platform_database": {"status": "ok"},
+    "redis": {"status": "ok"},
+    "restaurant_database": {"status": "ok"},
+    "uploads": {"status": "ok"}
+  },
+  "runtime": {
+    "identity_database": "platform_core",
+    "reference_projector_enabled": true,
+    "reference_projector_failed_events": 0,
+    "reference_projector_last_error_type": null,
+    "reference_projector_loop_errors": 0,
+    "reference_projector_running": true,
+    "restaurant_service_database": "restaurant"
+  },
+  "version": "1.0.0"
+}

@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.models.accounting import Account, AccountBalance, JournalEntry, JournalLine
 from app.models.audit import AuditLog
 from app.models.company import Company
-from app.models.pos import SaleOrder
+from app.models.pos import PosCashMovement, SaleOrder
 from app.models.purchase import PurchaseOrder
 from app.models.stock import StockMovement
 from app.schemas.accounting import AccountCreate, AccountLedgerResponse, AccountUpdate, CreateJournalEntryRequest
@@ -253,6 +253,37 @@ class AccountingService:
             reference_id=str(sale_order.id),
         )
 
+    async def post_cash_movement(
+        self,
+        movement: PosCashMovement,
+        company_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> JournalEntry:
+        amount = q2(movement.amount)
+        if movement.movement_type == "cash_in":
+            counterpart = "1102" if movement.reason_code == "change_fund" else "4004"
+            lines = [
+                PostingLine("1101", amount, Decimal("0.00"), "เงินสดเข้าลิ้นชัก"),
+                PostingLine(counterpart, Decimal("0.00"), amount, movement.reason),
+            ]
+        else:
+            counterpart = "1102" if movement.reason_code == "cash_drop" else "6006"
+            lines = [
+                PostingLine(counterpart, amount, Decimal("0.00"), movement.reason),
+                PostingLine("1101", Decimal("0.00"), amount, "เงินสดออกจากลิ้นชัก"),
+            ]
+        return await self._post_entry(
+            company_id=company_id,
+            branch_id=movement.branch_id,
+            user_id=user_id,
+            entry_date=movement.posted_at.date(),
+            entry_type="cash_movement",
+            description=f"{movement.movement_type} {movement.reason_code}: {movement.reason}",
+            lines=lines,
+            reference_type="PosCashMovement",
+            reference_id=str(movement.id),
+        )
+
     async def post_purchase(self, po: PurchaseOrder, company_id: uuid.UUID, user_id: uuid.UUID) -> JournalEntry:
         lines = get_purchase_posting(
             subtotal=Decimal(po.subtotal or 0),
@@ -341,6 +372,14 @@ class AccountingService:
         entry = await self.get_entry(entry_id, company_id)
         if entry.is_reversed:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Journal entry already reversed")
+        if entry.entry_type == "manual" and entry.created_by == user_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "maker_checker_conflict",
+                    "message": "Manual journal creator and reversal approver must be different users",
+                },
+            )
         reversed_entry = await self._post_entry(
             company_id=company_id,
             branch_id=entry.branch_id,

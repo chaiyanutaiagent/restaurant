@@ -5,8 +5,6 @@ from contextlib import asynccontextmanager
 
 import asyncio
 import os
-import tempfile
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi import status
@@ -20,39 +18,65 @@ from app.database import (
     AsyncSessionLocal,
     PlatformSessionLocal,
     RestaurantSessionLocal,
+    RetailSessionLocal,
+    TakeawaySessionLocal,
     current_database_name,
     init_db,
+    validate_retail_schema_readiness,
     validate_runtime_database_names,
 )
 from app.middleware.branch_context import BranchContextMiddleware
 from app.middleware.request_id import RequestIDMiddleware
 from app.routers import accounting as accounting_router
 from app.routers import platform as platform_router
-from app.routers import api_mgmt, approvals, device_workspaces, devices, incoming_webhook, public_api, storefront
+from app.routers import api_mgmt, approvals, company_distribution, company_foundation, company_kitchen, device_workspaces, devices, incoming_webhook, physical_uat, public_api, storefront
 from app.routers import crm as crm_router
 from app.routers import etax as etax_router
+from app.routers import tax_settings as tax_settings_router
+from app.routers import tax_operations as tax_operations_router
 from app.routers import hr as hr_router
 from app.routers import logistics as logistics_router
 from app.routers import payment_gateway as payment_gw_router
+from app.routers import takeaway as takeaway_router
 from app.routers import restaurant as restaurant_router
 from app.routers import payable as payable_router
-from app.routers import auth, pos, products, purchase, reports, stock, stock_count as stock_count_router, system, transfer
+from app.routers import auth, membership, pos, privacy_support, products, purchase, reports, stock, stock_count as stock_count_router, system, transfer
 from app.routers import router
+from app.routers import mobile_store_auth
 from app.utils.create_superuser import ensure_default_company_seed_in_session
 from app.utils.seed_permissions import seed_default_permissions
 from app.services.reference_projector_worker import (
-    reference_projector_state,
     run_reference_projector,
 )
+from app.services.retail_reference_projector import (
+    run_retail_reference_projector,
+    validate_retail_reference_readiness,
+)
+from app.services.platform_operations_service import collect_runtime_state
+from app.services.takeaway_reference_projector import run_takeaway_reference_projector
+from app.services.shared_reporting_worker import run_shared_reporting_projector
+from app.utils.webhook_dispatcher import run_webhook_retry_worker
+from app.utils.access_log_redaction import install_access_log_secret_filter
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    install_access_log_secret_filter()
     await init_db()
     legacy_database_name, platform_database_name, restaurant_database_name = await asyncio.gather(
         current_database_name(AsyncSessionLocal),
         current_database_name(PlatformSessionLocal),
         current_database_name(RestaurantSessionLocal),
+    )
+    takeaway_database_name = (
+        await current_database_name(TakeawaySessionLocal)
+        if settings.takeaway_feature_enabled and TakeawaySessionLocal is not None
+        else None
+    )
+    retail_database_name = (
+        await current_database_name(RetailSessionLocal)
+        if settings.retail_service_database == "retail" and RetailSessionLocal is not None
+        else None
     )
     validate_runtime_database_names(
         identity_database=settings.identity_database,
@@ -61,7 +85,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         legacy_database_name=legacy_database_name,
         platform_database_name=platform_database_name,
         restaurant_database_name=restaurant_database_name,
+        retail_service_database=settings.retail_service_database,
+        retail_database_name=retail_database_name,
+        retail_reference_projector_enabled=settings.retail_reference_projector_enabled,
+        takeaway_service_database=settings.takeaway_service_database,
+        takeaway_feature_enabled=settings.takeaway_feature_enabled,
+        takeaway_database_name=takeaway_database_name,
     )
+    if settings.retail_service_database == "retail":
+        if RetailSessionLocal is None:
+            raise RuntimeError("Retail service cutover requires RETAIL_DATABASE_URL")
+        await validate_retail_schema_readiness(RetailSessionLocal)
+        await validate_retail_reference_readiness(
+            retail_session_factory=RetailSessionLocal,
+        )
     permission_catalog_factories = [AsyncSessionLocal]
     if platform_database_name != legacy_database_name:
         permission_catalog_factories.append(PlatformSessionLocal)
@@ -90,6 +127,55 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             name="platform-reference-projector",
         )
 
+    takeaway_projector_stop: asyncio.Event | None = None
+    takeaway_projector_task: asyncio.Task[None] | None = None
+    if settings.takeaway_feature_enabled:
+        takeaway_projector_stop = asyncio.Event()
+        takeaway_projector_task = asyncio.create_task(
+            run_takeaway_reference_projector(
+                takeaway_projector_stop,
+                poll_seconds=settings.reference_projector_poll_seconds,
+            ),
+            name="takeaway-reference-projector",
+        )
+
+    retail_projector_stop: asyncio.Event | None = None
+    retail_projector_task: asyncio.Task[None] | None = None
+    if settings.retail_reference_projector_enabled:
+        retail_projector_stop = asyncio.Event()
+        retail_projector_task = asyncio.create_task(
+            run_retail_reference_projector(
+                retail_projector_stop,
+                poll_seconds=settings.retail_reference_projector_poll_seconds,
+            ),
+            name="retail-reference-projector",
+        )
+
+    reporting_projector_stop: asyncio.Event | None = None
+    reporting_projector_task: asyncio.Task[None] | None = None
+    if settings.shared_reporting_projector_enabled:
+        reporting_projector_stop = asyncio.Event()
+        reporting_projector_task = asyncio.create_task(
+            run_shared_reporting_projector(
+                reporting_projector_stop,
+                poll_seconds=settings.shared_reporting_projector_poll_seconds,
+                batch_size=settings.shared_reporting_projector_batch_size,
+            ),
+            name="shared-reporting-projector",
+        )
+
+    webhook_retry_stop: asyncio.Event | None = None
+    webhook_retry_task: asyncio.Task[None] | None = None
+    if settings.webhook_retry_worker_enabled:
+        webhook_retry_stop = asyncio.Event()
+        webhook_retry_task = asyncio.create_task(
+            run_webhook_retry_worker(
+                webhook_retry_stop,
+                poll_seconds=settings.webhook_retry_poll_seconds,
+            ),
+            name="webhook-retry-worker",
+        )
+
     try:
         yield
     finally:
@@ -101,13 +187,46 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             except TimeoutError:  # pragma: no cover - shutdown timeout path
                 projector_task.cancel()
                 await asyncio.gather(projector_task, return_exceptions=True)
+        if takeaway_projector_stop is not None:
+            takeaway_projector_stop.set()
+        if takeaway_projector_task is not None:
+            try:
+                await asyncio.wait_for(takeaway_projector_task, timeout=5)
+            except TimeoutError:  # pragma: no cover - shutdown timeout path
+                takeaway_projector_task.cancel()
+                await asyncio.gather(takeaway_projector_task, return_exceptions=True)
+        if retail_projector_stop is not None:
+            retail_projector_stop.set()
+        if retail_projector_task is not None:
+            try:
+                await asyncio.wait_for(retail_projector_task, timeout=5)
+            except TimeoutError:  # pragma: no cover - shutdown timeout path
+                retail_projector_task.cancel()
+                await asyncio.gather(retail_projector_task, return_exceptions=True)
+        if reporting_projector_stop is not None:
+            reporting_projector_stop.set()
+        if reporting_projector_task is not None:
+            try:
+                await asyncio.wait_for(reporting_projector_task, timeout=5)
+            except TimeoutError:  # pragma: no cover - shutdown timeout path
+                reporting_projector_task.cancel()
+                await asyncio.gather(reporting_projector_task, return_exceptions=True)
+        if webhook_retry_stop is not None:
+            webhook_retry_stop.set()
+        if webhook_retry_task is not None:
+            try:
+                await asyncio.wait_for(webhook_retry_task, timeout=5)
+            except TimeoutError:  # pragma: no cover - shutdown timeout path
+                webhook_retry_task.cancel()
+                await asyncio.gather(webhook_retry_task, return_exceptions=True)
 
 
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    docs_url="/api/docs",
-    openapi_url="/api/openapi.json",
+    docs_url="/api/docs" if settings.api_docs_enabled else None,
+    redoc_url="/api/redoc" if settings.api_docs_enabled else None,
+    openapi_url="/api/openapi.json" if settings.api_docs_enabled else None,
     lifespan=lifespan,
 )
 
@@ -127,12 +246,19 @@ app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads"
 
 app.include_router(router)
 app.include_router(auth.router)
+app.include_router(mobile_store_auth.router)
+app.include_router(membership.router)
+app.include_router(privacy_support.router)
 app.include_router(platform_router.router)
 app.include_router(approvals.router)
 app.include_router(devices.router)
 app.include_router(devices.auth_router)
 app.include_router(device_workspaces.router)
+app.include_router(physical_uat.router)
 app.include_router(system.router)
+app.include_router(company_kitchen.router)
+app.include_router(company_distribution.router)
+app.include_router(company_foundation.router)
 app.include_router(products.router)
 app.include_router(stock.router)
 app.include_router(stock_count_router.router)
@@ -142,6 +268,8 @@ app.include_router(purchase.router)
 app.include_router(transfer.router)
 app.include_router(accounting_router.router)
 app.include_router(etax_router.router)
+app.include_router(tax_settings_router.router)
+app.include_router(tax_operations_router.router)
 app.include_router(payable_router.router)
 app.include_router(hr_router.router)
 app.include_router(crm_router.router)
@@ -154,6 +282,8 @@ app.include_router(payment_gw_router.router)
 app.include_router(restaurant_router.router)
 app.include_router(restaurant_router.public_router)
 app.include_router(restaurant_router.qs_router)
+app.include_router(takeaway_router.router)
+app.include_router(takeaway_router.public_router)
 
 
 @app.get("/health")
@@ -166,74 +296,15 @@ async def health_live() -> dict[str, str]:
     return {"status": "ok", "version": settings.app_version}
 
 
-async def _check_database(session_factory) -> str:
-    async with session_factory() as db:
-        await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=5)
-    return "ok"
-
-
-async def _check_redis() -> str:
-    import redis.asyncio as aioredis
-
-    redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-    try:
-        await asyncio.wait_for(redis.ping(), timeout=5)
-    finally:
-        await redis.aclose()
-    return "ok"
-
-
-def _check_uploads() -> str:
-    upload_path = Path(settings.upload_dir)
-    upload_path.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=upload_path, prefix=".health-", delete=True):
-        pass
-    return "ok"
-
-
 @app.get("/health/ready")
 async def health_ready() -> JSONResponse:
-    checks: dict[str, dict[str, str]] = {}
-
-    for name, check in (
-        ("database", lambda: _check_database(AsyncSessionLocal)),
-        ("platform_database", lambda: _check_database(PlatformSessionLocal)),
-        ("restaurant_database", lambda: _check_database(RestaurantSessionLocal)),
-        ("redis", _check_redis),
-    ):
-        try:
-            await check()
-            checks[name] = {"status": "ok"}
-        except Exception:  # pragma: no cover - runtime dependency failure path
-            checks[name] = {"status": "error"}
-
-    try:
-        _check_uploads()
-        checks["uploads"] = {"status": "ok"}
-    except Exception:  # pragma: no cover - runtime dependency failure path
-        checks["uploads"] = {"status": "error"}
-
-    if settings.reference_projector_enabled:
-        checks["reference_projector"] = {
-            "status": "ok" if reference_projector_state.running else "error"
-        }
-
-    ready = all(check["status"] == "ok" for check in checks.values())
+    runtime = await collect_runtime_state()
+    ready = runtime.status == "ok"
     status_code = status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE
     return JSONResponse(
         status_code=status_code,
         content={
             "status": "ok" if ready else "error",
-            "checks": checks,
-            "runtime": {
-                "identity_database": settings.identity_database,
-                "restaurant_service_database": settings.restaurant_service_database,
-                "reference_projector_enabled": settings.reference_projector_enabled,
-                "reference_projector_running": reference_projector_state.running,
-                "reference_projector_failed_events": reference_projector_state.failed,
-                "reference_projector_loop_errors": reference_projector_state.loop_errors,
-                "reference_projector_last_error_type": reference_projector_state.last_error_type,
-            },
             "version": settings.app_version,
         },
     )
@@ -241,4 +312,4 @@ async def health_ready() -> JSONResponse:
 
 @app.get("/")
 async def root() -> dict[str, str]:
-    return {"message": "Restaurant POS API", "docs": "/docs"}
+    return {"message": f"{settings.app_name} API", "docs": "/docs"}

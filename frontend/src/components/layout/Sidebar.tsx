@@ -14,8 +14,11 @@ import {
   Link2,
   LogOut,
   Package,
+  Percent,
   Ruler,
   FileText,
+  FileCheck2,
+  Factory,
   UtensilsCrossed,
   Warehouse,
   Shield,
@@ -43,6 +46,7 @@ import { syncStockBalances, useLowStockCount } from "@/lib/syncService";
 import { branchApi, userApi } from "@/lib/adminApi";
 import { fbApi } from "@/lib/fbApi";
 import { brandNavigationApi } from "@/lib/brandNavigationApi";
+import { PLATFORM_BRAND } from "@/config/platformBrand";
 
 type SidebarProps = {
   workspace?: "admin" | "restaurant";
@@ -60,10 +64,17 @@ type NavItem = {
 };
 
 const mainItems: NavItem[] = [
-  { label: "ERP Admin", to: "/admin", icon: LayoutDashboard },
-  { label: "ผู้ใช้งาน", to: "/users", icon: Users, permission: "system.user.view" },
+  { label: "หน้าหลัก", to: "/company", icon: LayoutDashboard },
+  { label: "งานและการแจ้งเตือน", to: "/company/actions", icon: ClipboardCheck },
+  { label: "องค์กร", to: "/company/organization", icon: Building2, permission: "system.branch.view" },
+  { label: "พนักงานและสิทธิ์", to: "/users", icon: Users, permission: "system.user.view" },
+  { label: "การตั้งค่า", to: "/company/settings", icon: Settings, permission: "system.company.edit" },
+  { label: "แอปทั้งหมด", to: "/company/apps", icon: Store },
+  { label: "ครัวกลางบริษัท", to: "/company-kitchen", icon: Factory, permissions: ["company.kitchen.view", "company.kitchen.manage", "system.company.edit"] },
+  { label: "กระจายสินค้า", to: "/company-distribution", icon: ArrowLeftRight, permissions: ["company.distribution.view", "company.distribution.manage", "system.company.edit"] },
+  { label: "แพ็กเกจ SaaS", to: "/billing", icon: CreditCard },
+  { label: "Privacy & Support", to: "/privacy-support", icon: Shield },
   { label: "บทบาท", to: "/roles", icon: Shield, permission: "system.role.view" },
-  { label: "สาขา", to: "/branches", icon: Building2, permission: "system.branch.view" },
   { label: "อุปกรณ์", to: "/devices", icon: Cpu, permission: "system.device.view" }
 ];
 
@@ -77,6 +88,7 @@ const comingSoonItems: NavItem[] = [
 ];
 
 const reportItems: NavItem[] = [
+  { label: "รายงานรวมบริษัท", to: "/reports/company", icon: BarChart2, permission: "system.company.edit" },
   { label: "รายงาน", to: "/reports", icon: BarChart2, permission: "pos.report.view" },
   { label: "ประวัติกะ", to: "/shift-history", icon: Clock, permission: "pos.report.view" }
 ];
@@ -88,8 +100,10 @@ const purchaseItems: NavItem[] = [
 
 const accountingItems: NavItem[] = [
   { label: "บัญชี", to: "/accounting", icon: BookOpen, permission: "accounting.report.view" },
+  { label: "ศูนย์ภาษี", to: "/tax-center", icon: FileCheck2, permissions: ["accounting.tax.view", "accounting.report.view", "system.company.edit"] },
   { label: "เจ้าหนี้", to: "/payable", icon: CreditCard, permission: "accounting.payment.view" },
-  { label: "ใบกำกับภาษี", to: "/etax", icon: FileText, permission: "accounting.invoice.view" }
+  { label: "ใบกำกับภาษี", to: "/etax", icon: FileText, permission: "accounting.invoice.view" },
+  { label: "ตั้งค่าภาษี", to: "/settings/tax", icon: Percent, permission: "system.company.edit" }
 ];
 
 const hrItems: NavItem[] = [
@@ -120,7 +134,7 @@ const fbItems: NavItem[] = [
 
 const fbSubItems: NavItem[] = [
   { label: "แบรนด์ร้านอาหาร", to: "/restaurant/brands", icon: Store, permission: "fb.settings.manage" },
-  { label: "ขายหน้าร้าน", to: "/restaurant/wap", icon: ShoppingCart, permission: "fb.order.create" },
+  { label: "ขาย / รับกลับ", to: "/restaurant/wap", icon: ShoppingCart, permission: "fb.order.create" },
   { label: "ออเดอร์", to: "/restaurant/orders", icon: ClipboardList, permission: "fb.order.create" },
   { label: "โต๊ะ", to: "/restaurant/tables", icon: Table2, permission: "fb.table.manage", feature: "tables" },
   { label: "ครัว", to: "/restaurant/kitchen", icon: ChefHat, permissions: ["fb.kitchen.ticket.manage", "fb.kitchen.manage"] },
@@ -142,8 +156,10 @@ export default function Sidebar({
   isSidebarOpen,
   onClose
 }: SidebarProps): JSX.Element {
-  const logout = useLogout();
+  const businessSlug = useAuthStore((state) => state.businessSlug);
+  const logout = useLogout(businessSlug ? `/${businessSlug}` : "/login");
   const user = useAuthStore((state) => state.user);
+  const businessType = useAuthStore((state) => state.businessType);
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasFbAccess = fbPermissionCodes.some((code) => hasPermission(code));
   const lowStockCount = useLowStockCount();
@@ -178,10 +194,11 @@ export default function Sidebar({
     ? fbSettingsQuery.data.fb_service_mode !== "quick_service"
     : false;
   const activeColor = workspace === "restaurant" ? "bg-orange-600" : "bg-blue-600";
-  const brandTitle = workspace === "restaurant" ? (currentBrand?.name ?? "Restaurant") : "Restaurant POS";
+  const brandTitle = workspace === "restaurant" ? (currentBrand?.name ?? "Restaurant") : PLATFORM_BRAND.productName;
   const brandSubtitle = workspace === "restaurant"
     ? `Restaurant${currentBrandBranch ? ` · ${currentBrandBranch.branch_name}` : ""}`
-    : "Admin Console";
+    : "Company Admin";
+  const canonicalPosPath = businessType === "retail_pos" ? "/retail/pos" : "/restaurant/pos";
 
   useEffect(() => {
     if (hasPermission("inventory.stock.view") || hasPermission("inventory.stock.adjust.request")) {
@@ -192,22 +209,22 @@ export default function Sidebar({
   return (
     <aside
       className={cn(
-        "fixed inset-y-0 left-0 z-40 flex w-72 flex-col bg-gray-900 text-gray-100 transition-transform duration-200 lg:static lg:translate-x-0",
+        "fixed inset-y-0 left-0 z-50 flex w-[18rem] flex-col border-r border-slate-800 bg-slate-950 text-slate-100 shadow-2xl transition-transform duration-200 xl:static xl:translate-x-0 xl:shadow-none",
         isSidebarOpen ? "translate-x-0" : "-translate-x-full"
       )}
     >
-      <div className="flex items-center justify-between border-b border-gray-800 px-5 py-4">
+      <div className="flex min-h-16 items-center justify-between border-b border-slate-800 px-5 py-3.5">
         <div>
           <p className="text-lg font-semibold text-white">{brandTitle}</p>
           <p className="text-xs text-gray-400">{brandSubtitle}</p>
         </div>
-        <Button variant="ghost" size="icon" className="text-gray-300 lg:hidden" onClick={onClose}>
+        <Button variant="ghost" size="icon" className="text-slate-300 xl:hidden" onClick={onClose}>
           <X className="h-5 w-5" />
         </Button>
       </div>
 
-      <div className="border-b border-gray-800 px-4 py-4">
-        <div className="flex items-center gap-3 rounded-lg bg-gray-800/60 px-3 py-3">
+      <div className="border-b border-slate-800 px-4 py-3">
+        <div className="flex items-center gap-3 rounded-xl bg-slate-900 px-3 py-3 ring-1 ring-slate-800">
           <Avatar className="h-10 w-10">
             <AvatarFallback>
               {user?.username.slice(0, 2).toUpperCase() ?? "AD"}
@@ -222,7 +239,7 @@ export default function Sidebar({
         </div>
       </div>
 
-      <nav className="flex-1 space-y-6 overflow-y-auto px-4 py-5">
+      <nav className="app-horizontal-scroll flex-1 space-y-5 overflow-y-auto px-3 py-4 [&_a]:min-h-11 [&_a]:rounded-xl [&_button]:min-h-11 [&_button]:rounded-xl">
         {workspace === "restaurant" ? (
           <>
             <div className="space-y-3">
@@ -254,7 +271,7 @@ export default function Sidebar({
                 .map((item) => (
                   <NavLink
                     key={item.to}
-                    to={item.to}
+                    to={item.to === "/admin" && businessSlug ? `/${businessSlug}/admin` : item.to}
                     onClick={onClose}
                     className={({ isActive }) =>
                       cn(
@@ -273,7 +290,7 @@ export default function Sidebar({
               <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">Switch</p>
               {[
                 { label: "ร้านอาหาร", to: "/restaurant/orders", icon: ShoppingCart, permissions: ["brand.store.order.create", "fb.order.create"] },
-                { label: "เปิด POS", to: "/pos", icon: ShoppingCart, permission: "pos.sale.create" },
+                { label: "เปิด POS", to: canonicalPosPath, icon: ShoppingCart, permission: "pos.sale.create" },
                 { label: "POS Admin", to: "/pos/admin", icon: Settings, permission: "pos.sale.view" },
                 { label: "ERP Admin", to: "/admin", icon: LayoutDashboard }
               ]
@@ -281,7 +298,7 @@ export default function Sidebar({
                 .map((item) => (
                   <NavLink
                     key={item.to}
-                    to={item.to}
+                    to={item.to === "/admin" && businessSlug ? `/${businessSlug}/admin` : item.to}
                     onClick={onClose}
                     className={({ isActive }) =>
                       cn(
@@ -300,11 +317,11 @@ export default function Sidebar({
           <>
         <div className="space-y-2">
           {mainItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
-                to={item.to}
+                to={item.to === "/admin" && businessSlug ? `/${businessSlug}/admin` : item.to}
                 onClick={onClose}
                 className={({ isActive }) =>
                   cn(
@@ -342,7 +359,8 @@ export default function Sidebar({
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">POS</p>
           {comingSoonItems
             .slice(0, 3)
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
+            .map((item) => item.to === "/pos" ? { ...item, to: canonicalPosPath } : item)
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -367,7 +385,7 @@ export default function Sidebar({
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">คลังสินค้า</p>
           {comingSoonItems
             .slice(3)
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -392,7 +410,7 @@ export default function Sidebar({
               </NavLink>
             ))}
           {transferItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -416,7 +434,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">รายงาน</p>
           {reportItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -440,7 +458,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">การเชื่อมต่อ</p>
           {integrationItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -464,7 +482,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">โลจิสติกส์</p>
           {logisticsItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -488,7 +506,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">จัดซื้อ</p>
           {purchaseItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -512,7 +530,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">บัญชี</p>
           {accountingItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -536,7 +554,7 @@ export default function Sidebar({
         <div className="space-y-3">
           <p className="px-3 text-xs uppercase tracking-[0.25em] text-gray-500">HR</p>
           {hrItems
-            .filter((item) => !item.permission || hasPermission(item.permission))
+            .filter((item) => canShowItem(item, hasPermission))
             .map((item) => (
               <NavLink
                 key={item.to}
@@ -562,7 +580,7 @@ export default function Sidebar({
         <div className="border-t border-gray-800 pt-4">
           <div className="space-y-2">
             {settingsItems
-              .filter((item) => !item.permission || hasPermission(item.permission))
+              .filter((item) => canShowItem(item, hasPermission))
               .map((item) => (
                 <NavLink
                   key={item.to}

@@ -13,15 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.audit import AuditLog
+from app.models.accounting import JournalEntry
 from app.models.branch import Branch
 from app.models.company import Company
-from app.models.pos import CashierShift, Payment, SaleOrder, SaleOrderItem
+from app.models.offline_sync import OfflinePosOperation
+from app.models.pos import CashierShift, Payment, PosCashMovement, SaleOrder, SaleOrderItem
+from app.models.refund import RefundOperation
+from app.models.pricing import PriceOverrideAudit
 from app.models.product import Product, ProductVariant
 from app.models.restaurant import BrandBranch
 from app.models.settings import BranchSettings
 from app.models.stock import StockBalance, StockLocation
 from app.models.user import User
 from app.schemas.pos import (
+    CashMovementCreateRequest,
     CloseShiftRequest,
     CreateSaleRequest,
     OpenShiftRequest,
@@ -30,11 +35,17 @@ from app.schemas.pos import (
     SyncSalesRequest,
     VoidRequest,
 )
+from app.schemas.pricing import PricingCalculateRequest, PricingLineRequest
 from app.services.accounting_service import AccountingService
 from app.services.approval_service import ApprovalEvidence
 from app.services.crm_service import CRMService
+from app.services.hold_draft_service import HoldDraftService, hold_error
 from app.services.notification_service import NotificationService
-from app.services.operational_handoff_service import ensure_sale_completed_handoff
+from app.services.operational_handoff_service import (
+    ensure_sale_completed_handoff,
+    ensure_sale_state_changed_handoff,
+)
+from app.services.pricing_service import PricingResult, PricingService, canonical_hash, pricing_error
 from app.services.stock_service import StockService
 from app.utils.webhook_dispatcher import trigger_event
 from app.schemas.crm import EarnPointsRequest
@@ -89,10 +100,56 @@ def sale_discount_percentage(data: CreateSaleRequest) -> Decimal:
     return q2(total_discount * Decimal("100") / gross)
 
 
+def pricing_request_for_sale(data: CreateSaleRequest) -> PricingCalculateRequest:
+    """Translate the untrusted checkout payload into the pricing input contract.
+
+    Client price and VAT values are supplied only as expectations. The pricing
+    engine resolves all authoritative monetary values from server-side data.
+    """
+    return PricingCalculateRequest(
+        items=[
+            PricingLineRequest(
+                product_id=item.product_id,
+                variant_id=item.variant_id,
+                qty=item.qty,
+                discount_amount=item.discount_amount,
+                discount_type=item.discount_type,
+                expected_unit_price=item.original_price,
+                expected_price_version=item.expected_price_version,
+                price_override=item.price_override,
+            )
+            for item in data.items
+        ],
+        discount_amount=data.discount_amount,
+        discount_type=data.discount_type,
+        channel=data.channel,
+        currency=data.currency,
+        customer_id=data.customer_id,
+        idempotency_key=data.client_order_id or f"non-idempotent-{uuid.uuid4()}",
+        cart_version=data.cart_version,
+    )
+
+
+def sale_request_hash(data: CreateSaleRequest) -> str:
+    return canonical_hash(
+        data.model_dump(
+            mode="json",
+            exclude={"approval_token", "price_override_approval_token"},
+            exclude_none=True,
+        )
+    )
+
+
 class SaleService:
-    def __init__(self, db: AsyncSession):
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        legacy_side_effects_enabled: bool = True,
+    ):
         self.db = db
         self.stock_service = StockService(db)
+        self.legacy_side_effects_enabled = legacy_side_effects_enabled
 
     async def open_shift(
         self,
@@ -106,6 +163,27 @@ class SaleService:
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> CashierShift:
+        request_hash = canonical_hash(
+            data.model_dump(mode="json", exclude_none=True)
+        )
+        if data.idempotency_key:
+            replay = await self.db.scalar(
+                select(CashierShift).where(
+                    CashierShift.company_id == company_id,
+                    CashierShift.branch_id == branch_id,
+                    CashierShift.open_idempotency_key == data.idempotency_key,
+                )
+            )
+            if replay is not None:
+                if replay.open_request_hash != request_hash:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "duplicate_request",
+                            "message": "Open-shift idempotency key was replayed with different data",
+                        },
+                    )
+                return replay
         existing = await self.get_open_shift(company_id, user_id, branch_id)
         if existing is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Shift already open")
@@ -132,6 +210,12 @@ class SaleService:
             user_id=user_id,
             shift_number=f"S{now_local:%Y%m%d}-{int(count) + 1:03d}",
             opening_cash=q2(data.opening_cash),
+            shift_type=data.shift_type,
+            version=1,
+            open_idempotency_key=data.idempotency_key,
+            open_request_hash=request_hash,
+            opened_device_id=device_id,
+            opened_device_code=device_code,
         )
         self.db.add(shift)
         await self.db.flush()
@@ -148,6 +232,9 @@ class SaleService:
                     "operator_user_id": str(user_id),
                     "location_id": str(data.location_id),
                     "opening_cash": str(q2(data.opening_cash)),
+                    "shift_type": data.shift_type,
+                    "version": 1,
+                    "idempotency_key": data.idempotency_key,
                     "device_id": str(device_id) if device_id else None,
                     "device_code": device_code,
                 },
@@ -158,6 +245,334 @@ class SaleService:
         await self.db.commit()
         await self.db.refresh(shift)
         return shift
+
+    async def get_shift_summary(
+        self,
+        shift_id: uuid.UUID,
+        company_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        include_journal: bool = True,
+    ) -> dict[str, object]:
+        shift = await self.db.scalar(
+            select(CashierShift).where(
+                CashierShift.id == shift_id,
+                CashierShift.company_id == company_id,
+                CashierShift.user_id == user_id,
+            )
+        )
+        if shift is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
+        return await self._build_shift_summary(shift, include_journal=include_journal)
+
+    async def _build_shift_summary(
+        self,
+        shift: CashierShift,
+        *,
+        include_journal: bool,
+    ) -> dict[str, object]:
+        active_statuses = ("completed", "partially_refunded", "refunded")
+        order_count = await self.db.scalar(
+            select(func.count(SaleOrder.id)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status.in_(active_statuses),
+            )
+        ) or 0
+        void_count = await self.db.scalar(
+            select(func.count(SaleOrder.id)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status == "voided",
+            )
+        ) or 0
+        gross_sales = await self.db.scalar(
+            select(func.coalesce(func.sum(SaleOrder.total_amount), 0)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status.in_(active_statuses),
+            )
+        ) or Decimal("0")
+        refund_total = await self.db.scalar(
+            select(func.coalesce(func.sum(SaleOrder.refund_amount), 0)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status.in_(active_statuses),
+            )
+        ) or Decimal("0")
+        void_total = await self.db.scalar(
+            select(func.coalesce(func.sum(SaleOrder.total_amount), 0)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status == "voided",
+            )
+        ) or Decimal("0")
+        change_total = await self.db.scalar(
+            select(func.coalesce(func.sum(SaleOrder.change_amount), 0)).where(
+                SaleOrder.shift_id == shift.id,
+                SaleOrder.status.in_(active_statuses),
+            )
+        ) or Decimal("0")
+        payment_rows = (
+            await self.db.execute(
+                select(Payment.payment_method, func.coalesce(func.sum(Payment.amount), 0))
+                .join(SaleOrder, SaleOrder.id == Payment.order_id)
+                .where(
+                    SaleOrder.shift_id == shift.id,
+                    SaleOrder.status.in_(active_statuses),
+                )
+                .group_by(Payment.payment_method)
+                .order_by(Payment.payment_method.asc())
+            )
+        ).all()
+        payment_totals = {
+            str(method): str(q2(Decimal(amount))) for method, amount in payment_rows
+        }
+        cash_net = q2(Decimal(payment_totals.get("cash", "0")))
+        movement_rows = (
+            await self.db.scalars(
+                select(PosCashMovement)
+                .where(PosCashMovement.shift_id == shift.id)
+                .order_by(PosCashMovement.posted_at.asc(), PosCashMovement.id.asc())
+            )
+        ).all()
+        cash_in = q2(sum((Decimal(row.amount) for row in movement_rows if row.movement_type == "cash_in"), Decimal("0")))
+        cash_out = q2(sum((Decimal(row.amount) for row in movement_rows if row.movement_type == "cash_out"), Decimal("0")))
+        expected_cash = q2(
+            Decimal(shift.opening_cash or 0) + cash_net - Decimal(change_total) + cash_in - cash_out
+        )
+
+        pending_drafts = await HoldDraftService(self.db).count_pending_for_shift(shift.id)
+        pending_refunds = await self.db.scalar(
+            select(func.count(RefundOperation.id)).where(
+                RefundOperation.shift_id == shift.id,
+                RefundOperation.status.in_((
+                    "requested", "processing", "cash_due", "unknown",
+                    "needs_reconciliation", "tax_pending",
+                )),
+            )
+        ) or 0
+        pending_offline = 0
+        if include_journal:
+            pending_offline = await self.db.scalar(
+                select(func.count(OfflinePosOperation.id)).where(
+                    OfflinePosOperation.shift_id == shift.id,
+                    OfflinePosOperation.status.in_((
+                        "pending_sync", "syncing", "server_acknowledged", "needs_review",
+                        "quarantined", "unknown",
+                    )),
+                )
+            ) or 0
+        unresolved_payments = await self.db.scalar(
+            select(func.count(Payment.id))
+            .join(SaleOrder, SaleOrder.id == Payment.order_id)
+            .where(
+                SaleOrder.shift_id == shift.id,
+                Payment.amount > 0,
+                Payment.settlement_state.notin_(("settled", "captured")),
+            )
+        ) or 0
+
+        journal_missing_sales = 0
+        journal_missing_movements = 0
+        journal_state = "not_applicable"
+        if include_journal:
+            sale_ids = (
+                await self.db.scalars(
+                    select(SaleOrder.id).where(SaleOrder.shift_id == shift.id)
+                )
+            ).all()
+            movement_ids = [row.id for row in movement_rows]
+            posted_sale_refs = set()
+            posted_movement_refs = set()
+            if sale_ids:
+                posted_sale_refs = set(
+                    (
+                        await self.db.scalars(
+                            select(JournalEntry.reference_id).where(
+                                JournalEntry.company_id == shift.company_id,
+                                JournalEntry.reference_type == "SaleOrder",
+                                JournalEntry.reference_id.in_([str(value) for value in sale_ids]),
+                                JournalEntry.is_posted.is_(True),
+                            )
+                        )
+                    ).all()
+                )
+            if movement_ids:
+                posted_movement_refs = set(
+                    (
+                        await self.db.scalars(
+                            select(JournalEntry.reference_id).where(
+                                JournalEntry.company_id == shift.company_id,
+                                JournalEntry.reference_type == "PosCashMovement",
+                                JournalEntry.reference_id.in_([str(value) for value in movement_ids]),
+                                JournalEntry.is_posted.is_(True),
+                                JournalEntry.is_reversed.is_(False),
+                            )
+                        )
+                    ).all()
+                )
+            journal_missing_sales = sum(1 for value in sale_ids if str(value) not in posted_sale_refs)
+            journal_missing_movements = sum(1 for value in movement_ids if str(value) not in posted_movement_refs)
+            journal_state = "matched" if journal_missing_sales + journal_missing_movements == 0 else "needs_reconciliation"
+
+        blockers: list[dict[str, object]] = []
+        blocker_specs = (
+            ("hold_drafts_pending", int(pending_drafts), "พักบิลยังไม่ถูกจัดการ", "/pos"),
+            ("refunds_pending", int(pending_refunds), "รายการคืนเงินยังไม่สิ้นสุด", "/pos"),
+            ("offline_operations_pending", int(pending_offline), "รายการ Offline/Outbox ยังไม่กระทบยอด", "/pos/offline-sync"),
+            ("payments_unresolved", int(unresolved_payments), "สถานะการชำระเงินยังไม่แน่นอน", "/pos"),
+            ("journal_reconciliation_pending", int(journal_missing_sales + journal_missing_movements), "รายการบัญชียังไม่ครบ", "/accounting"),
+        )
+        for code, count, message, action_path in blocker_specs:
+            if count:
+                blockers.append({"code": code, "count": count, "message": message, "action_path": action_path})
+
+        return {
+            "shift_id": str(shift.id),
+            "shift_number": shift.shift_number,
+            "shift_type": shift.shift_type,
+            "status": shift.status,
+            "version": shift.version,
+            "company_id": str(shift.company_id),
+            "branch_id": str(shift.branch_id),
+            "location_id": str(shift.location_id),
+            "operator_user_id": str(shift.user_id),
+            "opened_at": shift.opened_at.isoformat(),
+            "opening_cash": str(q2(shift.opening_cash)),
+            "gross_sales": str(q2(gross_sales)),
+            "net_sales": str(q2(Decimal(gross_sales) - Decimal(refund_total))),
+            "refund_total": str(q2(refund_total)),
+            "void_total": str(q2(void_total)),
+            "order_count": int(order_count),
+            "void_count": int(void_count),
+            "payment_totals": payment_totals,
+            "cash_received_net": str(cash_net),
+            "change_total": str(q2(change_total)),
+            "cash_in_total": str(cash_in),
+            "cash_out_total": str(cash_out),
+            "expected_cash": str(expected_cash),
+            "cash_movements": [
+                {
+                    "id": str(row.id),
+                    "movement_type": row.movement_type,
+                    "amount": str(q2(row.amount)),
+                    "reason_code": row.reason_code,
+                    "reason": row.reason,
+                    "requester_id": str(row.requester_id),
+                    "approver_id": str(row.approver_id) if row.approver_id else None,
+                    "posted_at": row.posted_at.isoformat(),
+                    "journal_entry_id": str(row.journal_entry_id) if row.journal_entry_id else None,
+                }
+                for row in movement_rows
+            ],
+            "pending": {
+                "hold_drafts": int(pending_drafts),
+                "refunds": int(pending_refunds),
+                "offline_operations": int(pending_offline),
+                "unresolved_payments": int(unresolved_payments),
+            },
+            "journal": {
+                "state": journal_state,
+                "missing_sales": journal_missing_sales,
+                "missing_cash_movements": journal_missing_movements,
+            },
+            "blockers": blockers,
+            "can_close": shift.status == "open" and not blockers,
+            "reopen_allowed": False,
+        }
+
+    async def create_cash_movement(
+        self,
+        shift_id: uuid.UUID,
+        company_id: uuid.UUID,
+        user_id: uuid.UUID,
+        data: CashMovementCreateRequest,
+        *,
+        approval_evidence: ApprovalEvidence | None,
+        device_id: uuid.UUID | None,
+        device_code: str | None,
+        ip_address: str | None,
+        user_agent: str | None,
+        include_journal: bool = True,
+    ) -> PosCashMovement:
+        request_hash = canonical_hash(
+            data.model_dump(mode="json", exclude={"approval_token"}, exclude_none=True)
+        )
+        shift = await self.db.scalar(
+            select(CashierShift)
+            .where(
+                CashierShift.id == shift_id,
+                CashierShift.company_id == company_id,
+                CashierShift.user_id == user_id,
+            )
+            .with_for_update()
+        )
+        if shift is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
+        if shift.status != "open":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "shift_closed", "message": "Cash movement requires an open shift"})
+        existing = await self.db.scalar(
+            select(PosCashMovement).where(
+                PosCashMovement.company_id == company_id,
+                PosCashMovement.branch_id == shift.branch_id,
+                PosCashMovement.idempotency_key == data.idempotency_key,
+            )
+        )
+        if existing is not None:
+            if existing.shift_id != shift.id or existing.request_hash != request_hash:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "duplicate_request", "message": "Cash movement idempotency key was replayed with different data"})
+            return existing
+        if shift.version != data.expected_shift_version:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "version_conflict", "message": "Shift changed; reload before recording cash", "current_version": shift.version})
+        shift.version += 1
+        movement = PosCashMovement(
+            company_id=company_id,
+            branch_id=shift.branch_id,
+            shift_id=shift.id,
+            location_id=shift.location_id,
+            requester_id=user_id,
+            approver_id=approval_evidence.approver_id if approval_evidence else None,
+            device_id=device_id,
+            device_code=device_code,
+            movement_type=data.movement_type,
+            amount=q2(data.amount),
+            reason_code=data.reason_code,
+            reason=data.reason.strip(),
+            shift_version=shift.version,
+            idempotency_key=data.idempotency_key,
+            request_hash=request_hash,
+            approval_evidence=approval_evidence.as_audit_value() if approval_evidence else None,
+        )
+        self.db.add(movement)
+        await self.db.flush()
+        journal = None
+        if include_journal:
+            journal = await AccountingService(self.db).post_cash_movement(movement, company_id, user_id)
+            movement.journal_entry_id = journal.id
+        self.db.add(
+            AuditLog(
+                company_id=company_id,
+                branch_id=shift.branch_id,
+                user_id=user_id,
+                action="pos.shift.cash_movement",
+                resource="PosCashMovement",
+                resource_id=str(movement.id),
+                new_value={
+                    "shift_id": str(shift.id),
+                    "shift_version": shift.version,
+                    "movement_type": movement.movement_type,
+                    "amount": str(movement.amount),
+                    "reason_code": movement.reason_code,
+                    "reason": movement.reason,
+                    "device_id": str(device_id) if device_id else None,
+                    "device_code": device_code,
+                    "approval": movement.approval_evidence,
+                    "journal_entry_id": str(journal.id) if journal else None,
+                    "journal_state": "posted" if journal else "not_applicable",
+                },
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        )
+        await self.db.commit()
+        await self.db.refresh(movement)
+        return movement
 
     async def get_open_shift(
         self,
@@ -185,40 +600,106 @@ class SaleService:
         device_code: str | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
+        approval_evidence: ApprovalEvidence | None = None,
+        include_journal: bool = True,
+        handover: bool = False,
     ) -> CashierShift:
+        request_hash = canonical_hash(
+            data.model_dump(mode="json", exclude={"approval_token"}, exclude_none=True)
+        )
+        idempotency_key = data.idempotency_key or f"legacy-close:{shift_id}"
         shift = await self.db.scalar(
-            select(CashierShift).where(
-                CashierShift.id == shift_id,
-                CashierShift.company_id == company_id,
-                CashierShift.user_id == user_id,
-            )
+            select(CashierShift)
+            .where(
+                    CashierShift.id == shift_id,
+                    CashierShift.company_id == company_id,
+                    CashierShift.user_id == user_id,
+                )
+            .with_for_update()
         )
         if shift is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
         if shift.status != "open":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Shift already closed")
+            if (
+                shift.close_idempotency_key == idempotency_key
+                and shift.close_request_hash == request_hash
+            ):
+                return shift
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "shift_closed", "message": "Shift is already closed"},
+            )
+        if data.expected_version is not None and shift.version != data.expected_version:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "version_conflict",
+                    "message": "Shift changed; reload the Server summary before closing",
+                    "current_version": shift.version,
+                },
+            )
 
-        cash_paid = await self.db.scalar(
-            select(func.coalesce(func.sum(Payment.amount), 0))
-            .join(SaleOrder, SaleOrder.id == Payment.order_id)
-            .where(
-                SaleOrder.shift_id == shift.id,
-                SaleOrder.status.in_(("completed", "partially_refunded", "refunded")),
-                Payment.payment_method == "cash",
+        summary = await self._build_shift_summary(shift, include_journal=include_journal)
+        blockers = summary["blockers"]
+        if blockers:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "shift_close_blocked",
+                    "message": "Resolve every Server blocker before closing this shift",
+                    "blockers": blockers,
+                },
             )
-        ) or Decimal("0")
-        cash_change = await self.db.scalar(
-            select(func.coalesce(func.sum(SaleOrder.change_amount), 0)).where(
-                SaleOrder.shift_id == shift.id,
-                SaleOrder.status.in_(("completed", "partially_refunded", "refunded")),
-            )
-        ) or Decimal("0")
-        expected_cash = q2(Decimal(shift.opening_cash or 0) + Decimal(cash_paid) - Decimal(cash_change))
+
+        expected_cash = q2(Decimal(str(summary["expected_cash"])))
         closing_cash = q2(data.closing_cash)
+        cash_difference = q2(closing_cash - expected_cash)
+        if cash_difference != 0 and (data.reason_code is None or not (data.note or "").strip()):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "variance_reason_required",
+                    "message": "Reason code and note are required when counted cash differs",
+                },
+            )
+        branch_settings = await self.db.scalar(
+            select(BranchSettings).where(
+                BranchSettings.company_id == company_id,
+                BranchSettings.branch_id == shift.branch_id,
+            )
+        )
+        approval_threshold = Decimal(
+            branch_settings.pos_shift_variance_approval_threshold
+            if branch_settings else 500
+        )
+        if abs(cash_difference) >= approval_threshold and approval_evidence is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "approval_required",
+                    "action": "pos.shift.variance.approve",
+                    "message": "Manager approval is required for this cash variance",
+                    "cash_difference": str(cash_difference),
+                    "approval_threshold": str(q2(approval_threshold)),
+                },
+            )
         shift.expected_cash = expected_cash
         shift.closing_cash = closing_cash
-        shift.cash_difference = q2(closing_cash - expected_cash)
-        shift.note = data.note
+        shift.cash_difference = cash_difference
+        shift.note = data.note.strip() if data.note else None
+        shift.close_reason_code = data.reason_code
+        shift.cash_count_json = [row.model_dump(mode="json") for row in data.cash_count] or None
+        shift.close_idempotency_key = idempotency_key
+        shift.close_request_hash = request_hash
+        shift.closed_device_id = device_id
+        shift.closed_device_code = device_code
+        shift.closed_by_user_id = user_id
+        shift.approval_evidence = approval_evidence.as_audit_value() if approval_evidence else None
+        shift.close_snapshot_json = summary
+        shift.total_sales = q2(Decimal(str(summary["net_sales"])))
+        shift.total_orders = int(summary["order_count"])
+        shift.total_voids = int(summary["void_count"])
+        shift.version += 1
         shift.status = "closed"
         shift.closed_at = datetime.now(timezone.utc)
         self.db.add(
@@ -226,7 +707,7 @@ class SaleService:
                 company_id=company_id,
                 branch_id=shift.branch_id,
                 user_id=user_id,
-                action="pos.shift.close",
+                action="pos.shift.handover" if handover else "pos.shift.close",
                 resource="CashierShift",
                 resource_id=str(shift.id),
                 old_value={
@@ -242,9 +723,15 @@ class SaleService:
                     "closing_cash": str(closing_cash),
                     "expected_cash": str(expected_cash),
                     "cash_difference": str(shift.cash_difference),
+                    "reason_code": data.reason_code,
+                    "version": shift.version,
+                    "idempotency_key": idempotency_key,
                     "device_id": str(device_id) if device_id else None,
                     "device_code": device_code,
                     "note": data.note,
+                    "approval": shift.approval_evidence,
+                    "summary": summary,
+                    "handover": handover,
                 },
                 ip_address=ip_address,
                 user_agent=user_agent,
@@ -325,11 +812,21 @@ class SaleService:
         brand_id: uuid.UUID | None = None,
         recipe_inventory_location_id: uuid.UUID | None = None,
         approval_evidence: ApprovalEvidence | None = None,
+        price_override_evidence: ApprovalEvidence | None = None,
+        pricing_result: PricingResult | None = None,
     ) -> SaleOrder:
         if not data.items:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one cart item is required")
 
-        discount_percentage = sale_discount_percentage(data)
+        pricing = pricing_result or await PricingService(self.db).calculate(
+            company_id=company_id,
+            branch_id=branch_id,
+            brand_id=brand_id,
+            payload=pricing_request_for_sale(data),
+            lock_prices=True,
+        )
+        request_hash = sale_request_hash(data)
+        discount_percentage = pricing.discount_percentage
         branch_settings = await self.db.scalar(
             select(BranchSettings).where(
                 BranchSettings.company_id == company_id,
@@ -369,6 +866,37 @@ class SaleService:
                     "cashier_limit_percentage": str(cashier_limit),
                 },
             )
+        if pricing.requires_price_override_approval and price_override_evidence is None:
+            raise pricing_error(
+                status.HTTP_403_FORBIDDEN,
+                "approval_required",
+                "Manager approval is required for this price override",
+                action="pos.price.override",
+            )
+
+        quote = None
+        if data.pricing_quote_id is not None or data.pricing_calculation_hash is not None:
+            if data.pricing_quote_id is None or data.pricing_calculation_hash is None:
+                raise pricing_error(
+                    status.HTTP_409_CONFLICT,
+                    "context_mismatch",
+                    "Both pricing quote id and calculation hash are required",
+                )
+            quote = await PricingService(self.db).validate_quote(
+                quote_id=data.pricing_quote_id,
+                calculation_hash=data.pricing_calculation_hash,
+                company_id=company_id,
+                branch_id=branch_id,
+                user_id=user_id,
+                current_result=pricing,
+            )
+        elif pricing.has_price_discrepancy:
+            raise pricing_error(
+                status.HTTP_409_CONFLICT,
+                "stale_price",
+                "Displayed price differs from the server price; recalculate before checkout",
+                calculation_hash=pricing.calculation_hash,
+            )
 
         shift = await self._get_shift_for_sale(company_id, branch_id, user_id, data.shift_id)
         location = await self._get_location(company_id, data.location_id)
@@ -379,57 +907,57 @@ class SaleService:
 
         stock_needs: dict[tuple[uuid.UUID, uuid.UUID | None], Decimal] = {}
         item_rows: list[dict[str, object]] = []
-        subtotal = Decimal("0")
-        vat_total = Decimal("0")
-        excluded_vat_total = Decimal("0")
-
-        for item in data.items:
-            if item.qty <= 0:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be positive")
-            product, variant = await self._get_product_snapshot(company_id, item.product_id, item.variant_id)
-            key = (item.product_id, item.variant_id)
-            stock_needs[key] = stock_needs.get(key, Decimal("0")) + Decimal(item.qty)
-
-            effective_price = self._apply_discount(
-                base_price=Decimal(item.original_price),
-                discount_amount=Decimal(item.discount_amount),
-                discount_type=item.discount_type,
+        for line in pricing.lines:
+            product = line.product
+            variant = line.variant
+            key = (product.id, variant.id if variant else None)
+            stock_needs[key] = stock_needs.get(key, Decimal("0")) + Decimal(line.request.qty)
+            effective_unit_price = q4(
+                line.applied_unit_price
+                - (line.line_discount_amount / Decimal(line.request.qty))
             )
-            effective_price = q4(effective_price)
-            line_subtotal = q4(effective_price * Decimal(item.qty))
-            line_vat = self._calc_vat(line_subtotal, item.vat_type, Decimal(item.vat_rate))
-            if item.vat_type == "excluded":
-                excluded_vat_total += line_vat
-            vat_total += line_vat
-            subtotal += line_subtotal
             item_rows.append(
                 {
                     "product": product,
                     "variant": variant,
-                    "qty": q4(Decimal(item.qty)),
-                    "unit_price": effective_price,
-                    "original_price": q4(Decimal(item.original_price)),
-                    "discount_amount": q4(Decimal(item.discount_amount)),
-                    "discount_type": item.discount_type,
-                    "vat_type": item.vat_type,
-                    "vat_rate": q2(Decimal(item.vat_rate)),
-                    "vat_amount": line_vat,
-                    "subtotal": line_subtotal,
+                    "qty": q4(line.request.qty),
+                    "unit_price": effective_unit_price,
+                    "original_price": line.applied_unit_price,
+                    "discount_amount": q4(line.request.discount_amount),
+                    "discount_type": line.request.discount_type,
+                    "vat_type": line.vat_type,
+                    "vat_rate": line.vat_rate,
+                    "vat_amount": line.vat_amount,
+                    "subtotal": line.line_subtotal,
+                    "line_total": line.line_total,
+                    "order_discount_share": line.order_discount_share,
+                    "price_source": line.price_source,
+                    "price_list_id": line.price_list_id,
+                    "price_list_version": line.price_list_version,
+                    "price_version": line.price_version,
+                    "price_snapshot": line.snapshot(),
+                    "price_override_applied": line.override_requested,
+                    "price_override_reason": (
+                        line.request.price_override.reason
+                        if line.request.price_override is not None
+                        else None
+                    ),
+                    "price_override_reason_code": (
+                        line.request.price_override.reason_code
+                        if line.request.price_override is not None
+                        else None
+                    ),
+                    "override_deviation_pct": line.override_deviation_pct,
+                    "override_requires_approval": line.override_requires_approval,
                 }
             )
 
         await self._ensure_stock_available(company_id, branch_id, data.location_id, stock_needs)
 
-        order_discount = q2(
-            self._apply_discount(
-                base_price=q2(subtotal),
-                discount_amount=Decimal(data.discount_amount),
-                discount_type=data.discount_type,
-            )
-        )
-        base_subtotal = q2(subtotal)
-        actual_order_discount = q2(base_subtotal - order_discount)
-        total_amount = q2(base_subtotal - actual_order_discount + q2(excluded_vat_total))
+        base_subtotal = pricing.subtotal
+        actual_order_discount = pricing.order_discount_amount
+        vat_total = pricing.vat_amount
+        total_amount = pricing.total_amount
         payment_rows = self._prepare_payments(data, total_amount)
         paid_amount = q2(sum((Decimal(item.amount) for item in payment_rows), Decimal("0")))
         if paid_amount < total_amount:
@@ -460,8 +988,18 @@ class SaleService:
             "change_amount": change_amount,
             "is_offline": data.is_offline,
             "client_order_id": data.client_order_id,
-            "synced_at": datetime.now(timezone.utc) if not data.is_offline else None,
+            # Reaching this insert means the server has authoritatively repriced,
+            # checked stock and accepted the payment. Offline-originated sales are
+            # therefore reconciled at this point too.
+            "synced_at": datetime.now(timezone.utc),
             "note": data.note,
+            "pricing_quote_id": data.pricing_quote_id,
+            "pricing_request_hash": request_hash,
+            "pricing_calculation_hash": pricing.calculation_hash,
+            "pricing_calculation_version": pricing.calculation_version,
+            "pricing_context": pricing.context(),
+            "pricing_snapshot": pricing.snapshot(),
+            "row_version": 1,
         }
         if data.client_order_id:
             inserted_id = (
@@ -476,7 +1014,18 @@ class SaleService:
                 await self.db.rollback()
                 existing = await self.get_existing_sale_by_client_order_id(company_id, branch_id, data.client_order_id)
                 if existing is None:
-                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Duplicate client_order_id")
+                    raise pricing_error(
+                        status.HTTP_409_CONFLICT,
+                        "duplicate_request",
+                        "Idempotency key already exists in another checkout context",
+                    )
+                if existing.pricing_request_hash and existing.pricing_request_hash != request_hash:
+                    raise pricing_error(
+                        status.HTTP_409_CONFLICT,
+                        "duplicate_request",
+                        "Idempotency key was replayed with a different sale request",
+                        client_order_id=data.client_order_id,
+                    )
                 if brand_id is not None and recipe_inventory_location_id is not None and existing.recipe_stock_posted_at is None:
                     from app.services.store_inventory_service import StoreInventoryService
 
@@ -506,32 +1055,94 @@ class SaleService:
             await self.db.flush()
             order_id = order.id
 
+        if (data.source_hold_draft_id is None) != (data.source_hold_draft_version is None):
+            raise hold_error(
+                status.HTTP_409_CONFLICT,
+                "context_mismatch",
+                "Both source_hold_draft_id and source_hold_draft_version are required",
+            )
+        if data.source_hold_draft_id is not None and data.source_hold_draft_version is not None:
+            await HoldDraftService(self.db).convert_into_sale(
+                draft_id=data.source_hold_draft_id,
+                expected_version=data.source_hold_draft_version,
+                company_id=company_id,
+                brand_id=brand_id,
+                branch_id=branch_id,
+                user_id=user_id,
+                order_id=order_id,
+            )
+
         for row in item_rows:
             product = row["product"]
             variant = row["variant"]
             assert isinstance(product, Product)
             assert variant is None or isinstance(variant, ProductVariant)
-            self.db.add(
-                SaleOrderItem(
-                    order_id=order_id,
-                    company_id=company_id,
-                    product_id=product.id,
-                    variant_id=variant.id if variant else None,
-                    product_name=product.name,
-                    variant_name=variant.name if variant else None,
-                    sku=variant.sku if variant else product.sku,
-                    unit_code=product.unit.code if product.unit else None,
-                    qty=row["qty"],
-                    unit_price=row["unit_price"],
-                    original_price=row["original_price"],
-                    discount_amount=row["discount_amount"],
-                    discount_type=row["discount_type"],
-                    vat_type=row["vat_type"],
-                    vat_rate=row["vat_rate"],
-                    vat_amount=row["vat_amount"],
-                    subtotal=row["subtotal"],
-                )
+            order_item = SaleOrderItem(
+                order_id=order_id,
+                company_id=company_id,
+                product_id=product.id,
+                variant_id=variant.id if variant else None,
+                product_name=product.name,
+                variant_name=variant.name if variant else None,
+                sku=variant.sku if variant else product.sku,
+                unit_code=product.unit.code if product.unit else None,
+                qty=row["qty"],
+                unit_price=row["unit_price"],
+                original_price=row["original_price"],
+                discount_amount=row["discount_amount"],
+                discount_type=row["discount_type"],
+                vat_type=row["vat_type"],
+                vat_rate=row["vat_rate"],
+                vat_amount=row["vat_amount"],
+                subtotal=row["subtotal"],
+                line_total=row["line_total"],
+                order_discount_share=row["order_discount_share"],
+                price_source=row["price_source"],
+                price_list_id=row["price_list_id"],
+                price_list_version=row["price_list_version"],
+                price_version=row["price_version"],
+                price_snapshot=row["price_snapshot"],
+                price_override_applied=row["price_override_applied"],
+                price_override_reason=row["price_override_reason"],
             )
+            self.db.add(order_item)
+            await self.db.flush()
+            if bool(row["price_override_applied"]):
+                evidence = price_override_evidence or ApprovalEvidence(
+                    action="pos.price.override",
+                    requester_id=user_id,
+                    approver_id=user_id,
+                    reason=str(row["price_override_reason"]),
+                    mode="policy_auto",
+                )
+                self.db.add(
+                    PriceOverrideAudit(
+                        company_id=company_id,
+                        brand_id=brand_id,
+                        branch_id=branch_id,
+                        order_id=order_id,
+                        order_item_id=order_item.id,
+                        product_id=product.id,
+                        requester_id=user_id,
+                        approver_id=evidence.approver_id,
+                        approval_grant_id=evidence.grant_id,
+                        original_unit_price=row["price_snapshot"]["authoritative_unit_price"],
+                        applied_unit_price=row["original_price"],
+                        deviation_pct=row["override_deviation_pct"],
+                        reason=str(row["price_override_reason"]),
+                        reason_code=str(row["price_override_reason_code"] or "other"),
+                        approval_mode=evidence.mode,
+                        policy_snapshot={
+                            "requires_approval": bool(row["override_requires_approval"]),
+                            "auto_limit_pct": str(branch_settings.pos_price_override_auto_limit_pct if branch_settings else 10),
+                            "auto_limit_amount": str(branch_settings.pos_price_override_auto_limit_amount if branch_settings else 100),
+                            "max_deviation_pct": str(branch_settings.pos_price_override_max_deviation_pct if branch_settings else 50),
+                            "minimum_margin_pct": str(branch_settings.pos_price_override_min_margin_pct if branch_settings else 0),
+                            "self_approval": bool(branch_settings.pos_price_override_self_approval if branch_settings else False),
+                        },
+                        price_snapshot=row["price_snapshot"],
+                    )
+                )
 
         for payment in payment_rows:
             self.db.add(
@@ -541,6 +1152,8 @@ class SaleService:
                     payment_method=payment.payment_method,
                     amount=q2(Decimal(payment.amount)),
                     reference_no=payment.reference_no,
+                    currency="THB",
+                    settlement_state="settled" if payment.payment_method == "cash" else "unknown",
                     note=data.note,
                 )
             )
@@ -591,6 +1204,7 @@ class SaleService:
 
         shift.total_sales = q2(Decimal(shift.total_sales or 0) + total_amount)
         shift.total_orders = int(shift.total_orders or 0) + 1
+        shift.version = int(shift.version or 1) + 1
         self.db.add(
             AuditLog(
                 company_id=company_id,
@@ -603,43 +1217,52 @@ class SaleService:
                     "order_number": order_values["order_number"],
                     "total_amount": str(total_amount),
                     "discount_percentage": str(discount_percentage),
+                    "pricing_calculation_hash": pricing.calculation_hash,
                     "approval": (
                         approval_evidence.as_audit_value()
                         if approval_evidence is not None
                         else None
                     ),
+                    "price_override_approval": (
+                        price_override_evidence.as_audit_value()
+                        if price_override_evidence is not None
+                        else None
+                    ),
                 },
             )
         )
-        try:
-            await trigger_event(
-                self.db,
-                company_id,
-                "sale.created",
-                {
-                    "order_number": order_values["order_number"],
-                    "total_amount": str(total_amount),
-                    "branch_id": str(order_values["branch_id"]),
-                    "items_count": len(item_rows),
-                },
-            )
-        except Exception:
-            pass
-        try:
-            notif_svc = NotificationService(self.db)
-            await notif_svc.notify_event(
-                company_id,
-                "sale.created",
-                context={
-                    "order_number": order_values["order_number"],
-                    "total_amount": f"{total_amount:,.2f}",
-                    "branch_name": str(order_values["branch_id"]),
-                },
-                reference_type="SaleOrder",
-                reference_id=str(order_id),
-            )
-        except Exception:
-            pass
+        if self.legacy_side_effects_enabled:
+            try:
+                await trigger_event(
+                    self.db,
+                    company_id,
+                    "sale.created",
+                    {
+                        "order_number": order_values["order_number"],
+                        "total_amount": str(total_amount),
+                        "branch_id": str(order_values["branch_id"]),
+                        "items_count": len(item_rows),
+                    },
+                )
+            except Exception:
+                pass
+            try:
+                notif_svc = NotificationService(self.db)
+                await notif_svc.notify_event(
+                    company_id,
+                    "sale.created",
+                    context={
+                        "order_number": order_values["order_number"],
+                        "total_amount": f"{total_amount:,.2f}",
+                        "branch_name": str(order_values["branch_id"]),
+                    },
+                    reference_type="SaleOrder",
+                    reference_id=str(order_id),
+                )
+            except Exception:
+                pass
+        if quote is not None:
+            PricingService.consume_quote(quote, order_id)
         await ensure_sale_completed_handoff(
             self.db,
             company_id=company_id,
@@ -653,7 +1276,7 @@ class SaleService:
         )
         await self.db.commit()
         order = await self.get_sale(order_id, company_id)
-        if data.customer_id:
+        if data.customer_id and self.legacy_side_effects_enabled:
             try:
                 crm_svc = CRMService(self.db)
                 await crm_svc.earn_points(
@@ -678,6 +1301,8 @@ class SaleService:
         company_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> None:
+        if not self.legacy_side_effects_enabled:
+            return
         try:
             accounting_svc = AccountingService(self.db)
             await accounting_svc.post_sale(order, company_id, user_id)
@@ -710,9 +1335,35 @@ class SaleService:
         order = await self.get_sale(order_id, company_id)
         if order.status != "completed":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order cannot be voided")
-        shift = await self.get_open_shift(company_id, user_id, order.branch_id)
+        shift = await self.db.scalar(
+            select(CashierShift).where(
+                CashierShift.company_id == company_id,
+                CashierShift.user_id == user_id,
+                CashierShift.branch_id == order.branch_id,
+                CashierShift.status == "open",
+            ).with_for_update()
+        )
         if shift is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active shift required to void sale")
+        unsafe_payment = next(
+            (
+                payment
+                for payment in order.payments
+                if Decimal(payment.amount) > 0
+                and payment.settlement_state not in {"authorized", "pending"}
+            ),
+            None,
+        )
+        if unsafe_payment is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "settled_payment_requires_refund",
+                    "message": "Settled or unknown payments cannot be voided; use the Refund workflow",
+                    "payment_id": str(unsafe_payment.id),
+                    "settlement_state": unsafe_payment.settlement_state,
+                },
+            )
 
         recipe_return_items: list[tuple[Product, Decimal]] = []
         for item in order.items:
@@ -764,6 +1415,7 @@ class SaleService:
         order.void_reason = data.void_reason
         order.shift.total_voids = int(order.shift.total_voids or 0) + 1
         order.shift.total_sales = q2(max(Decimal("0"), Decimal(order.shift.total_sales or 0) - Decimal(order.total_amount)))
+        shift.version = int(shift.version or 1) + 1
         self.db.add(
             AuditLog(
                 company_id=company_id,
@@ -787,11 +1439,24 @@ class SaleService:
                 },
             )
         )
-        try:
-            crm_svc = CRMService(self.db)
-            await crm_svc.void_earn(company_id, user_id, str(order.id))
-        except Exception as e:
-            logger.error(f"Points void failed: {e}")
+        if self.legacy_side_effects_enabled:
+            try:
+                crm_svc = CRMService(self.db)
+                await crm_svc.void_earn(company_id, user_id, str(order.id))
+            except Exception as e:
+                logger.error(f"Points void failed: {e}")
+        brand_context = await self._get_store_brand_context(order)
+        await ensure_sale_state_changed_handoff(
+            self.db,
+            company_id=company_id,
+            brand_id=brand_context.brand_id if brand_context is not None else None,
+            branch_id=order.branch_id,
+            order_id=order.id,
+            order_number=order.order_number,
+            source_status=order.status,
+            total_amount=Decimal(order.total_amount),
+            refund_amount=Decimal(order.refund_amount or 0),
+        )
         await self.db.commit()
         return await self.get_sale(order.id, company_id)
 
@@ -806,7 +1471,14 @@ class SaleService:
         order = await self.get_sale(order_id, company_id)
         if order.status not in {"completed", "partially_refunded"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order cannot be refunded")
-        active_shift = await self.get_open_shift(company_id, user_id, order.branch_id)
+        active_shift = await self.db.scalar(
+            select(CashierShift).where(
+                CashierShift.company_id == company_id,
+                CashierShift.user_id == user_id,
+                CashierShift.branch_id == order.branch_id,
+                CashierShift.status == "open",
+            ).with_for_update()
+        )
         if active_shift is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active shift required to refund sale")
         refundable_items = [
@@ -826,7 +1498,11 @@ class SaleService:
             audit_action="pos.sale.refund",
             approval_evidence=approval_evidence,
         )
-        if q2(Decimal(order.refund_amount or 0)) >= q2(Decimal(order.total_amount or 0)):
+        if (
+            self.legacy_side_effects_enabled
+            and q2(Decimal(order.refund_amount or 0))
+            >= q2(Decimal(order.total_amount or 0))
+        ):
             try:
                 crm_svc = CRMService(self.db)
                 await crm_svc.void_earn(company_id, user_id, str(order.id))
@@ -847,7 +1523,14 @@ class SaleService:
         order = await self.get_sale(order_id, company_id)
         if order.status not in {"completed", "partially_refunded"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order cannot be partially refunded")
-        active_shift = await self.get_open_shift(company_id, user_id, order.branch_id)
+        active_shift = await self.db.scalar(
+            select(CashierShift).where(
+                CashierShift.company_id == company_id,
+                CashierShift.user_id == user_id,
+                CashierShift.branch_id == order.branch_id,
+                CashierShift.status == "open",
+            ).with_for_update()
+        )
         if active_shift is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active shift required to refund sale")
         if not payload.items:
@@ -1063,6 +1746,7 @@ class SaleService:
         note_line = f"REFUND {datetime.now(BANGKOK).strftime('%d/%m/%Y %H:%M')} {refund_total:,.2f}: {refund_reason.strip()}"
         order.note = f"{order.note}\n{note_line}".strip() if order.note else note_line
         active_shift.total_sales = q2(max(Decimal("0"), Decimal(active_shift.total_sales or 0) - refund_total))
+        active_shift.version = int(active_shift.version or 1) + 1
 
         for original_payment_id, payment_method, amount, reference_no in refundable_allocations:
             self.db.add(
@@ -1107,6 +1791,18 @@ class SaleService:
                     ],
                 },
             )
+        )
+        brand_context = await self._get_store_brand_context(order)
+        await ensure_sale_state_changed_handoff(
+            self.db,
+            company_id=company_id,
+            brand_id=brand_context.brand_id if brand_context is not None else None,
+            branch_id=order.branch_id,
+            order_id=order.id,
+            order_number=order.order_number,
+            source_status=order.status,
+            total_amount=Decimal(order.total_amount),
+            refund_amount=Decimal(order.refund_amount or 0),
         )
         return refund_total
 
@@ -1161,7 +1857,7 @@ class SaleService:
                 CashierShift.company_id == company_id,
                 CashierShift.branch_id == branch_id,
                 CashierShift.user_id == user_id,
-            )
+            ).with_for_update()
         )
         if shift is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")

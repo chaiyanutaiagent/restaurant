@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.database import get_db
+from app.database import get_restaurant_service_db
 from app.models.branch import Branch
 from app.models.company import Company
 from app.models.product import Product
@@ -19,12 +20,23 @@ from app.models.stock import StockBalance
 from app.schemas.api_integration import (
     PublicStorefrontBranchRead,
     PublicStorefrontCompanyRead,
+    PublicExperienceRead,
     PublicStorefrontProductRead,
     PublicStorefrontSummaryRead,
 )
 from app.services.crm_service import resolve_public_company_id
+from app.services.business_directory_service import resolve_active_business
+from app.utils.public_rate_limit import require_public_rate_limit
 
 router = APIRouter(prefix="/api/public/storefront", tags=["storefront"])
+
+PUBLIC_EXPERIENCE_HOLDS = [
+    "owner_ecommerce_mode_decision",
+    "server_inventory_reservation",
+    "checkout_and_payment_provider",
+    "privacy_and_consent_center",
+    "digital_receipt_access_token",
+]
 
 
 def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -77,6 +89,13 @@ def _serialize_product(product: Product, total_qty_available: Decimal) -> dict[s
     ).model_dump(mode="json")
 
 
+def public_experience_contract(*, generated_at: datetime | None = None) -> PublicExperienceRead:
+    return PublicExperienceRead(
+        generated_at=generated_at or datetime.now(timezone.utc),
+        hard_holds=PUBLIC_EXPERIENCE_HOLDS,
+    )
+
+
 def _product_statement(company_id: uuid.UUID) -> Select[tuple[Product, Decimal]]:
     stock_subquery = (
         select(
@@ -100,11 +119,26 @@ def _product_statement(company_id: uuid.UUID) -> Select[tuple[Product, Decimal]]
     )
 
 
+async def _resolve_company_id(db: AsyncSession, business_slug: str | None) -> uuid.UUID:
+    if business_slug is not None:
+        return (await resolve_active_business(db, business_slug)).id
+    return await resolve_public_company_id(db)
+
+
 @router.get("")
+@router.get("/businesses/{business_slug}")
 async def get_storefront_summary(
-    db: AsyncSession = Depends(get_db),
+    request: Request,
+    business_slug: str | None = None,
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
-    company_id = await resolve_public_company_id(db)
+    await require_public_rate_limit(
+        request,
+        "storefront-summary",
+        subject=business_slug or "default",
+        limit=120,
+    )
+    company_id = await _resolve_company_id(db, business_slug)
     company = await db.scalar(select(Company).where(Company.id == company_id, Company.is_active.is_(True)))
     assert company is not None
 
@@ -146,20 +180,30 @@ async def get_storefront_summary(
             PublicStorefrontBranchRead.model_validate(_serialize_branch(branch, settings_by_branch.get(branch.id)))
             for branch in visible_branches
         ],
+        experience=public_experience_contract(),
     )
     return ok(payload.model_dump(mode="json"))
 
 
 @router.get("/products")
+@router.get("/businesses/{business_slug}/products")
 async def list_storefront_products(
+    request: Request,
+    business_slug: str | None = None,
     search: str | None = Query(default=None),
     category_id: uuid.UUID | None = Query(default=None),
     in_stock_only: bool = Query(default=False),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=24, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
-    company_id = await resolve_public_company_id(db)
+    await require_public_rate_limit(
+        request,
+        "storefront-products",
+        subject=business_slug or "default",
+        limit=180,
+    )
+    company_id = await _resolve_company_id(db, business_slug)
     statement = _product_statement(company_id)
 
     if search:
@@ -191,11 +235,20 @@ async def list_storefront_products(
 
 
 @router.get("/branches")
+@router.get("/businesses/{business_slug}/branches")
 async def list_storefront_branches(
+    request: Request,
+    business_slug: str | None = None,
     active_only: bool = Query(default=True),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_restaurant_service_db),
 ) -> dict[str, Any]:
-    company_id = await resolve_public_company_id(db)
+    await require_public_rate_limit(
+        request,
+        "storefront-branches",
+        subject=business_slug or "default",
+        limit=120,
+    )
+    company_id = await _resolve_company_id(db, business_slug)
     filters = [Branch.company_id == company_id, Branch.deleted_at.is_(None)]
     if active_only:
         filters.append(Branch.is_active.is_(True))

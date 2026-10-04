@@ -3,6 +3,7 @@ import axios from "axios";
 import { useLocation, useNavigate } from "react-router-dom";
 import { authApi } from "@/lib/api";
 import { db } from "@/lib/db";
+import { clearOfflineEncryptionKeyWhenSafe } from "@/lib/secureOfflineStore";
 import { useAuthStore } from "@/stores/auth.store";
 import type { LoginRequest } from "@/types/auth";
 
@@ -21,7 +22,7 @@ function getLoginErrorMessage(error: unknown): string | null {
   return error instanceof Error ? error.message : "เข้าสู่ระบบไม่สำเร็จ";
 }
 
-export function useLogin(): {
+export function useLogin(defaultDestination = "/admin"): {
   login: (payload: LoginRequest) => Promise<void>;
   isLoading: boolean;
   error: string | null;
@@ -30,7 +31,7 @@ export function useLogin(): {
   const location = useLocation();
   const setSession = useAuthStore((state) => state.setSession);
   const next = new URLSearchParams(location.search).get("next");
-  const redirectTo = next?.startsWith("/") && !next.startsWith("//") ? next : "/admin";
+  const redirectTo = next?.startsWith("/") && !next.startsWith("//") ? next : defaultDestination;
 
   const mutation = useMutation({
     mutationFn: async (payload: LoginRequest) => {
@@ -58,6 +59,32 @@ export function useLogin(): {
   };
 }
 
+export function useUatAutoLogin(defaultDestination = "/admin"): {
+  startAutoLogin: () => void;
+  isLoading: boolean;
+} {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const setSession = useAuthStore((state) => state.setSession);
+  const next = new URLSearchParams(location.search).get("next");
+  const redirectTo = next?.startsWith("/") && !next.startsWith("//") ? next : defaultDestination;
+
+  const mutation = useMutation({
+    mutationFn: async () => (await authApi.uatAutoLogin()).data.data,
+    onSuccess: (tokenResponse) => {
+      const companyId = tokenResponse.user.company_id;
+      setSession(tokenResponse, companyId);
+      window.localStorage.setItem("last_company_id", companyId);
+      navigate(redirectTo, { replace: true });
+    }
+  });
+
+  return {
+    startAutoLogin: mutation.mutate,
+    isLoading: mutation.isPending
+  };
+}
+
 export function useLogout(destination = "/login"): () => void {
   const navigate = useNavigate();
   const clearSession = useAuthStore((state) => state.clearSession);
@@ -68,7 +95,7 @@ export function useLogout(destination = "/login"): () => void {
         db.restaurantPendingOrders.toArray(),
         db.pendingSales.toArray(),
       ]);
-      const hasPendingRestaurant = restaurantOrders.some((order) => order.status !== "synced");
+      const hasPendingRestaurant = restaurantOrders.some((order) => !["reconciled", "rejected"].includes(order.status));
       const hasPendingPos = pendingSales.some((sale) => !sale.synced);
       if (hasPendingRestaurant || hasPendingPos) {
         window.alert("ยังมีรายการขายที่ส่งไม่สำเร็จ กรุณาต่ออินเทอร์เน็ตและซิงก์ข้อมูลก่อนออกจากระบบ เพื่อรักษาชื่อพนักงานขายให้ถูกต้อง");
@@ -78,6 +105,7 @@ export function useLogout(destination = "/login"): () => void {
       if (refreshToken) {
         void authApi.logout(refreshToken);
       }
+      await clearOfflineEncryptionKeyWhenSafe();
       clearSession();
       navigate(destination, { replace: true });
     })();

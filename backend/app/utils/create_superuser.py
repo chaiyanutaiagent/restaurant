@@ -59,6 +59,7 @@ async def ensure_default_company_seed_in_session(db: AsyncSession) -> None:
         company = Company(
             id=DEFAULT_COMPANY_ID,
             name="Test Company",
+            business_slug="test-company",
             tax_id="0000000000000",
             currency="THB",
         )

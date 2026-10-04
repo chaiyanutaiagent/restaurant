@@ -9,7 +9,8 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.database import PlatformSessionLocal, RestaurantSessionLocal
+from app.config import settings
+from app.database import AsyncSessionLocal, PlatformSessionLocal, RestaurantSessionLocal
 
 
 EVENT_TYPE = "platform.reference.changed.v1"
@@ -374,6 +375,35 @@ def _upsert_sql(aggregate_type: str) -> str:
         f"INSERT INTO {table_name} ({insert_columns}) VALUES ({insert_values}) "
         f"ON CONFLICT (id) DO UPDATE SET {update_columns}"
     )
+
+
+async def ensure_legacy_operational_user_reference(
+    user: Any,
+    *,
+    legacy_session_factory: async_sessionmaker[AsyncSession] = AsyncSessionLocal,
+) -> bool:
+    """Synchronously mirror a Platform actor needed by the legacy Restaurant service.
+
+    This is a bounded transition bridge. Platform remains the identity authority,
+    while the legacy operational schema retains foreign keys from shifts, sales,
+    journals, and audits to ``users.id``. The bridge preserves the canonical user
+    ID and constraint instead of substituting another operator or weakening the
+    schema. It becomes a no-op after the Restaurant service cuts over.
+    """
+    if (
+        settings.identity_database != "platform_core"
+        or settings.restaurant_service_database != "legacy"
+    ):
+        return False
+
+    source = {
+        column: getattr(user, column)
+        for column in REFERENCE_COLUMNS["user"]
+    }
+    async with legacy_session_factory() as legacy_session:
+        await legacy_session.execute(text(_upsert_sql("user")), source)
+        await legacy_session.commit()
+    return True
 
 
 async def apply_restaurant_projection(

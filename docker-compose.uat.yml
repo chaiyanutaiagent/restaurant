@@ -17,7 +17,7 @@ services:
       QA_ACCESS_SESSION_MINUTES: ${QA_ACCESS_SESSION_MINUTES:-30}
       # The readiness rehearsal enables these only after it has seeded and
       # resolved the exact Company/Branch scope. Production defaults stay off.
-      SAAS_PUBLIC_BASE_URL: ${P5_UAT_PUBLIC_BASE_URL:-http://localhost:4173}
+      SAAS_PUBLIC_BASE_URL: ${SAAS_PUBLIC_BASE_URL:-http://localhost:4173}
       POS_OFFLINE_MODE_ENABLED: ${P5_UAT_POS_OFFLINE_MODE_ENABLED:-false}
       POS_OFFLINE_COMPANY_ALLOWLIST: ${P5_UAT_POS_OFFLINE_COMPANY_ALLOWLIST:-}
       POS_OFFLINE_BRANCH_ALLOWLIST: ${P5_UAT_POS_OFFLINE_BRANCH_ALLOWLIST:-}

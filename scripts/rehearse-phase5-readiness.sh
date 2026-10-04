@@ -105,7 +105,7 @@ PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS" \
   npm --prefix frontend run e2e:p5 2>&1 | tee "$artifact_dir/browser-e2e.log"
 
 printf 'Running 100-order reconnect/idempotency load gate...\n'
-export P5_UAT_PUBLIC_BASE_URL="https://uat-app.foodchainservice.com"
+export SAAS_PUBLIC_BASE_URL="https://uat-app.foodchainservice.com"
 export P5_UAT_POS_OFFLINE_MODE_ENABLED="true"
 export P5_UAT_POS_OFFLINE_COMPANY_ALLOWLIST="$readiness_company_id"
 export P5_UAT_POS_OFFLINE_BRANCH_ALLOWLIST="$readiness_branch_id"

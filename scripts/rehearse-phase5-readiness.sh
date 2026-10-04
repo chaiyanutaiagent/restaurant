@@ -81,7 +81,11 @@ until curl -fsS "http://127.0.0.1:${HTTP_PORT}/health/ready" \
 done
 
 printf 'Running backend baseline and preparing browser context...\n'
-docker compose exec -T backend python -m unittest discover -s tests -p 'test_*.py' \
+docker compose run --rm -T --no-deps \
+  -v "$PROJECT_DIR:/workspace:ro" \
+  -w /workspace/backend \
+  -e UPLOAD_DIR=/tmp/restaurant-test-uploads \
+  backend python -m unittest discover -s tests -p 'test_*.py' \
   2>&1 | tee "$artifact_dir/backend-regression.log"
 docker compose exec -T -e PYTHONPATH=/app backend python tests/smoke_phase5_full_uat_api.py \
   2>&1 | tee "$artifact_dir/full-uat-api.log"
@@ -89,6 +93,8 @@ docker compose exec -T -e PYTHONPATH=/app backend python tests/smoke_phase5_full
 browser_context="$(sed -n 's/^BROWSER_CONTEXT=//p' "$artifact_dir/full-uat-api.log" | tail -n 1)"
 [[ -n "$browser_context" ]] || fail "full UAT did not produce browser context"
 printf '%s\n' "$browser_context" >"$artifact_dir/browser-context.json"
+readiness_company_id="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["company_id"])' <<<"$browser_context")"
+readiness_branch_id="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["branch_id"])' <<<"$browser_context")"
 
 printf 'Running mobile/tablet Playwright flow...\n'
 P5_UAT_BASE_URL="http://127.0.0.1:${HTTP_PORT}" \
@@ -99,8 +105,21 @@ PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS" \
   npm --prefix frontend run e2e:p5 2>&1 | tee "$artifact_dir/browser-e2e.log"
 
 printf 'Running 100-order reconnect/idempotency load gate...\n'
+export P5_UAT_PUBLIC_BASE_URL="https://uat-app.foodchainservice.com"
+export P5_UAT_POS_OFFLINE_MODE_ENABLED="true"
+export P5_UAT_POS_OFFLINE_COMPANY_ALLOWLIST="$readiness_company_id"
+export P5_UAT_POS_OFFLINE_BRANCH_ALLOWLIST="$readiness_branch_id"
+docker compose up -d --force-recreate backend
+tries=0
+until curl -fsS "http://127.0.0.1:${HTTP_PORT}/health/ready" >/dev/null; do
+  tries=$((tries + 1))
+  [[ "$tries" -lt 60 ]] || fail "offline-enabled readiness backend did not become ready"
+  sleep 1
+done
 docker compose exec -T -e PYTHONPATH=/app backend \
-  python tests/smoke_phase5_readiness_load_api.py \
+  -e WP47_UAT_PASSWORD="$READINESS_PASSWORD" \
+  -e WP47_UAT_BRANCH_ID="$readiness_branch_id" \
+  python tests/smoke_wp47_offline_sync_api.py \
   2>&1 | tee "$artifact_dir/load-reconnect-idempotency.log"
 
 printf 'Running frontend, documentation, and repository validation...\n'

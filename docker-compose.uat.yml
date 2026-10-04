@@ -8,10 +8,19 @@ services:
       ENVIRONMENT: development
       QA_ACCESS_MODE_ENABLED: ${QA_ACCESS_MODE_ENABLED:-false}
       QA_ACCESS_KEY: ${QA_ACCESS_KEY:-}
-      QA_ACCESS_COMPANY_ID: ${QA_ACCESS_COMPANY_ID:-}
+      # Pydantic does not coerce an empty string to an optional UUID. Keep a
+      # valid inert value while QA access mode is disabled so the isolated UAT
+      # stack can always boot with the checked-in defaults.
+      QA_ACCESS_COMPANY_ID: ${QA_ACCESS_COMPANY_ID:-1b8a1818-44d6-4d5f-9d22-e5e17b23c081}
       QA_ACCESS_PERSONAS: '${QA_ACCESS_PERSONAS:-{}}'
       QA_PLATFORM_PERSONAS: '${QA_PLATFORM_PERSONAS:-{}}'
       QA_ACCESS_SESSION_MINUTES: ${QA_ACCESS_SESSION_MINUTES:-30}
+      # The readiness rehearsal enables these only after it has seeded and
+      # resolved the exact Company/Branch scope. Production defaults stay off.
+      SAAS_PUBLIC_BASE_URL: ${P5_UAT_PUBLIC_BASE_URL:-http://localhost:4173}
+      POS_OFFLINE_MODE_ENABLED: ${P5_UAT_POS_OFFLINE_MODE_ENABLED:-false}
+      POS_OFFLINE_COMPANY_ALLOWLIST: ${P5_UAT_POS_OFFLINE_COMPANY_ALLOWLIST:-}
+      POS_OFFLINE_BRANCH_ALLOWLIST: ${P5_UAT_POS_OFFLINE_BRANCH_ALLOWLIST:-}
     volumes:
       - ./backend/tests:/app/tests:ro
   frontend:

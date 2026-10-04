@@ -1,5 +1,7 @@
 # Foodchainservice POS for iOS and Android
 
+สถานะล่าสุด 5 ตุลาคม 2026: deploy backend UAT และเผยแพร่ APK UAT 3 แล้ว ดู [ผล deployment และ rollback](FOODCHAINSERVICE-POS-UAT3-DEPLOYMENT.md) รายละเอียดด้านล่างเป็นบันทึก Foundation ณ วันที่ 4 ตุลาคมก่อน deployment
+
 อัปเดต 4 ตุลาคม 2026 จาก Takeaway UAT 8 ที่ commit `4e9575d` รอบนี้พัฒนา Android UAT candidate ให้เชื่อม Takeaway, Restaurant และ Retail ผ่านบัญชีที่เซิร์ฟเวอร์ตรวจสิทธิ์ โค้ดและ APK อยู่ในเครื่อง ยังไม่ใช่การเปิด Production และยังไม่ได้ deploy backend ใหม่
 
 ตรวจ UAT แบบอ่านอย่างเดียวพบว่า `/api/v1/mobile-pos/context` ยังตอบ HTTP 404 ดังนั้น APK รุ่นนี้ยังเข้าใช้ UAT ไม่ได้จนกว่าจะ deploy backend ที่รองรับ ไม่มีการเปลี่ยนข้อมูล flags, hostname หรือ data source ของระบบที่ใช้อยู่

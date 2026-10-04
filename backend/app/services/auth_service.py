@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
+import logging
 import uuid
 
 from fastapi import HTTPException, status
@@ -18,7 +19,10 @@ from app.models.platform import SaasTenantMembership
 from app.models.staff_assignment import StaffRoleAssignment
 from app.models.user import User, UserBranch
 from app.services.business_context_service import resolve_user_branch_context
-from app.services.platform_reference_projection import enqueue_reference_event
+from app.services.platform_reference_projection import (
+    enqueue_reference_event,
+    ensure_legacy_operational_user_reference,
+)
 from app.business_context import CanonicalBusinessContext
 from app.services.staff_scope_policy import assignment_applies_to_context, normalized_station_key
 from app.services.saas_membership_service import membership_access_error
@@ -33,6 +37,9 @@ from app.utils.security import (
     decode_token,
     verify_password,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -205,6 +212,19 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Company is inactive or no longer exists",
             )
+        temporary_uat_superadmin = uat_superadmin_store_access(user)
+        if temporary_uat_superadmin:
+            try:
+                await ensure_legacy_operational_user_reference(user)
+            except Exception as exc:
+                logger.error(
+                    "UAT superadmin operational identity projection failed: %s",
+                    f"{type(exc).__module__}.{type(exc).__name__}",
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="UAT superadmin operational identity is not ready",
+                ) from exc
         (
             permissions,
             resolved_branch_id,
@@ -259,7 +279,6 @@ class AuthService:
             qa_deadline=qa_deadline,
         )
         expires_at = self._extract_expiration(refresh_token)
-        temporary_uat_superadmin = uat_superadmin_store_access(user)
         self.db.add(
             RefreshToken(
                 id=session_id,

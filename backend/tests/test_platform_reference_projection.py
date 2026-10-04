@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import uuid
@@ -11,6 +12,7 @@ from app.services.platform_reference_projection import (
     REFERENCE_COLUMNS,
     _upsert_sql,
     enqueue_reference_event,
+    ensure_legacy_operational_user_reference,
     process_projection_batch,
     projection_backoff_seconds,
     sanitized_projection_error,
@@ -70,7 +72,84 @@ class _LifecycleFactory:
         )
 
 
+class _ReferenceSession:
+    def __init__(self) -> None:
+        self.parameters: dict[str, object] | None = None
+        self.commits = 0
+
+    async def execute(self, statement: object, parameters: dict[str, object]) -> None:
+        self.parameters = parameters
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+
+class _ReferenceContext:
+    def __init__(self, session: _ReferenceSession) -> None:
+        self.session = session
+
+    async def __aenter__(self) -> _ReferenceSession:
+        return self.session
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+
+class _ReferenceFactory:
+    def __init__(self) -> None:
+        self.session = _ReferenceSession()
+
+    def __call__(self) -> _ReferenceContext:
+        return _ReferenceContext(self.session)
+
+
 class PlatformReferenceProjectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_platform_user_is_mirrored_to_legacy_operational_fk_target(self) -> None:
+        now = datetime.now(timezone.utc)
+        values = {
+            column: None
+            for column in REFERENCE_COLUMNS["user"]
+        }
+        values.update({
+            "id": uuid.uuid4(),
+            "company_id": uuid.uuid4(),
+            "username": "superadmin",
+            "hashed_password": "hashed-only",
+            "is_active": True,
+            "is_superuser": True,
+            "created_at": now,
+            "updated_at": now,
+        })
+        factory = _ReferenceFactory()
+        with (
+            patch("app.services.platform_reference_projection.settings.identity_database", "platform_core"),
+            patch("app.services.platform_reference_projection.settings.restaurant_service_database", "legacy"),
+        ):
+            projected = await ensure_legacy_operational_user_reference(  # type: ignore[arg-type]
+                SimpleNamespace(**values),
+                legacy_session_factory=factory,
+            )
+
+        self.assertTrue(projected)
+        self.assertEqual(factory.session.commits, 1)
+        assert factory.session.parameters is not None
+        self.assertEqual(factory.session.parameters["id"], values["id"])
+        self.assertEqual(factory.session.parameters["username"], "superadmin")
+
+    async def test_legacy_projection_bridge_disables_after_restaurant_cutover(self) -> None:
+        factory = _ReferenceFactory()
+        with (
+            patch("app.services.platform_reference_projection.settings.identity_database", "platform_core"),
+            patch("app.services.platform_reference_projection.settings.restaurant_service_database", "restaurant"),
+        ):
+            projected = await ensure_legacy_operational_user_reference(  # type: ignore[arg-type]
+                SimpleNamespace(),
+                legacy_session_factory=factory,
+            )
+
+        self.assertFalse(projected)
+        self.assertEqual(factory.session.commits, 0)
+
     def test_snapshot_event_id_is_deterministic_and_revision_sensitive(self) -> None:
         aggregate_id = uuid.uuid4()
         first_revision = datetime(2026, 8, 1, 1, 0, tzinfo=timezone.utc)

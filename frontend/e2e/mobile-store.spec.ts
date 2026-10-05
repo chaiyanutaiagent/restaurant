@@ -5,14 +5,24 @@ const companyB = "22222222-2222-4222-8222-222222222222";
 const branch = "33333333-3333-4333-8333-333333333333";
 const brand = "44444444-4444-4444-8444-444444444444";
 const permissions = ["takeaway.store.access", "takeaway.catalog.view", "takeaway.stock.view"];
-function tokens(company: string, device: string) {
+const chamboMenuPermissions = [
+  "takeaway.store.access",
+  "takeaway.catalog.view",
+  "takeaway.sale.create",
+  "takeaway.shift.manage",
+  "takeaway.stock.view",
+  "takeaway.central_order.create",
+  "takeaway.transfer.manage",
+  "takeaway.credit.manage",
+];
+function tokens(company: string, device: string, grantedPermissions = permissions) {
   const user = { id: `user-${company}`, company_id: company, username: "stock", display_name: "Store Test", is_superuser: false };
   const payload = { sub: user.id, company_id: company, branch_id: branch, brand_id: brand,
     business_type: "takeaway", target_database: "takeaway", client_surface: "takeaway_store",
-    store_device_id: device, station_key: "counter-1", permissions, exp: Math.floor(Date.now()/1000)+3600 };
+    store_device_id: device, station_key: "counter-1", permissions: grantedPermissions, exp: Math.floor(Date.now()/1000)+3600 };
   return { access_token: `test.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.fixture`, refresh_token: `test-refresh-${company}`, user, business_slug: company === companyA ? "company-one" : "company-two" };
 }
-async function mockApi(page: Page) {
+async function mockApi(page: Page, grantedPermissions = permissions) {
   await page.route("https://uat-takeaway.foodchainservice.com/api/v1/**", async (route) => {
     const request = route.request(), url = new URL(request.url());
     let data: unknown = [];
@@ -22,20 +32,41 @@ async function mockApi(page: Page) {
       data = { business_code: code, name: code };
     } else if (url.pathname.endsWith("/mobile-store/branches")) data = [{ id: branch, code: "BKK-01", name: "Branch" }];
     else if (url.pathname.endsWith("/mobile-store/login")) {
-      const body = request.postDataJSON(); data = tokens(body.business_code === "company-one" ? companyA : companyB, body.device_id);
+      const body = request.postDataJSON(); data = tokens(body.business_code === "company-one" ? companyA : companyB, body.device_id, grantedPermissions);
     } else if (url.pathname.endsWith("/takeaway/status")) data = { enabled: true, writes_enabled: false, company_id: request.headers()["x-company-id"], branch_id: branch, brand_id: brand, hard_holds: [] };
     return route.fulfill({ json: { data, meta: {}, error: null } });
   });
 }
-async function login(page: Page, code: string) {
+async function login(page: Page, code: string, destination = "stock") {
   await page.getByLabel("Business Code", { exact: true }).fill(code);
   await page.getByRole("button", { name: "ตรวจสอบบริษัท", exact: true }).click();
   await page.getByLabel("ชื่อผู้ใช้", { exact: true }).fill("stock");
   await page.getByLabel("รหัสผ่าน", { exact: true }).fill("test-fixture-password");
   await page.getByRole("button", { name: "ตรวจสอบบัญชีและสาขา", exact: true }).click();
   await page.getByRole("button", { name: "เข้าใช้งานสาขานี้", exact: true }).click();
-  await expect(page).toHaveURL(/\/takeaway\/store\/stock$/);
+  await expect(page).toHaveURL(new RegExp(`/takeaway/store/${destination}$`));
 }
+
+test("Store shell matches the Chambo primary navigation and keeps secondary actions in the drawer", async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 851 });
+  await mockApi(page, chamboMenuPermissions);
+  await page.goto("/");
+  await login(page, "company-one", "orders");
+
+  const primary = page.getByRole("navigation", { name: "เมนูหลักหน้าร้าน" });
+  for (const label of ["ขาย", "Stock", "ปิดกะ", "สั่ง/รับสินค้า", "เครดิต"]) {
+    await expect(primary.getByRole("link", { name: label, exact: true })).toBeVisible();
+  }
+  await expect(primary.getByRole("link", { name: "ขาย", exact: true })).toHaveAttribute("aria-current", "page");
+
+  await page.getByRole("button", { name: "เปิดเมนูหน้าร้าน", exact: true }).click();
+  const drawer = page.getByRole("complementary", { name: "เมนูหน้าร้าน" });
+  for (const label of ["รับออเดอร์", "Stock หน้าร้าน", "ปิดกะ", "รายการสั่งสินค้า", "แจ้งเติมเครดิต", "รับโอนสินค้า", "ตั้งค่าเครื่องพิมพ์"]) {
+    await expect(drawer.getByRole("link", { name: label, exact: true })).toBeVisible();
+  }
+  await expect(drawer.getByText("ส่วนกลาง", { exact: true })).toHaveCount(0);
+  if (process.env.CODEX_VISUAL_QA_PATH) await page.screenshot({ path: process.env.CODEX_VISUAL_QA_PATH, fullPage: true });
+});
 
 test("manual forbidden URLs are denied before and after login", async ({ page }) => {
   await mockApi(page);
@@ -61,11 +92,12 @@ test("logout clears session; same APK resolves and logs into another company", a
   await mockApi(page); const requests: string[] = []; page.on("request", (request) => requests.push(request.url()));
   await page.goto("/"); await login(page, "company-one");
   page.on("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "เปิดเมนูหน้าร้าน", exact: true }).click();
   await page.getByRole("button", { name: "ออกจากระบบ / เปลี่ยนบริษัท", exact: true }).click();
   await expect(page.getByLabel("Business Code", { exact: true })).toHaveValue("");
   expect(await page.evaluate(() => localStorage.getItem("erp-auth"))).toBeNull();
   await login(page, "company-two");
-  await expect(page.getByRole("banner")).toContainText("company-two");
+  await expect(page.getByRole("banner")).toContainText("COMPANY TWO");
   expect(requests.some((url) => url.includes("auto-login"))).toBe(false);
 });
 

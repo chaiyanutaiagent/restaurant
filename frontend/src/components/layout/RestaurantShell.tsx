@@ -50,6 +50,7 @@ const CENTRAL_NAV = [
 
 const STORE_NAV = [
   { label: "ขาย", path: "orders", permissions: ["brand.store.order.create", "fb.order.create"] },
+  { label: "โต๊ะ / QR", path: "tables", permissions: ["fb.table.manage"] },
   { label: "Stock", path: "stock", permissions: ["brand.store.stock.view", "brand.store.stock.adjust"] },
   { label: "ปิดกะ", path: "close-shift", permissions: ["brand.store.shift.close", "fb.order.create"] },
   { label: "รับสินค้า", path: "replenishment-orders", permissions: ["brand.store.replenishment.submit", "brand.store.delivery.receive", "fb.order.create"] },

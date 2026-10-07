@@ -318,11 +318,14 @@ export default function App(): JSX.Element {
             </Route>
           </Route>
           <Route element={<ProductContextGuard businessType="restaurant" />}>
-            <Route element={<ProtectedRoute permissions={["brand.store.order.create", "brand.store.shift.close", "brand.store.replenishment.submit", "brand.store.delivery.receive", "brand.store.stock.view", "brand.store.stock.adjust", "fb.order.create", "system.user.request"]} />}>
+            <Route element={<ProtectedRoute permissions={["brand.store.order.create", "brand.store.shift.close", "brand.store.replenishment.submit", "brand.store.delivery.receive", "brand.store.stock.view", "brand.store.stock.adjust", "fb.order.create", "fb.table.manage", "system.user.request"]} />}>
               <Route element={<RestaurantShell />}>
               <Route element={<ProtectedRoute permissions={["brand.store.order.create", "fb.order.create"]} />}>
                 <Route path="/store/:brandSlug/orders" element={<WapOrderPage />} />
                 <Route path="/store/:brandSlug/sync" element={<OfflineSyncCenterPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="fb.table.manage" />}>
+                <Route path="/store/:brandSlug/tables" element={<TableMapPage />} />
               </Route>
               <Route element={<ProtectedRoute permissions={["brand.store.shift.close", "fb.order.create"]} />}>
                 <Route path="/store/:brandSlug/close-shift" element={<WapShiftClosePage />} />

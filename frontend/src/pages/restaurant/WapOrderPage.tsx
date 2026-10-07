@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { App } from "@capacitor/app";
 import { liveQuery } from "dexie";
-import { AlertTriangle, ArrowRightLeft, ChefHat, ClipboardCheck, CloudUpload, CreditCard, LogOut, Loader2, Menu, Minus, PackageCheck, PackageOpen, Plus, Printer, ReceiptText, UserRoundCheck, Warehouse, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, ChefHat, ClipboardCheck, CloudUpload, CreditCard, LogOut, Loader2, Menu, Minus, PackageCheck, PackageOpen, Plus, Printer, QrCode, ReceiptText, UserRoundCheck, Warehouse, Wifi, WifiOff } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
@@ -466,6 +466,14 @@ export default function WapOrderPage(): JSX.Element {
                       Offline Sync Center
                     </Link>
                   </DropdownMenuItem>
+                  {brandSlug ? (
+                    <DropdownMenuItem asChild>
+                      <Link to={`${storeBase}/tables`} className="flex items-center">
+                        <QrCode className="mr-2 h-4 w-4" />
+                        โต๊ะ / ออก QR
+                      </Link>
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem asChild>
                     <Link to={stockPath} className="flex items-center">
                       <Warehouse className="mr-2 h-4 w-4" />

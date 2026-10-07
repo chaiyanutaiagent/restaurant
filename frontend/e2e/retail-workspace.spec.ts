@@ -157,6 +157,10 @@ test("Retail workspace stays server-authoritative and usable on desktop and tabl
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   }
 
+  await page.evaluate(() => window.dispatchEvent(new Event("offline")));
+  await expect(page.getByText("○ OFFLINE", { exact: true })).toBeVisible();
+  await expect(page.getByText("● ONLINE", { exact: true })).toBeVisible({ timeout: 5_000 });
+
   const lookup = page.waitForRequest((request) => request.url().includes("/api/v1/products/retail/lookup"));
   const search = page.getByPlaceholder("สแกนบาร์โค้ด / ค้นหาชื่อ / SKU");
   await search.fill("8850000000001");

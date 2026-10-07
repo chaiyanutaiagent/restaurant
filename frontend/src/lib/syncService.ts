@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Network } from "@capacitor/network";
 import { db, type SyncedCompletedOrder } from "@/lib/db";
 import { posApi } from "@/lib/posApi";
 import { categoryApi, productApi, unitApi } from "@/lib/productApi";
 import { stockApi } from "@/lib/stockApi";
+import { useAuthStore } from "@/stores/auth.store";
 import type { Category, ProductListItem, Unit } from "@/types/product";
 import type { SaleOrder } from "@/types/pos";
 import type { StockBalance } from "@/types/stock";
@@ -13,6 +14,84 @@ type SyncedCategory = Category & { synced_at: number };
 type SyncedUnit = Unit & { synced_at: number };
 type SyncedStockBalance = StockBalance & { synced_at: number };
 export const POS_CATALOG_ISOLATION_KEY = "pos-catalog-isolation-key";
+
+const configuredApiOrigin = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/$/, "");
+const connectivityProbeUrl = `${configuredApiOrigin
+  ? (configuredApiOrigin.endsWith("/api/v1") ? configuredApiOrigin : `${configuredApiOrigin}/api/v1`)
+  : "/api/v1"}/system/health-detail`;
+const onlineSubscribers = new Set<() => void>();
+let sharedOnlineStatus = typeof navigator === "undefined" ? true : navigator.onLine;
+let connectivityMonitoringStarted = false;
+let connectivityProbeInFlight = false;
+let connectivityProbeTimer: number | undefined;
+
+function publishOnlineStatus(next: boolean): void {
+  if (sharedOnlineStatus === next) return;
+  sharedOnlineStatus = next;
+  onlineSubscribers.forEach((subscriber) => subscriber());
+}
+
+function scheduleConnectivityProbe(delayMs: number): void {
+  if (connectivityProbeTimer) window.clearTimeout(connectivityProbeTimer);
+  connectivityProbeTimer = window.setTimeout(() => void probeBackendConnectivity(), delayMs);
+}
+
+async function probeBackendConnectivity(): Promise<void> {
+  if (connectivityProbeInFlight) return;
+  connectivityProbeInFlight = true;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 5_000);
+  try {
+    const token = useAuthStore.getState().accessToken;
+    const response = await fetch(connectivityProbeUrl, {
+      cache: "no-store",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      signal: controller.signal,
+    });
+    // An auth or permission response still proves that the API is reachable.
+    publishOnlineStatus(response.status < 500);
+  } catch {
+    publishOnlineStatus(false);
+  } finally {
+    window.clearTimeout(timeout);
+    connectivityProbeInFlight = false;
+    scheduleConnectivityProbe(sharedOnlineStatus ? 30_000 : 5_000);
+  }
+}
+
+function startConnectivityMonitoring(): void {
+  if (connectivityMonitoringStarted || typeof window === "undefined") return;
+  connectivityMonitoringStarted = true;
+
+  window.addEventListener("online", () => void probeBackendConnectivity());
+  window.addEventListener("offline", () => {
+    publishOnlineStatus(false);
+    scheduleConnectivityProbe(1_000);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void probeBackendConnectivity();
+  });
+
+  void Network.getStatus().then((status) => {
+    if (!status.connected) publishOnlineStatus(false);
+    void probeBackendConnectivity();
+  });
+  void Network.addListener("networkStatusChange", (status) => {
+    if (status.connected) {
+      void probeBackendConnectivity();
+    } else {
+      publishOnlineStatus(false);
+      scheduleConnectivityProbe(1_000);
+    }
+  });
+  void probeBackendConnectivity();
+}
+
+function subscribeOnlineStatus(subscriber: () => void): () => void {
+  startConnectivityMonitoring();
+  onlineSubscribers.add(subscriber);
+  return () => onlineSubscribers.delete(subscriber);
+}
 
 export type PendingSaleScope = {
   companyId: string;
@@ -283,33 +362,11 @@ export function useOfflineProducts(search?: string, catalogRevision = 0): Produc
 }
 
 export function useOnlineStatus(): boolean {
-  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
-
-  useEffect(() => {
-    let cancelled = false;
-    let removeNativeListener: (() => Promise<void>) | undefined;
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-    void Network.getStatus().then((status) => {
-      if (!cancelled) setIsOnline(status.connected);
-    });
-    void Network.addListener("networkStatusChange", (status) => {
-      if (!cancelled) setIsOnline(status.connected);
-    }).then((handle) => {
-      removeNativeListener = () => handle.remove();
-    });
-    return () => {
-      cancelled = true;
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-      if (removeNativeListener) void removeNativeListener();
-    };
-  }, []);
-
-  return isOnline;
+  return useSyncExternalStore(
+    subscribeOnlineStatus,
+    () => sharedOnlineStatus,
+    () => true,
+  );
 }
 
 export function useLowStockCount(): number {

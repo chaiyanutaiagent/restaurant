@@ -111,15 +111,22 @@ export default function RestaurantShell(): JSX.Element {
     () => brandNavigationQuery.data?.find((brand) => brand.slug === activeBrandSlug) ?? null,
     [activeBrandSlug, brandNavigationQuery.data],
   );
+  const assignedRouteBranches = useMemo(
+    () => (branchesQuery.data ?? []).filter((branch) => (
+      branch.brand_id === routeBrand?.id && branch.business_type === "restaurant"
+    )),
+    [branchesQuery.data, routeBrand?.id],
+  );
   const routeBranchId = useMemo(() => {
     if (!routeBrand) return null;
-    if (storeBranchId && routeBrand.branches.some((branch) => branch.branch_id === storeBranchId)) {
+    const routeBranches = routeBrand.branches.length > 0 ? routeBrand.branches : assignedRouteBranches;
+    if (storeBranchId && routeBranches.some((branch) => branch.branch_id === storeBranchId)) {
       return storeBranchId;
     }
     if (centralBrandSlug && routeBrand.central_branch_id) return routeBrand.central_branch_id;
-    if (routeBrand.branches.some((branch) => branch.branch_id === branchId)) return branchId;
-    return routeBrand.branches[0]?.branch_id ?? routeBrand.central_branch_id;
-  }, [branchId, centralBrandSlug, routeBrand, storeBranchId]);
+    if (routeBranches.some((branch) => branch.branch_id === branchId)) return branchId;
+    return routeBranches[0]?.branch_id ?? routeBrand.central_branch_id;
+  }, [assignedRouteBranches, branchId, centralBrandSlug, routeBrand, storeBranchId]);
   const routeContextMatches = Boolean(
     routeBrand
     && currentBrandId === routeBrand.id
@@ -151,8 +158,11 @@ export default function RestaurantShell(): JSX.Element {
   });
   const centralProductionEnabled = brandFeaturesQuery.data?.central_production ?? false;
   const routeBranchIds = useMemo(
-    () => new Set(routeBrand?.branches.map((branch) => branch.branch_id) ?? []),
-    [routeBrand],
+    () => new Set([
+      ...(routeBrand?.branches.map((branch) => branch.branch_id) ?? []),
+      ...assignedRouteBranches.map((branch) => branch.branch_id),
+    ]),
+    [assignedRouteBranches, routeBrand],
   );
   const selectableBranches = useMemo(
     () => (storeBrandSlug && routeBranchIds.size > 0

@@ -119,8 +119,8 @@ export default function PosWorkspaceNav({
       { label: "สถานะเครื่อง", icon: MonitorCog, onClick: onDeviceStatus },
     ];
     return (
-      <nav data-testid="retail-pos-workspace-bar" aria-label="พื้นที่ทำงาน Retail POS" className="shrink-0 border-b border-blue-100 bg-white px-3 py-2 text-slate-900 shadow-sm">
-        <div className="flex items-center gap-2 overflow-x-auto">
+      <nav data-testid="retail-pos-workspace-bar" aria-label="พื้นที่ทำงาน Retail POS" className="shrink-0 border-b border-blue-100 bg-white px-3 py-1 text-slate-900 shadow-sm">
+        <div className="flex items-center gap-1.5 overflow-x-auto">
           {retailItems.map((item, index) => {
             const Icon = item.icon;
             const isActive = index === 0 && location.pathname === "/retail/pos";
@@ -131,9 +131,9 @@ export default function PosWorkspaceNav({
                 disabled={!item.onClick}
                 aria-current={isActive ? "page" : undefined}
                 onClick={item.onClick}
-                className={`flex min-h-12 shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${isActive ? "bg-blue-600 font-semibold text-white shadow-sm" : "font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700"}`}
+                className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${isActive ? "bg-blue-600 font-semibold text-white shadow-sm" : "font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700"}`}
               >
-                <Icon className="h-5 w-5" /> {item.label}
+                <Icon className="h-4 w-4" /> {item.label}
               </button>
             );
           })}

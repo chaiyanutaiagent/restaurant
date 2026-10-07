@@ -151,11 +151,17 @@ test("Retail workspace stays server-authoritative and usable on desktop and tabl
     await page.setViewportSize(viewport);
     await page.goto("/retail/pos");
     await expect(page.getByText("Retail POS", { exact: true }).first()).toBeVisible();
-    await expect(page.getByText(/Pilot · Production ใช้ Legacy/)).toBeVisible();
-    await expect(page.getByText(/Retail Scan-first · Pilot/)).toBeVisible();
-    await expect(page.getByText(/signed Company \/ Brand \/ Branch/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "ขยายเมนูด้านบน" })).toBeVisible();
+    await expect(page.getByText(/Retail Scan-first · Pilot/)).toHaveCount(0);
+    await expect(page.getByText(/Enter = เพิ่มสินค้า/)).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   }
+
+  await page.getByRole("button", { name: "ขยายเมนูด้านบน" }).click();
+  await expect(page.getByRole("button", { name: "ย่อเมนูด้านบน" })).toBeVisible();
+  await expect(page.getByText("สถานะซิงก์", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "ย่อเมนูด้านบน" }).click();
+  await expect(page.getByText("สถานะซิงก์", { exact: true })).toHaveCount(0);
 
   await page.evaluate(() => window.dispatchEvent(new Event("offline")));
   await expect(page.getByText("○ OFFLINE", { exact: true })).toBeVisible();

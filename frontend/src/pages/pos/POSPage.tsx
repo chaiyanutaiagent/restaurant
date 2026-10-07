@@ -6,6 +6,8 @@ import {
   ArrowLeft,
   Camera,
   ChefHat,
+  ChevronDown,
+  ChevronUp,
   ClipboardList,
   CloudUpload,
   LayoutGrid,
@@ -392,6 +394,7 @@ export default function POSPage(): JSX.Element {
   const deviceSessionHydrated = useDeviceStore((state) => state.hydrated);
   const hydrateDeviceSession = useDeviceStore((state) => state.hydrate);
   const [search, setSearch] = useState("");
+  const [retailHeaderExpanded, setRetailHeaderExpanded] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
@@ -2573,17 +2576,17 @@ export default function POSPage(): JSX.Element {
     <div data-pos-touch-surface className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] md:h-screen">
       <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
         {/* Tablet v2: compact identity and health header */}
-        <div className="border-b border-slate-200/80 bg-white/90 px-4 py-2.5 backdrop-blur">
+        <div className={`border-b border-slate-200/80 bg-white/90 backdrop-blur ${isRetailMode && !retailHeaderExpanded ? "px-3 py-1.5" : "px-4 py-2.5"}`}>
           <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
             <div className="flex shrink-0 items-center gap-2">
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-base font-black text-white shadow-sm" aria-hidden="true">F</span>
-              <span className="hidden whitespace-nowrap text-base font-black text-blue-700 xl:inline">{PLATFORM_BRAND.productName}</span>
-              <span className="hidden h-7 w-px bg-slate-200 xl:block" aria-hidden="true" />
+              <span className={`flex items-center justify-center bg-blue-600 font-black text-white shadow-sm ${isRetailMode && !retailHeaderExpanded ? "h-8 w-8 rounded-xl text-sm" : "h-11 w-11 rounded-2xl text-base"}`} aria-hidden="true">F</span>
+              <span className={`${isRetailMode && !retailHeaderExpanded ? "hidden" : "hidden xl:inline"} whitespace-nowrap text-base font-black text-blue-700`}>{PLATFORM_BRAND.productName}</span>
+              <span className={`${isRetailMode && !retailHeaderExpanded ? "hidden" : "hidden xl:block"} h-7 w-px bg-slate-200`} aria-hidden="true" />
               <span className="whitespace-nowrap text-base font-black text-slate-900">{isRetailMode ? "Retail POS" : "ขายหน้าร้าน"}</span>
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto text-xs">
-              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-700">{branchName}</span>
-              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-600">
+              <span className="max-w-52 truncate rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-700">{branchName}</span>
+              <span className={`${isRetailMode && !retailHeaderExpanded ? "hidden" : ""} rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-600`}>
                 {isRetailMode ? (currentCounterDevice?.device_code ?? "Counter ยังไม่จับคู่") : currentLocationName}
               </span>
               {currentShift ? (
@@ -2591,12 +2594,12 @@ export default function POSPage(): JSX.Element {
                   {currentShift.shift_number}
                 </span>
               ) : null}
-              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${isTakeawayMode || isRetailMode ? "bg-amber-100 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>
+              <span className={`${isRetailMode && !retailHeaderExpanded ? "hidden" : "inline-flex"} items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${isTakeawayMode || isRetailMode ? "bg-amber-100 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>
                 {isTakeawayMode ? <ShoppingBag className="h-3.5 w-3.5" /> : null}
                 {isRetailMode ? "Pilot · Production ใช้ Legacy" : isTakeawayMode ? "รับกลับ · ออกคิว/KDS" : "ขายหน้าร้าน"}
               </span>
               {user ? (
-                <span className="hidden items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700 xl:inline-flex">
+                <span className={`${isRetailMode && !retailHeaderExpanded ? "hidden" : "hidden xl:inline-flex"} items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-medium text-blue-700`}>
                   <UserRoundCheck className="h-3.5 w-3.5" /> ID {staffIdentifier}
                 </span>
               ) : null}
@@ -2628,31 +2631,47 @@ export default function POSPage(): JSX.Element {
               ) : null}
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
-              {isRetailMode ? (
+              {isRetailMode && retailHeaderExpanded ? (
                 <Button size="sm" variant="outline" className="min-h-11" onClick={() => openWorkspace("/retail/offline-sync", "ศูนย์สถานะและการกู้คืน")}>
                   <CloudUpload className="h-4 w-4" />สถานะซิงก์
                 </Button>
               ) : null}
-              {isRetailMode && canViewDevices ? (
+              {isRetailMode && retailHeaderExpanded && canViewDevices ? (
                 <Button size="sm" variant="outline" className="min-h-11" onClick={() => openWorkspace("/devices/uat-readiness", "Counter Readiness")}>
                   <TabletSmartphone className="h-4 w-4" />ความพร้อม
                 </Button>
               ) : null}
-              <Button size="sm" variant="outline" onClick={() => setRecentSalesOpen(true)} disabled={!currentShift}>
-                ศูนย์บิล
-              </Button>
-              <Button size="sm" variant="outline" className="min-h-11" onClick={() => setCloseShiftOpen(true)} disabled={!currentShift}>จัดการกะ</Button>
-              <Button size="sm" variant="outline" aria-label="สถานะเครื่องและการพิมพ์" onClick={() => setDeviceStatusOpen(true)}>
-                <MonitorCog className="h-4 w-4" />
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                aria-label="กลับหน้าผู้ดูแล"
-                onClick={() => openWorkspace("/admin", "หน้าผู้ดูแล")}
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
+              {!isRetailMode || retailHeaderExpanded ? (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => setRecentSalesOpen(true)} disabled={!currentShift}>
+                    ศูนย์บิล
+                  </Button>
+                  <Button size="sm" variant="outline" className="min-h-11" onClick={() => setCloseShiftOpen(true)} disabled={!currentShift}>จัดการกะ</Button>
+                  <Button size="sm" variant="outline" aria-label="สถานะเครื่องและการพิมพ์" onClick={() => setDeviceStatusOpen(true)}>
+                    <MonitorCog className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    aria-label="กลับหน้าผู้ดูแล"
+                    onClick={() => openWorkspace("/admin", "หน้าผู้ดูแล")}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                </>
+              ) : null}
+              {isRetailMode ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className={retailHeaderExpanded ? "min-h-11" : "h-8 w-8 rounded-lg p-0"}
+                  aria-label={retailHeaderExpanded ? "ย่อเมนูด้านบน" : "ขยายเมนูด้านบน"}
+                  aria-expanded={retailHeaderExpanded}
+                  onClick={() => setRetailHeaderExpanded((current) => !current)}
+                >
+                  {retailHeaderExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </Button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -2702,9 +2721,6 @@ export default function POSPage(): JSX.Element {
                     <Camera className="mr-2 h-4 w-4" />
                     เปิดกล้องสแกน
                   </Button>
-                  <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-xs text-slate-500">
-                    Enter = เพิ่มสินค้า, F1 = โฟกัสค้นหา, F2 = ช่องเงินสด
-                  </div>
                 </div>
               </div>
             </div>
@@ -2729,21 +2745,9 @@ export default function POSPage(): JSX.Element {
               </div>
             ) : null}
 
-            {isRetailMode ? (
-              <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${retailContextValid ? "border-blue-200 bg-blue-50 text-blue-900" : "border-red-200 bg-red-50 text-red-800"}`}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="font-semibold">Retail Scan-first · Pilot</div>
-                    <div className="mt-1 text-xs opacity-80">
-                      {retailContextValid
-                        ? "Catalog ถูกจำกัดด้วย signed Company / Brand / Branch · ระบบจริงยังใช้ Legacy data source"
-                        : "Signed Retail context ไม่ครบ — ปิดการขายและไม่อ่าน Catalog จาก cache อื่น"}
-                    </div>
-                  </div>
-                  <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold shadow-sm">
-                    {isOnline ? "Online" : "Offline"} · {catalogCacheTrusted ? "Catalog ตรงบริบท" : "รอ Catalog"}
-                  </span>
-                </div>
+            {isRetailMode && !retailContextValid ? (
+              <div className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">
+                Signed Retail context ไม่ครบ — ปิดการขายเพื่อป้องกันข้อมูลข้ามบริษัทหรือสาขา
               </div>
             ) : null}
 

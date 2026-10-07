@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
-import { Building2, Grid2X2, LayoutDashboard, Store, UtensilsCrossed } from "lucide-react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Building2, Grid2X2, LayoutDashboard, Loader2, Store, UtensilsCrossed } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { authApi } from "@/lib/api";
+import { brandNavigationApi } from "@/lib/brandNavigationApi";
 import { wapApi } from "@/lib/wapApi";
 import { useAuthStore } from "@/stores/auth.store";
 
@@ -57,15 +58,32 @@ const STORE_NAV = [
 ];
 
 export default function RestaurantShell(): JSX.Element {
+  const queryClient = useQueryClient();
   const branchId = useAuthStore((state) => state.branchId);
+  const currentBrandId = useAuthStore((state) => state.brandId);
   const companyId = useAuthStore((state) => state.companyId);
   const setSession = useAuthStore((state) => state.setSession);
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const location = useLocation();
+  const autoSwitchTarget = useRef<string | null>(null);
+
+  const centralMatch = location.pathname.match(/^\/central\/([^/]+)(?:\/([^/]+))?/);
+  const centralBrandSlug = centralMatch?.[1] ?? null;
+  const centralSection = centralMatch?.[2] ?? "orders";
+  const storeMatch = location.pathname.match(/^\/store\/([^/]+)(?:\/branches\/([^/]+))?(?:\/([^/]+))?/);
+  const storeBrandSlug = storeMatch?.[1] ?? null;
+  const storeBranchId = storeMatch?.[2] ?? null;
+  const storeSection = storeMatch?.[3] ?? "orders";
+  const activeBrandSlug = centralBrandSlug ?? storeBrandSlug;
 
   const branchesQuery = useQuery({
     queryKey: ["system", "my-branches"],
     queryFn: async () => (await authApi.myBranches()).data.data,
+  });
+  const brandNavigationQuery = useQuery({
+    queryKey: ["restaurant", "brand-navigation", companyId],
+    queryFn: async () => (await brandNavigationApi.mine()).data.data,
+    enabled: Boolean(companyId && activeBrandSlug),
   });
 
   const defaultBranch = useMemo(
@@ -80,7 +98,8 @@ export default function RestaurantShell(): JSX.Element {
     if (!companyId) return;
     const response = await authApi.switchBranch(nextBranchId, nextStationKey);
     setSession(response.data.data, companyId);
-  }, [companyId, setSession]);
+    queryClient.clear();
+  }, [companyId, queryClient, setSession]);
 
   useEffect(() => {
     if (!branchId && defaultBranch) {
@@ -88,12 +107,40 @@ export default function RestaurantShell(): JSX.Element {
     }
   }, [branchId, defaultBranch, handleSwitchBranch]);
 
-  const centralMatch = location.pathname.match(/^\/central\/([^/]+)(?:\/([^/]+))?/);
-  const centralBrandSlug = centralMatch?.[1] ?? null;
-  const centralSection = centralMatch?.[2] ?? "orders";
-  const storeMatch = location.pathname.match(/^\/store\/([^/]+)(?:\/branches\/[^/]+)?(?:\/([^/]+))?/);
-  const storeBrandSlug = storeMatch?.[1] ?? null;
-  const storeSection = storeMatch?.[2] ?? "orders";
+  const routeBrand = useMemo(
+    () => brandNavigationQuery.data?.find((brand) => brand.slug === activeBrandSlug) ?? null,
+    [activeBrandSlug, brandNavigationQuery.data],
+  );
+  const routeBranchId = useMemo(() => {
+    if (!routeBrand) return null;
+    if (storeBranchId && routeBrand.branches.some((branch) => branch.branch_id === storeBranchId)) {
+      return storeBranchId;
+    }
+    if (centralBrandSlug && routeBrand.central_branch_id) return routeBrand.central_branch_id;
+    if (routeBrand.branches.some((branch) => branch.branch_id === branchId)) return branchId;
+    return routeBrand.branches[0]?.branch_id ?? routeBrand.central_branch_id;
+  }, [branchId, centralBrandSlug, routeBrand, storeBranchId]);
+  const routeContextMatches = Boolean(
+    routeBrand
+    && currentBrandId === routeBrand.id
+    && routeBranchId
+    && branchId === routeBranchId,
+  );
+
+  useEffect(() => {
+    if (!activeBrandSlug || !routeBrand || !routeBranchId || routeContextMatches) {
+      if (routeContextMatches) autoSwitchTarget.current = null;
+      return;
+    }
+    const targetKey = `${routeBrand.id}:${routeBranchId}`;
+    if (autoSwitchTarget.current === targetKey) return;
+    autoSwitchTarget.current = targetKey;
+    const targetBranch = branchesQuery.data?.find((branch) => branch.branch_id === routeBranchId);
+    void handleSwitchBranch(routeBranchId, targetBranch?.station_key ?? null).catch(() => {
+      autoSwitchTarget.current = null;
+    });
+  }, [activeBrandSlug, branchesQuery.data, handleSwitchBranch, routeBrand, routeBranchId, routeContextMatches]);
+
   const brandFeaturesQuery = useQuery({
     queryKey: ["restaurant-brand-features", centralBrandSlug],
     queryFn: async () => {
@@ -103,8 +150,17 @@ export default function RestaurantShell(): JSX.Element {
     enabled: Boolean(centralBrandSlug),
   });
   const centralProductionEnabled = brandFeaturesQuery.data?.central_production ?? false;
-  const currentBranch = branchesQuery.data?.find((branch) => branch.branch_id === branchId) ?? defaultBranch;
-  const activeBrandSlug = centralBrandSlug ?? storeBrandSlug;
+  const routeBranchIds = useMemo(
+    () => new Set(routeBrand?.branches.map((branch) => branch.branch_id) ?? []),
+    [routeBrand],
+  );
+  const selectableBranches = useMemo(
+    () => (storeBrandSlug && routeBranchIds.size > 0
+      ? (branchesQuery.data ?? []).filter((branch) => routeBranchIds.has(branch.branch_id))
+      : branchesQuery.data ?? []),
+    [branchesQuery.data, routeBranchIds, storeBrandSlug],
+  );
+  const currentBranch = selectableBranches.find((branch) => branch.branch_id === branchId) ?? selectableBranches[0] ?? defaultBranch;
   const workspaceLabel = centralBrandSlug ? "ครัวกลาง" : storeBrandSlug ? "หน้าร้าน" : "Restaurant";
 
   const contextNavigation = centralBrandSlug
@@ -114,6 +170,18 @@ export default function RestaurantShell(): JSX.Element {
     ))
     : STORE_NAV.filter((item) => item.permissions.some((code) => hasPermission(code)));
   const activeSection = centralBrandSlug ? centralSection : storeSection;
+
+  if (activeBrandSlug && (brandNavigationQuery.isLoading || (routeBrand && !routeContextMatches))) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-100 p-5">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-lg">
+          <Loader2 className="mx-auto h-8 w-8 animate-spin text-orange-600" />
+          <h1 className="mt-4 text-xl font-black text-slate-950">กำลังเปิดร้าน {activeBrandSlug}</h1>
+          <p className="mt-2 text-sm text-slate-600">ระบบกำลังเลือกแบรนด์และสาขาให้ตรงกับลิงก์</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col bg-[linear-gradient(180deg,#fff7ed_0%,#f8fafc_34%,#eef2f7_100%)] text-slate-950">
@@ -130,19 +198,19 @@ export default function RestaurantShell(): JSX.Element {
           </div>
 
           <div className="ml-auto flex min-w-0 items-center gap-2">
-            {storeBrandSlug && branchesQuery.data?.length ? (
+            {storeBrandSlug && selectableBranches.length ? (
               <label className="relative hidden items-center md:flex">
                 <Building2 className="pointer-events-none absolute left-3 h-4 w-4 text-orange-600" />
                 <select
                   aria-label="เลือกสาขา"
                   value={currentBranch?.branch_id ?? ""}
                   onChange={(event) => {
-                    const branch = branchesQuery.data?.find((row) => row.branch_id === event.target.value);
+                    const branch = selectableBranches.find((row) => row.branch_id === event.target.value);
                     if (branch) void handleSwitchBranch(branch.branch_id, branch.station_key);
                   }}
                   className="h-11 max-w-[15rem] appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm font-semibold text-slate-700 shadow-sm"
                 >
-                  {branchesQuery.data.map((branch) => (
+                  {selectableBranches.map((branch) => (
                     <option key={`${branch.branch_id}:${branch.station_key ?? "branch"}`} value={branch.branch_id}>
                       {branch.branch_name}
                     </option>

@@ -1,7 +1,7 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App } from "@capacitor/app";
 import { liveQuery } from "dexie";
-import { AlertTriangle, ArrowRightLeft, ChefHat, ClipboardCheck, CloudUpload, CreditCard, LogOut, Loader2, Menu, Minus, PackageCheck, PackageOpen, Plus, Printer, QrCode, ReceiptText, UserRoundCheck, Warehouse, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, ChefHat, CheckCircle2, ClipboardCheck, CloudUpload, CreditCard, LogOut, Loader2, Menu, Minus, PackageCheck, PackageOpen, Plus, Printer, QrCode, ReceiptText, ShoppingBag, UserRoundCheck, Users, UtensilsCrossed, Warehouse, Wifi, WifiOff } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/use-toast";
 import { useLogout } from "@/hooks/useAuth";
+import { authApi } from "@/lib/api";
 import {
   getRestaurantOutboxSummary,
   getQueuedRestaurantOrder,
@@ -36,6 +37,32 @@ type CartItem = {
   product: WapMenuProduct;
   qty: number;
   note: string;
+};
+
+type ServiceMode = "takeaway" | "dine_in";
+
+type DiningTable = {
+  id: string;
+  name: string;
+  zone: string;
+  capacity: number;
+  status: "available" | "occupied" | "bill_requested" | "cleaning" | string;
+  is_active: boolean;
+  active_session_id: string | null;
+};
+
+type DineInOrderResult = {
+  sessionId: string;
+  orderNumber: string;
+  tableName: string;
+  openedTable: boolean;
+};
+
+const TABLE_STATUS_LABEL: Record<string, string> = {
+  available: "ว่าง",
+  occupied: "มีลูกค้า",
+  bill_requested: "เรียกบิล",
+  cleaning: "กำลังทำความสะอาด",
 };
 
 const paymentLabels: Record<string, string> = {
@@ -148,15 +175,22 @@ export default function WapOrderPage(): JSX.Element {
   const { brandSlug } = useParams<{ brandSlug?: string }>();
   const location = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const isCounterWorkspace = location.pathname.startsWith("/counter/");
   const logout = useLogout(isCounterWorkspace ? "/counter" : "/login");
   const isOnline = useOnlineStatus();
   const user = useAuthStore((state) => state.user);
+  const branchId = useAuthStore((state) => state.branchId);
   const customerSlipRef = useRef<HTMLDivElement | null>(null);
   const kitchenSlipRef = useRef<HTMLDivElement | null>(null);
+  const dineInOrderKeyRef = useRef(`staff-sale-${crypto.randomUUID()}`);
   const [promptpayQrDataUrl, setPromptpayQrDataUrl] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [currentOrder, setCurrentOrder] = useState<WapOrder | null>(null);
+  const [serviceMode, setServiceMode] = useState<ServiceMode>("takeaway");
+  const [selectedTableId, setSelectedTableId] = useState("");
+  const [guestCount, setGuestCount] = useState("1");
+  const [dineInResult, setDineInResult] = useState<DineInOrderResult | null>(null);
   const [showSummary, setShowSummary] = useState(false);
   const [pendingPrint, setPendingPrint] = useState<"customer" | "kitchen" | null>(null);
   const [outboxSummary, setOutboxSummary] = useState<RestaurantOutboxSummary>({
@@ -176,6 +210,13 @@ export default function WapOrderPage(): JSX.Element {
     queryFn: async () => loadRestaurantMenu(offlineBrandSlug),
     retry: false,
   });
+  const tablesQuery = useQuery({
+    queryKey: ["dining-tables", branchId],
+    queryFn: async () => (await authApi.get("/restaurant/tables")).data.data as DiningTable[],
+    enabled: serviceMode === "dine_in" && Boolean(branchId) && isOnline,
+    retry: false,
+    refetchInterval: serviceMode === "dine_in" ? 15_000 : false,
+  });
   const storeBase = brandSlug ? `/store/${brandSlug}` : "/restaurant";
   const orderPath = isCounterWorkspace
     ? "/counter/orders"
@@ -185,6 +226,16 @@ export default function WapOrderPage(): JSX.Element {
   const centralBase = brandSlug ? `/central/${brandSlug}` : null;
   const employeeName = user?.display_name || [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.username || "พนักงาน";
   const employeeIdentifier = user?.employee_code?.trim() || user?.username || "-";
+
+  const sortedTables = useMemo(() => {
+    return (tablesQuery.data ?? [])
+      .filter((table) => table.is_active)
+      .sort((a, b) => a.zone.localeCompare(b.zone, "th") || a.name.localeCompare(b.name, "th", { numeric: true }));
+  }, [tablesQuery.data]);
+  const selectedTable = sortedTables.find((table) =>
+    table.id === selectedTableId
+    && (table.status === "available" || (table.status === "occupied" && table.active_session_id))
+  ) ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -346,6 +397,71 @@ export default function WapOrderPage(): JSX.Element {
     },
   });
 
+  const dineInOrderMutation = useMutation({
+    mutationFn: async (): Promise<DineInOrderResult> => {
+      if (!isOnline) throw new Error("การเปิดโต๊ะและส่งครัวต้องเชื่อมต่ออินเทอร์เน็ต");
+      if (!selectedTableId) throw new Error("กรุณาเลือกโต๊ะ");
+      if (cart.length === 0) throw new Error("กรุณาเลือกเมนูอย่างน้อย 1 รายการ");
+
+      const latestTable = (await authApi.get(`/restaurant/tables/${selectedTableId}`)).data.data as DiningTable;
+      let sessionId = latestTable.active_session_id;
+      let openedTable = false;
+
+      if (!sessionId) {
+        if (latestTable.status !== "available") {
+          throw new Error(`โต๊ะ ${latestTable.name} ยังไม่พร้อมใช้งาน (${TABLE_STATUS_LABEL[latestTable.status] ?? latestTable.status})`);
+        }
+        const count = Number(guestCount);
+        if (!Number.isFinite(count) || count < 1) throw new Error("จำนวนลูกค้าต้องมากกว่า 0");
+        const sessionResponse = await authApi.post("/restaurant/sessions", {
+          table_id: latestTable.id,
+          guest_count: count,
+        });
+        sessionId = String(sessionResponse.data.data.id);
+        openedTable = true;
+      } else if (latestTable.status !== "occupied") {
+        throw new Error(`โต๊ะ ${latestTable.name} ไม่สามารถสั่งเพิ่มได้ (${TABLE_STATUS_LABEL[latestTable.status] ?? latestTable.status})`);
+      }
+
+      const orderResponse = await authApi.post(`/restaurant/sessions/${sessionId}/orders`, {
+        items: cart.map((item) => ({
+          product_id: item.product.id,
+          qty: item.qty,
+          special_request: item.note.trim() || null,
+          expected_unit_price: Number(item.product.selling_price),
+        })),
+        note: null,
+        cart_version: 1,
+        idempotency_key: dineInOrderKeyRef.current,
+      });
+      return {
+        sessionId,
+        orderNumber: String(orderResponse.data.data.order_number),
+        tableName: latestTable.name,
+        openedTable,
+      };
+    },
+    onSuccess: async (result) => {
+      setDineInResult(result);
+      setCart([]);
+      setShowSummary(true);
+      dineInOrderKeyRef.current = `staff-sale-${crypto.randomUUID()}`;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["dining-tables"] }),
+        queryClient.invalidateQueries({ queryKey: ["kitchen-tickets"] }),
+        queryClient.invalidateQueries({ queryKey: ["session-detail", result.sessionId] }),
+      ]);
+      toast({
+        title: `ส่งเข้าครัวแล้ว · โต๊ะ ${result.tableName}`,
+        description: `${result.openedTable ? "เปิดโต๊ะใหม่โดยไม่พิมพ์ QR" : "เพิ่มในโต๊ะที่เปิดอยู่"} · ออเดอร์ ${result.orderNumber}`,
+      });
+    },
+    onError: async (error) => {
+      await queryClient.invalidateQueries({ queryKey: ["dining-tables"] });
+      toast({ title: "ส่งออเดอร์โต๊ะไม่สำเร็จ", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
   const customerSlipMutation = useMutation({
     mutationFn: async () => {
       if (!currentOrder) throw new Error("ยังไม่มีออเดอร์");
@@ -434,12 +550,29 @@ export default function WapOrderPage(): JSX.Element {
 
   function resetOrder(): void {
     setCurrentOrder(null);
+    setDineInResult(null);
     setShowSummary(false);
   }
 
-  const canSubmit = cart.length > 0 && total > 0 && (isOnline || Boolean(menuQuery.data?.offline_mode_enabled));
+  function changeServiceMode(mode: ServiceMode): void {
+    setServiceMode(mode);
+    setCurrentOrder(null);
+    setDineInResult(null);
+    setShowSummary(false);
+  }
+
+  function startAnotherTable(): void {
+    setDineInResult(null);
+    setSelectedTableId("");
+    setGuestCount("1");
+    setShowSummary(false);
+  }
+
+  const canSubmit = serviceMode === "dine_in"
+    ? cart.length > 0 && total > 0 && isOnline && Boolean(selectedTable)
+    : cart.length > 0 && total > 0 && (isOnline || Boolean(menuQuery.data?.offline_mode_enabled));
   const customerSlipPrinted = Boolean(currentOrder?.customer_slip_printed_at);
-  const isSummaryVisible = showSummary || Boolean(currentOrder);
+  const isSummaryVisible = showSummary || Boolean(currentOrder) || Boolean(dineInResult);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -581,6 +714,93 @@ export default function WapOrderPage(): JSX.Element {
             </div>
           ) : null}
 
+          {brandSlug ? (
+            <div className="border-b border-slate-200 bg-slate-50/80 px-3 py-2 lg:px-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  aria-pressed={serviceMode === "takeaway"}
+                  className={`inline-flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-bold transition ${serviceMode === "takeaway" ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-slate-400"}`}
+                  onClick={() => changeServiceMode("takeaway")}
+                >
+                  <ShoppingBag className="h-4 w-4" />
+                  รับกลับ
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={serviceMode === "dine_in"}
+                  className={`inline-flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-bold transition ${serviceMode === "dine_in" ? "border-orange-600 bg-orange-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-orange-300"}`}
+                  onClick={() => changeServiceMode("dine_in")}
+                >
+                  <UtensilsCrossed className="h-4 w-4" />
+                  ทานที่ร้าน
+                </button>
+                {serviceMode === "dine_in" ? (
+                  <span className="text-xs text-slate-500">พนักงานคีย์แทนลูกค้า · ไม่พิมพ์ QR</span>
+                ) : null}
+              </div>
+
+              {serviceMode === "dine_in" ? (
+                <div className="mt-2 rounded-xl border border-orange-200 bg-white p-2.5">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-bold text-slate-950">เลือกโต๊ะ</p>
+                      <p className="text-xs text-slate-500">โต๊ะว่างจะเปิดโต๊ะให้ ส่วนโต๊ะที่มีลูกค้าจะเพิ่มรายการในบิลเดิม</p>
+                    </div>
+                    {selectedTable?.status === "available" ? (
+                      <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                        <Users className="h-4 w-4" />
+                        จำนวนลูกค้า
+                        <input
+                          type="number"
+                          min="1"
+                          max={Math.max(selectedTable.capacity, 1)}
+                          value={guestCount}
+                          onChange={(event) => setGuestCount(event.target.value)}
+                          className="h-9 w-16 rounded-lg border border-slate-300 px-2 text-center text-sm font-bold"
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+
+                  {tablesQuery.isLoading ? (
+                    <div className="flex h-12 items-center text-sm text-slate-500"><Loader2 className="mr-2 h-4 w-4 animate-spin" />โหลดโต๊ะ</div>
+                  ) : tablesQuery.isError ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                      <span>โหลดโต๊ะไม่สำเร็จ</span>
+                      <Button type="button" size="sm" variant="outline" onClick={() => void tablesQuery.refetch()}>ลองใหม่</Button>
+                    </div>
+                  ) : sortedTables.length === 0 ? (
+                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">ยังไม่มีโต๊ะในสาขานี้ กรุณาสร้างโต๊ะที่เมนู “โต๊ะ / QR” ก่อน</div>
+                  ) : (
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {sortedTables.map((table) => {
+                        const canSelect = table.status === "available" || (table.status === "occupied" && Boolean(table.active_session_id));
+                        const isSelected = selectedTableId === table.id;
+                        return (
+                          <button
+                            key={table.id}
+                            type="button"
+                            disabled={!canSelect}
+                            aria-pressed={isSelected}
+                            onClick={() => {
+                              setSelectedTableId(table.id);
+                              setGuestCount("1");
+                            }}
+                            className={`min-w-32 rounded-lg border px-3 py-2 text-left transition ${isSelected ? "border-orange-500 bg-orange-50 ring-2 ring-orange-200" : canSelect ? "border-slate-200 bg-white hover:border-orange-300" : "cursor-not-allowed border-slate-200 bg-slate-100 opacity-60"}`}
+                          >
+                            <span className="block truncate text-sm font-bold text-slate-950">{table.name}</span>
+                            <span className="block truncate text-[11px] text-slate-500">{table.zone} · {TABLE_STATUS_LABEL[table.status] ?? table.status}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {menuQuery.isLoading ? (
             <div className="flex h-72 items-center justify-center text-slate-500">
               <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -645,11 +865,13 @@ export default function WapOrderPage(): JSX.Element {
 
           <div className="border-t border-slate-200 p-3 lg:p-4">
             <Button
-              className="h-11 w-full bg-slate-950 text-sm hover:bg-slate-800 lg:h-12 lg:text-base"
+              className={`h-11 w-full text-sm lg:h-12 lg:text-base ${serviceMode === "dine_in" ? "bg-orange-600 hover:bg-orange-700" : "bg-slate-950 hover:bg-slate-800"}`}
               disabled={!canSubmit}
               onClick={() => setShowSummary(true)}
             >
-              สรุปออเดอร์ · {cart.length} รายการ · ฿{money(total)}
+              {serviceMode === "dine_in"
+                ? `${selectedTable ? `โต๊ะ ${selectedTable.name}` : "เลือกโต๊ะก่อน"} · ${cart.length} รายการ · ฿${money(total)}`
+                : `สรุปออเดอร์ · ${cart.length} รายการ · ฿${money(total)}`}
             </Button>
           </div>
         </section>
@@ -661,9 +883,9 @@ export default function WapOrderPage(): JSX.Element {
                 <ReceiptText className="h-5 w-5 text-slate-700" />
                 <h2 className="font-bold text-slate-950">สรุปออเดอร์</h2>
               </div>
-              {currentOrder ? (
+              {currentOrder || dineInResult ? (
                 <Button variant="outline" size="sm" onClick={resetOrder}>
-                  เริ่มออเดอร์ใหม่
+                  {dineInResult ? `สั่งเพิ่มโต๊ะ ${dineInResult.tableName}` : "เริ่มออเดอร์ใหม่"}
                 </Button>
               ) : (
                 <Button variant="outline" size="sm" onClick={() => setShowSummary(false)}>
@@ -719,6 +941,28 @@ export default function WapOrderPage(): JSX.Element {
                       : "พิมพ์ออเดอร์ส่งครัว"}
                 </Button>
               </div>
+            ) : dineInResult ? (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-center">
+                  <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" />
+                  <p className="mt-3 text-xl font-black text-emerald-950">ส่งเข้าครัวแล้ว</p>
+                  <p className="mt-1 text-lg font-bold text-emerald-800">โต๊ะ {dineInResult.tableName}</p>
+                  <p className="mt-1 text-sm text-emerald-700">ออเดอร์ {dineInResult.orderNumber}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-4 text-sm text-slate-600">
+                  <p className="font-bold text-slate-950">{dineInResult.openedTable ? "เปิดโต๊ะใหม่แล้ว" : "เพิ่มรายการในโต๊ะเดิมแล้ว"}</p>
+                  <p className="mt-1">รายการถูกส่งเข้าครัวโดยไม่พิมพ์ QR และจะรวมชำระตอนเรียกบิล</p>
+                </div>
+                <Button asChild className="h-12 w-full bg-slate-950 hover:bg-slate-800">
+                  <Link to={`/restaurant/session/${dineInResult.sessionId}/detail`}>
+                    <ReceiptText className="mr-2 h-4 w-4" />
+                    ดูรายการโต๊ะ / รวมบิล
+                  </Link>
+                </Button>
+                <Button type="button" variant="outline" className="h-12 w-full" onClick={startAnotherTable}>
+                  เลือกโต๊ะอื่น
+                </Button>
+              </div>
             ) : (
               <div className="space-y-4">
                 {cart.length === 0 ? (
@@ -762,30 +1006,47 @@ export default function WapOrderPage(): JSX.Element {
             )}
           </div>
 
-          {!currentOrder ? (
+          {!currentOrder && !dineInResult ? (
             <div className="border-t border-slate-200 p-3 lg:p-4">
               <div className="mb-3 space-y-1 text-sm">
                 <div className="flex justify-between"><span>ยอดรวม</span><span className="font-bold">฿{money(total)}</span></div>
-                <div className="text-slate-500">เลือกวิธีรับเงินเพื่อออกคิว</div>
+                <div className="text-slate-500">
+                  {serviceMode === "dine_in"
+                    ? selectedTable
+                      ? `โต๊ะ ${selectedTable.name} · ส่งครัวก่อน ชำระเงินเมื่อรวมบิล`
+                      : "กรุณากลับไปเลือกโต๊ะ"
+                    : "เลือกวิธีรับเงินเพื่อออกคิว"}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              {serviceMode === "dine_in" ? (
                 <Button
-                  className="h-12 px-2 text-sm bg-slate-950 hover:bg-slate-800"
-                  disabled={!canSubmit || createOrderMutation.isPending}
-                  onClick={() => createOrderMutation.mutate("cash")}
+                  className="h-12 w-full bg-orange-600 text-sm hover:bg-orange-700"
+                  disabled={!canSubmit || dineInOrderMutation.isPending}
+                  onClick={() => dineInOrderMutation.mutate()}
                 >
-                  {createOrderMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  <span className="truncate">รับเงินสด / ออกคิว</span>
+                  {dineInOrderMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ChefHat className="mr-2 h-4 w-4" />}
+                  <span className="truncate">ส่งเข้าครัว · โต๊ะ {selectedTable?.name ?? "-"}</span>
                 </Button>
-                <Button
-                  className="h-12 px-2 text-sm bg-emerald-600 hover:bg-emerald-700"
-                  disabled={!canSubmit || createOrderMutation.isPending || !isOnline}
-                  onClick={() => createOrderMutation.mutate("promptpay")}
-                >
-                  {createOrderMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  <span className="truncate">PromptPay จ่ายแล้ว / ออกคิว</span>
-                </Button>
-              </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    className="h-12 px-2 text-sm bg-slate-950 hover:bg-slate-800"
+                    disabled={!canSubmit || createOrderMutation.isPending}
+                    onClick={() => createOrderMutation.mutate("cash")}
+                  >
+                    {createOrderMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    <span className="truncate">รับเงินสด / ออกคิว</span>
+                  </Button>
+                  <Button
+                    className="h-12 px-2 text-sm bg-emerald-600 hover:bg-emerald-700"
+                    disabled={!canSubmit || createOrderMutation.isPending || !isOnline}
+                    onClick={() => createOrderMutation.mutate("promptpay")}
+                  >
+                    {createOrderMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    <span className="truncate">PromptPay จ่ายแล้ว / ออกคิว</span>
+                  </Button>
+                </div>
+              )}
             </div>
           ) : null}
         </aside>

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.audit import AuditLog
 from app.models.platform import (
+    PlatformCustomRole,
     PlatformOperator,
     PlatformOperatorInvitation,
     PlatformOperatorRoleAssignment,
@@ -17,15 +18,22 @@ from app.models.platform import (
 )
 from app.schemas.platform import (
     PlatformAccessReviewRequest,
+    PlatformCustomRoleCreate,
+    PlatformCustomRoleUpdate,
     PlatformOperatorInvitationAccept,
     PlatformOperatorInvitationRead,
     PlatformOperatorInviteRequest,
     PlatformOperatorRead,
     PlatformOperatorStateRequest,
+    PlatformPermissionDefinitionRead,
     PlatformRoleAssignmentRequest,
+    PlatformRoleDefinitionRead,
     PlatformTeamOperatorRead,
 )
 from app.services.platform_access_service import (
+    PLATFORM_ASSIGNABLE_PERMISSIONS,
+    PLATFORM_PERMISSION_CATALOG,
+    PLATFORM_ROLE_DESCRIPTIONS,
     PLATFORM_ROLE_LABELS,
     PLATFORM_ROLE_PERMISSIONS,
     active_owner_count,
@@ -46,15 +54,161 @@ class PlatformTeamService:
         self.actor_id = actor_id
 
     @staticmethod
-    def role_definitions() -> list[dict[str, object]]:
-        return [
-            {
-                "code": code,
-                "label": PLATFORM_ROLE_LABELS[code],
-                "permissions": sorted(PLATFORM_ROLE_PERMISSIONS[code]),
-            }
+    def permission_definitions() -> list[PlatformPermissionDefinitionRead]:
+        return [PlatformPermissionDefinitionRead(**item) for item in PLATFORM_PERMISSION_CATALOG]
+
+    async def role_definitions(self, *, environment: str) -> list[PlatformRoleDefinitionRead]:
+        system_roles = [
+            PlatformRoleDefinitionRead(
+                code=code,
+                label=PLATFORM_ROLE_LABELS[code],
+                description=PLATFORM_ROLE_DESCRIPTIONS[code],
+                permissions=sorted(PLATFORM_ROLE_PERMISSIONS[code]),
+                environment=environment,
+                is_system=True,
+                is_active=True,
+                version=1,
+            )
             for code in PLATFORM_ROLE_LABELS
         ]
+        custom_rows = (
+            await self.db.scalars(
+                select(PlatformCustomRole)
+                .where(PlatformCustomRole.environment == environment)
+                .order_by(PlatformCustomRole.is_active.desc(), PlatformCustomRole.label, PlatformCustomRole.code)
+            )
+        ).all()
+        return system_roles + [self._custom_role_read(row) for row in custom_rows]
+
+    async def create_custom_role(
+        self,
+        payload: PlatformCustomRoleCreate,
+        *,
+        actor_roles: list[str],
+        actor_permissions: list[str],
+        ip_address: str | None,
+        user_agent: str | None,
+    ) -> PlatformRoleDefinitionRead:
+        if payload.code in PLATFORM_ROLE_PERMISSIONS:
+            raise HTTPException(status_code=409, detail="System role codes are reserved")
+        permissions = self._validate_permissions(payload.permissions)
+        self._protect_grant_scope(permissions, actor_permissions)
+        existing = await self.db.scalar(
+            select(PlatformCustomRole).where(
+                PlatformCustomRole.environment == payload.environment,
+                PlatformCustomRole.code == payload.code,
+            )
+        )
+        if existing is not None:
+            raise HTTPException(status_code=409, detail="Role code already exists in this environment")
+        row = PlatformCustomRole(
+            code=payload.code,
+            label=payload.label,
+            description=payload.description,
+            permissions=permissions,
+            environment=payload.environment,
+            is_active=True,
+            version=1,
+            created_by=self._required_actor(),
+            updated_by=self._required_actor(),
+        )
+        self.db.add(row)
+        await self.db.flush()
+        self._audit(
+            action="platform.team.custom_role.create",
+            resource="PlatformCustomRole",
+            resource_id=row.id,
+            reason=payload.reason,
+            actor_roles=actor_roles,
+            environment=payload.environment,
+            request_id=payload.request_id,
+            old_value=None,
+            new_value={
+                "code": row.code,
+                "label": row.label,
+                "description": row.description,
+                "permissions": row.permissions,
+                "is_active": row.is_active,
+                "version": row.version,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        await self.db.commit()
+        return self._custom_role_read(row)
+
+    async def update_custom_role(
+        self,
+        code: str,
+        payload: PlatformCustomRoleUpdate,
+        *,
+        actor_roles: list[str],
+        actor_permissions: list[str],
+        ip_address: str | None,
+        user_agent: str | None,
+    ) -> PlatformRoleDefinitionRead:
+        permissions = self._validate_permissions(payload.permissions)
+        self._protect_grant_scope(permissions, actor_permissions)
+        row = await self.db.scalar(
+            select(PlatformCustomRole)
+            .where(
+                PlatformCustomRole.environment == payload.environment,
+                PlatformCustomRole.code == code,
+            )
+            .with_for_update()
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="Custom role not found")
+        if row.version != payload.expected_version:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "stale_platform_role_version",
+                    "message": "Role changed; refresh before retrying",
+                    "expected": payload.expected_version,
+                    "current": row.version,
+                },
+            )
+        if row.is_active and not payload.is_active:
+            await self._protect_role_deactivation(row)
+        before = {
+            "label": row.label,
+            "description": row.description,
+            "permissions": sorted(row.permissions or []),
+            "is_active": row.is_active,
+            "version": row.version,
+        }
+        access_changed = sorted(row.permissions or []) != permissions or row.is_active != payload.is_active
+        row.label = payload.label
+        row.description = payload.description
+        row.permissions = permissions
+        row.is_active = payload.is_active
+        row.deactivated_at = None if payload.is_active else datetime.now(timezone.utc)
+        row.updated_by = self._required_actor()
+        row.version += 1
+        if access_changed:
+            await self._invalidate_role_assignees(row.code, row.environment)
+        self._audit(
+            action="platform.team.custom_role.update",
+            resource="PlatformCustomRole",
+            resource_id=row.id,
+            reason=payload.reason,
+            actor_roles=actor_roles,
+            environment=payload.environment,
+            request_id=payload.request_id,
+            old_value=before,
+            new_value={
+                "label": row.label,
+                "description": row.description,
+                "permissions": row.permissions,
+                "is_active": row.is_active,
+                "version": row.version,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        await self.db.commit()
+        return self._custom_role_read(row)
 
     async def list_operators(self, *, environment: str) -> list[PlatformTeamOperatorRead]:
         rows = (
@@ -90,9 +244,15 @@ class PlatformTeamService:
         payload: PlatformOperatorInviteRequest,
         *,
         actor_roles: list[str],
+        actor_permissions: list[str],
         ip_address: str | None,
         user_agent: str | None,
     ) -> PlatformOperatorInvitationRead:
+        await self._ensure_role_assignable(
+            payload.role_code,
+            environment=payload.environment,
+            actor_permissions=actor_permissions,
+        )
         existing_request = await self.db.scalar(
             select(PlatformOperatorInvitation).where(
                 PlatformOperatorInvitation.request_id == payload.request_id
@@ -177,6 +337,10 @@ class PlatformTeamService:
             or invitation.expires_at <= now
         ):
             raise HTTPException(status_code=410, detail="Platform invitation is invalid or expired")
+        await self._ensure_role_assignable(
+            invitation.role_code,
+            environment=invitation.environment,
+        )
         duplicate = await self.db.scalar(
             select(PlatformOperator.id).where(
                 or_(
@@ -237,9 +401,15 @@ class PlatformTeamService:
         payload: PlatformRoleAssignmentRequest,
         *,
         actor_roles: list[str],
+        actor_permissions: list[str],
         ip_address: str | None,
         user_agent: str | None,
     ) -> PlatformTeamOperatorRead:
+        await self._ensure_role_assignable(
+            payload.role_code,
+            environment=payload.environment,
+            actor_permissions=actor_permissions,
+        )
         repeated = await self.db.scalar(
             select(PlatformOperatorRoleAssignment).where(
                 PlatformOperatorRoleAssignment.request_id == payload.request_id
@@ -288,9 +458,15 @@ class PlatformTeamService:
         payload: PlatformRoleAssignmentRequest,
         *,
         actor_roles: list[str],
+        actor_permissions: list[str],
         ip_address: str | None,
         user_agent: str | None,
     ) -> PlatformTeamOperatorRead:
+        await self._ensure_role_assignable(
+            payload.role_code,
+            environment=payload.environment,
+            actor_permissions=actor_permissions,
+        )
         if await self._idempotent_replay(
             "platform.team.role.revoke", operator_id, payload.request_id
         ):
@@ -458,6 +634,128 @@ class PlatformTeamService:
         )
         await self.db.commit()
         return count
+
+    async def role_permissions(self, role_code: str, *, environment: str) -> frozenset[str]:
+        if role_code in PLATFORM_ROLE_PERMISSIONS:
+            return PLATFORM_ROLE_PERMISSIONS[role_code]
+        row = await self.db.scalar(
+            select(PlatformCustomRole).where(
+                PlatformCustomRole.environment == environment,
+                PlatformCustomRole.code == role_code,
+                PlatformCustomRole.is_active.is_(True),
+            )
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="Active Platform role not found")
+        return frozenset(row.permissions or [])
+
+    async def _ensure_role_assignable(
+        self,
+        role_code: str,
+        *,
+        environment: str,
+        actor_permissions: list[str] | None = None,
+    ) -> frozenset[str]:
+        permissions = await self.role_permissions(role_code, environment=environment)
+        if actor_permissions is not None:
+            self._protect_grant_scope(permissions, actor_permissions)
+        return permissions
+
+    @staticmethod
+    def _validate_permissions(permissions: list[str]) -> list[str]:
+        normalized = sorted(set(permissions))
+        unknown = sorted(set(normalized) - PLATFORM_ASSIGNABLE_PERMISSIONS)
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "unknown_platform_permissions",
+                    "message": "Role contains permissions outside the Platform catalog",
+                    "permissions": unknown,
+                },
+            )
+        if "*" in normalized:
+            raise HTTPException(status_code=422, detail="Wildcard permission is reserved for Platform Owner")
+        return normalized
+
+    @staticmethod
+    def _protect_grant_scope(
+        role_permissions: list[str] | frozenset[str], actor_permissions: list[str]
+    ) -> None:
+        if "*" in actor_permissions:
+            return
+        missing = sorted(set(role_permissions) - set(actor_permissions))
+        if missing:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "platform_role_escalation_denied",
+                    "message": "You cannot grant permissions that you do not hold",
+                    "permissions": missing,
+                },
+            )
+
+    async def _protect_role_deactivation(self, role: PlatformCustomRole) -> None:
+        assignment_count = await self.db.scalar(
+            select(func.count(PlatformOperatorRoleAssignment.id)).where(
+                PlatformOperatorRoleAssignment.environment == role.environment,
+                PlatformOperatorRoleAssignment.role_code == role.code,
+                PlatformOperatorRoleAssignment.revoked_at.is_(None),
+            )
+        )
+        now = datetime.now(timezone.utc)
+        pending_invitation_count = await self.db.scalar(
+            select(func.count(PlatformOperatorInvitation.id)).where(
+                PlatformOperatorInvitation.environment == role.environment,
+                PlatformOperatorInvitation.role_code == role.code,
+                PlatformOperatorInvitation.accepted_at.is_(None),
+                PlatformOperatorInvitation.revoked_at.is_(None),
+                PlatformOperatorInvitation.expires_at > now,
+            )
+        )
+        if assignment_count or pending_invitation_count:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "platform_role_in_use",
+                    "message": "Reassign operators and let pending invitations expire before disabling this role",
+                    "active_assignments": int(assignment_count or 0),
+                    "pending_invitations": int(pending_invitation_count or 0),
+                },
+            )
+
+    async def _invalidate_role_assignees(self, role_code: str, environment: str) -> None:
+        operator_ids = list(
+            (
+                await self.db.scalars(
+                    select(PlatformOperatorRoleAssignment.operator_id).where(
+                        PlatformOperatorRoleAssignment.environment == environment,
+                        PlatformOperatorRoleAssignment.role_code == role_code,
+                        PlatformOperatorRoleAssignment.revoked_at.is_(None),
+                    )
+                )
+            ).all()
+        )
+        if not operator_ids:
+            return
+        operators = list(
+            (await self.db.scalars(select(PlatformOperator).where(PlatformOperator.id.in_(operator_ids)))).all()
+        )
+        for operator in operators:
+            await self._invalidate_access(operator, reason="custom-role-updated")
+
+    @staticmethod
+    def _custom_role_read(row: PlatformCustomRole) -> PlatformRoleDefinitionRead:
+        return PlatformRoleDefinitionRead(
+            code=row.code,
+            label=row.label,
+            description=row.description,
+            permissions=sorted(row.permissions or []),
+            environment=row.environment,
+            is_system=False,
+            is_active=row.is_active,
+            version=row.version,
+        )
 
     async def _operator_read(self, operator: PlatformOperator, *, environment: str) -> PlatformTeamOperatorRead:
         roles, permissions = await effective_platform_access(self.db, operator, environment=environment)
@@ -643,3 +941,5 @@ class PlatformTeamService:
         if self.actor_id is None:
             raise HTTPException(status_code=401, detail="Platform actor is required")
         return self.actor_id
+    PlatformPermissionDefinitionRead,
+    PlatformRoleDefinitionRead,

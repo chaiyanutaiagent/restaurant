@@ -13,8 +13,10 @@ import type {
   PlatformMfaSetup,
   PlatformOperator,
   PlatformOperatorInvitation,
+  PlatformPermissionDefinition,
   PlatformRoleCode,
   PlatformRoleDefinition,
+  PlatformEnvironment,
   PlatformTeamOperator,
   PlatformOperationsSnapshot,
   PlatformOperationsSummary,
@@ -139,7 +141,18 @@ export const platformApi = {
       mfa_code: mfaCode || null,
     }),
   me: () => platformApiClient.get<PlatformApiResponse<PlatformOperator>>("/auth/me"),
-  platformRoles: () => platformApiClient.get<PlatformApiResponse<PlatformRoleDefinition[]>>("/team/roles"),
+  platformRoles: (environment?: PlatformEnvironment) =>
+    platformApiClient.get<PlatformApiResponse<PlatformRoleDefinition[]>>("/team/roles", { params: environment ? { environment } : undefined }),
+  platformPermissions: () =>
+    platformApiClient.get<PlatformApiResponse<PlatformPermissionDefinition[]>>("/team/permissions"),
+  createPlatformRole: (payload: {
+    code: string; label: string; description: string | null; permissions: string[];
+    environment: PlatformEnvironment; reason: string; request_id: string;
+  }) => platformApiClient.post<PlatformApiResponse<PlatformRoleDefinition>>("/team/roles", payload),
+  updatePlatformRole: (roleCode: string, payload: {
+    label: string; description: string | null; permissions: string[]; is_active: boolean;
+    environment: PlatformEnvironment; reason: string; request_id: string; expected_version: number;
+  }) => platformApiClient.put<PlatformApiResponse<PlatformRoleDefinition>>(`/team/roles/${roleCode}`, payload),
   teamOperators: (environment?: "uat" | "production") =>
     platformApiClient.get<PlatformApiResponse<PlatformTeamOperator[]>>("/team/operators", { params: environment ? { environment } : undefined }),
   teamInvitations: (environment?: "uat" | "production") =>

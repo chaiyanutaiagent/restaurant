@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 import re
 import uuid
 
@@ -17,6 +17,7 @@ USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,99}$")
 PLAN_CODE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,49}$")
 FEATURE_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{1,99}$")
 LIMIT_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{1,99}$")
+PLATFORM_ROLE_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,39}$")
 OPERATIONS_COMPONENT_KEYS = {
     "legacy_database",
     "platform_database",
@@ -68,8 +69,9 @@ class PlatformLoginRequest(BaseSchema):
         return normalized
 
 
-PlatformRoleCode = Literal[
-    "platform_owner", "operations", "support", "billing", "security", "auditor"
+PlatformRoleCode = Annotated[
+    str,
+    Field(min_length=3, max_length=40, pattern=r"^[a-z][a-z0-9_]{2,39}$"),
 ]
 PlatformEnvironment = Literal["uat", "production"]
 
@@ -94,7 +96,85 @@ class PlatformOperatorRead(BaseSchema):
 class PlatformRoleDefinitionRead(BaseSchema):
     code: PlatformRoleCode
     label: str
+    description: str | None = None
     permissions: list[str]
+    environment: PlatformEnvironment
+    is_system: bool = False
+    is_active: bool = True
+    version: int = 1
+
+
+class PlatformPermissionDefinitionRead(BaseSchema):
+    code: str
+    label: str
+    group: str
+    group_label: str
+    risk: Literal["standard", "sensitive", "critical"] = "standard"
+
+
+class PlatformCustomRoleCreate(BaseSchema):
+    code: PlatformRoleCode
+    label: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    permissions: list[str] = Field(min_length=1, max_length=100)
+    environment: PlatformEnvironment
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+
+    @field_validator("code")
+    @classmethod
+    def normalize_role_code(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not PLATFORM_ROLE_CODE_PATTERN.fullmatch(normalized):
+            raise ValueError("role code must contain lowercase letters, numbers, or underscores")
+        return normalized
+
+    @field_validator("label", "reason")
+    @classmethod
+    def normalize_role_text(cls, value: str, info) -> str:
+        return _required_text(value, field_name=info.field_name, max_length=500)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_role_description(cls, value: str | None) -> str | None:
+        return (value.strip() or None) if value is not None else None
+
+    @field_validator("permissions")
+    @classmethod
+    def normalize_role_permissions(cls, value: list[str]) -> list[str]:
+        normalized = sorted({item.strip() for item in value if item.strip()})
+        if not normalized:
+            raise ValueError("at least one permission is required")
+        return normalized
+
+
+class PlatformCustomRoleUpdate(BaseSchema):
+    label: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    permissions: list[str] = Field(min_length=1, max_length=100)
+    is_active: bool = True
+    environment: PlatformEnvironment
+    reason: str = Field(min_length=1, max_length=500)
+    request_id: uuid.UUID
+    expected_version: int = Field(ge=1)
+
+    @field_validator("label", "reason")
+    @classmethod
+    def normalize_update_text(cls, value: str, info) -> str:
+        return _required_text(value, field_name=info.field_name, max_length=500)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_update_description(cls, value: str | None) -> str | None:
+        return (value.strip() or None) if value is not None else None
+
+    @field_validator("permissions")
+    @classmethod
+    def normalize_update_permissions(cls, value: list[str]) -> list[str]:
+        normalized = sorted({item.strip() for item in value if item.strip()})
+        if not normalized:
+            raise ValueError("at least one permission is required")
+        return normalized
 
 
 class PlatformTeamOperatorRead(PlatformOperatorRead):

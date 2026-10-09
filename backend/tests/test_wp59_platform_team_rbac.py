@@ -9,6 +9,8 @@ from fastapi import HTTPException
 
 from app.dependencies import PlatformTokenData
 from app.services.platform_access_service import (
+    PLATFORM_ASSIGNABLE_PERMISSIONS,
+    PLATFORM_PERMISSION_CATALOG,
     PLATFORM_ROLE_PERMISSIONS,
     has_permission,
     permissions_for_roles,
@@ -45,6 +47,32 @@ class PlatformPermissionMatrixTests(unittest.TestCase):
 
 
 class PlatformTeamGovernanceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_custom_role_permission_catalog_has_unique_known_codes(self) -> None:
+        codes = [item["code"] for item in PLATFORM_PERMISSION_CATALOG]
+        self.assertEqual(len(codes), len(set(codes)))
+        self.assertEqual(PLATFORM_ASSIGNABLE_PERMISSIONS, frozenset(codes))
+
+    async def test_custom_role_rejects_unknown_and_wildcard_permissions(self) -> None:
+        with self.assertRaises(HTTPException) as unknown:
+            PlatformTeamService._validate_permissions(["platform.unknown.manage"])
+        self.assertEqual(unknown.exception.status_code, 422)
+        with self.assertRaises(HTTPException) as wildcard:
+            PlatformTeamService._validate_permissions(["*"])
+        self.assertEqual(wildcard.exception.status_code, 422)
+
+    async def test_operator_cannot_grant_permission_they_do_not_hold(self) -> None:
+        with self.assertRaises(HTTPException) as raised:
+            PlatformTeamService._protect_grant_scope(
+                ["platform.billing.manage"],
+                ["platform.team.manage"],
+            )
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(raised.exception.detail["code"], "platform_role_escalation_denied")
+        PlatformTeamService._protect_grant_scope(
+            ["platform.billing.manage", "platform.team.manage"],
+            ["*"],
+        )
+
     async def test_last_owner_cannot_be_removed(self) -> None:
         service = PlatformTeamService(AsyncMock(), actor_id=uuid.uuid4())
         with patch(

@@ -15,6 +15,8 @@ from app.dependencies import PlatformTokenData, get_current_platform_operator
 from app.models.platform import PlatformOperator
 from app.schemas.platform import (
     PlatformCompanyCreate,
+    PlatformCustomRoleCreate,
+    PlatformCustomRoleUpdate,
     PlatformLifecycleAction,
     PlatformLoginRequest,
     PlatformMfaCodeRequest,
@@ -472,10 +474,68 @@ def _same_platform_environment(current: PlatformTokenData, environment: str) -> 
 
 @router.get("/team/roles")
 async def team_roles(
+    environment: str | None = Query(default=None, pattern="^(uat|production)$"),
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.view")
+    environment = environment or current.environment
+    _same_platform_environment(current, environment)
+    rows = await PlatformTeamService(db, actor_id=current.operator_id).role_definitions(
+        environment=environment
+    )
+    return ok([row.model_dump(mode="json") for row in rows])
+
+
+@router.get("/team/permissions")
+async def team_permissions(
     current: PlatformTokenData = Depends(get_current_platform_operator),
 ) -> dict[str, Any]:
     require_platform_permission(current, "platform.team.view")
-    return ok(PlatformTeamService.role_definitions())
+    rows = PlatformTeamService.permission_definitions()
+    return ok([row.model_dump(mode="json") for row in rows])
+
+
+@router.post("/team/roles", status_code=status.HTTP_201_CREATED)
+async def create_team_role(
+    payload: PlatformCustomRoleCreate,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.manage")
+    _same_platform_environment(current, payload.environment)
+    ip_address, user_agent = _client(request)
+    row = await PlatformTeamService(db, actor_id=current.operator_id).create_custom_role(
+        payload,
+        actor_roles=current.role_codes,
+        actor_permissions=current.permissions,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(row.model_dump(mode="json"))
+
+
+@router.put("/team/roles/{role_code}")
+async def update_team_role(
+    role_code: str,
+    payload: PlatformCustomRoleUpdate,
+    request: Request,
+    current: PlatformTokenData = Depends(get_current_platform_operator),
+    db: AsyncSession = Depends(get_identity_db),
+) -> dict[str, Any]:
+    require_platform_permission(current, "platform.team.manage")
+    _same_platform_environment(current, payload.environment)
+    ip_address, user_agent = _client(request)
+    row = await PlatformTeamService(db, actor_id=current.operator_id).update_custom_role(
+        role_code,
+        payload,
+        actor_roles=current.role_codes,
+        actor_permissions=current.permissions,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return ok(row.model_dump(mode="json"))
 
 
 @router.get("/team/operators")
@@ -537,6 +597,7 @@ async def invite_team_operator(
     row = await PlatformTeamService(db, actor_id=current.operator_id).invite(
         payload,
         actor_roles=current.role_codes,
+        actor_permissions=current.permissions,
         ip_address=ip_address,
         user_agent=user_agent,
     )
@@ -558,6 +619,7 @@ async def assign_team_role(
         operator_id,
         payload,
         actor_roles=current.role_codes,
+        actor_permissions=current.permissions,
         ip_address=ip_address,
         user_agent=user_agent,
     )
@@ -579,6 +641,7 @@ async def revoke_team_role(
         operator_id,
         payload,
         actor_roles=current.role_codes,
+        actor_permissions=current.permissions,
         ip_address=ip_address,
         user_agent=user_agent,
     )

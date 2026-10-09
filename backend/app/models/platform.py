@@ -142,10 +142,6 @@ class PlatformOperatorRoleAssignment(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "platform_operator_role_assignments"
     __table_args__ = (
         CheckConstraint(
-            "role_code IN ('platform_owner', 'operations', 'support', 'billing', 'security', 'auditor')",
-            name="role_code_valid",
-        ),
-        CheckConstraint(
             "environment IN ('uat', 'production')",
             name="environment_valid",
         ),
@@ -189,10 +185,6 @@ class PlatformOperatorInvitation(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "platform_operator_invitations"
     __table_args__ = (
         CheckConstraint(
-            "role_code IN ('platform_owner', 'operations', 'support', 'billing', 'security', 'auditor')",
-            name="role_code_valid",
-        ),
-        CheckConstraint(
             "environment IN ('uat', 'production')",
             name="environment_valid",
         ),
@@ -217,6 +209,41 @@ class PlatformOperatorInvitation(UUIDMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("platform_operators.id"), nullable=True
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PlatformCustomRole(UUIDMixin, TimestampMixin, Base):
+    """Environment-scoped role assembled from the server permission catalog."""
+
+    __tablename__ = "platform_custom_roles"
+    __table_args__ = (
+        CheckConstraint(
+            "environment IN ('uat', 'production')",
+            name="environment_valid",
+        ),
+        CheckConstraint("version > 0", name="version_positive"),
+        UniqueConstraint("environment", "code", name="uq_platform_custom_roles_environment_code"),
+        Index("ix_platform_custom_roles_environment_active", "environment", "is_active"),
+    )
+
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    permissions: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'::json"),
+    )
+    environment: Mapped[str] = mapped_column(String(20), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform_operators.id"), nullable=False
+    )
+    updated_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform_operators.id"), nullable=False
+    )
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class PlatformTenantProfile(UUIDMixin, TimestampMixin, Base):

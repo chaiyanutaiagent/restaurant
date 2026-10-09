@@ -1290,3 +1290,69 @@ test("business admin rejects a session belonging to another Tenant", async ({ pa
   await page.goto("/alpha-cafe/admin");
   await expect(page).toHaveURL(/\/403$/);
 });
+
+test("Platform Owner creates a custom role from the permission catalog", async ({ page }) => {
+  await installAuthenticatedSession(page);
+  const teamOperator = {
+    ...operator,
+    active_session_count: 1,
+    stale_access: false,
+    review_due: false,
+    deactivated_at: null,
+    deactivation_reason: null,
+    deep_links: { team: `/platform/team?operator=${operator.id}`, audit: `/platform/audit?operator_id=${operator.id}`, security: `/platform/security?operator=${operator.id}` },
+  };
+  const roles = [{
+    code: "support",
+    label: "Support",
+    description: "ดูแลลูกค้า",
+    permissions: ["platform.company.view", "platform.support.view"],
+    environment: "uat",
+    is_system: true,
+    is_active: true,
+    version: 1,
+  }];
+  const permissions = [
+    { code: "platform.company.view", label: "ดูบริษัทลูกค้า", group: "companies", group_label: "บริษัทลูกค้า", risk: "standard" },
+    { code: "platform.support.view", label: "ดู Support Ticket", group: "support", group_label: "Privacy & Support", risk: "standard" },
+  ];
+  let submitted: Record<string, unknown> | null = null;
+
+  await page.route("**/api/v1/platform/team/operators?environment=uat", async (route) => {
+    await fulfill(route, response([teamOperator]));
+  });
+  await page.route("**/api/v1/platform/team/roles?environment=uat", async (route) => {
+    await fulfill(route, response(roles));
+  });
+  await page.route("**/api/v1/platform/team/permissions", async (route) => {
+    await fulfill(route, response(permissions));
+  });
+  await page.route("**/api/v1/platform/team/roles", async (route) => {
+    submitted = await route.request().postDataJSON();
+    await fulfill(route, response({
+      ...submitted,
+      description: null,
+      is_system: false,
+      is_active: true,
+      version: 1,
+    }), 201);
+  });
+
+  await page.goto("/platform/team");
+  await expect(page.getByRole("heading", { name: "Role และสิทธิ์ของเจ้าหน้าที่" })).toBeVisible();
+  await page.getByRole("button", { name: "สร้าง Role ใหม่" }).click();
+  await page.getByPlaceholder("เช่น เจ้าหน้าที่ดูแลลูกค้า").fill("เจ้าหน้าที่ดูแลลูกค้า UAT");
+  await page.getByPlaceholder("เช่น customer_care").fill("customer_care_uat");
+  await page.getByPlaceholder("บันทึกไว้ใน Audit Log").fill("ทดสอบกำหนดสิทธิ์เอง");
+  await page.locator("label").filter({ hasText: "ดูบริษัทลูกค้า" }).locator('input[type="checkbox"]').check();
+  await page.getByRole("button", { name: "บันทึก Role" }).click();
+
+  await expect.poll(() => submitted).not.toBeNull();
+  expect(submitted).toMatchObject({
+    code: "customer_care_uat",
+    label: "เจ้าหน้าที่ดูแลลูกค้า UAT",
+    permissions: ["platform.company.view"],
+    environment: "uat",
+    reason: "ทดสอบกำหนดสิทธิ์เอง",
+  });
+});

@@ -15,13 +15,26 @@ export type PlatformOperator = {
   access_review_due_at: string | null;
 };
 
-export type PlatformRoleCode = "platform_owner" | "operations" | "support" | "billing" | "security" | "auditor";
+export type PlatformRoleCode = string;
 export type PlatformEnvironment = "uat" | "production";
 
 export type PlatformRoleDefinition = {
   code: PlatformRoleCode;
   label: string;
+  description: string | null;
   permissions: string[];
+  environment: PlatformEnvironment;
+  is_system: boolean;
+  is_active: boolean;
+  version: number;
+};
+
+export type PlatformPermissionDefinition = {
+  code: string;
+  label: string;
+  group: string;
+  group_label: string;
+  risk: "standard" | "sensitive" | "critical";
 };
 
 export type PlatformTeamOperator = PlatformOperator & {

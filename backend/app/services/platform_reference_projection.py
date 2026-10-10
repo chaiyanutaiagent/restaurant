@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import Any
 import uuid
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy import inspect, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_object_session, async_sessionmaker
 
 from app.config import settings
 from app.database import AsyncSessionLocal, PlatformSessionLocal, RestaurantSessionLocal
@@ -395,6 +395,20 @@ async def ensure_legacy_operational_user_reference(
         or settings.restaurant_service_database != "legacy"
     ):
         return False
+
+    # authenticate_user() flushes last_login_at. Its server-generated updated_at
+    # is then expired even with expire_on_commit=False. Reading it via getattr
+    # would perform synchronous lazy IO and raise MissingGreenlet under asyncio.
+    state = inspect(user, raiseerr=False)
+    unloaded = [
+        column for column in REFERENCE_COLUMNS["user"]
+        if state is not None and column in state.unloaded
+    ]
+    if unloaded:
+        source_session = async_object_session(user)
+        if source_session is None:
+            raise ProjectionSourceMissing("Operational user reference is not loaded")
+        await source_session.refresh(user, attribute_names=unloaded)
 
     source = {
         column: getattr(user, column)

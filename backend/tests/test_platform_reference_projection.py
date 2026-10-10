@@ -3,12 +3,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import uuid
+
+from sqlalchemy.orm import make_transient_to_detached
+from app.models.user import User
 
 from app.services.platform_reference_projection import (
     EVENT_TYPE,
     OutboxEvent,
+    ProjectionSourceMissing,
     REFERENCE_COLUMNS,
     _upsert_sql,
     enqueue_reference_event,
@@ -104,6 +108,44 @@ class _ReferenceFactory:
 
 
 class PlatformReferenceProjectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_expired_server_timestamp_is_awaited_before_projection(self) -> None:
+        now = datetime.now(timezone.utc)
+        values = {column: None for column in REFERENCE_COLUMNS["user"] if column != "updated_at"}
+        values.update(id=uuid.uuid4(), company_id=uuid.uuid4(), username="fixture", created_at=now)
+        user = User(**values)
+        make_transient_to_detached(user)
+        source_session = AsyncMock()
+
+        async def refresh(instance, *, attribute_names):
+            self.assertIs(instance, user)
+            self.assertEqual(attribute_names, ["updated_at"])
+            instance.updated_at = now
+
+        source_session.refresh.side_effect = refresh
+        factory = _ReferenceFactory()
+        with (
+            patch("app.services.platform_reference_projection.settings.identity_database", "platform_core"),
+            patch("app.services.platform_reference_projection.settings.restaurant_service_database", "legacy"),
+            patch("app.services.platform_reference_projection.async_object_session", return_value=source_session),
+        ):
+            self.assertTrue(await ensure_legacy_operational_user_reference(user, legacy_session_factory=factory))
+        source_session.refresh.assert_awaited_once()
+        self.assertEqual(factory.session.parameters["updated_at"], now)
+        self.assertEqual(factory.session.commits, 1)
+
+    async def test_detached_unloaded_user_fails_without_operational_write(self) -> None:
+        user = User(id=uuid.uuid4(), company_id=uuid.uuid4())
+        make_transient_to_detached(user)
+        factory = _ReferenceFactory()
+        with (
+            patch("app.services.platform_reference_projection.settings.identity_database", "platform_core"),
+            patch("app.services.platform_reference_projection.settings.restaurant_service_database", "legacy"),
+        ):
+            with self.assertRaises(ProjectionSourceMissing):
+                await ensure_legacy_operational_user_reference(user, legacy_session_factory=factory)
+        self.assertIsNone(factory.session.parameters)
+        self.assertEqual(factory.session.commits, 0)
+
     async def test_platform_user_is_mirrored_to_legacy_operational_fk_target(self) -> None:
         now = datetime.now(timezone.utc)
         values = {

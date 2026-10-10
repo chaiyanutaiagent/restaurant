@@ -1500,6 +1500,7 @@ class DiningService:
             )
 
         sale_svc = SaleService(self.db)
+        table_name = table.name if table else None
         sale_order = await sale_svc.create_sale(
             company_id,
             branch_id,
@@ -1511,6 +1512,10 @@ class DiningService:
             pricing_result=pricing,
         )
 
+        # Sale commits independently. A failed optional accounting handoff (or
+        # duplicate-sale recovery) rolls back and expires this session/table.
+        # Reload before attribute access; never create a second sale to recover.
+        await self.db.refresh(session)
         # ปิด session
         await self.close_session(session, sale_order_id=sale_order.id)
 
@@ -1521,7 +1526,7 @@ class DiningService:
             paid_amount=sale_order.paid_amount,
             change_amount=sale_order.change_amount,
             session_id=session.id,
-            table_name=table.name if table else None,
+            table_name=table_name,
             queue_number=session.queue_number,
             source_type=source_type,
             customer_name=customer_name,

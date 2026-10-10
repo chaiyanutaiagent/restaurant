@@ -788,6 +788,8 @@ class SaleService:
         *,
         brand_id: uuid.UUID | None = None,
     ) -> SaleOrder:
+        # Accounting recovery can roll back and expire every ORM instance.
+        order_id = order.id
         await ensure_sale_completed_handoff(
             self.db,
             company_id=company_id,
@@ -801,7 +803,7 @@ class SaleService:
         )
         await self.db.commit()
         await self._ensure_accounting_handoff(order, company_id, user_id)
-        return await self.get_sale(order.id, company_id)
+        return await self.get_sale(order_id, company_id)
 
     async def create_sale(
         self,
@@ -1303,12 +1305,13 @@ class SaleService:
     ) -> None:
         if not self.legacy_side_effects_enabled:
             return
+        order_number = order.order_number
         try:
             accounting_svc = AccountingService(self.db)
             await accounting_svc.post_sale(order, company_id, user_id)
             await self.db.commit()
         except Exception as exc:
-            logger.error("Accounting post failed for %s: %s", order.order_number, exc)
+            logger.error("Accounting post failed for %s: %s", order_number, exc)
             await self.db.rollback()
 
     async def _generate_order_number(self, company_id: uuid.UUID, date_str: str) -> str:

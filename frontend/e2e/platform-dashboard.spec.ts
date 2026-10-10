@@ -43,7 +43,7 @@ test("company create explains rejected fields and allows corrected submission", 
   await page.getByRole("button", { name: "เปิด Company ใหม่" }).click();
   await page.getByLabel("ชื่อบริษัท *", { exact: true }).fill("QA company");
   await page.getByLabel("Business name *", { exact: true }).fill("restaurant");
-  await expect(page.getByText("ชื่อธุรกิจในลิงก์ของ Foodchainservice", { exact: false })).toBeVisible();
+  await expect(page.getByText("ชื่อสำหรับเข้าใช้งานธุรกิจใน Foodchainservice", { exact: false })).toBeVisible();
   await page.getByLabel("ชื่อ Company Owner *", { exact: true }).fill("Owner Shop");
   const username = page.getByLabel("Username Owner *", { exact: true });
   await username.fill("owner@example.com");

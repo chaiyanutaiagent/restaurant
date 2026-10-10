@@ -1,0 +1,109 @@
+{
+  "verified_at_utc": "2026-10-10T18:15:56Z",
+  "candidate_commit": "04044f84ff9497e3dfc25a40739d0688018cda58",
+  "status": "backend_uat_deployed_ready_for_direct_apk_physical_acceptance",
+  "backend": {
+    "image": "restaurant-pos-backend:uat-print-uat14",
+    "image_id": "sha256:83eacd273d1ff6ca1111b42d3a11bf73b1ebaf279643b0ca15f06ad6ea76261c",
+    "container": "restaurant-pos-uat-drill-backend-1",
+    "health": "healthy",
+    "readiness": "ok",
+    "migration": "p6takeaway0010",
+    "constraint_valid": true,
+    "invalid_copy_rows": 0
+  },
+  "backup": {
+    "directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/takeaway-store-uat14-print-batch",
+    "configuration": [
+      ".env.uat",
+      "docker-compose.prod.yml",
+      "docker-compose.uat.yml",
+      "docker-compose.uat-superadmin.yml"
+    ],
+    "database": "takeaway.dump",
+    "sha256": "5ad2d44ec28a0d3b63d218af01919121f26ed394f10ad2fce507634b7bb983f2",
+    "archive_verification": "pg_restore --list and full decode --file=/dev/null succeeded; checksum verified before resume",
+    "private_runtime_evidence": "backend-before.json/backend-after-retry.json/runtime-backend.env; credentials remain private on UAT host, not committed"
+  },
+  "smoke": {
+    "authentication": "Temporary scoped cashier session, 15-minute deadline; revoked in finally after each attempt; no password reset/login bypass flag change. Password login not tested.",
+    "public_https_gets": {
+      "/api/v1/takeaway/status": 200,
+      "/api/v1/takeaway/receipts?limit=10": 200,
+      "/api/v1/takeaway/orders/b27b4470-7506-4c2e-b901-ac79b1911aaf/receipt": 200,
+      "/api/v1/takeaway/orders?active_only=true": 200
+    },
+    "wrong_company": 403,
+    "audit_api": {
+      "transport": "Deployed FastAPI application via ASGITransport, actual authorization; operational DB dependency binds to outer rollback transaction with commit savepoints",
+      "fixture": "Cloned order/receipt under new UUID and unique receipt/order keys. No actual payment, stock movement, acceptance or handoff.",
+      "customer_first": {
+        "status": 200,
+        "replay": false
+      },
+      "customer_duplicate": {
+        "status": 200,
+        "replay": true
+      },
+      "preparation_first": {
+        "status": 200,
+        "replay": false
+      },
+      "preparation_duplicate": {
+        "status": 200,
+        "replay": true
+      },
+      "print_count": 2,
+      "audits": 2,
+      "remaining_fixture_orders_receipts_audits_after_rollback": 0
+    }
+  },
+  "unchanged": {
+    "production_containers_images_env": true,
+    "shared_web_image": "restaurant-pos-frontend:uat-recipes-6e595d8",
+    "runtime_flags": "All environment values unchanged except deployment metadata BACKEND_IMAGE; actual executable image verified using Config.Image and image ID.",
+    "real_queue4_state": [
+      "paid",
+      "picked_up"
+    ],
+    "queue4_before_and_after_snapshot_sha256": "69e36cca91cda44007068ebb658167c6bcd08475311d89443ed779f35aeb6168",
+    "snapshot_covers": [
+      "order",
+      "receipt",
+      "order_items",
+      "payments"
+    ],
+    "note": "Queue4 was already picked_up before deployment, proven by identical pre-migration and post-smoke hashes. No status was reverted.",
+    "public_latest_version": "1.1.0-uat.13 / 10112",
+    "latest_json_sha256": "026f7cb1d657660eabb8f604892607f66679fa683b9723a42800b9e56c2d926b",
+    "public_latest_activated": false
+  },
+  "deployment_events": [
+    "Migration applied once, safely with lock_timeout=5s/statement_timeout=30s.",
+    "Two safety-check-triggered application rollbacks occurred while correcting deployment metadata comparison. Only BACKEND_IMAGE differed; Compose env_file retains the previous pointer during image override. No business flag drift was found.",
+    "Final deployment verifies Config.Image/image ID, excludes only BACKEND_IMAGE from environment equality, and persists desired image in .env.uat.",
+    "Initial smoke incorrectly assumed old queue4 still queued; current baseline was picked_up. Test corrected to compare captured current state and ensure completed order absent from active queue. Successful final smoke and matching full row hashes confirm no real queue change."
+  ],
+  "rollback": {
+    "image": "restaurant-pos-backend:rollback-before-print-uat14",
+    "script": "/home/behappyaiagent/restaurant-uat-deploy-backups/takeaway-store-uat14-print-batch/rollback-backend.sh",
+    "application_rollback_exercised": true,
+    "rule": "Retain additive p6takeaway0010 constraint and audit history. Never automatically downgrade schema or restore over current transaction data."
+  },
+  "physical_acceptance": {
+    "required": true,
+    "status": "requires_physical_cut_validation",
+    "apk_url": "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/foodchainservice-takeaway-store-1.1.0-uat.14.apk",
+    "apk_sha256": "34eabc30c9ba6d7ddab37905c9ff3fa68f36adcd73bfde7d1558934428feacec",
+    "package_id": "com.foodchainservice.takeaway.uat",
+    "version_code": 10113,
+    "certificate_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5",
+    "steps": [
+      "Install direct UAT14 APK as update, preserving app data.",
+      "Select PHOMARK JHP-A1 in printer settings, run the two-cut test and confirm only if each slip fully detaches.",
+      "One payment tap must produce customer receipt -> real full cut -> preparation slip -> real full cut.",
+      "Confirm actual copies or select missing copies; verify recovery prints only missing copies without another sale.",
+      "Public latest must remain UAT13 until physical evidence is accepted and explicit activation authorized."
+    ]
+  }
+}

@@ -492,19 +492,30 @@ async def delete_role(
 @router.get("/branches")
 async def get_branches(
     current: TokenData = Depends(require_permission("system.branch.view")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     service = AdminService(db)
-    data = [branch.model_dump() for branch in await service.list_branches(current.company_id, current)]
-    return ok(data)
+    data = [branch.model_dump() for branch in await service.list_branches(
+        current.company_id, current, include_settings=settings.identity_database != "platform_core",
+    )]
+    return ok(data, {"branch_creation_mode": "workspace" if settings.identity_database == "platform_core" else "legacy"})
 
 
 @router.post("/branches", status_code=status.HTTP_201_CREATED)
 async def create_branch(
     payload: BranchCreateFull,
     current: TokenData = Depends(require_permission("system.branch.create")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
+    # In split mode, branches are Platform-owned references. The old form cannot
+    # select a Brand/product boundary or atomically provision its workspace.
+    # Never create a legacy shadow branch (or operational defaults in Platform).
+    if settings.identity_database == "platform_core":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "code": "BRANCH_WORKSPACE_REQUIRED",
+            "message": "กรุณาสร้างสาขาผ่านหน้าพื้นที่ทำงาน โดยเลือกประเภทกิจการและระบุแบรนด์กับสาขา ระบบจะสร้างข้อมูลให้พร้อมกัน",
+            "next": "/workspaces",
+        })
     await TenantControlPolicy(db).require_capacity(current.company_id, "branches")
     service = AdminService(db)
     branch = await service.create_branch(current.company_id, payload)

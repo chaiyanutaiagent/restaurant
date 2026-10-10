@@ -1,6 +1,6 @@
 export interface ApiResponse<T> {
   data: T;
-  meta: { version: string; page?: number; limit?: number; total?: number };
+  meta: { version: string; page?: number; limit?: number; total?: number; branch_creation_mode?: "workspace" | "legacy" };
   error: string | null;
 }
 

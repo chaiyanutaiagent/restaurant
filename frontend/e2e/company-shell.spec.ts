@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { companySetupErrorMessage } from "../src/lib/companySetupErrors";
 
 const companyId = "11111111-1111-4111-8111-111111111111";
 const brandId = "22222222-2222-4222-8222-222222222222";
@@ -8,6 +9,7 @@ const userId = "55555555-5555-4555-8555-555555555555";
 const permissions = [
   "system.company.edit",
   "system.branch.view",
+  "system.branch.create",
   "system.user.view",
   "system.role.view",
   "system.device.view",
@@ -202,6 +204,39 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
 
 test.beforeEach(async ({ page }) => {
   await installSession(page);
+});
+
+test("branch onboarding routes split companies to the brand and branch workspace flow", async ({ page }) => {
+  await mockCompanyApi(page);
+  await page.route("**/api/v1/system/branches", (route) => route.fulfill({ json: { data: [], meta: { version: "test", branch_creation_mode: "workspace" }, error: null } }));
+  await page.route("**/api/v1/membership/workspaces", (route) => fulfill(route, { company_id: companyId, modules: [] }));
+  let legacyWrites = 0;
+  page.on("request", request => { if (request.url().endsWith("/system/branches") && request.method() === "POST") legacyWrites++; });
+  await page.goto("/company/organization");
+  await expect(page.getByText(/สร้างสาขาพร้อมแบรนด์และประเภทกิจการ/)).toBeVisible();
+  await page.getByRole("button", { name: "เพิ่มสาขา", exact: true }).click();
+  await expect(page).toHaveURL(/\/workspaces$/);
+  expect(legacyWrites).toBe(0);
+});
+
+test("branch onboarding stale form shows Thai field validation instead of HTTP code", async ({ page }) => {
+  await mockCompanyApi(page);
+  await page.route("**/api/v1/system/branches", (route) => route.request().method() === "GET"
+    ? route.fulfill({ json: { data: [], meta: { version: "test", branch_creation_mode: "legacy" }, error: null } })
+    : route.fulfill({ status: 422, json: { detail: [{ loc: ["body", "code"], type: "string_too_long", ctx: { max_length: 20 }, input: "private-value" }] } }));
+  await page.goto("/company/organization");
+  await page.getByRole("button", { name: "เพิ่มสาขา", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "บันทึก", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("รหัสสาขา: กรอกได้ไม่เกิน 20 ตัวอักษร");
+  await expect(page.getByRole("dialog").getByRole("alert")).not.toContainText("status code");
+});
+
+test("branch onboarding errors cover workspace ordering, validation, capacity and server failures", () => {
+  const error = (status: number, detail: unknown) => ({ isAxiosError: true, response: { status, data: { detail } } });
+  expect(companySetupErrorMessage(error(409, { code: "BRANCH_WORKSPACE_REQUIRED", message: "กรุณาสร้างผ่านพื้นที่ทำงาน" }))).toBe("กรุณาสร้างผ่านพื้นที่ทำงาน");
+  expect(companySetupErrorMessage(error(422, [{ loc: ["body", "brand_slug"], type: "value_error", input: "private" }]))).toContain("รหัสแบรนด์:");
+  expect(companySetupErrorMessage(error(409, "Plan limit reached for branches: 5/5"))).toContain("ขีดจำกัด");
+  expect(companySetupErrorMessage(error(500, "internal SQL"))).not.toMatch(/SQL|500|status code/);
 });
 
 test("desktop dashboard renders company context, readiness, stale and sync states", async ({ page }) => {

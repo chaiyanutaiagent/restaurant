@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { platformModule } from "@/config/platformModules";
 import { authApi, membershipApi } from "@/lib/api";
+import { companySetupErrorMessage as errorMessage } from "@/lib/companySetupErrors";
 import { useAuthStore } from "@/stores/auth.store";
 import type { CompanyModuleAccess } from "@/types/moduleAccess";
 import type {
@@ -50,14 +51,6 @@ const accessReason: Record<CompanyModuleAccess["reason_code"], string> = {
   runtime_unavailable: "ระบบยังไม่เปิด",
   permission_denied: "ไม่มีสิทธิ์ใช้งาน",
 };
-
-function errorMessage(error: unknown): string {
-  if (typeof error === "object" && error !== null && "response" in error) {
-    const response = (error as { response?: { data?: { detail?: string } } }).response;
-    return response?.data?.detail ?? "";
-  }
-  return error instanceof Error ? error.message : "";
-}
 
 function newIdempotencyKey(): string {
   if (typeof crypto.randomUUID === "function") return `workspace-${crypto.randomUUID()}`;
@@ -126,6 +119,7 @@ export default function CompanyWorkspacesPage(): JSX.Element {
         queryClient.invalidateQueries({ queryKey: ["membership", "workspaces", companyId] }),
         queryClient.invalidateQueries({ queryKey: ["brand-navigation"] }),
         queryClient.invalidateQueries({ queryKey: ["system-branches"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "branches"] }),
       ]);
       toast({
         title: result.created ? "สร้าง Workspace แล้ว" : "Workspace นี้มีอยู่แล้ว",

@@ -535,6 +535,8 @@ class AdminService:
         self,
         company_id: uuid.UUID,
         current_user: TokenData,
+        *,
+        include_settings: bool = True,
     ) -> list[BranchDetailRead]:
         statement = (
             select(Branch)
@@ -563,7 +565,8 @@ class AdminService:
 
         branches = (await self.db.execute(statement)).scalars().unique().all()
         counts = await self._branch_user_counts(company_id)
-        settings_map = await self._branch_settings_map([branch.id for branch in branches])
+        # Platform owns branch references, not the operational branch_settings table.
+        settings_map = await self._branch_settings_map([branch.id for branch in branches]) if include_settings else {}
         context_map = {
             branch.id: (
                 await load_branch_business_context(

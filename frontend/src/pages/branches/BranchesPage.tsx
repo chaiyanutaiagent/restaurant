@@ -21,6 +21,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { usePermission } from "@/hooks/usePermission";
 import { authApi } from "@/lib/api";
 import { branchApi } from "@/lib/adminApi";
+import { companySetupErrorMessage } from "@/lib/companySetupErrors";
 import type { BranchDetail } from "@/types/admin";
 
 type BranchFormState = {
@@ -55,6 +56,7 @@ const emptyBranchForm: BranchFormState = {
 
 export default function BranchesPage(): JSX.Element {
   const canCreate = usePermission("system.branch.create");
+  const canManageWorkspaces = usePermission("system.company.edit");
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -63,8 +65,8 @@ export default function BranchesPage(): JSX.Element {
   const [form, setForm] = useState<BranchFormState>(emptyBranchForm);
 
   const branchesQuery = useQuery({
-    queryKey: ["admin", "branches"],
-    queryFn: async () => (await branchApi.list()).data.data
+    queryKey: ["admin", "branches", "organization"],
+    queryFn: async () => (await branchApi.list()).data
   });
 
   const myBranchesQuery = useQuery({
@@ -91,12 +93,13 @@ export default function BranchesPage(): JSX.Element {
       toast({ title: "สร้างสาขาแล้ว" });
       navigate(`/branches/${response.data.data.id}/settings`);
     },
-    onError: (error: Error) => {
-      toast({ title: "สร้างสาขาไม่สำเร็จ", description: error.message, variant: "destructive" });
+    onError: (error: unknown) => {
+      toast({ title: "สร้างสาขาไม่สำเร็จ", description: companySetupErrorMessage(error), variant: "destructive" });
     }
   });
 
-  const branches = branchesQuery.data ?? [];
+  const branches = branchesQuery.data?.data ?? [];
+  const workspaceCreation = branchesQuery.data?.meta.branch_creation_mode === "workspace";
 
   return (
     <div className="space-y-6">
@@ -105,7 +108,7 @@ export default function BranchesPage(): JSX.Element {
         subtitle="จัดการสาขาของบริษัท"
         actions={
           canCreate ? (
-            <Button onClick={() => setDialogOpen(true)}>
+            <Button disabled={branchesQuery.isLoading || branchesQuery.isError || (workspaceCreation && !canManageWorkspaces)} onClick={() => workspaceCreation ? navigate("/workspaces") : setDialogOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               เพิ่มสาขา
             </Button>
@@ -113,13 +116,16 @@ export default function BranchesPage(): JSX.Element {
         }
       />
 
+      {workspaceCreation ? <p className="rounded-xl bg-blue-50 p-4 text-sm text-blue-900">สร้างสาขาพร้อมแบรนด์และประเภทกิจการที่หน้าพื้นที่ทำงาน เพื่อให้สาขาเชื่อมกับระบบขายที่ถูกต้อง{!canManageWorkspaces ? " กรุณาให้เจ้าของบริษัทดำเนินการ" : " กดเพิ่มสาขาเพื่อเริ่มตั้งค่า"}</p> : null}
+      {branchesQuery.error ? <p role="alert" className="text-red-700">{companySetupErrorMessage(branchesQuery.error)}</p> : null}
+
       <div className="grid gap-4 md:grid-cols-2">
         {branches.map((branch) => (
           <button
             key={branch.id}
             type="button"
             className="text-left"
-            onClick={() => navigate(`/branches/${branch.id}/settings`)}
+            onClick={() => navigate(workspaceCreation && canManageWorkspaces ? "/workspaces" : `/branches/${branch.id}/settings`)}
           >
             <Card className="h-full transition-shadow hover:shadow-md">
               <CardContent className="space-y-4 p-5">
@@ -219,11 +225,12 @@ export default function BranchesPage(): JSX.Element {
               </Field>
             </div>
           </div>
+          {createBranchMutation.error ? <div role="alert" className="whitespace-pre-line text-sm text-red-700">{companySetupErrorMessage(createBranchMutation.error)}{canManageWorkspaces ? <Button variant="ghost" onClick={() => navigate("/workspaces")}>ไปหน้าพื้นที่ทำงาน</Button> : null}</div> : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               ยกเลิก
             </Button>
-            <Button onClick={() => createBranchMutation.mutate()}>
+            <Button disabled={createBranchMutation.isPending} onClick={() => createBranchMutation.mutate()}>
               บันทึก
             </Button>
           </DialogFooter>

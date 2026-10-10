@@ -236,18 +236,25 @@ class BranchSettingsUpdate(BaseSchema):
 
 
 class BranchCreateFull(BaseSchema):
-    code: str
-    name: str
-    name_en: str | None = None
+    code: str = Field(min_length=1, max_length=20)
+    name: str = Field(min_length=1, max_length=255)
+    name_en: str | None = Field(default=None, max_length=255)
     address: str | None = None
     landmark: str | None = None
-    phone: str | None = None
-    email: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    google_maps_url: str | None = None
+    phone: str | None = Field(default=None, max_length=20)
+    email: str | None = Field(default=None, max_length=255)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    google_maps_url: str | None = Field(default=None, max_length=500)
     is_warehouse: bool = False
     sort_order: int = 0
+
+    @field_validator("code", "name")
+    @classmethod
+    def require_branch_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("กรุณากรอกข้อมูล ห้ามมีแต่ช่องว่าง")
+        return value.strip()
 
 
 class BranchUpdateFull(BaseSchema):

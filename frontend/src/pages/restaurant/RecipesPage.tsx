@@ -9,10 +9,13 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuthStore } from "@/stores/auth.store";
 import { authApi } from "@/lib/api";
-import { productApi } from "@/lib/productApi";
+import RecipeMaterialPicker, { type QuickMaterial } from "@/components/restaurant/RecipeMaterialPicker";
+import { recipeQuantity, recipeError } from "@/lib/recipeUnits";
 import type { ProductListItem } from "@/types/product";
 
 type RecipeIngredientDraft = {
+  row_id: string;
+  cost_unit: string;
   ingredient_id: string;
   ingredient_name: string;
   quantity: string;
@@ -72,8 +75,6 @@ type RecipeRead = RecipeListItem & {
   }[];
 };
 
-type IngredientInventoryRole = "central_raw" | "central_ready" | "store_local";
-
 const api = authApi;
 
 function recipeBasePath(brandSlug?: string): string {
@@ -95,94 +96,46 @@ async function fetchRecipe(id: string, brandSlug?: string): Promise<RecipeRead> 
   return res.data.data as RecipeRead;
 }
 
-async function fetchRecipeProducts(brandSlug?: string): Promise<ProductListItem[]> {
-  if (brandSlug) {
-    const res = await api.get(`${recipeBasePath(brandSlug)}/recipe-products`);
-    return res.data.data as ProductListItem[];
+async function fetchRecipeProducts(brandSlug?: string, productType?: string): Promise<ProductListItem[]> {
+  const products: ProductListItem[] = [];
+  for (let page = 1; ; page++) {
+    const response = await api.get(`${recipeBasePath(brandSlug)}/recipe-products`, {
+      params: { page, limit: 200, ...(productType ? { product_type: productType } : {}) },
+    });
+    const rows = response.data.data as ProductListItem[];
+    products.push(...rows);
+    if (rows.length < 200) return products;
   }
-  const res = await api.get("/products?is_active=true&limit=300");
-  return res.data.data as ProductListItem[];
 }
 
-async function fetchRawMaterials(brandSlug?: string): Promise<ProductListItem[]> {
-  if (brandSlug) {
-    const res = await api.get(`${recipeBasePath(brandSlug)}/recipe-products?product_type=raw_material`);
-    return res.data.data as ProductListItem[];
-  }
-  const res = await api.get("/products?product_type=raw_material&is_active=true&limit=200");
-  return res.data.data as ProductListItem[];
-}
-
-const UNIT_ALIASES: Record<string, string> = {
-  "กรัม": "g",
-  gram: "g",
-  grams: "g",
-  "ก": "g",
-  "กก": "kg",
-  "กิโล": "kg",
-  "กิโลกรัม": "kg",
-  kilogram: "kg",
-  kilograms: "kg",
-  "มล": "ml",
-  "มิลลิลิตร": "ml",
-  milliliter: "ml",
-  milliliters: "ml",
-  "ลิตร": "l",
-  liter: "l",
-  liters: "l",
-  "ขีด": "heed",
-};
-
-const UNIT_TO_BASE: Record<string, [string, number]> = {
-  g: ["weight", 1],
-  kg: ["weight", 1000],
-  heed: ["weight", 100],
-  ml: ["volume", 1],
-  l: ["volume", 1000],
-};
-
-function normalizeUnit(unit?: string | null): string {
-  const raw = (unit ?? "").trim().toLowerCase();
-  return UNIT_ALIASES[raw] ?? raw;
-}
-
-function convertQuantity(value: number, fromUnit?: string | null, toUnit?: string | null): number {
-  const source = normalizeUnit(fromUnit);
-  const target = normalizeUnit(toUnit);
-  if (!source || !target || source === target) return value;
-  const sourceBase = UNIT_TO_BASE[source];
-  const targetBase = UNIT_TO_BASE[target];
-  if (!sourceBase || !targetBase || sourceBase[0] !== targetBase[0]) return value;
-  return (value * sourceBase[1]) / targetBase[1];
-}
-
-function getApiErrorMessage(error: unknown): string {
-  if (typeof error === "object" && error !== null && "response" in error) {
-    const response = (error as { response?: { data?: { detail?: string } } }).response;
-    return response?.data?.detail ?? "";
-  }
-  return error instanceof Error ? error.message : "";
-}
+const getApiErrorMessage = recipeError;
 
 function MarginBadge({ pct }: { pct: number }): JSX.Element {
   const color = pct >= 60 ? "bg-emerald-100 text-emerald-700" : pct >= 40 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700";
-  return <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${color}`}>{pct.toFixed(1)}%</span>;
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${color}`}>{Number(pct).toFixed(1)}%</span>;
 }
 
 function recipeTypeLabel(type: string): string {
   const labels: Record<string, string> = {
     menu_recipe: "สูตรเมนูหน้าร้าน",
-    production_recipe: "สูตรผลิตส่วนกลาง",
+    production_recipe: "สูตรผลิตครัวกลาง",
   };
   return labels[type] ?? type;
 }
 
-export default function RecipesPage(): JSX.Element {
-  const { brandSlug } = useParams<{ brandSlug?: string }>();
+export default function RecipesPage({ brandSlug: brandOverride, companyKitchen = false, writesAllowed = true, onDraftChange }: {
+  brandSlug?: string; companyKitchen?: boolean; writesAllowed?: boolean; onDraftChange?: (dirty: boolean) => void;
+} = {}): JSX.Element {
+  const { brandSlug: routeBrandSlug } = useParams<{ brandSlug?: string }>();
+  const brandSlug = brandOverride ?? routeBrandSlug;
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const branchId = useAuthStore((s) => s.branchId);
-  const scopeKey = brandSlug ?? branchId ?? "global";
+  const companyId = useAuthStore(s => s.companyId);
+  const signedBrandId = useAuthStore(s => s.brandId);
+  const hasPermission = useAuthStore(s => s.hasPermission);
+  const canManage = hasPermission("fb.recipe.manage") && writesAllowed;
+  const scopeKey = `${companyId}:${signedBrandId}:${brandSlug ?? branchId ?? "global"}`;
   const isBrandCentral = Boolean(brandSlug);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -200,16 +153,12 @@ export default function RecipesPage(): JSX.Element {
   const [formName, setFormName] = useState("");
   const [formSellingPrice, setFormSellingPrice] = useState("0");
   const [formYieldQty, setFormYieldQty] = useState("1");
-  const [formYieldUnit, setFormYieldUnit] = useState("แก้ว");
+  const [formYieldUnit, setFormYieldUnit] = useState(brandSlug ? "kg" : "จาน");
   const [formLossPercent, setFormLossPercent] = useState("0");
   const [formNotes, setFormNotes] = useState("");
   const [formIngredients, setFormIngredients] = useState<RecipeIngredientDraft[]>([]);
-  const [rawName, setRawName] = useState("");
-  const [rawSku, setRawSku] = useState("");
-  const [rawCost, setRawCost] = useState("0");
-  const [rawUnit, setRawUnit] = useState("g");
-  const [rawInventoryRole, setRawInventoryRole] = useState<IngredientInventoryRole>("central_raw");
-  const [rawImage, setRawImage] = useState<File | null>(null);
+  const [createdCount, setCreatedCount] = useState(0);
+  useEffect(() => { onDraftChange?.(showForm); }, [showForm, onDraftChange]);
 
   const listQuery = useQuery({
     queryKey: ["recipes", scopeKey],
@@ -230,13 +179,13 @@ export default function RecipesPage(): JSX.Element {
 
   const rawQuery = useQuery({
     queryKey: ["products", "raw_material", scopeKey],
-    queryFn: () => fetchRawMaterials(brandSlug),
+    queryFn: () => fetchRecipeProducts(brandSlug, "raw_material"),
     enabled: showForm,
   });
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      await syncRawMaterialDrafts();
+      validateDraft();
       const response = await api.post(`${recipeBasePath(brandSlug)}/recipes`, {
         product_id: formProductId,
         branch_id: isBrandCentral ? null : branchId ?? null,
@@ -269,9 +218,7 @@ export default function RecipesPage(): JSX.Element {
       const createdBalances = savedRecipe.inventory_updates?.filter((item) => item.balance_created) ?? [];
       toast({
         title: "บันทึกสูตรแล้ว",
-        description: createdBalances.length > 0
-          ? `เพิ่มรายการ stock เริ่มต้น 0 จำนวน ${createdBalances.length} รายการ`
-          : undefined,
+        description: `ผูกสูตร ${formName} แล้ว · เพิ่มวัตถุดิบ ${createdCount} รายการ · สร้างยอดสต็อกเริ่ม 0 เพิ่ม ${createdBalances.length} รายการ`,
       });
       resetForm();
     },
@@ -281,7 +228,7 @@ export default function RecipesPage(): JSX.Element {
   const updateMutation = useMutation({
     mutationFn: async () => {
       if (!editingId) return;
-      await syncRawMaterialDrafts();
+      validateDraft();
       const response = await api.patch(`${recipeBasePath(brandSlug)}/recipes/${editingId}`, {
         name: formName,
         selling_price: Number(formSellingPrice || 0),
@@ -313,9 +260,7 @@ export default function RecipesPage(): JSX.Element {
       const createdBalances = savedRecipe?.inventory_updates?.filter((item) => item.balance_created) ?? [];
       toast({
         title: "อัปเดตสูตรแล้ว",
-        description: createdBalances.length > 0
-          ? `เพิ่มรายการ stock เริ่มต้น 0 จำนวน ${createdBalances.length} รายการ`
-          : undefined,
+        description: `ผูกสูตร ${formName} แล้ว · เพิ่มวัตถุดิบ ${createdCount} รายการ · สร้างยอดสต็อกเริ่ม 0 เพิ่ม ${createdBalances.length} รายการ`,
       });
       resetForm();
     },
@@ -331,47 +276,6 @@ export default function RecipesPage(): JSX.Element {
     },
   });
 
-  const createRawMaterialMutation = useMutation({
-    mutationFn: async () => {
-      const res = await api.post(`${recipeBasePath(brandSlug)}/raw-materials`, {
-        sku: rawSku.trim(),
-        name: rawName.trim(),
-        cost_price: Number(rawCost || 0),
-        unit: rawUnit.trim() || "unit",
-        inventory_role: rawInventoryRole,
-      });
-      const product = res.data.data as ProductListItem;
-      if (rawImage) {
-        const upload = await productApi.uploadImage(product.id, rawImage, true);
-        return upload.data.data as ProductListItem;
-      }
-      return product;
-    },
-    onSuccess: async (product) => {
-      await queryClient.invalidateQueries({ queryKey: ["products", "raw_material", scopeKey] });
-      setFormIngredients((prev) => [
-        ...prev,
-        {
-          ingredient_id: product.id,
-          ingredient_name: product.name,
-          quantity: "1",
-          unit: rawUnit,
-          cost_price: String(product.cost_price ?? rawCost ?? 0),
-          image_url: product.image_url ?? null,
-          image_file: null,
-        },
-      ]);
-      setRawName("");
-      setRawSku("");
-      setRawCost("0");
-      setRawUnit("g");
-      setRawInventoryRole(formRecipeType === "production_recipe" ? "central_raw" : "central_ready");
-      setRawImage(null);
-      toast({ title: "สร้างวัตถุดิบแล้ว" });
-    },
-    onError: () => toast({ title: "สร้างวัตถุดิบไม่สำเร็จ", description: "ตรวจ SKU ซ้ำหรือสิทธิ์จัดการสูตร" }),
-  });
-
   function resetForm(): void {
     setShowForm(false);
     setEditingId(null);
@@ -383,16 +287,11 @@ export default function RecipesPage(): JSX.Element {
     setFormName("");
     setFormSellingPrice("0");
     setFormYieldQty("1");
-    setFormYieldUnit("แก้ว");
+    setFormYieldUnit(activeRecipeType === "production_recipe" ? "kg" : "จาน");
     setFormLossPercent("0");
     setFormNotes("");
     setFormIngredients([]);
-    setRawName("");
-    setRawSku("");
-    setRawCost("0");
-    setRawUnit("g");
-    setRawInventoryRole(activeRecipeType === "production_recipe" ? "central_raw" : "central_ready");
-    setRawImage(null);
+    setCreatedCount(0);
   }
 
   function startCreate(recipeType = activeRecipeType): void {
@@ -406,16 +305,11 @@ export default function RecipesPage(): JSX.Element {
     setFormName("");
     setFormSellingPrice("0");
     setFormYieldQty("1");
-    setFormYieldUnit("แก้ว");
+    setFormYieldUnit(recipeType === "production_recipe" ? "kg" : "จาน");
     setFormLossPercent("0");
     setFormNotes("");
     setFormIngredients([]);
-    setRawName("");
-    setRawSku("");
-    setRawCost("0");
-    setRawUnit("g");
-    setRawInventoryRole(recipeType === "production_recipe" ? "central_raw" : "central_ready");
-    setRawImage(null);
+    setCreatedCount(0);
   }
 
   function startEdit(recipe: RecipeRead): void {
@@ -432,9 +326,10 @@ export default function RecipesPage(): JSX.Element {
     setFormYieldUnit(recipe.yield_unit);
     setFormLossPercent(String(recipe.loss_percent ?? 0));
     setFormNotes(recipe.notes ?? "");
-    setRawInventoryRole(recipe.recipe_type === "production_recipe" ? "central_raw" : "central_ready");
     setFormIngredients(
       recipe.ingredients.map((ing) => ({
+        row_id: crypto.randomUUID(),
+        cost_unit: ing.cost_unit || ing.unit,
         ingredient_id: ing.ingredient_id,
         ingredient_name: ing.ingredient_name,
         quantity: String(ing.quantity),
@@ -447,7 +342,7 @@ export default function RecipesPage(): JSX.Element {
   }
 
   function addIngredient(): void {
-    setFormIngredients((prev) => [...prev, { ingredient_id: "", ingredient_name: "", quantity: "1", unit: "g", cost_price: "0", image_url: null, image_file: null }]);
+    setFormIngredients((prev) => [...prev, { row_id: crypto.randomUUID(), cost_unit: "", ingredient_id: "", ingredient_name: "", quantity: "1", unit: "g", cost_price: "0", image_url: null, image_file: null }]);
   }
 
   function updateIngredient(index: number, key: keyof RecipeIngredientDraft, value: string | File | null): void {
@@ -460,17 +355,39 @@ export default function RecipesPage(): JSX.Element {
     setFormIngredients((prev) => prev.filter((_, i) => i !== index));
   }
 
-  async function syncRawMaterialDrafts(): Promise<void> {
-    const seen = new Set<string>();
-    for (const ingredient of formIngredients) {
-      if (!ingredient.ingredient_id || seen.has(ingredient.ingredient_id)) continue;
-      seen.add(ingredient.ingredient_id);
+  function chooseIngredient(index: number, product: ProductListItem): void {
+    setFormIngredients(previous => previous.map((row, i) => i === index ? {
+      ...row, ingredient_id: product.id, ingredient_name: product.name,
+      unit: product.unit?.code ?? "", cost_unit: product.unit?.code ?? "",
+      cost_price: String(product.cost_price ?? 0), image_url: product.image_url, image_file: null,
+    } : row));
+    const rowId = formIngredients[index]?.row_id;
+    window.requestAnimationFrame(() => document.getElementById(`recipe-quantity-${rowId}`)?.focus());
+  }
 
-      const costPrice = Number(ingredient.cost_price || 0);
-      await productApi.update(ingredient.ingredient_id, { cost_price: costPrice });
-      if (ingredient.image_file) {
-        await productApi.uploadImage(ingredient.ingredient_id, ingredient.image_file, true);
-      }
+  function materialCreated(index: number, product: QuickMaterial): void {
+    queryClient.setQueryData<ProductListItem[]>(["products", "raw_material", scopeKey], previous =>
+      [...(previous ?? []).filter(row => row.id !== product.id), product]);
+    chooseIngredient(index, product);
+    setCreatedCount(count => count + 1);
+    const setup = product.inventory_setup;
+    toast({ title: `เพิ่ม ${product.name} เข้าแถวสูตรแล้ว`, description:
+      `สร้างยอดสต็อกเริ่ม 0 จำนวน ${setup?.zero_balances_created ?? 0} รายการ${setup?.mapping_created ? " · ผูกครัวกลางกับแบรนด์แล้ว" : ""}${setup?.stock_deferred ? " · ยังไม่ระบุคลัง จึงยังไม่สร้างยอดสต็อก" : ""}` });
+  }
+
+  function validateDraft(): void {
+    if (!canManage) throw new Error("ไม่มีสิทธิ์จัดการสูตร");
+    if (!formProductId || !formName.trim()) throw new Error("กรุณาเลือกเมนูและระบุชื่อสูตร");
+    if (!Number.isFinite(Number(formYieldQty)) || Number(formYieldQty) <= 0 || !formYieldUnit.trim()) throw new Error("กรุณาระบุจำนวนที่ผลิตได้และหน่วยให้ครบ");
+    if (!Number.isFinite(Number(formLossPercent)) || Number(formLossPercent) < 0 || Number(formLossPercent) >= 100) throw new Error("การสูญเสียต้องอยู่ระหว่าง 0 ถึงน้อยกว่า 100%");
+    if (!Number.isFinite(Number(formSellingPrice)) || Number(formSellingPrice) < 0) throw new Error("ราคาขายต้องไม่ติดลบ");
+    if (!formIngredients.length) throw new Error("กรุณาเพิ่มวัตถุดิบอย่างน้อย 1 รายการ");
+    const seen = new Set<string>();
+    for (const row of formIngredients) {
+      if (!row.ingredient_id || !Number.isFinite(Number(row.quantity)) || Number(row.quantity) <= 0) throw new Error("กรุณาเลือกวัตถุดิบและใส่ปริมาณมากกว่า 0 ทุกแถว");
+      if (seen.has(row.ingredient_id)) throw new Error(`มี ${row.ingredient_name} ซ้ำ กรุณารวมปริมาณในแถวเดียว`);
+      seen.add(row.ingredient_id);
+      recipeQuantity(Number(row.quantity), row.unit, row.cost_unit);
     }
   }
 
@@ -487,11 +404,9 @@ export default function RecipesPage(): JSX.Element {
   const recipeProducts = menuQuery.data ?? [];
   const preview = useMemo(() => {
     const totalCost = formIngredients.reduce((sum, ing) => {
-      const product = rawMaterials.find((item) => item.id === ing.ingredient_id);
-      if (!product) return sum;
-      const qty = Number(ing.quantity || 0);
-      const costQty = convertQuantity(qty, ing.unit, product.unit?.code ?? ing.unit);
-      return sum + costQty * Number(ing.cost_price || product.cost_price || 0);
+      if (!ing.ingredient_id) return sum;
+      try { return sum + recipeQuantity(Number(ing.quantity || 0), ing.unit, ing.cost_unit) * Number(ing.cost_price || 0); }
+      catch { return sum; }
     }, 0);
     const yieldQty = Math.max(Number(formYieldQty || 1), 0.0001);
     const lossRate = Math.min(Math.max(Number(formLossPercent || 0), 0), 100);
@@ -517,19 +432,19 @@ export default function RecipesPage(): JSX.Element {
     <div>
       <PageHeader
         title={isBrandCentral ? `สูตรแบรนด์ ${brandSlug}` : "สูตรอาหาร / เครื่องดื่ม"}
-        subtitle={isBrandCentral ? "แยกสูตรผลิตส่วนกลางออกจากสูตรเมนูหน้าร้าน เพื่อควบคุมต้นทุนและสูตรลับให้ชัดเจน" : "จัดการสูตร ต้นทุนวัตถุดิบ และ Gross Margin"}
+        subtitle={isBrandCentral ? "แยกสูตรผลิตครัวกลางออกจากสูตรเมนูหน้าร้าน เพื่อควบคุมต้นทุนและสูตรลับให้ชัดเจน" : "จัดการสูตร ต้นทุนวัตถุดิบ และ Gross Margin"}
         actions={
-          <Button className="bg-orange-500 hover:bg-orange-600" onClick={() => startCreate()}>
+          <Button disabled={!canManage || showForm} className="bg-orange-500 hover:bg-orange-600" onClick={() => startCreate()}>
             <Plus className="mr-2 h-4 w-4" />
             สร้างสูตรใหม่
           </Button>
         }
       />
 
-      <div className="flex gap-6 p-6">
+      <div className="flex min-w-0 flex-col gap-4 p-3 md:p-6 xl:flex-row">
         {/* Recipe List */}
-        <div className="flex w-72 flex-shrink-0 flex-col gap-2">
-          {isBrandCentral ? (
+        <div className={`flex shrink-0 flex-col gap-2 ${showForm ? "hidden" : "w-full xl:w-72"}`}>
+          {!companyKitchen ? (
             <div className="mb-2 grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-white p-1">
               <button
                 type="button"
@@ -613,6 +528,8 @@ export default function RecipesPage(): JSX.Element {
                 <Button
                   variant="outline"
                   size="sm"
+                  aria-label="แก้ไขสูตร"
+                  disabled={!canManage}
                   onClick={() => startEdit(selected)}
                 >
                   <Pencil className="h-4 w-4" />
@@ -621,6 +538,7 @@ export default function RecipesPage(): JSX.Element {
                   variant="outline"
                   size="sm"
                   className="text-red-600 hover:bg-red-50"
+                  disabled={!canManage}
                   onClick={() => window.confirm("ลบสูตรนี้หรือไม่?") && deleteMutation.mutate(selected.id)}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -702,305 +620,71 @@ export default function RecipesPage(): JSX.Element {
           </div>
         )}
 
-        {/* Create/Edit Form */}
+        {/* Single-page recipe editor: technical settings stay collapsed. */}
         {showForm && (
-          <div className="flex-1 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-slate-900">{editingId ? "แก้ไขสูตร" : "สร้างสูตรใหม่"}</h2>
-              <Button variant="ghost" size="icon" onClick={resetForm}><X className="h-5 w-5" /></Button>
-            </div>
-
-            <div className="mt-6 space-y-5">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>สินค้าที่ผูกสูตร</Label>
-                  <select
-                    className="mt-1 h-10 w-full rounded-xl border border-slate-300 px-3 text-sm"
-                    value={formProductId}
-                    disabled={Boolean(editingId)}
-                    onChange={(e) => {
-                      const p = recipeProducts.find((m) => m.id === e.target.value);
-                      setFormProductId(e.target.value);
-                      if (p && !formName) setFormName(`สูตร${p.name}`);
-                      if (p) setFormSellingPrice(String(p.selling_price ?? 0));
-                    }}
-                  >
-                    <option value="">-- เลือกสินค้า --</option>
-                    {recipeProducts.map((m) => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                  </select>
-                  {recipeProducts.length === 0 && (
-                    <p className="mt-1 text-xs text-amber-600">ยังไม่มีสินค้า active — เพิ่มสินค้าก่อน</p>
-                  )}
-                  {editingId && (
-                    <p className="mt-1 text-xs text-slate-500">แก้ไขสูตรเดิมจะไม่เปลี่ยนเมนูที่ผูกไว้</p>
-                  )}
-                </div>
-                <div>
-                  <Label>ชื่อสูตร</Label>
-                  <Input className="mt-1" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="เช่น Latte Standard" />
-                </div>
+          <div className="min-w-0 flex-1 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
+            <div className="flex items-center justify-between gap-2"><h2 className="text-xl font-semibold">{editingId ? "แก้ไขสูตร" : "สร้างสูตรใหม่"}</h2>
+              <Button aria-label="ปิดแบบฟอร์มสูตร" variant="ghost" onClick={resetForm}><X className="h-5 w-5" /></Button></div>
+            <p className="mt-2 text-sm text-slate-500">เลือกเมนู → เพิ่มวัตถุดิบ → ใส่ปริมาณ → ดูต้นทุน → บันทึกสูตร</p>
+            <div className="mt-5 space-y-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Label htmlFor="recipe-type">ประเภทสูตร<select id="recipe-type" className="mt-1 h-11 w-full rounded-xl border px-3" disabled={companyKitchen || Boolean(editingId)}
+                  value={formRecipeType} onChange={e => setFormRecipeType(e.target.value as "menu_recipe" | "production_recipe")}>
+                  <option value="menu_recipe">สูตรเมนูหน้าร้าน</option><option value="production_recipe">สูตรผลิตครัวกลาง</option></select></Label>
+                <Label htmlFor="recipe-product">{formRecipeType === "production_recipe" ? "สินค้าที่ผลิต" : "เมนูหน้าร้าน"}
+                  <select id="recipe-product" className="mt-1 h-11 w-full rounded-xl border px-3" value={formProductId} disabled={Boolean(editingId)} onChange={e => {
+                    const product = recipeProducts.find(p => p.id === e.target.value); setFormProductId(e.target.value);
+                    if (product) { if (!formName) setFormName(`สูตร${product.name}`); setFormSellingPrice(String(product.selling_price ?? 0)); }
+                  }}><option value="">เลือกเมนู / สินค้าที่ผลิต</option>{recipeProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Label>
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>ประเภทสูตร</Label>
-                  <select
-                    className="mt-1 h-10 w-full rounded-xl border border-slate-300 px-3 text-sm"
-                    value={formRecipeType}
-                    onChange={(e) => {
-                      const nextType = e.target.value === "production_recipe" ? "production_recipe" : "menu_recipe";
-                      setFormRecipeType(nextType);
-                      setRawInventoryRole(nextType === "production_recipe" ? "central_raw" : "central_ready");
-                    }}
-                  >
-                    <option value="production_recipe">สูตรผลิตส่วนกลาง</option>
-                    <option value="menu_recipe">สูตรเมนูหน้าร้าน</option>
-                  </select>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {formRecipeType === "production_recipe"
-                      ? "ใช้กับครัวกลาง/โรงผลิต เช่น ซอสพื้นฐานหรือวัตถุดิบเตรียม"
-                      : "ใช้กับหน้าร้านเพื่อตัดสต็อกจากการขายตามสูตร"}
-                  </p>
-                </div>
-                <div>
-                  <Label>Version</Label>
-                  <Input type="number" className="mt-1" value={formVersionNo} min="1" step="1" onChange={(e) => setFormVersionNo(e.target.value)} />
-                </div>
+              {menuQuery.isError || rawQuery.isError ? <p role="alert" className="text-red-700">โหลดรายการไม่สำเร็จ ข้อมูลสูตรยังอยู่ <button type="button" className="underline" onClick={() => { void menuQuery.refetch(); void rawQuery.refetch(); }}>ลองใหม่</button></p> : null}
+              <div className="flex items-center justify-between gap-2"><h3 className="font-bold">วัตถุดิบในสูตร</h3><Button type="button" variant="outline" disabled={!canManage} onClick={addIngredient}><Plus className="mr-1 h-4 w-4" />เพิ่มวัตถุดิบ</Button></div>
+              {formIngredients.length === 0 && <p className="text-sm text-slate-500">กดเพิ่มวัตถุดิบ แล้วพิมพ์ค้นหาได้เลย</p>}
+              <div className="space-y-3">
+                {formIngredients.map((row, index) => {
+                  let unitError = "";
+                  if (row.ingredient_id) { try { recipeQuantity(1, row.unit, row.cost_unit); } catch (error) { unitError = recipeError(error); } }
+                  return <div key={row.row_id} data-testid="recipe-ingredient-row" className="rounded-2xl border bg-slate-50 p-3">
+                    <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_110px_110px_auto]">
+                      <RecipeMaterialPicker materials={rawMaterials} selectedId={row.ingredient_id} selectedName={row.ingredient_name}
+                        endpoint={`${recipeBasePath(brandSlug)}/raw-materials/quick-create`}
+                        role={formRecipeType === "production_recipe" ? "central_raw" : isBrandCentral ? "central_ready" : "store_local"}
+                        companyKitchen={companyKitchen} disabled={!canManage}
+                        onSelect={p => chooseIngredient(index, p)} onCreated={p => materialCreated(index, p)} />
+                      <Label htmlFor={`recipe-quantity-${row.row_id}`}>ปริมาณ<Input id={`recipe-quantity-${row.row_id}`} type="number" min="0.0001" step="0.0001" value={row.quantity} onChange={e => updateIngredient(index, "quantity", e.target.value)} /></Label>
+                      <Label htmlFor={`recipe-unit-${row.row_id}`}>หน่วย<Input id={`recipe-unit-${row.row_id}`} list="recipe-units" value={row.unit} onChange={e => updateIngredient(index, "unit", e.target.value)} /></Label>
+                      <Button type="button" aria-label={`ลบวัตถุดิบแถว ${index + 1}`} variant="ghost" onClick={() => removeIngredient(index)}><X className="h-4 w-4" /></Button>
+                    </div>
+                    {unitError ? <p role="alert" className="mt-2 text-sm text-red-700">{unitError}</p> : row.ingredient_id ? <p className="mt-2 text-sm text-slate-500">ต้นทุนอ้างอิง ฿{Number(row.cost_price).toFixed(4)} / {row.cost_unit} · ในสูตร ฿{(recipeQuantity(Number(row.quantity || 0), row.unit, row.cost_unit) * Number(row.cost_price)).toFixed(2)}</p> : null}
+                  </div>;
+                })}
+                <datalist id="recipe-units">{["kg", "g", "l", "ml", "ชิ้น"].map(u => <option key={u} value={u} />)}</datalist>
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>วันที่เริ่มใช้</Label>
-                  <Input type="date" className="mt-1" value={formEffectiveFrom} onChange={(e) => setFormEffectiveFrom(e.target.value)} />
-                </div>
-                <div>
-                  <Label>วันที่เลิกใช้</Label>
-                  <Input type="date" className="mt-1" value={formEffectiveTo} onChange={(e) => setFormEffectiveTo(e.target.value)} />
-                </div>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <Label htmlFor="recipe-yield">จำนวนที่ผลิตได้<Input id="recipe-yield" type="number" min="0.0001" step="0.0001" value={formYieldQty} onChange={e => setFormYieldQty(e.target.value)} /></Label>
+                <Label htmlFor="recipe-yield-unit">หน่วยผลผลิต<Input id="recipe-yield-unit" value={formYieldUnit} onChange={e => setFormYieldUnit(e.target.value)} placeholder="จาน / ชิ้น / kg" /></Label>
+                <Label htmlFor="recipe-loss">สูญเสีย (%)<Input id="recipe-loss" type="number" min="0" max="99.99" step="0.01" value={formLossPercent} onChange={e => setFormLossPercent(e.target.value)} /></Label>
+                <Label htmlFor="recipe-selling">ราคาขายต่อหน่วย<Input id="recipe-selling" type="number" min="0" step="0.01" value={formSellingPrice} onChange={e => setFormSellingPrice(e.target.value)} /></Label>
               </div>
-
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <div>
-                  <Label>ราคาขาย</Label>
-                  <Input type="number" className="mt-1" value={formSellingPrice} onChange={(e) => setFormSellingPrice(e.target.value)} min="0" step="0.01" />
-                </div>
-                <div>
-                  <Label>ปริมาณที่ได้ต่อครั้ง (yield)</Label>
-                  <Input type="number" className="mt-1" value={formYieldQty} onChange={(e) => setFormYieldQty(e.target.value)} min="0.01" step="0.01" />
-                </div>
-                <div>
-                  <Label>หน่วย yield</Label>
-                  <Input className="mt-1" value={formYieldUnit} onChange={(e) => setFormYieldUnit(e.target.value)} placeholder="แก้ว / ชิ้น / จาน" />
-                </div>
-                <div>
-                  <Label>Loss %</Label>
-                  <Input type="number" className="mt-1" value={formLossPercent} onChange={(e) => setFormLossPercent(e.target.value)} min="0" max="99.99" step="0.01" />
-                </div>
-              </div>
-
-              {/* Ingredients */}
-              <div>
-                <div className="flex items-center justify-between">
-                  <Label>วัตถุดิบ</Label>
-                  <Button variant="outline" size="sm" onClick={addIngredient}>
-                    <Plus className="mr-1 h-3 w-3" />
-                    เพิ่มวัตถุดิบ
-                  </Button>
-                </div>
-                <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold text-slate-600">สร้างวัตถุดิบใหม่</p>
-                  <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(180px,1fr)_120px_90px_80px_210px_160px_auto] xl:items-end">
-                    <div>
-                      <Label className="text-xs">ชื่อวัตถุดิบ</Label>
-                      <Input className="mt-1" value={rawName} onChange={(e) => setRawName(e.target.value)} placeholder="เช่น นมสด" />
-                    </div>
-                    <div>
-                      <Label className="text-xs">SKU</Label>
-                      <Input className="mt-1" value={rawSku} onChange={(e) => setRawSku(e.target.value)} placeholder="RAW-MILK" />
-                    </div>
-                    <div>
-                      <Label className="text-xs">ต้นทุน/หน่วย</Label>
-                      <Input type="number" className="mt-1" value={rawCost} min="0" step="0.0001" onChange={(e) => setRawCost(e.target.value)} />
-                    </div>
-                    <div>
-                      <Label className="text-xs">หน่วย</Label>
-                      <Input className="mt-1" value={rawUnit} onChange={(e) => setRawUnit(e.target.value)} placeholder="g/ml" />
-                    </div>
-                    <div>
-                      <Label className="text-xs">แหล่ง stock</Label>
-                      <select
-                        className="mt-1 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm"
-                        value={rawInventoryRole}
-                        onChange={(e) => setRawInventoryRole(e.target.value as IngredientInventoryRole)}
-                      >
-                        <option value="central_raw">ส่วนกลางซื้อ/ใช้ผลิต (RAW)</option>
-                        <option value="central_ready">ส่วนกลางเตรียมพร้อมส่ง (READY)</option>
-                        <option value="store_local">ร้านซื้อเอง (STORE)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <Label className="text-xs">รูปวัตถุดิบ</Label>
-                      <Input
-                        className="mt-1"
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        onChange={(e) => setRawImage(e.target.files?.[0] ?? null)}
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={!rawName.trim() || !rawSku.trim() || createRawMaterialMutation.isPending}
-                      onClick={() => createRawMaterialMutation.mutate()}
-                    >
-                      {createRawMaterialMutation.isPending ? "กำลังสร้าง..." : "สร้าง"}
-                    </Button>
-                  </div>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {formIngredients.length === 0 && (
-                    <p className="text-sm text-slate-400">กดปุ่ม "เพิ่มวัตถุดิบ" เพื่อเริ่มต้น</p>
-                  )}
-                  {formIngredients.map((ing, idx) => (
-                    <div key={idx} className="grid grid-cols-[56px_1fr_100px_90px_100px_150px_32px] items-end gap-2">
-                      <div>
-                        {idx === 0 && <Label className="text-xs">รูป</Label>}
-                        <div className="mt-1 flex h-10 w-14 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white text-[10px] text-slate-400">
-                          {ing.image_file ? (
-                            <span className="px-1 text-center">รูปใหม่</span>
-                          ) : ing.image_url ? (
-                            <img src={ing.image_url} alt={ing.ingredient_name || "วัตถุดิบ"} className="h-full w-full object-cover" />
-                          ) : (
-                            <span>ไม่มี</span>
-                          )}
-                        </div>
-                      </div>
-                      <div>
-                        {idx === 0 && <Label className="text-xs">วัตถุดิบ (raw_material)</Label>}
-                        <select
-                          className="mt-1 h-10 w-full rounded-xl border border-slate-300 px-3 text-sm"
-                          value={ing.ingredient_id}
-                          onChange={(e) => {
-                            const p = rawMaterials.find((r) => r.id === e.target.value);
-                            updateIngredient(idx, "ingredient_id", e.target.value);
-                            if (p) {
-                              updateIngredient(idx, "ingredient_name", p.name);
-                              updateIngredient(idx, "cost_price", String(p.cost_price ?? 0));
-                              updateIngredient(idx, "image_url", p.image_url);
-                              updateIngredient(idx, "image_file", null);
-                            }
-                          }}
-                        >
-                          <option value="">-- เลือกวัตถุดิบ --</option>
-                          {rawMaterials.map((r) => (
-                            <option key={r.id} value={r.id}>{r.name}</option>
-                          ))}
-                        </select>
-                        {rawMaterials.length === 0 && idx === 0 && (
-                          <p className="text-xs text-amber-600">ยังไม่มีสินค้าประเภท raw_material</p>
-                        )}
-                      </div>
-                      <div>
-                        {idx === 0 && <Label className="text-xs">ปริมาณ</Label>}
-                        <Input
-                          type="number"
-                          className="mt-1"
-                          value={ing.quantity}
-                          onChange={(e) => updateIngredient(idx, "quantity", e.target.value)}
-                          min="0.001"
-                          step="0.001"
-                        />
-                      </div>
-                      <div>
-                        {idx === 0 && <Label className="text-xs">หน่วย</Label>}
-                        <Input
-                          className="mt-1"
-                          value={ing.unit}
-                          onChange={(e) => updateIngredient(idx, "unit", e.target.value)}
-                          placeholder="g/ml/ชิ้น"
-                        />
-                      </div>
-                      <div>
-                        {idx === 0 && <Label className="text-xs">ราคา/หน่วย</Label>}
-                        <Input
-                          type="number"
-                          className="mt-1"
-                          value={ing.cost_price}
-                          onChange={(e) => updateIngredient(idx, "cost_price", e.target.value)}
-                          min="0"
-                          step="0.0001"
-                        />
-                      </div>
-                      <div>
-                        {idx === 0 && <Label className="text-xs">อัปรูป</Label>}
-                        <Input
-                          className="mt-1"
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp"
-                          disabled={!ing.ingredient_id}
-                          onChange={(e) => updateIngredient(idx, "image_file", e.target.files?.[0] ?? null)}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeIngredient(idx)}
-                        className={`flex h-10 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 ${idx === 0 ? "mt-6" : "mt-1"}`}
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid gap-4 rounded-2xl border border-orange-200 bg-orange-50 p-4 md:grid-cols-2 xl:grid-cols-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-orange-700">Preview ต้นทุนรวม</p>
-                  <p className="mt-1 text-2xl font-bold text-slate-950">฿{preview.totalCost.toFixed(2)}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-orange-700">Yield หลัง loss</p>
-                  <p className="mt-1 text-2xl font-bold text-slate-950">
-                    {preview.effectiveYield.toFixed(4)} {formYieldUnit}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-orange-700">ต้นทุนต่อ {formYieldUnit || "หน่วย"}</p>
-                  <p className="mt-1 text-2xl font-bold text-orange-700">฿{preview.costPerYield.toFixed(2)}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-orange-700">Gross Margin</p>
-                  <p className={`mt-1 text-2xl font-bold ${preview.grossMarginPct >= 40 ? "text-emerald-700" : "text-red-700"}`}>
-                    {preview.grossMarginPct.toFixed(1)}%
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <Label>หมายเหตุ (ไม่บังคับ)</Label>
-                <textarea
-                  className="mt-1 min-h-16 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  value={formNotes}
-                  onChange={(e) => setFormNotes(e.target.value)}
-                  placeholder="เช่น ใช้นม oat แทน full cream ได้"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3">
-                <Button variant="outline" onClick={resetForm}>ยกเลิก</Button>
-                <Button
-                  className="bg-orange-500 hover:bg-orange-600"
-                  disabled={!formProductId || !formName || createMutation.isPending || updateMutation.isPending}
-                  onClick={() => editingId ? updateMutation.mutate() : createMutation.mutate()}
-                >
-                  {createMutation.isPending || updateMutation.isPending
-                    ? "กำลังบันทึก..."
-                    : editingId
-                      ? "อัปเดตสูตร"
-                      : "บันทึกสูตร"}
-                </Button>
+              <section aria-label="ต้นทุนสูตร" className="grid grid-cols-2 gap-3 rounded-2xl border border-orange-200 bg-orange-50 p-4 lg:grid-cols-4">
+                <div><p className="text-sm">ต้นทุนรวม</p><p data-testid="recipe-total-cost" className="text-xl font-bold">฿{preview.totalCost.toFixed(2)}</p></div>
+                <div><p className="text-sm">ผลผลิตหลังสูญเสีย</p><p className="text-xl font-bold">{preview.effectiveYield.toFixed(4)} {formYieldUnit}</p></div>
+                <div><p className="text-sm">ต้นทุนต่อ {formYieldUnit || "หน่วย"}</p><p data-testid="recipe-unit-cost" className="text-xl font-bold">฿{preview.costPerYield.toFixed(2)}</p></div>
+                <div><p className="text-sm">กำไรขั้นต้น (Gross margin)</p><p className="text-xl font-bold">{preview.grossMarginPct.toFixed(1)}%</p></div>
+                <p className="col-span-2 text-xs text-slate-600 lg:col-span-4">ต้นทุนประมาณการจากข้อมูลที่แสดง ระบบคำนวณต้นทุนจากการรับซื้อล่าสุดอีกครั้งเมื่อบันทึก โดยไม่เปลี่ยนราคาวัตถุดิบเดิม</p>
+              </section>
+              <details className="rounded-xl border p-3"><summary className="cursor-pointer font-semibold">ตั้งค่าเพิ่มเติม</summary><div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <Label htmlFor="recipe-name">ชื่อสูตร<Input id="recipe-name" value={formName} onChange={e => setFormName(e.target.value)} /></Label>
+                <Label htmlFor="recipe-version">รุ่นสูตร<Input id="recipe-version" type="number" min="1" step="1" value={formVersionNo} onChange={e => setFormVersionNo(e.target.value)} /></Label>
+                <Label htmlFor="recipe-from">วันที่เริ่มใช้<Input id="recipe-from" type="date" value={formEffectiveFrom} onChange={e => setFormEffectiveFrom(e.target.value)} /></Label>
+                <Label htmlFor="recipe-to">วันที่เลิกใช้<Input id="recipe-to" type="date" value={formEffectiveTo} onChange={e => setFormEffectiveTo(e.target.value)} /></Label>
+                <Label htmlFor="recipe-notes">หมายเหตุ<Input id="recipe-notes" value={formNotes} onChange={e => setFormNotes(e.target.value)} /></Label>
+                <p className="text-xs text-slate-500">{isBrandCentral ? "สูตรนี้อยู่ในแบรนด์ที่เลือก" : branchId ? "สูตรนี้ใช้ในสาขาปัจจุบัน" : "สูตรนี้ใช้ร่วมกันในบริษัท"}</p>
+              </div></details>
+              <div className="sticky bottom-0 flex justify-end gap-3 bg-white py-3">
+                <Button variant="outline" disabled={createMutation.isPending || updateMutation.isPending} onClick={resetForm}>ยกเลิก</Button>
+                <Button disabled={!canManage || !formProductId || !formName || createMutation.isPending || updateMutation.isPending} onClick={() => editingId ? updateMutation.mutate() : createMutation.mutate()}>
+                  {createMutation.isPending || updateMutation.isPending ? "กำลังบันทึก…" : editingId ? "อัปเดตสูตร" : "บันทึกสูตร"}</Button>
               </div>
             </div>
           </div>

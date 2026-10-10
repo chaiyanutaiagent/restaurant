@@ -1413,7 +1413,7 @@ class SharedKitchenService:
                     for row in locations
                 ],
                 "brands": [
-                    {"id": row.id, "name": row.name, "business_type": row.business_type}
+                    {"id": row.id, "name": row.name, "slug": row.slug, "business_type": row.business_type}
                     for row in brands
                 ],
                 "brand_branches": [

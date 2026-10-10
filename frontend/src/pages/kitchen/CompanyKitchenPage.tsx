@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { companyKitchenApi } from "@/lib/api";
 import { useOnlineStatus } from "@/lib/syncService";
 import { useAuthStore } from "@/stores/auth.store";
+import RecipesPage from "@/pages/restaurant/RecipesPage";
 
 const fieldClass = "mt-1 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm";
 const today = (): string => new Date().toISOString().slice(0, 10);
@@ -56,6 +57,8 @@ export default function CompanyKitchenPage(): JSX.Element {
   const [receipt, setReceipt] = useState({ ingredient_id: "", lot_code: "", qty: "", unit_cost: "", expires_on: "" });
   const [demand, setDemand] = useState({ brand_id: "", branch_id: "", output_product_id: "", needed_on: today(), requested_qty: "", unit_code: "ชิ้น" });
   const [order, setOrder] = useState({ demand_id: "", brand_id: "", output_product_id: "", planned_date: today(), planned_qty: "" });
+  const [recipeBrandSlug, setRecipeBrandSlug] = useState("");
+  const [recipeDraftOpen, setRecipeDraftOpen] = useState(false);
 
   useEffect(() => {
     if (dashboard?.kitchen) setKitchen({ branch_id: dashboard.kitchen.branch_id, raw_location_id: dashboard.kitchen.raw_location_id, name: dashboard.kitchen.name, timezone: dashboard.kitchen.timezone });
@@ -122,7 +125,18 @@ export default function CompanyKitchenPage(): JSX.Element {
       </section>
 
       <Tabs defaultValue="overview">
-        <TabsList className="h-auto flex-wrap"><TabsTrigger value="overview">ภาพรวม</TabsTrigger><TabsTrigger value="setup">ตั้งค่าและ Mapping</TabsTrigger><TabsTrigger value="production">Demand และผลิต</TabsTrigger><TabsTrigger value="report">รายงาน</TabsTrigger></TabsList>
+        <TabsList className="h-auto flex-wrap"><TabsTrigger value="overview">ภาพรวม</TabsTrigger><TabsTrigger value="recipes">สูตรผลิตครัวกลาง</TabsTrigger><TabsTrigger value="setup">ตั้งค่าเพิ่มเติม</TabsTrigger><TabsTrigger value="production">สั่งผลิตและผลิต</TabsTrigger><TabsTrigger value="report">รายงาน</TabsTrigger></TabsList>
+        <TabsContent value="recipes" forceMount className="space-y-4 data-[state=inactive]:hidden">
+          <section className="rounded-xl border bg-white p-4">
+            <Label htmlFor="kitchen-recipe-brand">สูตรของแบรนด์<select id="kitchen-recipe-brand" disabled={recipeDraftOpen} className={fieldClass} value={recipeBrandSlug} onChange={e => setRecipeBrandSlug(e.target.value)}>
+              <option value="">เลือกแบรนด์</option>{options.brands.filter(b => b.business_type === "restaurant" && b.slug).map(b => <option key={b.id} value={b.slug}>{b.name}</option>)}
+            </select></Label>
+            <p className="mt-2 text-sm text-slate-500">เพิ่มวัตถุดิบจากแถวสูตรได้เลย ระบบผูกวัตถุดิบใหม่กับครัวกลางและสร้างยอดเริ่มศูนย์ โดยไม่รับสินค้าเข้า</p>
+            {!hasPermission("fb.recipe.manage") && <p className="mt-2 text-sm text-amber-800">ต้องมีสิทธิ์จัดการสูตรจึงจะเพิ่มหรือแก้ไขสูตรได้</p>}
+            {!dashboard.kitchen && <p className="mt-2 text-sm text-amber-800">กรุณาตั้งค่าครัวและคลังวัตถุดิบในตั้งค่าเพิ่มเติมก่อน</p>}
+          </section>
+          {recipeBrandSlug && <RecipesPage key={recipeBrandSlug} brandSlug={recipeBrandSlug} companyKitchen writesAllowed={enabled && Boolean(dashboard.kitchen)} onDraftChange={setRecipeDraftOpen} />}
+        </TabsContent>
         <TabsContent value="overview" className="space-y-5">
           <section className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="border-b p-5"><h2 className="font-black">สต๊อกวัตถุดิบกลาง</h2><p className="text-sm text-slate-500">รวมทุก lot ในหน่วยกลาง</p></div><div className="overflow-x-auto"><table className="w-full min-w-[620px] text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-5 py-3">รหัส</th><th className="px-5 py-3">วัตถุดิบ</th><th className="px-5 py-3">มิติ</th><th className="px-5 py-3 text-right">คงเหลือ</th></tr></thead><tbody className="divide-y">{dashboard.ingredients.length ? dashboard.ingredients.map((row) => <tr key={row.id}><td className="px-5 py-4 font-mono text-xs">{row.code}</td><td className="px-5 py-4 font-bold">{row.name}</td><td className="px-5 py-4 text-slate-500">{row.unit_dimension}</td><td className="px-5 py-4 text-right font-black">{number(row.qty_on_hand)} {row.base_unit_code}</td></tr>) : <tr><td colSpan={4} className="p-10 text-center text-slate-500">ยังไม่มีวัตถุดิบกลาง</td></tr>}</tbody></table></div></section>
           <section className="rounded-xl border border-slate-200 bg-white"><div className="border-b p-5"><h2 className="font-black">ใบผลิตล่าสุด</h2><p className="text-sm text-slate-500">ผลผลิตยังแยกคลัง READY ตามแบรนด์</p></div><div className="divide-y">{dashboard.orders.length ? dashboard.orders.slice(0, 10).map((row) => <div key={row.id} className="flex justify-between p-5"><div><p className="font-black">{row.order_number} · {row.output_product_name}</p><p className="text-sm text-slate-500">{row.brand_name} · {row.planned_date} · {row.status}</p></div><p className="font-black">{number(row.actual_output_qty ?? row.planned_qty)} {row.output_unit_code}</p></div>) : <p className="p-10 text-center text-slate-500">ยังไม่มีใบผลิต</p>}</div></section>

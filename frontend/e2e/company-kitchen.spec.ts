@@ -82,7 +82,7 @@ test("Company Admin sees shared raw stock and Brand-separated reporting in dark 
   await expect(page.locator('[data-release-check="opening_lot_physical_count"]')).toBeVisible();
   await expect(page.getByText("หมู", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("1,500 g")).toBeVisible();
-  await page.getByRole("tab", { name: "ตั้งค่าและ Mapping" }).click();
+  await page.getByRole("tab", { name: "ตั้งค่าเพิ่มเติม" }).click();
   await expect(page.getByText("หมูแดดเดียว: หมูสูตร A")).toBeVisible();
   await expect(page.getByText("หมูหนักย่าง: หมูสูตร B")).toBeVisible();
   await expect(page.getByRole("button", { name: "บันทึก", exact: true })).toBeDisabled();

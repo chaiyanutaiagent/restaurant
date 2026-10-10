@@ -62,6 +62,7 @@ from app.schemas.restaurant import (
     StockCutoverExecuteRequest,
 )
 from app.services.upload_service import UploadService
+from app.services.recipe_material_service import RecipeMaterialQuickCreate, create_recipe_material
 from app.services.brand_navigation_service import BrandNavigationService
 from app.schemas.product import ProductCreate, ProductListItem
 from app.schemas.stock import StockBalanceRead, StockMovementRead
@@ -1061,6 +1062,53 @@ async def delete_recipe(
 
 # ── Raw Materials ─────────────────────────────────────────────────────────────
 
+def _require_quick_material_scope(current: TokenData, payload: RecipeMaterialQuickCreate) -> None:
+    if payload.use_company_kitchen:
+        if not set(current.permissions).intersection({"*", "company.kitchen.manage", "system.company.edit"}):
+            raise HTTPException(403, "ต้องมีสิทธิ์จัดการครัวกลางเพื่อผูกวัตถุดิบบริษัท")
+        from app.routers.company_kitchen import require_write_activation
+        require_write_activation()
+
+
+@router.post("/raw-materials/quick-create", status_code=status.HTTP_201_CREATED)
+async def quick_create_raw_material(
+    payload: RecipeMaterialQuickCreate,
+    current: TokenData = Depends(require_permission("fb.recipe.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    _require_quick_material_scope(current, payload)
+    return ok(await create_recipe_material(db, current.company_id, current.user_id, payload))
+
+
+@router.post("/central/{brand_slug}/raw-materials/quick-create", status_code=status.HTTP_201_CREATED)
+async def quick_create_brand_raw_material(
+    brand_slug: str,
+    payload: RecipeMaterialQuickCreate,
+    current: TokenData = Depends(require_permission("fb.recipe.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    brand = await _load_brand_for_slug(db, current.company_id, brand_slug)
+    _require_brand_assignment(current, brand)
+    _require_quick_material_scope(current, payload)
+    return ok(await create_recipe_material(db, current.company_id, current.user_id, payload, brand))
+
+
+@router.get("/recipe-products")
+async def list_recipe_products(
+    product_type: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=200, ge=1, le=200),
+    current: TokenData = Depends(require_any_permission("fb.menu.view", "fb.recipe.manage")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    q = select(Product).options(selectinload(Product.unit)).where(
+        Product.company_id == current.company_id, Product.deleted_at.is_(None), Product.is_active.is_(True))
+    q = q.where(or_(Product.brand_id == current.brand_id, Product.brand_id.is_(None)))
+    if product_type:
+        q = q.where(Product.product_type == product_type)
+    rows = (await db.scalars(q.order_by(Product.name, Product.id).offset((page - 1) * limit).limit(limit))).all()
+    return ok([ProductListItem.model_validate(row).model_dump() for row in rows])
+
 RAW_MATERIAL_UNIT_CODES = {
     "g": "G",
     "gram": "G",
@@ -1160,6 +1208,8 @@ async def create_raw_material(
 async def list_brand_recipe_products(
     brand_slug: str,
     product_type: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=300, ge=1, le=300),
     current: TokenData = Depends(require_any_permission("fb.menu.view", "fb.recipe.manage")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -1175,11 +1225,11 @@ async def list_brand_recipe_products(
             Product.is_active.is_(True),
             or_(Product.brand_id == brand.id, Product.brand_id.is_(None)),
         )
-        .order_by(Product.name.asc())
+        .order_by(Product.name.asc(), Product.id.asc())
     )
     if product_type:
         q = q.where(Product.product_type == product_type)
-    q = q.limit(300)
+    q = q.offset((page - 1) * limit).limit(limit)
     products = (await db.scalars(q)).all()
     return ok([ProductListItem.model_validate(product).model_dump() for product in products])
 

@@ -96,7 +96,7 @@ export type CompanyKitchenDashboard = {
   setup_options: {
     branches: Array<{ id: string; name: string; code: string }>;
     locations: Array<{ id: string; branch_id: string; name: string; code: string }>;
-    brands: Array<{ id: string; name: string; business_type: string }>;
+    brands: Array<{ id: string; name: string; slug?: string; business_type: string }>;
     brand_branches: Array<{ brand_id: string; branch_id: string }>;
     products: Array<{
       id: string;

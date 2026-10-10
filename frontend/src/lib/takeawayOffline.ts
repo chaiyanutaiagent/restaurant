@@ -348,6 +348,7 @@ export async function markTakeawayReceiptPrinted(
   clientSaleId: string | null,
   orderId: string,
   copyType: "customer" | "merchant",
+  idempotencyKey = `takeaway-print:${copyType}:${randomId()}`,
 ): Promise<TakeawayReceipt> {
   const printedAt = new Date().toISOString();
   if (clientSaleId) {
@@ -372,7 +373,7 @@ export async function markTakeawayReceiptPrinted(
     await takeawayApi.markReceiptPrinted(
       orderId,
       copyType,
-      `takeaway-print:${copyType}:${randomId()}`,
+      idempotencyKey,
     )
   ).data.data;
 }

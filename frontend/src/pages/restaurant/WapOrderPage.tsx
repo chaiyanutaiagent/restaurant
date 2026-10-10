@@ -30,6 +30,7 @@ import {
 } from "@/lib/restaurantOffline";
 import { useOnlineStatus } from "@/lib/syncService";
 import { printConfiguredWapOrderSlip } from "@/lib/takeawayPrinter";
+import { printTakeawaySlipFrame, TAKEAWAY_SLIP_PRINT_CSS, waitForSlipImages } from "@/lib/takeawaySlipPrint";
 import { wapApi, type WapMenu, type WapMenuProduct, type WapOrder } from "@/lib/wapApi";
 import { useAuthStore } from "@/stores/auth.store";
 
@@ -86,7 +87,7 @@ function lineTotal(item: CartItem): number {
   return Number(item.product.selling_price) * item.qty;
 }
 
-function Slip({
+export function Slip({
   order,
   type,
   employeeName,
@@ -185,6 +186,7 @@ export default function WapOrderPage(): JSX.Element {
   const kitchenSlipRef = useRef<HTMLDivElement | null>(null);
   const dineInOrderKeyRef = useRef(`staff-sale-${crypto.randomUUID()}`);
   const [promptpayQrDataUrl, setPromptpayQrDataUrl] = useState<string | null>(null);
+  const [promptpayQrError, setPromptpayQrError] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [currentOrder, setCurrentOrder] = useState<WapOrder | null>(null);
   const [serviceMode, setServiceMode] = useState<ServiceMode>("takeaway");
@@ -193,6 +195,7 @@ export default function WapOrderPage(): JSX.Element {
   const [dineInResult, setDineInResult] = useState<DineInOrderResult | null>(null);
   const [showSummary, setShowSummary] = useState(false);
   const [pendingPrint, setPendingPrint] = useState<"customer" | "kitchen" | null>(null);
+  const printRunningRef = useRef(false);
   const [outboxSummary, setOutboxSummary] = useState<RestaurantOutboxSummary>({
     pending: 0, syncing: 0, acknowledged: 0, reconciled: 0,
     needsReview: 0, rejected: 0, quarantined: 0, unknown: 0,
@@ -201,8 +204,16 @@ export default function WapOrderPage(): JSX.Element {
   const [closingCash, setClosingCash] = useState(0);
   const [handoverNote, setHandoverNote] = useState("");
 
-  const customerPrint = useReactToPrint({ contentRef: customerSlipRef });
-  const kitchenPrint = useReactToPrint({ contentRef: kitchenSlipRef });
+  const printOptions = {
+    pageStyle: TAKEAWAY_SLIP_PRINT_CSS, print: printTakeawaySlipFrame,
+    onAfterPrint: () => { printRunningRef.current = false; setPendingPrint(null); },
+    onPrintError: (_where: string, error: Error) => {
+      printRunningRef.current = false; setPendingPrint(null);
+      toast({ title: "พิมพ์ไม่สำเร็จ", description: error.message, variant: "destructive" });
+    },
+  };
+  const customerPrint = useReactToPrint({ contentRef: customerSlipRef, ...printOptions });
+  const kitchenPrint = useReactToPrint({ contentRef: kitchenSlipRef, ...printOptions });
 
   const offlineBrandSlug = brandSlug;
   const menuQuery = useQuery({
@@ -240,6 +251,8 @@ export default function WapOrderPage(): JSX.Element {
   useEffect(() => {
     let cancelled = false;
     const payload = menuQuery.data?.promptpay_payload;
+    setPromptpayQrDataUrl(null);
+    setPromptpayQrError(false);
     if (!payload) {
       setPromptpayQrDataUrl(null);
       return () => {
@@ -254,7 +267,7 @@ export default function WapOrderPage(): JSX.Element {
     }).then((dataUrl) => {
       if (!cancelled) setPromptpayQrDataUrl(dataUrl);
     }).catch(() => {
-      if (!cancelled) setPromptpayQrDataUrl(null);
+      if (!cancelled) { setPromptpayQrDataUrl(null); setPromptpayQrError(true); }
     });
     return () => {
       cancelled = true;
@@ -315,39 +328,42 @@ export default function WapOrderPage(): JSX.Element {
   const total = cart.reduce((sum, item) => sum + lineTotal(item), 0);
 
   useEffect(() => {
-    if (!pendingPrint || !currentOrder) return;
-    let cancelled = false;
-    const printTimer = window.setTimeout(() => {
+    if (!pendingPrint || !currentOrder || printRunningRef.current) return;
+    if (pendingPrint === "customer" && currentOrder.payment_method === "promptpay"
+      && menuQuery.data?.promptpay_payload && !promptpayQrDataUrl) {
+      if (promptpayQrError) {
+        setPendingPrint(null);
+        toast({ title: "สร้าง QR ไม่สำเร็จ", description: "กรุณาโหลดหน้าใหม่ก่อนพิมพ์สลิปลูกค้า", variant: "destructive" });
+      }
+      return;
+    }
+    printRunningRef.current = true;
       void (async () => {
         const type = pendingPrint;
-        let printedDirectly = false;
         try {
-          printedDirectly = await printConfiguredWapOrderSlip(
+          const root = type === "customer" ? customerSlipRef.current : kitchenSlipRef.current;
+          if (!root) throw new Error("ไม่พบสลิปสำหรับพิมพ์");
+          await waitForSlipImages(root);
+          const printedDirectly = await printConfiguredWapOrderSlip(
             currentOrder,
             type,
             employeeName,
             menuQuery.data ?? null,
             type === "customer" && currentOrder.payment_method === "promptpay" ? promptpayQrDataUrl : null,
           );
+          if (printedDirectly) { printRunningRef.current = false; setPendingPrint(null); }
+          else if (type === "customer") customerPrint();
+          else kitchenPrint();
         } catch (error) {
+          printRunningRef.current = false; setPendingPrint(null);
           toast({
             title: "พิมพ์ตรงไม่สำเร็จ",
-            description: `${getErrorMessage(error)} — เปิดหน้าพิมพ์สำรองให้แทน`,
+            description: `${getErrorMessage(error)} — ตรวจว่ากระดาษออกแล้วหรือไม่ก่อนลองใหม่ ระบบไม่พิมพ์ซ้ำอัตโนมัติ`,
             variant: "destructive",
           });
         }
-        if (!printedDirectly) {
-          if (type === "customer") customerPrint();
-          else kitchenPrint();
-        }
-        if (!cancelled) setPendingPrint(null);
       })();
-    }, 150);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(printTimer);
-    };
-  }, [currentOrder, customerPrint, employeeName, kitchenPrint, menuQuery.data, pendingPrint, promptpayQrDataUrl, toast]);
+  }, [currentOrder, customerPrint, employeeName, kitchenPrint, menuQuery.data, pendingPrint, promptpayQrDataUrl, promptpayQrError, toast]);
 
   const createOrderMutation = useMutation({
     mutationFn: async (method: "cash" | "promptpay") => {
@@ -923,7 +939,7 @@ export default function WapOrderPage(): JSX.Element {
                 <Button
                   className="h-12 w-full"
                   onClick={() => customerSlipMutation.mutate()}
-                  disabled={customerSlipMutation.isPending}
+                  disabled={customerSlipMutation.isPending || kitchenSlipMutation.isPending || pendingPrint !== null}
                 >
                   {customerSlipMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
                   {customerSlipPrinted ? "พิมพ์สลิปลูกค้าซ้ำ" : "พิมพ์สลิปลูกค้า"}
@@ -931,7 +947,7 @@ export default function WapOrderPage(): JSX.Element {
                 <Button
                   className="h-12 w-full bg-orange-600 hover:bg-orange-700"
                   onClick={() => kitchenSlipMutation.mutate()}
-                  disabled={kitchenSlipMutation.isPending || !customerSlipPrinted}
+                  disabled={kitchenSlipMutation.isPending || customerSlipMutation.isPending || pendingPrint !== null || !customerSlipPrinted}
                 >
                   {kitchenSlipMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ChefHat className="mr-2 h-4 w-4" />}
                   {!customerSlipPrinted
@@ -1097,7 +1113,7 @@ export default function WapOrderPage(): JSX.Element {
       </Dialog>
 
       <div className="fixed -left-[9999px] top-0">
-        <div ref={customerSlipRef} className="wap-print-slip">
+        <div ref={customerSlipRef} className="takeaway-thermal-sheet">
           <Slip
             order={currentOrder}
             type="customer"
@@ -1106,7 +1122,7 @@ export default function WapOrderPage(): JSX.Element {
             promptpayQrDataUrl={promptpayQrDataUrl}
           />
         </div>
-        <div ref={kitchenSlipRef} className="wap-print-slip">
+        <div ref={kitchenSlipRef} className="takeaway-thermal-sheet">
           <Slip
             order={currentOrder}
             type="kitchen"

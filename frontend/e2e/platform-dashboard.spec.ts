@@ -42,7 +42,8 @@ test("company create explains rejected fields and allows corrected submission", 
   await page.goto("/platform/companies");
   await page.getByRole("button", { name: "เปิด Company ใหม่" }).click();
   await page.getByLabel("ชื่อบริษัท *", { exact: true }).fill("QA company");
-  await page.getByLabel("Business URL *", { exact: true }).fill("restaurant");
+  await page.getByLabel("Business name *", { exact: true }).fill("restaurant");
+  await expect(page.getByText("ชื่อธุรกิจในลิงก์ของ Foodchainservice", { exact: false })).toBeVisible();
   await page.getByLabel("ชื่อ Company Owner *", { exact: true }).fill("Owner Shop");
   const username = page.getByLabel("Username Owner *", { exact: true });
   await username.fill("owner@example.com");
@@ -52,10 +53,10 @@ test("company create explains rejected fields and allows corrected submission", 
   expect(attempts).toBe(0);
   await username.fill("owner.shop");
   await page.getByRole("button", { name: "สร้าง Company และ Owner" }).click();
-  await expect(page.getByRole("alert")).toContainText("Business URL:");
+  await expect(page.getByRole("alert")).toContainText("Business name:");
   await expect(page.getByRole("alert")).toContainText("คำสงวน");
   await expect(page.getByRole("alert")).not.toContainText("status code 422");
-  await page.getByLabel("Business URL *", { exact: true }).fill("qa-company-valid");
+  await page.getByLabel("Business name *", { exact: true }).fill("qa-company-valid");
   await page.getByRole("button", { name: "สร้าง Company และ Owner" }).click();
   await expect(page).toHaveURL(new RegExp(`/platform/companies/${companyId}$`));
   expect(attempts).toBe(2);

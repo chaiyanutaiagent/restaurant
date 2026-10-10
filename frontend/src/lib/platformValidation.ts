@@ -1,6 +1,6 @@
 // Never render validation `input` or `ctx`: they can contain credentials.
 const labels: Record<string, string> = {
-  name: "ชื่อบริษัท", business_slug: "Business URL", name_en: "ชื่ออังกฤษ",
+  name: "ชื่อบริษัท", business_slug: "Business name", name_en: "ชื่ออังกฤษ",
   tax_id: "เลขประจำตัวผู้เสียภาษี", email: "อีเมลบริษัท", phone: "เบอร์โทรศัพท์",
   currency: "สกุลเงิน", timezone: "เขตเวลา", plan_code: "Plan code",
   reason: "เหตุผลที่เปิด Company", "owner.username": "Username Owner",

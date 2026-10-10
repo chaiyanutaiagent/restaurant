@@ -229,6 +229,10 @@ a {
   display: none;
 }
 
+.table-qr-print-root {
+  display: none;
+}
+
 @media print {
   body {
     background: #ffffff;
@@ -238,8 +242,8 @@ a {
     visibility: hidden;
   }
 
-  .qr-print-card,
-  .qr-print-card *,
+  .table-qr-print-root,
+  .table-qr-print-root *,
   .pos-print-receipt,
   .pos-print-receipt *,
   .wap-print-slip,
@@ -247,15 +251,38 @@ a {
     visibility: visible;
   }
 
-  .qr-print-card {
-    position: fixed;
-    inset: 0;
-    width: 100%;
-    max-width: 480px;
-    height: fit-content;
+  /* Print outside the transformed, scroll-clipped Radix dialog. */
+  body:has(> .table-qr-print-root) > :not(.table-qr-print-root) {
+    display: none !important;
+  }
+
+  body:has(> .table-qr-print-root) {
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .table-qr-print-root {
+    display: block !important;
+    width: 72mm;
+    max-width: 100%;
     margin: 0 auto;
-    border: 0 !important;
-    box-shadow: none !important;
+    padding: 2mm;
+    color: #000;
+    background: #fff;
+    text-align: center;
+    break-inside: avoid;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .table-qr-print-root img {
+    display: block !important;
+    width: 56mm;
+    height: 56mm;
+    max-width: 100%;
+    object-fit: contain;
+    margin: 4mm auto 0;
   }
 
   .wap-print-slip {

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import TokenData
 from app.config import settings
+from app.services.takeaway_catalog_policy import sale_eligible
 from app.models.takeaway import (
     TakeawayBranchCatalogItem,
     TakeawayCatalogItem,
@@ -218,7 +219,7 @@ class TakeawayService:
 
     async def list_categories(self, brand_id: uuid.UUID) -> list[TakeawayCategory]:
         await self._validate_context(brand_id=brand_id)
-        return list(
+        categories = list(
             await self.db.scalars(
                 select(TakeawayCategory)
                 .where(
@@ -229,6 +230,11 @@ class TakeawayService:
                 .order_by(TakeawayCategory.sort_order, TakeawayCategory.name)
             )
         )
+        if self.current.client_surface == "takeaway_store":
+            rows = await self.list_catalog(brand_id, self.current.branch_id, sales_only=True)
+            category_ids = {row["item"].category_id for row in rows}
+            categories = [category for category in categories if category.id in category_ids]
+        return categories
 
     async def create_catalog_item(self, data: TakeawayCatalogItemCreate) -> TakeawayCatalogItem:
         await self._validate_context(brand_id=data.brand_id)
@@ -245,6 +251,7 @@ class TakeawayService:
                 raise HTTPException(status_code=404, detail="Takeaway category not found")
         item = TakeawayCatalogItem(
             company_id=self.current.company_id,
+            source_metadata={"product_type": "menu_item", "is_for_sale": True},
             **data.model_dump(),
         )
         self.db.add(item)
@@ -304,12 +311,18 @@ class TakeawayService:
         self,
         brand_id: uuid.UUID,
         branch_id: uuid.UUID | None = None,
+        sales_only: bool = False,
     ) -> list[dict[str, object]]:
+        sales_only = sales_only or self.current.client_surface == "takeaway_store"
+        if sales_only:
+            branch_id = branch_id or self.current.branch_id
+            if branch_id is None:
+                raise HTTPException(status_code=400, detail="Sales catalog requires branch context")
         await self._validate_context(brand_id=brand_id, branch_id=branch_id)
         columns: list[object] = [
             TakeawayCatalogItem,
             TakeawayBranchCatalogItem.price_override,
-            func.coalesce(TakeawayBranchCatalogItem.is_available, True),
+            func.coalesce(TakeawayBranchCatalogItem.is_available, not sales_only),
         ]
         stock_totals = None
         if branch_id is not None:
@@ -338,7 +351,9 @@ class TakeawayService:
             .outerjoin(
                 TakeawayBranchCatalogItem,
                 (TakeawayBranchCatalogItem.catalog_item_id == TakeawayCatalogItem.id)
-                & (TakeawayBranchCatalogItem.branch_id == branch_id),
+                & (TakeawayBranchCatalogItem.branch_id == branch_id)
+                & (TakeawayBranchCatalogItem.company_id == self.current.company_id)
+                & (TakeawayBranchCatalogItem.brand_id == brand_id),
             )
             .where(
                 TakeawayCatalogItem.company_id == self.current.company_id,
@@ -357,6 +372,10 @@ class TakeawayService:
             item = row[0]
             price_override = row[1]
             branch_is_available = bool(row[2])
+            effective_price = price_override if price_override is not None else item.price
+            eligible = sale_eligible(item.source_metadata, effective_price, active=item.is_active, assigned=branch_is_available)
+            if sales_only and not eligible:
+                continue
             available_qty = Decimal(row[3]) if stock_totals is not None and row[3] is not None else None
             stock_is_available = (
                 not item.track_stock
@@ -369,6 +388,9 @@ class TakeawayService:
                 "branch_is_available": branch_is_available,
                 "available_qty": available_qty,
                 "is_available": branch_is_available and stock_is_available,
+                "sales_eligible": eligible,
+                "branch_assigned": branch_is_available,
+                "catalog_revision": 2,
             })
         return rows
 
@@ -819,6 +841,8 @@ class TakeawayService:
             for row in await self.db.scalars(
                 select(TakeawayBranchCatalogItem).where(
                     TakeawayBranchCatalogItem.branch_id == branch_id,
+                    TakeawayBranchCatalogItem.company_id == self.current.company_id,
+                    TakeawayBranchCatalogItem.brand_id == brand_id,
                     TakeawayBranchCatalogItem.catalog_item_id.in_(item_ids),
                 )
             )
@@ -831,6 +855,8 @@ class TakeawayService:
             item = catalog[line.catalog_item_id]
             override = availability.get(item.id)
             unit_price = money(override.price_override if override and override.price_override is not None else item.price)
+            if not sale_eligible(item.source_metadata, unit_price, active=item.is_active, assigned=bool(override and override.is_available)):
+                raise HTTPException(status_code=409, detail="Item is not approved for sale at this branch")
             line_subtotal = money(unit_price * line.quantity)
             line_tax = money(line_subtotal * Decimal(item.tax_rate) / Decimal("100"))
             subtotal += line_subtotal
@@ -1079,6 +1105,8 @@ class TakeawayService:
             for row in await self.db.scalars(
                 select(TakeawayBranchCatalogItem).where(
                     TakeawayBranchCatalogItem.branch_id == data.branch_id,
+                    TakeawayBranchCatalogItem.company_id == self.current.company_id,
+                    TakeawayBranchCatalogItem.brand_id == data.brand_id,
                     TakeawayBranchCatalogItem.catalog_item_id.in_(item_ids),
                 )
             )
@@ -1091,6 +1119,8 @@ class TakeawayService:
             item = catalog[line.catalog_item_id]
             override = availability.get(item.id)
             unit_price = money(override.price_override if override and override.price_override is not None else item.price)
+            if not sale_eligible(item.source_metadata, unit_price, active=item.is_active, assigned=bool(override and override.is_available)):
+                raise HTTPException(status_code=409, detail="Item is not approved for sale at this branch")
             line_subtotal = money(unit_price * line.quantity)
             line_tax = money(line_subtotal * Decimal(item.tax_rate) / Decimal("100"))
             subtotal += line_subtotal

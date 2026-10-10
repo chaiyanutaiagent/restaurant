@@ -13,7 +13,7 @@ android {
         applicationId "com.foodchainservice.takeaway"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 10109
+        versionCode 10110
         versionName "1.1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -35,7 +35,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix ".uat"
-            versionNameSuffix "-uat.10"
+            versionNameSuffix "-uat.11"
         }
         release {
             minifyEnabled false

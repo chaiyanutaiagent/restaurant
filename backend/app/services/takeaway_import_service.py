@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import TokenData
 from app.models.takeaway import (
+    TakeawayBranchCatalogItem,
     TakeawayCatalogItem,
     TakeawayCategory,
     TakeawayCreditAccount,
@@ -37,6 +38,7 @@ from app.models.takeaway import (
     TakeawayUnit,
 )
 from app.services.takeaway_service import TakeawayService
+from app.services.takeaway_catalog_policy import sale_eligible
 CONTRACT = "foodchainservice.takeaway-import"
 MAPPING_CONTRACT = "foodchainservice.takeaway-import-mapping"
 SCHEMA_VERSION = "1.0.0-draft"
@@ -672,11 +674,22 @@ class TakeawayImportService:
                     "product_type": data.get("product_type"),
                     "is_for_sale": data.get("is_for_sale"),
                     "is_for_purchase": data.get("is_for_purchase"),
+                    "item_kind": data.get("item_kind") or data.get("product_type"),
+                    "central_only": data.get("central_only", False),
                 },
             )
             self.db.add(target)
             await self.db.flush()
             item_map[source_id] = target.id
+            # Explicitly mapped destination branches receive sellable menus only.
+            # Raw/supply items stay in central inventory for recipes/replenishment.
+            if sale_eligible(target.source_metadata, target.price, active=target.is_active, assigned=True):
+                for mapped_branch in set(branch_map.values()):
+                    self.db.add(TakeawayBranchCatalogItem(
+                        company_id=self.current.company_id, brand_id=target_brand,
+                        branch_id=mapped_branch, catalog_item_id=target.id,
+                        is_available=True,
+                    ))
             target_records[("item", source_id)] = (
                 "takeaway_catalog_item",
                 target.id,

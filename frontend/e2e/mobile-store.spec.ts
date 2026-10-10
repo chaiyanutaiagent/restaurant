@@ -1,12 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const companyA = "11111111-1111-4111-8111-111111111111";
 // Release acceptance uses the actual signed manifest; Android installer is a bridge fixture.
-if (process.env.STORE_RELEASE_MANIFEST) test("UAT9 receives mandatory signed UAT10 update and passes verified artifact to installer", async ({ page }) => {
+if (process.env.STORE_RELEASE_MANIFEST) test("UAT10 receives mandatory signed UAT11 update and passes verified artifact to installer", async ({ page }) => {
   const manifest = JSON.parse(readFileSync(process.env.STORE_RELEASE_MANIFEST!, "utf8"));
-  expect(manifest.version_code).toBe(10109);
-  expect(manifest.minimum_supported_version_code).toBe(10109);
+  expect(manifest.version_code).toBe(10110);
+  expect(manifest.minimum_supported_version_code).toBe(10110);
   await page.route("**/downloads/takeaway-store/latest.json", route => route.fulfill({ json: manifest }));
   await page.route("**/src/mobile-store/main.tsx", route => route.fulfill({ contentType: "application/javascript", body: `
     import React from '/node_modules/.vite-mobile-store/deps/react.js';
@@ -22,7 +22,7 @@ if (process.env.STORE_RELEASE_MANIFEST) test("UAT9 receives mandatory signed UAT
       PluginHeaders: [{ name: "TakeawayUpdater", methods: [{ name: "getStatus", rtype: "promise" }, { name: "installUpdate", rtype: "promise" }] }],
       nativePromise: async (plugin: string, method: string, options: unknown) => {
         if (plugin !== "TakeawayUpdater") throw new Error("Unexpected native plugin");
-        if (method === "getStatus") return { packageId: "com.foodchainservice.takeaway.uat", versionName: "1.1.0-uat.9", versionCode: 10108, installPermission: true };
+        if (method === "getStatus") return { packageId: "com.foodchainservice.takeaway.uat", versionName: "1.1.0-uat.10", versionCode: 10109, installPermission: true };
         if (method === "installUpdate") { win.installerRequest = options; return; }
         throw new Error("Unexpected updater method");
       },
@@ -31,15 +31,144 @@ if (process.env.STORE_RELEASE_MANIFEST) test("UAT9 receives mandatory signed UAT
   await page.goto("/");
   const dialog = page.getByRole("dialog", { name: "มีแอปเวอร์ชันใหม่" });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("1.1.0-uat.9 → 1.1.0-uat.10");
+  await expect(dialog).toContainText("1.1.0-uat.10 → 1.1.0-uat.11");
   await expect(dialog).toContainText("จำเป็นต้องอัปเดตก่อนใช้งานต่อ");
   await expect(dialog.getByRole("button", { name: "ไว้ทีหลัง" })).toHaveCount(0);
   if (process.env.CODEX_VISUAL_QA_PATH) await page.screenshot({ path: process.env.CODEX_VISUAL_QA_PATH.replace(".png", "-update.png") });
   await dialog.getByRole("button", { name: "ดาวน์โหลดและติดตั้ง", exact: true }).click();
   await expect(dialog.getByRole("status")).toContainText("ดาวน์โหลดเสร็จแล้ว");
-  expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).installerRequest)).toEqual({ apkUrl: manifest.apk_url, apkSha256: manifest.apk_sha256, versionCode: 10109 });
+  expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).installerRequest)).toEqual({ apkUrl: manifest.apk_url, apkSha256: manifest.apk_sha256, versionCode: 10110 });
 });
 const companyB = "22222222-2222-4222-8222-222222222222";
+test("UAT11 migration clears UAT10 catalog only and preserves pending sale and sequence", async ({ page }) => {
+  await page.goto("/");
+  const result = await page.evaluate(async () => {
+    const { db } = await import("/src/mobile-store/db.ts");
+    db.close();
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open("foodchainservice-store-v1", 10);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore("takeawayWorkspaceSnapshots", { keyPath: "key" });
+        req.result.createObjectStore("takeawayPendingSales", { keyPath: "client_sale_id" });
+        req.result.createObjectStore("offlineSettings", { keyPath: "key" });
+      };
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const old = req.result;
+        const tx = old.transaction(["takeawayWorkspaceSnapshots", "takeawayPendingSales", "offlineSettings"], "readwrite");
+        tx.objectStore("takeawayWorkspaceSnapshots").put({ key: "old-scope", catalog: [{ sku: "CHAMBO-GARLIC", price: 0 }] });
+        tx.objectStore("takeawayPendingSales").put({ client_sale_id: "keep-sale", status: "pending", payload: { idempotency_key: "keep-key" } });
+        tx.objectStore("offlineSettings").put({ key: "sequence", value: "42" });
+        tx.oncomplete = () => { old.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+    await db.open();
+    return { version: db.verno, snapshots: await db.takeawayWorkspaceSnapshots.count(),
+      pending: await db.takeawayPendingSales.get("keep-sale"), sequence: await db.offlineSettings.get("sequence") };
+  });
+  expect(result.version).toBe(2);
+  expect(result.snapshots).toBe(0);
+  expect(result.pending).toMatchObject({ status: "pending", payload: { idempotency_key: "keep-key" } });
+  expect(result.sequence?.value).toBe("42");
+});
+
+if (process.env.STORE_LIVE_UAT_PASSWORD || process.env.STORE_LIVE_UAT_SESSION) test("live UAT BKK-01 approved catalog with authenticated employee session", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 393, height: 851 });
+  // Transport only: the local Vite origin is not an allowed production CORS
+  // origin. Forward unchanged requests to the REAL public API using Android's
+  // origin, and return its actual body/status (no business-response fixtures).
+  await page.route("https://uat-takeaway.foodchainservice.com/api/v1/**", async route => {
+    const response = await route.fetch({ headers: { ...route.request().headers(), origin: "https://localhost" } });
+    await route.fulfill({ response, headers: { ...response.headers(),
+      "access-control-allow-origin": "http://127.0.0.1:3011", "access-control-allow-credentials": "true" } });
+  });
+  let liveRows: Array<Record<string, any>> = [];
+  let context: Record<string, any> = {};
+  page.on("response", async response => {
+    if (response.url().includes("/takeaway/catalog/items?") && response.ok()) liveRows = (await response.json()).data;
+    if (response.url().endsWith("/takeaway/status") && response.ok()) context = (await response.json()).data;
+  });
+  await page.goto("/");
+  if (process.env.STORE_LIVE_UAT_SESSION) {
+    const issued = JSON.parse(readFileSync(process.env.STORE_LIVE_UAT_SESSION, "utf8"));
+    await page.evaluate(async session => {
+      const { saveSession } = await import("/src/mobile-store/session.ts");
+      await saveSession(session);
+    }, issued);
+  } else {
+  await page.getByLabel("Business Code", { exact: true }).fill("sketch-biz");
+  await page.getByRole("button", { name: "ตรวจสอบบริษัท", exact: true }).click();
+  await page.getByLabel("ชื่อผู้ใช้", { exact: true }).fill("test.chambo.store-cashier");
+  await page.getByLabel("รหัสผ่าน", { exact: true }).fill(process.env.STORE_LIVE_UAT_PASSWORD!);
+  await page.getByRole("button", { name: "ตรวจสอบบัญชีและสาขา", exact: true }).click();
+  await page.getByLabel("สาขา", { exact: true }).selectOption("1f397253-0479-4970-8288-f72d6cde6d7e");
+  await page.getByRole("button", { name: "เข้าใช้งานสาขานี้", exact: true }).click();
+  }
+  await expect(page).toHaveURL(/\/takeaway\/store\/sales$/);
+  await expect(page.getByTestId("sales-product")).toHaveCount(8);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(context.company_id).toBe("1b8a1818-44d6-4d5f-9d22-e5e17b23c081");
+  expect(context.brand_id).toBe("d6391cbe-ee53-4873-b95b-219c9bc23e7c");
+  expect(context.branch_id).toBe("1f397253-0479-4970-8288-f72d6cde6d7e");
+  const expected: Record<string, number> = { "ข้าวเหนียวหมูย่าง": 20, "ข้าวกล่องหมูย่าง": 40, "ข้าวหมูน้ำตก": 50, "น้ำตกหมู": 80, "หมูย่าง 1 ขีด": 35 };
+  for (const [name, price] of Object.entries(expected)) expect(Number(liveRows.find(row => row.item.name === name)?.effective_price)).toBe(price);
+  for (const row of liveRows) {
+    expect(row.item.company_id).toBe(context.company_id);
+    expect(row.item.brand_id).toBe(context.brand_id);
+    expect(row.item.source_metadata.is_for_sale).toBe(true);
+    expect(row.item.source_metadata.item_kind).toBe("menu_item");
+    expect(row.branch_assigned).toBe(true);
+    expect(row.sales_eligible).toBe(true);
+    expect(Number(row.effective_price)).toBeGreaterThan(0);
+    expect(["CHAMBO-GARLIC", "CHAMBO-RICEBOX", "CHAMBO-COCONUT-MILK", "UI-TW-006"]).not.toContain(row.item.sku);
+  }
+  if (process.env.CODEX_VISUAL_QA_PATH) {
+    await page.screenshot({ path: process.env.CODEX_VISUAL_QA_PATH, fullPage: true });
+    writeFileSync(process.env.CODEX_VISUAL_QA_PATH.replace(".png", "-api.json"), JSON.stringify({ context, catalog: liveRows }, null, 2));
+  }
+  // Exercise the live HTTP authorization boundary without changing business data.
+  const denied = await page.evaluate(async () => {
+    const { default: api } = await import("/src/mobile-store/api.ts");
+    const results = [];
+    for (const params of [
+      { brand_id: "3f8bdf47-885d-4a38-bac0-bccd6db9f8b3", branch_id: "1f397253-0479-4970-8288-f72d6cde6d7e" },
+      { brand_id: "d6391cbe-ee53-4873-b95b-219c9bc23e7c", branch_id: "03bb1c3b-cfd3-4766-a7f7-26585192974a" },
+    ]) {
+      try { await api.get("/takeaway/catalog/items", { params }); results.push(200); }
+      catch (error: any) { results.push(error.response?.status); }
+    }
+    return results;
+  });
+  expect(denied.every(status => status === 403 || status === 404)).toBe(true);
+  const wrongTenant = await page.evaluate(async () => {
+    const { useAuthStore } = await import("/src/mobile-store/session.ts");
+    const s = useAuthStore.getState();
+    const response = await fetch(`https://uat-takeaway.foodchainservice.com/api/v1/takeaway/catalog/items?brand_id=${s.brandId}&branch_id=${s.branchId}`, {
+      headers: { Authorization: `Bearer ${s.accessToken}`, "X-Company-ID": "22222222-2222-4222-8222-222222222222",
+        "X-Branch-ID": s.branchId!, "X-Store-Device-ID": s.deviceId! },
+    });
+    return response.status;
+  });
+  expect([403, 404]).toContain(wrongTenant);
+  if (process.env.CODEX_VISUAL_QA_PATH) {
+    writeFileSync(process.env.CODEX_VISUAL_QA_PATH.replace(".png", "-api.json"), JSON.stringify({
+      captured_at: new Date().toISOString(),
+      source: "https://uat-takeaway.foodchainservice.com/api/v1/takeaway/catalog/items",
+      authentication: process.env.STORE_LIVE_UAT_SESSION ? "temporary scoped employee session; password login not tested" : "employee password login",
+      viewport: { width: 393, height: 851, horizontal_overflow: false },
+      context, catalog: liveRows,
+      negative_skus_absent: ["CHAMBO-GARLIC", "CHAMBO-RICEBOX", "CHAMBO-COCONUT-MILK", "UI-TW-006"],
+      boundary_http_status: { wrong_brand: denied[0], wrong_branch: denied[1], wrong_company: wrongTenant },
+      transport: "Real public API body/status; localhost test proxy adjusts only CORS headers",
+    }, null, 2));
+  }
+  page.on("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "เปิดเมนูหน้าร้าน", exact: true }).click();
+  await page.getByRole("button", { name: "ออกจากระบบ / เปลี่ยนบริษัท", exact: true }).click();
+  await expect(page.getByLabel("Business Code", { exact: true })).toBeVisible();
+});
 const branch = "33333333-3333-4333-8333-333333333333";
 const brand = "44444444-4444-4444-8444-444444444444";
 const permissions = ["takeaway.store.access", "takeaway.catalog.view", "takeaway.stock.view"];

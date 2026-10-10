@@ -240,7 +240,7 @@ async def public_ordering_menu(
     token_row = await _ordering_token(ordering_token, db)
     service = TakeawayService(db, _public_current(token_row))
     categories = await service.list_categories(token_row.brand_id)
-    catalog = await service.list_catalog(token_row.brand_id, token_row.branch_id)
+    catalog = await service.list_catalog(token_row.brand_id, token_row.branch_id, sales_only=True)
     branch_ref = await db.scalar(
         select(TakeawayReferenceProjection).where(
             TakeawayReferenceProjection.aggregate_type == "branch",
@@ -433,10 +433,11 @@ async def create_catalog_item(
 async def list_catalog(
     brand_id: uuid.UUID,
     branch_id: uuid.UUID | None = None,
+    sales_only: bool = False,
     current: TokenData = Depends(require_permission("takeaway.catalog.view")),
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
-    return ok(await TakeawayService(db, current).list_catalog(brand_id, branch_id))
+    return ok(await TakeawayService(db, current).list_catalog(brand_id, branch_id, sales_only=sales_only))
 
 
 @router.patch("/catalog/items/{item_id}")

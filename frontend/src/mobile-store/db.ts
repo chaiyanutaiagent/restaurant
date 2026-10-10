@@ -13,6 +13,9 @@ class StoreDatabase extends Dexie {
       takeawayPendingSales: "client_sale_id, company_id, branch_id, user_id, status",
       offlineSettings: "key",
     });
+    // UAT10 cached central inventory as a sales menu. Only disposable snapshots
+    // are cleared; pending sales, sequence numbers and secure sessions survive.
+    this.version(2).stores({}).upgrade(tx => tx.table("takeawayWorkspaceSnapshots").clear());
   }
 }
 export const db = new StoreDatabase();

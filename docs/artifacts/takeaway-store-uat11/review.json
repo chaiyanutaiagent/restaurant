@@ -1,0 +1,75 @@
+{
+  "release": "1.1.0-uat.11",
+  "status": "STAGED_FOR_REVIEW_NOT_ACTIVATED",
+  "branch": "codex/takeaway-store-uat11",
+  "scope": "UAT only; no Production flags or ERP-POS source changes",
+  "root_cause": "Sales used the inventory catalog without metadata eligibility and defaulted missing branch assignments to available. Imported Chambo menus had no branch assignments while UI seed rows did.",
+  "changes": [
+    "Server fail-closed sale eligibility: explicit is_for_sale=true, approved finished/menu type, active, explicit branch availability, finite positive sale price",
+    "Store API always selects sales catalog; company/brand/branch-scoped joins and sale/public-order validation",
+    "Import preserves eligibility metadata and assigns eligible menus only to explicitly mapped branches",
+    "UAT-only idempotent BKK-01 reconciliation: preserve six imported menu IDs, add two approved menus, disable UI assortment assignments without deleting inventory/history",
+    "IndexedDB v2 invalidates disposable catalog snapshots only; pending outbox and sequence remain",
+    "Mobile grid min-width fix prevents horizontal page overflow with real recent orders"
+  ],
+  "build_inputs": {
+    "dependencies": "npm ci --no-audit --no-fund in this worktree, not a node_modules symlink",
+    "env": "Local ignored file, not a shared worktree symlink; no auto-login/default tenant",
+    "capacitor_settings": "Regenerated ../node_modules paths; matches committed base",
+    "path_scan": "PASS: Gradle/Capacitor configuration and decompressed APK contain no /Users/user/, chambo-store-menu-uat9 or restaurant-checkout-recovery references"
+  },
+  "tests": {
+    "backend": {"passed": 36, "environment": "Complete dependency image restaurant-pos-backend:uat-catalog-uat11, isolated docker run on UAT network", "modules": ["tests.test_takeaway_sales_catalog", "tests.test_takeaway_service", "tests.test_takeaway_import_service", "tests.test_mobile_store_boundary"]},
+    "type_check": "PASS: npm run type-check",
+    "store_playwright": {"passed": 21, "coverage": "Signed UAT11 update candidate, cache migration, company isolation, sales/queue routing, payment fixture, offline retry"},
+    "live_public_api_playwright": {"passed": 1, "viewport": "393x851 Redmi-sized Chrome viewport; not physical Redmi", "data": "Real UAT responses; no catalog mocks", "authorization": "Temporary 15-minute scoped employee session issued through AuthService; password not changed; logout completed", "negative_http_status": {"wrong_brand": 404, "wrong_branch": 404, "wrong_company": 403}},
+    "release_policy": {"passed": 3},
+    "android_unit": {"passed": 5},
+    "android_lint": "PASS: no errors; existing Gradle flatDir/deprecation warnings",
+    "android_build": "PASS: testDebugUnitTest lintDebug assembleDebug",
+    "bundle_boundary": "PASS: 6 compiled files",
+    "apk_boundary": "PASS: 8 assets",
+    "diff_check": "PASS"
+  },
+  "evidence": {
+    "live_api": "live-chambo-redmi-api.json",
+    "screenshot": "live-chambo-redmi.png",
+    "signed_candidate_manifest": "latest-uat.11.json",
+    "android_policy_tests": "android-update-policy.xml",
+    "android_unit_tests": "android-unit.xml"
+  },
+  "artifact": {
+    "package_id": "com.foodchainservice.takeaway.uat",
+    "version_code": 10110,
+    "version_name": "1.1.0-uat.11",
+    "apk_sha256": "e940c56db4ea60a03a310a4f4075205c7acf189e5a07adb2eb860515d8b8ca74",
+    "certificate_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5",
+    "certificate_note": "Existing UAT Android Debug certificate retained; not a Production release",
+    "apk_url": "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/foodchainservice-takeaway-store-1.1.0-uat.11.apk",
+    "manifest_url": "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/latest-uat.11.json",
+    "public_verification": "Downloaded staged APK/manifest; SHA256, Ed25519 manifest signature, APK signature and package/version verified",
+    "apksigner_note": "Verification passed; standard META-INF entries reported as outside JAR signature coverage; whole APK pinned by signed manifest SHA256"
+  },
+  "activation_hold": {
+    "latest_json_version": "1.1.0-uat.10",
+    "latest_json_version_code": 10109,
+    "latest_json_sha256_before_and_after": "e20144ba6f9187d67354972ff4e635df68331cf7d1d89599dee39f7674ea4480",
+    "latest_modified": false,
+    "install_instruction_sent": false,
+    "next_gate": "Review approval required before any latest.json switch"
+  },
+  "backend_and_rollback": {
+    "current_uat_image": "restaurant-pos-backend:uat-catalog-uat11",
+    "health": "healthy",
+    "previous_image": "restaurant-pos-backend:uat-store-projection-de21c84",
+    "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/takeaway-store-uat11-catalog",
+    "backup": "Pre-change takeaway.dump and .env.uat retained; dump archive listing verified; reconciliation run twice with identical results",
+    "warning": "Do not restore the whole database over subsequent transactions without an explicit recovery plan; rollback has not been physically rehearsed"
+  },
+  "limitations": [
+    "No physical Android installation, printer or payment-provider test in this pass",
+    "Password login is not certified by this live catalog acceptance; it used a scoped employee session",
+    "Cash/external-payment/offline E2E uses fixtures and does not claim real financial transactions",
+    "Two newly approved menus have no new production recipes/cost setup in this catalog-only patch"
+  ]
+}

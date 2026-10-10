@@ -7,7 +7,7 @@ export type * from "../lib/takeawayApi";
 export const takeawayApi = {
   status: () => api.get<ApiResponse<TakeawayContext>>("/takeaway/status"),
   categories: (brandId: string) => api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/catalog/categories", { params: { brand_id: brandId } }),
-  catalog: (brandId: string, branchId?: string | null) => api.get<ApiResponse<TakeawayCatalogRow[]>>("/takeaway/catalog/items", { params: { brand_id: brandId, branch_id: branchId } }),
+  catalog: (brandId: string, branchId?: string | null) => api.get<ApiResponse<TakeawayCatalogRow[]>>("/takeaway/catalog/items", { params: { brand_id: brandId, branch_id: branchId, sales_only: true } }),
   createCatalogItem: async (_payload: TakeawayCatalogItemPayload & { brand_id: string }): Promise<never> => {
     throw new Error("การแก้ข้อมูลหลักสินค้าให้ทำจากระบบหลังบ้าน");
   },

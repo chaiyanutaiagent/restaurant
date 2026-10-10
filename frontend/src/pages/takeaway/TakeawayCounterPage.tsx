@@ -308,7 +308,7 @@ export default function TakeawayCounterPage({ mode = "combined" }: { mode?: "com
   }
   return (
     <div className={`grid items-start gap-4 ${mode === "combined" ? "lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)]" : mode === "sales" ? "pb-24" : ""}`} data-testid={`takeaway-${mode}-workspace`}>
-      <section className="space-y-4">
+      <section className="min-w-0 space-y-4">
         {confirmPrinted ? <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-4">
           <p className="font-bold">กระดาษออกครบแล้วหรือไม่?</p><p className="text-sm">ถ้ากด Cancel หรือกระดาษไม่ออก ให้เลือก “ไม่ได้พิมพ์” จะไม่บันทึกประวัติ</p>
           <button className="m-2 rounded-lg bg-emerald-700 p-3 text-white" onClick={() => {

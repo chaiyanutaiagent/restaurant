@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { companySetupErrorMessage } from "../src/lib/companySetupErrors";
+import { estimateRestaurantReceiptPageHeightMm } from "../src/lib/restaurantReceiptPrint";
 import { BinaryBitmap, HybridBinarizer, QRCodeReader, RGBLuminanceSource } from "@zxing/library";
 
 const companyId = "11111111-1111-4111-8111-111111111111";
@@ -7,6 +8,101 @@ const brandId = "22222222-2222-4222-8222-222222222222";
 const branchId = "33333333-3333-4333-8333-333333333333";
 const secondBranchId = "44444444-4444-4444-8444-444444444444";
 const userId = "55555555-5555-4555-8555-555555555555";
+
+test("restaurant receipt height grows beyond 300mm for wrapped long receipts", () => {
+  const short = { items: [{ product_name: "ข้าวผัด" }], footer: "ขอบคุณที่ใช้บริการ" };
+  const long = { ...short, items: Array.from({ length: 80 }, () => ({
+    product_name: "ข้าวกะเพราไก่ไข่ดาวพิเศษชื่ออาหารยาวมากสำหรับทดสอบการตัดบรรทัด",
+    special_request: "ไม่ใส่กระเทียม\nแยกน้ำซุปและเครื่องปรุงทุกอย่างใส่ถุงต่างหาก",
+  })), header: "หัวบิลหลายบรรทัด\nที่อยู่ร้านอาหาร", note: "หมายเหตุเพิ่มเติม\nบรรทัดสุดท้าย", hasLogo: true };
+  expect(estimateRestaurantReceiptPageHeightMm(long)).toBeGreaterThan(300);
+  expect(estimateRestaurantReceiptPageHeightMm(long)).toBeGreaterThan(estimateRestaurantReceiptPageHeightMm(short));
+  expect(estimateRestaurantReceiptPageHeightMm({ ...short, footer: "ท้ายบิลยาว\n".repeat(30) })).toBeGreaterThan(estimateRestaurantReceiptPageHeightMm(short));
+});
+
+for (const variant of ["short", "long", "new-checkout"] as const) {
+  test(`restaurant ${variant} receipt prints footer with 15mm cutter feed`, async ({ page }) => {
+    await installSession(page, ["*"]);
+    await mockCompanyApi(page);
+    const sid = "66666666-6666-4666-8666-666666666666";
+    const saleId = "77777777-7777-4777-8777-777777777777";
+    const items = Array.from({ length: variant === "long" ? 80 : 2 }, (_, index) => ({
+      id: `item-${index}`, product_name: variant === "long" ? "ข้าวผัดไข่ดาวพิเศษชื่ออาหารยาวทดสอบการตัดบรรทัด" : "ข้าวผัดทดสอบ",
+      special_request: variant === "long" ? "ไม่ใส่กระเทียมและแยกเครื่องปรุงใส่ถุง\nหมายเหตุบรรทัดที่สอง" : null,
+      qty: 1, unit_price: 10, status: "served",
+    }));
+    let closed = variant !== "new-checkout";
+    let checkoutPosts = 0;
+    await page.route(`**/restaurant/sessions/${sid}/detail`, route => fulfill(route, {
+      id: sid, status: closed ? "closed" : "bill_requested", queue_number: 1, table_name: "A 1",
+      customer_name: "ลูกค้าทดสอบ", customer_phone: "", orders: [{ id: "order", status: "pending", source: "qr_self", items }],
+    }));
+    await page.route("**/restaurant/settings", route => fulfill(route, {
+      fb_setup_completed: true, fb_enabled: true, pos_receipt_header: "ร้านทดสอบ\nสาขาทดสอบกรุงเทพ", pos_receipt_footer: "ขอบคุณที่ใช้บริการ\nกรุณาตรวจสอบรายการก่อนออกจากร้าน", receipt_show_logo: false,
+    }));
+    await page.route("**/pos/shifts/current", route => fulfill(route, null));
+    const sale = { id: saleId, client_order_id: `restaurant-session-${sid}`, status: "completed", order_number: "SO-PRINT-TEST",
+      total_amount: items.length * 10, paid_amount: items.length * 10 + 50, change_amount: 50,
+      customer_name: "ลูกค้าทดสอบ", customer_phone: null, discount_amount: 0, note: "F&B | โต๊ะ A 1",
+      payments: [{ payment_method: "cash", reference_no: null }], items: [] };
+    await page.route(`**/pos/sales/${saleId}`, route => fulfill(route, sale));
+    await page.route(`**/restaurant/sessions/${sid}/checkout`, route => {
+      checkoutPosts += 1; closed = true;
+      return fulfill(route, { ...sale, sale_order_id: saleId, session_id: sid, table_name: "A 1", queue_number: 1, source_type: "dine_in", payment_method: "cash" });
+    });
+    // Capture the isolated document at the actual print call, without opening
+    // a system dialog or sending paper to a real printer.
+    await page.addInitScript(() => {
+      (window as any).__restaurantPrint = null;
+      const append = Node.prototype.appendChild;
+      Node.prototype.appendChild = function<T extends Node>(node: T): T {
+        const result = append.call(this, node) as T;
+        if (node instanceof HTMLIFrameElement) {
+          const capture = () => {
+            const win = node.contentWindow;
+            if (!win) return;
+            win.print = () => {
+              const doc = node.contentDocument!;
+              const root = doc.querySelector<HTMLElement>(".restaurant-print-receipt")!;
+              const footer = root.querySelector<HTMLElement>(".restaurant-receipt-footer")!;
+              const rect = root.getBoundingClientRect();
+              (window as any).__restaurantPrint = {
+                pageStyle: doc.querySelector("[data-restaurant-receipt-page]")?.textContent,
+                width: rect.width, height: rect.height, scrollWidth: root.scrollWidth,
+                footer: footer.textContent, footerBottom: footer.getBoundingClientRect().bottom - rect.top,
+                bottomFeed: parseFloat(win.getComputedStyle(root).paddingBottom),
+                position: win.getComputedStyle(root).position,
+                text: root.textContent,
+              };
+            };
+          };
+          capture(); node.addEventListener("load", capture);
+        }
+        return result;
+      };
+    });
+    await page.goto(`/restaurant/session/${sid}/checkout${closed ? `?receipt=${saleId}` : ""}`);
+    if (variant === "new-checkout") {
+      await page.locator('input[type="number"]').last().fill("70");
+      await page.getByRole("button", { name: /^ชำระเงิน ฿/ }).click();
+    }
+    await page.getByRole("button", { name: "พิมพ์ใบเสร็จ", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__restaurantPrint)).not.toBeNull();
+    const printed = await page.evaluate(() => (window as any).__restaurantPrint);
+    const heightMm = Number(printed.pageStyle.match(/80mm\s+([\d.]+)mm/)[1]);
+    const pxPerMm = 96 / 25.4;
+    expect(printed.width / pxPerMm).toBeCloseTo(64, 1);
+    expect(printed.scrollWidth).toBeLessThanOrEqual(Math.ceil(printed.width));
+    expect(printed.bottomFeed / pxPerMm).toBeCloseTo(15, 1);
+    expect(printed.height - printed.footerBottom).toBeGreaterThanOrEqual(14.9 * pxPerMm);
+    expect(heightMm).toBeGreaterThan(printed.height / pxPerMm);
+    expect(printed.position).toBe("static");
+    expect(printed.footer).toContain("ขอบคุณที่ใช้บริการ");
+    expect(printed.text).toContain("เงินทอน");
+    if (variant === "long") expect(heightMm).toBeGreaterThan(300);
+    expect(checkoutPosts).toBe(variant === "new-checkout" ? 1 : 0);
+  });
+}
 const permissions = [
   "system.company.edit",
   "system.branch.view",

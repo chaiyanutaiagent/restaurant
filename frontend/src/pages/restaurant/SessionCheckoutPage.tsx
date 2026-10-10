@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, ChefHat, Loader2, Printer, Rece
 import QRCode from "qrcode";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useReactToPrint } from "react-to-print";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,7 @@ import type { CashierShift } from "@/types/pos";
 import type { StockLocation } from "@/types/stock";
 import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
 import { errorMessage } from "@/lib/approvalApi";
+import { estimateRestaurantReceiptPageHeightMm, printRestaurantReceipt, RESTAURANT_RECEIPT_PRINT_CSS } from "@/lib/restaurantReceiptPrint";
 
 type SessionItem = { id: string; product_name: string; qty: number; unit_price: number; special_request: string | null; status: string };
 type SessionOrder = { id: string; status: string; source?: string; order_number?: string; items: SessionItem[] };
@@ -43,6 +45,7 @@ const SOURCE_LABELS: Record<string, string> = { dine_in: "โต๊ะ", quick_s
 export default function SessionCheckoutPage(): JSX.Element {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams] = useSearchParams();
+  const reprintSaleId = searchParams.get("receipt");
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -57,6 +60,7 @@ export default function SessionCheckoutPage(): JSX.Element {
   const [paymentQrImageLoaded, setPaymentQrImageLoaded] = useState(false);
   const [receiptLogoLoaded, setReceiptLogoLoaded] = useState(true);
   const [managerApprovalOpen, setManagerApprovalOpen] = useState(false);
+  const [printingReceipt, setPrintingReceipt] = useState(false);
   const receiptRef = useRef<HTMLDivElement>(null);
   const autoPrintStartedRef = useRef(false);
 
@@ -88,6 +92,32 @@ export default function SessionCheckoutPage(): JSX.Element {
   });
 
   const session = sessionQuery.data;
+  const reprintQuery = useQuery({
+    queryKey: ["restaurant-receipt", branchId, sessionId, reprintSaleId],
+    queryFn: async () => {
+      const sale = (await posApi.getSale(reprintSaleId!)).data.data;
+      if (sale.client_order_id !== `restaurant-session-${sessionId}` || sale.status !== "completed") {
+        throw new Error("ใบเสร็จไม่ตรงกับ session นี้ หรือรายการขายไม่ได้อยู่ในสถานะชำระแล้ว");
+      }
+      return sale;
+    },
+    enabled: Boolean(reprintSaleId && session?.status === "closed"),
+    retry: false,
+  });
+  useEffect(() => {
+    const sale = reprintQuery.data;
+    if (!sale || !session || session.status !== "closed") return;
+    setDiscount(Number(sale.discount_amount));
+    setCreditRef(sale.payments?.[0]?.reference_no ?? "");
+    setCheckoutResult({
+      sale_order_id: sale.id, order_number: sale.order_number,
+      total_amount: Number(sale.total_amount), paid_amount: Number(sale.paid_amount), change_amount: Number(sale.change_amount),
+      session_id: session.id, table_name: session.table_name ?? null, queue_number: session.queue_number,
+      source_type: session.table_name ? "dine_in" : "quick_service",
+      customer_name: sale.customer_name, customer_phone: sale.customer_phone,
+      payment_method: (sale.payments?.[0]?.payment_method ?? "other") as PaymentMethod, note: sale.note,
+    });
+  }, [reprintQuery.data, session]);
   const shift = shiftQuery.data;
   const locationId = shift?.location_id ?? locationsQuery.data?.[0]?.id;
 
@@ -133,7 +163,7 @@ export default function SessionCheckoutPage(): JSX.Element {
       const dataUrl = await QRCode.toDataURL(result.payload, { width: 320, margin: 1 });
       return { ...result, dataUrl };
     },
-    enabled: Boolean(sessionId && hasDynamicPromptPayTarget && !uploadedQrUrl && totalAfterDiscount > 0 && !checkoutResult),
+    enabled: Boolean(sessionId && session?.status !== "closed" && hasDynamicPromptPayTarget && !uploadedQrUrl && totalAfterDiscount > 0 && !checkoutResult),
     retry: false,
   });
   const paymentQrSrc = uploadedQrUrl || paymentQrQuery.data?.dataUrl || null;
@@ -141,6 +171,25 @@ export default function SessionCheckoutPage(): JSX.Element {
   const receiptLogoSrc = branchSettingsQuery.data?.receipt_show_logo
     ? branchSettingsQuery.data.receipt_logo_url
     : null;
+  const receiptHeightMm = estimateRestaurantReceiptPageHeightMm({
+    items: allItems,
+    header: branchSettingsQuery.data?.pos_receipt_header || "Restaurant POS Restaurant",
+    footer: branchSettingsQuery.data?.pos_receipt_footer || "ขอบคุณที่ใช้บริการ",
+    note: checkoutResult?.note, customerName: checkoutResult?.customer_name,
+    customerPhone: checkoutResult?.customer_phone, paymentReference, hasLogo: Boolean(receiptLogoSrc),
+  });
+  const handleReceiptPrint = useReactToPrint({
+    contentRef: receiptRef,
+    documentTitle: checkoutResult?.order_number ?? "Restaurant receipt",
+    pageStyle: RESTAURANT_RECEIPT_PRINT_CSS,
+    onBeforePrint: async () => { setPrintingReceipt(true); },
+    print: iframe => printRestaurantReceipt(iframe, receiptHeightMm),
+    onAfterPrint: () => setPrintingReceipt(false),
+    onPrintError: (_location, error) => {
+      setPrintingReceipt(false);
+      toast({ title: "พิมพ์ใบเสร็จไม่สำเร็จ", description: error.message, variant: "destructive" });
+    },
+  });
 
   useEffect(() => {
     setPaymentQrImageLoaded(false);
@@ -155,6 +204,7 @@ export default function SessionCheckoutPage(): JSX.Element {
       searchParams.get("printBill") !== "1"
       || autoPrintStartedRef.current
       || !session
+      || session.status === "closed"
       || !promptpayConfigured
       || !paymentQrSrc
       || !paymentQrImageLoaded
@@ -223,6 +273,7 @@ export default function SessionCheckoutPage(): JSX.Element {
   }
 
   const canCheckout =
+    session?.status !== "closed" && !reprintSaleId &&
     allItems.length > 0 &&
     (paymentMethod !== "cash" || paidAmount >= totalAfterDiscount) &&
     !checkoutMutation.isPending;
@@ -231,28 +282,6 @@ export default function SessionCheckoutPage(): JSX.Element {
   if (checkoutResult) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 p-4">
-        <style>{`
-          @media print {
-            body { background: white !important; }
-            body * { visibility: hidden !important; }
-            .restaurant-print-receipt, .restaurant-print-receipt * { visibility: visible !important; }
-            .restaurant-print-receipt {
-              position: fixed !important;
-              inset: 0 auto auto 0 !important;
-              width: 80mm !important;
-              max-width: 80mm !important;
-              border: 0 !important;
-              border-radius: 0 !important;
-              box-shadow: none !important;
-              padding: 4mm !important;
-              color: #111827 !important;
-              background: white !important;
-              font-size: 11px !important;
-              line-height: 1.3 !important;
-            }
-            .restaurant-print-actions { display: none !important; }
-          }
-        `}</style>
         <div className="w-full max-w-sm">
           <div className="rounded-3xl border border-emerald-200 bg-white p-8 shadow-lg text-center">
             <CheckCircle2 className="mx-auto h-16 w-16 text-emerald-500" />
@@ -271,7 +300,7 @@ export default function SessionCheckoutPage(): JSX.Element {
                   />
                 ) : null}
                 <p className="text-base font-black text-slate-950">{branchSettingsQuery.data?.pos_receipt_header || "Restaurant POS Restaurant"}</p>
-                <p className="mt-1 text-xs text-slate-500">ใบเสร็จรับเงิน</p>
+                <p className="mt-1 text-xs text-slate-500">{reprintSaleId ? "สำเนาใบเสร็จรับเงิน" : "ใบเสร็จรับเงิน"}</p>
                 <p className="mt-1 text-xs text-slate-500">{receiptPrintedAt}</p>
               </div>
 
@@ -314,11 +343,11 @@ export default function SessionCheckoutPage(): JSX.Element {
                 </div>
               )}
               {checkoutResult.note ? <p className="border-t border-dashed border-slate-200 pt-2 text-xs text-slate-500">{checkoutResult.note}</p> : null}
-              <p className="border-t border-dashed border-slate-200 pt-3 text-center text-xs text-slate-500">{branchSettingsQuery.data?.pos_receipt_footer || "ขอบคุณที่ใช้บริการ"}</p>
+              <p className="restaurant-receipt-footer border-t border-dashed border-slate-200 pt-3 text-center text-xs text-slate-500">{branchSettingsQuery.data?.pos_receipt_footer || "ขอบคุณที่ใช้บริการ"}</p>
             </div>
 
             <div className="restaurant-print-actions mt-6 flex gap-3">
-              <Button variant="outline" className="flex-1" onClick={() => window.print()}>
+              <Button variant="outline" className="flex-1" disabled={printingReceipt || branchSettingsQuery.isLoading} onClick={() => handleReceiptPrint()}>
                 <Printer className="mr-2 h-4 w-4" /> พิมพ์ใบเสร็จ
               </Button>
               <Button className="flex-1 bg-slate-950 hover:bg-slate-800" onClick={() => navigate(isDineIn ? "/restaurant/tables" : "/restaurant/orders")}>
@@ -338,6 +367,15 @@ export default function SessionCheckoutPage(): JSX.Element {
 
   if (!session) {
     return <div className="p-8 text-center text-slate-500">ไม่พบ session</div>;
+  }
+
+  if (session.status === "closed" || reprintSaleId) {
+    return <div className="p-8 text-center space-y-4">
+      <p>{reprintQuery.isFetching ? "กำลังโหลดใบเสร็จเดิม…" : reprintQuery.isError
+        ? errorMessage(reprintQuery.error, "ไม่สามารถโหลดใบเสร็จเดิมได้")
+        : "บิลนี้ปิดแล้ว กรุณาเปิดลิงก์พิมพ์ใบเสร็จเดิม ไม่ต้องชำระเงินซ้ำ"}</p>
+      <Button variant="outline" onClick={() => navigate("/restaurant/orders")}>กลับออเดอร์</Button>
+    </div>;
   }
 
   return (

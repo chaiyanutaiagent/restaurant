@@ -36,7 +36,7 @@ export default function LoginPage(): JSX.Element {
     retry: false,
   });
   const defaultDestination = isNativeApp ? "/takeaway" : canonicalSlug ? `/${canonicalSlug}/admin` : "/admin";
-  const { login, isLoading, error } = useLogin(defaultDestination);
+  const { login, isLoading, error } = useLogin(defaultDestination, canonicalSlug);
   const { startAutoLogin, isLoading: isAutoLoginLoading } = useUatAutoLogin(defaultDestination);
   const autoLoginRequested = useRef(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -44,8 +44,8 @@ export default function LoginPage(): JSX.Element {
     window.location.hostname.startsWith("uat-")
     || ["localhost", "127.0.0.1"].includes(window.location.hostname)
   );
-  const isUatAutoLogin = isUatPublicHost
-    || (isNativeApp && import.meta.env.VITE_UAT_AUTO_LOGIN === "true");
+  const isUatAutoLogin = !canonicalSlug && (isUatPublicHost
+    || (isNativeApp && import.meta.env.VITE_UAT_AUTO_LOGIN === "true"));
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
@@ -53,7 +53,7 @@ export default function LoginPage(): JSX.Element {
       business_code: isNativeApp
         ? window.localStorage.getItem("last_business_slug") ?? import.meta.env.VITE_BUSINESS_SLUG ?? ""
         : canonicalSlug ?? "",
-      username: isNativeApp ? "" : "admin",
+      username: isNativeApp || canonicalSlug ? "" : "admin",
       password: ""
     }
   });
@@ -73,7 +73,14 @@ export default function LoginPage(): JSX.Element {
 
   async function onSubmit(values: LoginFormValues): Promise<void> {
     let companyId = values.company_id?.trim() ?? "";
-    if (isNativeApp) {
+    if (canonicalSlug) {
+      if (!business.data || business.data.business_slug !== canonicalSlug) {
+        form.setError("root", { message: "ข้อมูลบริษัทไม่ตรงกับลิงก์ กรุณาเปิดลิงก์บริษัทอีกครั้ง" });
+        return;
+      }
+      // The canonical route, never a hidden field or old session, selects the company.
+      companyId = business.data.company_id;
+    } else if (isNativeApp) {
       const businessCode = values.business_code?.trim().toLowerCase() ?? "";
       if (!businessCode) {
         form.setError("business_code", { message: "กรุณากรอกรหัสบริษัท" });
@@ -119,12 +126,12 @@ export default function LoginPage(): JSX.Element {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {isAutoLoginLoading ? (
+          {isUatAutoLogin && isAutoLoginLoading ? (
             <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-center text-sm font-semibold text-amber-950">
               กำลังเข้าสู่ระบบทดสอบอัตโนมัติ...
             </div>
           ) : null}
-          {isUatPublicHost ? <QaAccessPanel defaultDestination={defaultDestination} /> : null}
+          {isUatPublicHost && !canonicalSlug ? <QaAccessPanel defaultDestination={defaultDestination} /> : null}
           <form className="space-y-5" onSubmit={form.handleSubmit(onSubmit)}>
             {isNativeApp ? (
               <div className="space-y-2">
@@ -156,6 +163,7 @@ export default function LoginPage(): JSX.Element {
 
             {canonicalSlug && business.isLoading ? <p className="rounded-lg bg-slate-100 p-3 text-sm text-slate-600">กำลังตรวจสอบ URL ธุรกิจ...</p> : null}
             {canonicalSlug && business.isError ? <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">ไม่พบธุรกิจนี้ หรือธุรกิจยังไม่เปิดใช้งาน</p> : null}
+            {form.formState.errors.root ? <p role="alert" className="text-sm text-red-600">{form.formState.errors.root.message}</p> : null}
 
             <div className="space-y-2">
               <Label htmlFor="username">Username</Label>

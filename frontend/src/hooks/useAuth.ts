@@ -1,5 +1,6 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
+import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { authApi } from "@/lib/api";
 import { db } from "@/lib/db";
@@ -22,16 +23,23 @@ function getLoginErrorMessage(error: unknown): string | null {
   return error instanceof Error ? error.message : "เข้าสู่ระบบไม่สำเร็จ";
 }
 
-export function useLogin(defaultDestination = "/admin"): {
+export function useLogin(defaultDestination = "/admin", expectedBusinessSlug?: string): {
   login: (payload: LoginRequest) => Promise<void>;
   isLoading: boolean;
   error: string | null;
 } {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const active = useRef(true);
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const setSession = useAuthStore((state) => state.setSession);
   const next = new URLSearchParams(location.search).get("next");
-  const redirectTo = next?.startsWith("/") && !next.startsWith("//") ? next : defaultDestination;
+  const safeNext = next?.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : null;
+  const canonicalPath = expectedBusinessSlug ? `/${expectedBusinessSlug}/admin` : null;
+  const redirectTo = canonicalPath
+    ? (safeNext && (safeNext === canonicalPath || safeNext.startsWith(`${canonicalPath}?`) || safeNext.startsWith(`${canonicalPath}#`)) ? safeNext : canonicalPath)
+    : safeNext ?? defaultDestination;
 
   const mutation = useMutation({
     mutationFn: async (payload: LoginRequest) => {
@@ -40,10 +48,30 @@ export function useLogin(defaultDestination = "/admin"): {
         throw new Error("กรุณากรอก Company ID");
       }
 
+      const loginPath = window.location.pathname;
       const response = await authApi.login(payload, companyId);
-      return { companyId, tokenResponse: response.data.data };
+      if (!active.current || window.location.pathname !== loginPath) {
+        throw new Error("ลิงก์เข้าสู่ระบบเปลี่ยนแล้ว กรุณาเข้าสู่ระบบอีกครั้ง");
+      }
+      if (response.data.data.user.company_id !== companyId
+        || (expectedBusinessSlug && response.data.data.business_slug !== expectedBusinessSlug)) {
+        throw new Error("บัญชีที่ได้รับไม่ตรงกับบริษัทในลิงก์ ระบบยังไม่เข้าสู่ระบบ กรุณาลองใหม่หรือติดต่อผู้ดูแล");
+      }
+      if (expectedBusinessSlug) {
+        let tokenCompanyId: unknown;
+        try {
+          const encoded = response.data.data.access_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+          tokenCompanyId = JSON.parse(window.atob(encoded)).company_id;
+        } catch { /* Malformed identity fails closed; API remains responsible for JWT verification. */ }
+        if (tokenCompanyId !== companyId) throw new Error("ข้อมูล session ไม่ตรงกับบริษัทในลิงก์ กรุณาติดต่อผู้ดูแล");
+      }
+      return { companyId, tokenResponse: response.data.data, loginPath };
     },
-    onSuccess: ({ companyId, tokenResponse }) => {
+    onSuccess: async ({ companyId, tokenResponse, loginPath }) => {
+      // Do not reuse cached business data after switching identities.
+      await queryClient.cancelQueries();
+      if (!active.current || window.location.pathname !== loginPath) return;
+      queryClient.clear();
       setSession(tokenResponse, companyId);
       window.localStorage.setItem("last_company_id", companyId);
       navigate(redirectTo, { replace: true });
@@ -52,7 +80,7 @@ export function useLogin(defaultDestination = "/admin"): {
 
   return {
     login: async (payload) => {
-      await mutation.mutateAsync(payload);
+      try { await mutation.mutateAsync(payload); } catch { /* Render the mutation error in the form. */ }
     },
     isLoading: mutation.isPending,
     error: getLoginErrorMessage(mutation.error)
@@ -72,6 +100,8 @@ export function useUatAutoLogin(defaultDestination = "/admin"): {
   const mutation = useMutation({
     mutationFn: async () => (await authApi.uatAutoLogin()).data.data,
     onSuccess: (tokenResponse) => {
+      // An in-flight generic QA login must not take over a canonical company page.
+      if (window.location.pathname !== "/login") return;
       const companyId = tokenResponse.user.company_id;
       setSession(tokenResponse, companyId);
       window.localStorage.setItem("last_company_id", companyId);

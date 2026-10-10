@@ -19,15 +19,12 @@ export default function BusinessAdminGuard(): JSX.Element {
   if (business.isLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">กำลังตรวจสอบธุรกิจ...</div>;
   }
-  if (business.isError || !business.data) {
+  if (business.isError || !business.data || business.data.business_slug !== businessSlug.toLowerCase()) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">ไม่พบธุรกิจนี้</div>;
   }
-  if (!isAuthenticated()) {
+  if (!isAuthenticated() || companyId !== business.data.company_id) {
     const next = `${location.pathname}${location.search}${location.hash}`;
     return <Navigate to={`/${business.data.business_slug}/login?next=${encodeURIComponent(next)}`} replace />;
-  }
-  if (companyId !== business.data.company_id) {
-    return <Navigate to="/403" replace />;
   }
   return <Outlet />;
 }

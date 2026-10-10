@@ -166,7 +166,8 @@ export default api;
 
 export const authApi = Object.assign(api, {
   login: (data: LoginRequest, companyId: string) =>
-    api.post<ApiResponse<TokenResponse>>("/auth/login", data, {
+    // Login establishes a new identity. Do not attach/refresh a previous tenant's session.
+    axios.post<ApiResponse<TokenResponse>>(`${apiBaseUrl}/auth/login`, data, {
       headers: { "X-Company-ID": companyId }
     }),
   uatAutoLogin: () =>

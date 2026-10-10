@@ -554,6 +554,30 @@ async function renderTakeawayReceipt(
   return drawOperations(composer);
 }
 
+async function renderTakeawayPreparation(receipt: TakeawayReceipt): Promise<HTMLCanvasElement> {
+  const composer = new ReceiptComposer(createMeasureContext());
+  composer.centered("ใบเตรียมสินค้า", 32, 800, 42);
+  composer.centered(`คิว ${receipt.payload.queue_number ?? "OFF"}`, 50, 800, 60);
+  composer.wrapped(receipt.payload.order_number || receipt.receipt_number, CONTENT_WIDTH, { size: 20, lineHeight: 27 });
+  composer.centered(new Date(receipt.issued_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }), 19, 400, 25);
+  composer.rule();
+  for (const item of receipt.payload.preparation_items ?? receipt.payload.items) {
+    composer.wrapped(`${item.quantity} × ${item.name}`, CONTENT_WIDTH, { size: 24, weight: 700, lineHeight: 32 });
+    if (item.note) composer.wrapped(`หมายเหตุ: ${item.note}`, CONTENT_WIDTH, { size: 22, weight: 700, lineHeight: 29 });
+    composer.spacer(8);
+  }
+  if (receipt.payload.note) {
+    composer.rule();
+    composer.wrapped(`หมายเหตุออเดอร์: ${receipt.payload.note}`, CONTENT_WIDTH, { size: 22, weight: 700, lineHeight: 29 });
+  }
+  return drawOperations(composer);
+}
+
+export async function buildEscPosPreparationBytes(receipt: TakeawayReceipt): Promise<Uint8Array> {
+  await ensureReceiptFontReady();
+  return canvasToEscPosRaster(await renderTakeawayPreparation(receipt));
+}
+
 async function renderWapOrderSlip(
   order: WapOrder,
   type: "customer" | "kitchen",

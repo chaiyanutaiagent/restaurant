@@ -3,10 +3,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const companyA = "11111111-1111-4111-8111-111111111111";
 // Release acceptance uses the actual signed manifest; Android installer is a bridge fixture.
-if (process.env.STORE_RELEASE_MANIFEST) test("UAT12 receives mandatory signed UAT13 update and passes verified artifact to installer", async ({ page }) => {
+if (process.env.STORE_RELEASE_MANIFEST) test("UAT13 receives mandatory signed UAT14 update and passes verified artifact to installer", async ({ page }) => {
   const manifest = JSON.parse(readFileSync(process.env.STORE_RELEASE_MANIFEST!, "utf8"));
-  expect(manifest.version_code).toBe(10112);
-  expect(manifest.minimum_supported_version_code).toBe(10112);
+  expect(manifest.version_code).toBe(10113);
+  expect(manifest.minimum_supported_version_code).toBe(10113);
   await page.route("**/downloads/takeaway-store/latest.json", route => route.fulfill({ json: manifest }));
   await page.route("**/src/mobile-store/main.tsx", route => route.fulfill({ contentType: "application/javascript", body: `
     import React from '/node_modules/.vite-mobile-store/deps/react.js';
@@ -22,7 +22,7 @@ if (process.env.STORE_RELEASE_MANIFEST) test("UAT12 receives mandatory signed UA
       PluginHeaders: [{ name: "TakeawayUpdater", methods: [{ name: "getStatus", rtype: "promise" }, { name: "installUpdate", rtype: "promise" }] }],
       nativePromise: async (plugin: string, method: string, options: unknown) => {
         if (plugin !== "TakeawayUpdater") throw new Error("Unexpected native plugin");
-        if (method === "getStatus") return { packageId: "com.foodchainservice.takeaway.uat", versionName: "1.1.0-uat.12", versionCode: 10111, installPermission: true };
+        if (method === "getStatus") return { packageId: "com.foodchainservice.takeaway.uat", versionName: "1.1.0-uat.13", versionCode: 10112, installPermission: true };
         if (method === "installUpdate") { win.installerRequest = options; return; }
         throw new Error("Unexpected updater method");
       },
@@ -31,13 +31,13 @@ if (process.env.STORE_RELEASE_MANIFEST) test("UAT12 receives mandatory signed UA
   await page.goto("/");
   const dialog = page.getByRole("dialog", { name: "มีแอปเวอร์ชันใหม่" });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("1.1.0-uat.12 → 1.1.0-uat.13");
+  await expect(dialog).toContainText("1.1.0-uat.13 → 1.1.0-uat.14");
   await expect(dialog).toContainText("จำเป็นต้องอัปเดตก่อนใช้งานต่อ");
   await expect(dialog.getByRole("button", { name: "ไว้ทีหลัง" })).toHaveCount(0);
   if (process.env.CODEX_VISUAL_QA_PATH) await page.screenshot({ path: process.env.CODEX_VISUAL_QA_PATH.replace(".png", "-update.png") });
   await dialog.getByRole("button", { name: "ดาวน์โหลดและติดตั้ง", exact: true }).click();
   await expect(dialog.getByRole("status")).toContainText("ดาวน์โหลดเสร็จแล้ว");
-  expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).installerRequest)).toEqual({ apkUrl: manifest.apk_url, apkSha256: manifest.apk_sha256, versionCode: 10112 });
+  expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).installerRequest)).toEqual({ apkUrl: manifest.apk_url, apkSha256: manifest.apk_sha256, versionCode: 10113 });
 });
 const companyB = "22222222-2222-4222-8222-222222222222";
 test("UAT11 migration clears UAT10 catalog only and preserves pending sale and sequence", async ({ page }) => {
@@ -522,7 +522,7 @@ for (const method of ["cash", "other"]) test(`sales records ${method} with serve
   await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true });
   await page.goto("/"); await login(page, "company-one", "sales");
   await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
-  const pay = page.getByRole("button", { name: "บันทึกการรับชำระ", exact: true });
+  const pay = page.getByRole("button", { name: "รับชำระและพิมพ์ 2 ใบ", exact: true });
   if (method === "other") {
     await page.getByLabel("โอน/ชำระภายนอก (ตรวจรับเอง)", { exact: true }).check();
     await expect(pay).toBeDisabled();
@@ -537,14 +537,8 @@ for (const method of ["cash", "other"]) test(`sales records ${method} with serve
   expect(payload.items).toEqual([{ catalog_item_id: "item-coffee", quantity: "1" }]);
   expect(payload.idempotency_key).toMatch(/^takeaway-sale:/);
   await expect(page.getByLabel("จำนวน กาแฟเย็น")).toHaveText("0");
-  await expect(page.getByRole("button", { name: "ใบลูกค้า", exact: true })).toBeEnabled();
-  if (method === "cash") {
-    await page.getByRole("button", { name: "ใบลูกค้า", exact: true }).click();
-    await expect(page.getByText("กระดาษออกครบแล้วหรือไม่?")).toBeVisible();
-    const recorded = page.waitForRequest(r => r.url().endsWith("/receipt/prints") && r.method() === "POST");
-    await page.getByRole("button", { name: "ยืนยันพิมพ์แล้ว", exact: true }).click();
-    expect((await recorded).postDataJSON().copy_type).toBe("customer");
-  }
+  await expect(page.getByRole("button", { name: "ใบลูกค้า", exact: true })).toHaveCount(0);
+  await expect(page.getByText(/ยังไม่ยืนยัน Auto Cutter: ยังไม่ได้ส่งกระดาษ/)).toBeVisible();
 });
 
 test("cash sale stays on device while offline, then syncs on reconnect", async ({ page, context }) => {
@@ -552,9 +546,9 @@ test("cash sale stays on device while offline, then syncs on reconnect", async (
   await page.goto("/"); await login(page, "company-one", "sales");
   await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
   await context.setOffline(true);
-  await page.getByRole("button", { name: "บันทึกการรับชำระ", exact: true }).click();
+  await page.getByRole("button", { name: "รับชำระและพิมพ์ 2 ใบ", exact: true }).click();
   await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "ใบลูกค้า", exact: true })).toBeEnabled();
+  await expect(page.getByText(/ยังไม่ยืนยัน Auto Cutter: ยังไม่ได้ส่งกระดาษ/)).toBeVisible();
   const synced = page.waitForRequest(r => r.url().endsWith("/takeaway/sales/offline-sync") && r.method() === "POST");
   await context.setOffline(false);
   expect((await synced).postDataJSON().payment.method).toBe("cash");
@@ -572,7 +566,7 @@ test("offline sale retry reuses the same idempotency key after a lost response",
   });
   await page.goto("/"); await login(page, "company-one", "sales");
   await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
-  await page.getByRole("button", { name: "บันทึกการรับชำระ", exact: true }).click();
+  await page.getByRole("button", { name: "รับชำระและพิมพ์ 2 ใบ", exact: true }).click();
   await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toBeVisible();
   failing = false;
   await page.getByRole("button", { name: "ส่งรายการค้าง", exact: true }).click();
@@ -581,47 +575,159 @@ test("offline sale retry reuses the same idempotency key after a lost response",
   await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toHaveCount(0);
 });
 
-test("Bluetooth transport failure records nothing; explicit retry and paper confirmation record each copy once", async ({ page }) => {
-  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true });
-  // Transport fixture only: actual raster and native spooling have separate byte tests.
+
+async function batchPrinterFixture(page: Page, verified = true): Promise<void> {
+  await page.addInitScript(({ verified }) => {
+    localStorage.setItem("foodchainservice-takeaway-printer", JSON.stringify({ name: "TEST FULL CUT", address: "AA:BB:CC:DD:EE:FF" }));
+    if (!localStorage.getItem("batch-fixture-count")) localStorage.setItem("batch-fixture-count", "0");
+    (window as any).batchPrinter = {
+      getCapabilities: async () => ({ protocolVersion: 2, autoCutter: verified ? "operator_verified_full_cut" : "unverified" }),
+      printBatch: async (job: any) => {
+        localStorage.setItem("batch-fixture-count", String(Number(localStorage.getItem("batch-fixture-count")) + 1));
+        localStorage.setItem("batch-fixture-last", JSON.stringify(job));
+        return new Promise((resolve, reject) => { (window as any).finishBatch = (ok: boolean) => ok ? resolve({ outcome: "sent_unconfirmed" }) : reject(new Error("SPP unknown outcome")); });
+      },
+    };
+  }, { verified });
   await page.route("**/src/lib/takeawayPrinter.ts", async route => {
     const response = await route.fetch();
-    const body = (await response.text()).replace(/export async function printTakeawayReceipt\([\s\S]*?\n}\n/, `export async function printTakeawayReceipt(receipt, copyType) {
-      window.printJobs = [...(window.printJobs || []), copyType];
-      return new Promise((resolve, reject) => { window.finishPrint = ok => ok ? resolve(true) : reject(new Error('SPP disconnected')); });
-    }\n`);
+    const body = (await response.text())
+      .replace('const nativePrinter = registerPlugin("TakeawayPrinter");', 'const nativePrinter = window.batchPrinter;')
+      .replace('return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";', 'return true;');
     await route.fulfill({ response, body });
   });
-  const prints: any[] = [];
-  await page.route("**/receipt/prints", async route => {
-    prints.push(route.request().postDataJSON());
-    await new Promise(resolve => setTimeout(resolve, 100));
-    await route.fulfill({ json: { data: { id: "receipt-1", order_id: "sale-1", payload: { items: [], subtotal: "55", total_amount: "58.85", tax_amount: "3.85", payment_method: "cash" }, print_count: prints.length } } });
-  });
-  await page.goto("/"); await login(page, "company-one", "sales");
+}
+async function batchCount(page: Page): Promise<number> { return page.evaluate(() => Number(localStorage.getItem("batch-fixture-count"))); }
+async function payOnce(page: Page): Promise<void> {
   await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
-  await page.getByRole("button", { name: "บันทึกการรับชำระ", exact: true }).click();
-  await page.getByRole("button", { name: "ใบลูกค้า", exact: true }).click();
-  await expect.poll(() => page.evaluate(() => (window as any).printJobs?.length)).toBe(1);
-  expect(prints).toHaveLength(0);
-  await page.evaluate(() => (window as any).finishPrint(false));
-  await expect(page.getByText(/SPP disconnected/).first()).toBeVisible();
-  expect(prints).toHaveLength(0);
-  for (const [button, copy] of [["ใบลูกค้า", "customer"], ["สำเนาร้าน", "merchant"]]) {
-    await page.getByRole("button", { name: button, exact: true }).click();
-    await expect.poll(() => page.evaluate(() => (window as any).printJobs?.length)).toBe(copy === "customer" ? 2 : 3);
-    await page.evaluate(() => (window as any).finishPrint(true));
-    await expect(page.getByText("กระดาษออกครบแล้วหรือไม่?")).toBeVisible();
-    expect(prints).toHaveLength(copy === "customer" ? 0 : 1);
-    // Re-entrant click cannot start another transport job while confirmation is pending.
-    await page.getByRole("button", { name: button, exact: true }).click();
-    await page.getByRole("button", { name: "ยืนยันพิมพ์แล้ว", exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
-    await expect.poll(() => prints.length).toBe(copy === "customer" ? 1 : 2);
-    await expect(page.getByText("กระดาษออกครบแล้วหรือไม่?")).toHaveCount(0);
-    await expect.poll(() => page.evaluate(() => (window as any).printJobs.length)).toBe(copy === "customer" ? 2 : 3);
+  await page.getByRole("button", { name: "รับชำระและพิมพ์ 2 ใบ", exact: true }).evaluate(b => { (b as HTMLButtonElement).click(); (b as HTMLButtonElement).click(); });
+}
+
+test("one payment click sends one compound batch; paper confirmation audits each copy once", async ({ page }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true }); await batchPrinterFixture(page);
+  const audits: any[] = []; let sales = 0;
+  page.on("request", req => { if (req.url().endsWith("/sales/offline-sync")) sales++; });
+  await page.route("**/receipt/prints", async route => { audits.push(route.request().postDataJSON()); await route.fulfill({ json: { data: {} } }); });
+  await page.goto("/"); await login(page, "company-one", "sales"); await payOnce(page);
+  await expect.poll(() => batchCount(page)).toBe(1); expect(sales).toBe(1); expect(audits).toHaveLength(0);
+  const job = await page.evaluate(() => JSON.parse(localStorage.getItem("batch-fixture-last")!));
+  expect(job.copies.map((c: any) => c.copyType)).toEqual(["customer", "preparation"]);
+  for (const copy of job.copies) {
+    const bytes = Buffer.from(copy.data, "base64"); expect([...bytes.subarray(-7)]).toEqual([27, 100, 4, 29, 86, 65, 16]);
   }
-  expect(prints.map(p => p.copy_type)).toEqual(["customer", "merchant"]);
-  expect(new Set(prints.map(p => p.idempotency_key)).size).toBe(2);
+  await page.evaluate(() => (window as any).finishBatch(true));
+  await expect(page.getByRole("button", { name: "กระดาษออกครบ 2 ใบ", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "กระดาษออกครบ 2 ใบ", exact: true }).evaluate(b => { (b as HTMLButtonElement).click(); (b as HTMLButtonElement).click(); });
+  await expect.poll(() => audits.length).toBe(2);
+  expect(audits.map(a => a.copy_type)).toEqual(["customer", "preparation"]);
+  expect(new Set(audits.map(a => a.batch_id)).size).toBe(1);
+  await page.reload(); await expect.poll(() => batchCount(page)).toBe(1);
+  await expect(page.getByText("บิลล่าสุด", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "เปิดเมนูหน้าร้าน", exact: true }).click();
+  await page.getByRole("link", { name: "บิลล่าสุด / พิมพ์ซ้ำ", exact: true }).click();
+  await expect(page).toHaveURL(/\/takeaway\/store\/receipts$/);
+  await expect(page.getByRole("button", { name: "พิมพ์ซ้ำใบลูกค้า", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "พิมพ์ซ้ำใบเตรียมสินค้า", exact: true })).toBeVisible();
+  page.once("dialog", dialog => dialog.dismiss()); await page.getByRole("button", { name: "พิมพ์ชุด 2 ใบ", exact: true }).click();
+  expect(await batchCount(page)).toBe(1);
+  for (const [index, copy] of (["customer", "preparation"] as const).entries()) {
+    await page.getByRole("button", { name: copy === "customer" ? "พิมพ์ซ้ำใบลูกค้า" : "พิมพ์ซ้ำใบเตรียมสินค้า", exact: true }).click();
+    await expect.poll(() => batchCount(page)).toBe(index + 2);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("batch-fixture-last")!).copies.map((c: any) => c.copyType))).toEqual([copy]);
+    await page.evaluate(() => (window as any).finishBatch(true));
+    await page.getByRole("button", { name: "กระดาษออกครบ 1 ใบ", exact: true }).click();
+    await expect.poll(() => audits.length).toBe(index + 3);
+  }
+  page.once("dialog", dialog => dialog.accept()); await page.getByRole("button", { name: "พิมพ์ชุด 2 ใบ", exact: true }).click();
+  await expect.poll(() => batchCount(page)).toBe(4);
+  await page.evaluate(() => (window as any).finishBatch(true));
+  await page.getByRole("button", { name: "กระดาษออกครบ 2 ใบ", exact: true }).click();
+  await expect.poll(() => audits.length).toBe(6);
+  expect(new Set(audits.map(a => a.batch_id)).size).toBe(4); expect(sales).toBe(1);
+});
+
+for (const missing of ["customer", "preparation"] as const) test(`uncertain Bluetooth only retries missing ${missing} and never repeats sale`, async ({ page }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true }); await batchPrinterFixture(page);
+  const audits: any[] = []; let sales = 0;
+  page.on("request", req => { if (req.url().endsWith("/sales/offline-sync")) sales++; });
+  await page.route("**/receipt/prints", route => { audits.push(route.request().postDataJSON()); return route.fulfill({ json: { data: {} } }); });
+  await page.goto("/"); await login(page, "company-one", "sales"); await payOnce(page);
+  await expect.poll(() => batchCount(page)).toBe(1); await page.evaluate(() => (window as any).finishBatch(false));
+  await expect(page.getByText(/SPP unknown outcome/)).toBeVisible();
+  expect(audits).toHaveLength(0); await page.reload();
+  await expect(page.getByRole("button", { name: "กระดาษออกครบ 2 ใบ", exact: true })).toBeVisible();
+  expect(await batchCount(page)).toBe(1);
+  await page.getByRole("button", { name: missing === "customer" ? "ขาดใบลูกค้า" : "ขาดใบเตรียมสินค้า", exact: true }).click();
+  await expect.poll(() => audits.length).toBe(1);
+  await page.getByRole("button", { name: /พิมพ์เฉพาะที่ขาด:/ }).evaluate(b => { (b as HTMLButtonElement).click(); (b as HTMLButtonElement).click(); });
+  await expect.poll(() => batchCount(page)).toBe(2);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("batch-fixture-last")!).copies.map((c: any) => c.copyType))).toEqual([missing]);
+  await page.evaluate(() => (window as any).finishBatch(true));
+  await page.getByRole("button", { name: "กระดาษออกครบ 2 ใบ", exact: true }).click();
+  await expect.poll(() => audits.length).toBe(2); expect(sales).toBe(1);
+  expect(new Set(audits.map(a => a.batch_id)).size).toBe(1);
+});
+
+test("restart during native send never resumes automatically; missing both requires explicit new attempt", async ({ page }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true }); await batchPrinterFixture(page);
+  const audits: any[] = [];
+  await page.route("**/receipt/prints", route => { audits.push(route.request().postDataJSON()); return route.fulfill({ json: { data: {} } }); });
+  await page.goto("/"); await login(page, "company-one", "sales"); await payOnce(page);
+  await expect.poll(() => batchCount(page)).toBe(1);
+  const first = await page.evaluate(() => JSON.parse(localStorage.getItem("batch-fixture-last")!).jobId);
+  await page.reload();
+  await page.getByRole("button", { name: "ไม่ออกทั้งสองใบ", exact: true }).click();
+  expect(await batchCount(page)).toBe(1); expect(audits).toHaveLength(0);
+  await page.getByRole("button", { name: /พิมพ์เฉพาะที่ขาด:/ }).click();
+  await expect.poll(() => batchCount(page)).toBe(2);
+  const second = await page.evaluate(() => JSON.parse(localStorage.getItem("batch-fixture-last")!));
+  expect(second.jobId).not.toBe(first); expect(second.copies.map((c: any) => c.copyType)).toEqual(["customer", "preparation"]);
+  await page.evaluate(() => (window as any).finishBatch(true));
+  await page.getByRole("button", { name: "กระดาษออกครบ 2 ใบ", exact: true }).click();
+  await expect.poll(() => audits.length).toBe(2);
+});
+
+test("print jobs stay isolated on branch/user changes and injected foreign local sale cannot print", async ({ page }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true }); await batchPrinterFixture(page);
+  await page.goto("/"); await login(page, "company-one", "sales"); await payOnce(page);
+  await expect.poll(() => batchCount(page)).toBe(1); await page.evaluate(() => (window as any).finishBatch(true));
+  const isolation = await page.evaluate(async () => {
+    const api = await import("/src/lib/takeawayPrintJobs.ts");
+    const { useAuthStore } = await import("/src/mobile-store/session.ts");
+    const original = useAuthStore.getState(); const [job] = await api.listStorePrintJobs();
+    const results = [];
+    for (const change of [{ companyId: "foreign" }, { brandId: "foreign" }, { branchId: "foreign" }, { user: { ...original.user!, id: "foreign" } }]) {
+      useAuthStore.setState(change);
+      let denied = false;
+      try { await api.startStorePrint(job.receipt, job.clientSaleId); } catch { denied = true; }
+      results.push({ visible: (await api.listStorePrintJobs()).length, denied });
+      useAuthStore.setState(original);
+    }
+    return results;
+  });
+  expect(isolation).toEqual(Array(4).fill({ visible: 0, denied: true })); expect(await batchCount(page)).toBe(1);
+});
+
+test("unverified cutter blocks transport and cannot report paper success", async ({ page }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true }); await batchPrinterFixture(page, false);
+  await page.goto("/"); await login(page, "company-one", "sales"); await payOnce(page);
+  await expect(page.getByText(/ยังไม่ยืนยัน Auto Cutter: ยังไม่ได้ส่งกระดาษ/)).toBeVisible();
+  expect(await batchCount(page)).toBe(0);
+  await expect(page.getByRole("button", { name: "กระดาษออกครบ 2 ใบ", exact: true })).toHaveCount(0);
+});
+
+test("offline printing audit sync does not resend paper after reconnect or restart", async ({ page, context }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true }); await batchPrinterFixture(page);
+  const audits: any[] = [];
+  await page.route("**/receipt/prints", route => { audits.push(route.request().postDataJSON()); return route.fulfill({ json: { data: {} } }); });
+  await page.goto("/"); await login(page, "company-one", "sales");
+  await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click(); await context.setOffline(true);
+  await page.getByRole("button", { name: "รับชำระและพิมพ์ 2 ใบ", exact: true }).click();
+  await expect.poll(() => batchCount(page)).toBe(1); await page.evaluate(() => (window as any).finishBatch(true));
+  await page.getByRole("button", { name: "กระดาษออกครบ 2 ใบ", exact: true }).click();
+  expect(audits).toHaveLength(0); await context.setOffline(false);
+  await expect.poll(() => audits.length, { timeout: 15000 }).toBe(2);
+  await page.reload(); expect(await batchCount(page)).toBe(1);
 });
 
 test("counter has only accept and handoff, handles legacy preparing and removes completed orders", async ({ page }) => {
@@ -650,7 +756,7 @@ test("counter has only accept and handoff, handles legacy preparing and removes 
   }
   expect(calls).toEqual(["accept", "handoff", "handoff", "handoff"]);
   await expect(page.getByText("ไม่มีออเดอร์รอรับหรือส่งมอบ")).toBeVisible();
-  await expect(page.getByText("บิลล่าสุด", { exact: true })).toBeVisible();
+  await expect(page.getByText("บิลล่าสุด", { exact: true })).toHaveCount(0);
 });
 
 test("Android never falls back to kitchen stages when counter capability is false", async ({ page }) => {
@@ -687,7 +793,7 @@ test("offline sale sync appears once in active order queue across retry and refr
   });
   await page.goto("/"); await login(page, "company-one", "sales");
   await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
-  await context.setOffline(true); await page.getByRole("button", { name: "บันทึกการรับชำระ", exact: true }).click();
+  await context.setOffline(true); await page.getByRole("button", { name: "รับชำระและพิมพ์ 2 ใบ", exact: true }).click();
   await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toBeVisible();
   await context.setOffline(false); await expect.poll(() => received.size).toBe(1);
   await page.goto("/takeaway/store/orders"); await expect(page.getByTestId("active-order-offline-one")).toHaveCount(1);

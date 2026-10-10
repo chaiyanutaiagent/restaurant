@@ -195,6 +195,7 @@ function localArtifacts(
       name: String(row?.item.name ?? "สินค้าออฟไลน์"),
       quantity: line.quantity,
       line_total: (lineSubtotal + lineTax).toFixed(2),
+      note: line.note,
     };
   });
   const localOrder: TakeawayLocalOrder = {
@@ -214,6 +215,7 @@ function localArtifacts(
       order_number: localOrder.order_number,
       queue_number: null,
       items: receiptLines,
+      note: payload.note,
       subtotal: subtotal.toFixed(2),
       discount_amount: payload.discount_amount,
       tax_amount: tax.toFixed(2),

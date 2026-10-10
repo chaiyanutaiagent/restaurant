@@ -13,6 +13,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.dependencies import TokenData
 from app.config import settings
@@ -1004,7 +1005,7 @@ class TakeawayService:
                     order_id=order.id,
                 )
             receipt_lines.append(
-                {"sku": item.sku, "name": item.name, "quantity": str(item.quantity), "line_total": str(item.line_total)}
+                {"sku": item.sku, "name": item.name, "quantity": str(item.quantity), "line_total": str(item.line_total), "note": item.note}
             )
         self.db.add(
             TakeawayPayment(
@@ -1041,6 +1042,7 @@ class TakeawayService:
                     "tax_amount": str(order.tax_amount),
                     "total_amount": str(order.total_amount),
                     "payment_method": data.payment.method,
+                    "note": order.note,
                 },
             )
         )
@@ -1220,7 +1222,7 @@ class TakeawayService:
                     order_id=order.id,
                 )
             receipt_lines.append(
-                {"sku": item.sku, "name": item.name, "quantity": str(line.quantity), "line_total": str(line_subtotal + line_tax)}
+                {"sku": item.sku, "name": item.name, "quantity": str(line.quantity), "line_total": str(line_subtotal + line_tax), "note": line.note}
             )
         payment = TakeawayPayment(
             order_id=order.id,
@@ -1256,6 +1258,7 @@ class TakeawayService:
                     "tax_amount": str(tax),
                     "total_amount": str(total),
                     "payment_method": data.payment.method,
+                    "note": data.note,
                 },
             )
         )
@@ -1383,24 +1386,36 @@ class TakeawayService:
         if row is None:
             raise HTTPException(status_code=404, detail="Takeaway receipt not found")
         order = await self.db.get(TakeawayOrder, order_id)
-        if order is None:
+        if order is None or order.company_id != self.current.company_id or row.branch_id != order.branch_id:
             raise HTTPException(status_code=404, detail="Takeaway order not found")
         assert_takeaway_scope(self.current, brand_id=order.brand_id, branch_id=order.branch_id)
+        # Read-only projection also restores preparation notes for pre-UAT14 receipts.
+        items = list(await self.db.scalars(select(TakeawayOrderItem).where(
+            TakeawayOrderItem.order_id == order.id).order_by(TakeawayOrderItem.created_at, TakeawayOrderItem.id)))
+        payload = dict(row.payload or {})
+        payload["note"] = order.note
+        payload["preparation_items"] = [{"sku": item.sku, "name": item.name, "quantity": str(item.quantity), "note": item.note} for item in items]
+        set_committed_value(row, "payload", payload)
         return row
+
+    async def list_receipts(self, limit: int = 50) -> list[TakeawayReceipt]:
+        statement = select(TakeawayReceipt).join(TakeawayOrder, TakeawayOrder.id == TakeawayReceipt.order_id).where(
+            TakeawayReceipt.company_id == self.current.company_id,
+            TakeawayOrder.company_id == self.current.company_id,
+            TakeawayReceipt.branch_id == TakeawayOrder.branch_id)
+        if self.current.brand_id is not None:
+            statement = statement.where(TakeawayOrder.brand_id == self.current.brand_id)
+        if self.current.branch_id is not None:
+            statement = statement.where(TakeawayOrder.branch_id == self.current.branch_id)
+        return list(await self.db.scalars(statement.order_by(TakeawayReceipt.issued_at.desc(), TakeawayReceipt.id.desc()).limit(limit)))
 
     async def mark_receipt_printed(
         self,
         order_id: uuid.UUID,
         data: TakeawayReceiptPrintCreate,
     ) -> tuple[TakeawayReceipt, bool]:
-        outbox_key = f"receipt-print:{order_id}:{data.idempotency_key}"
-        existing = await self.db.scalar(
-            select(TakeawayOperationalOutbox.id).where(
-                TakeawayOperationalOutbox.idempotency_key == outbox_key
-            )
-        )
-        if existing is not None:
-            return await self.get_receipt(order_id), True
+        key = f"batch:{data.batch_id}:{data.copy_type}" if data.batch_id else data.idempotency_key
+        outbox_key = f"receipt-print:{order_id}:{key}"
         receipt = await self.db.scalar(
             select(TakeawayReceipt)
             .where(
@@ -1412,12 +1427,24 @@ class TakeawayService:
         if receipt is None:
             raise HTTPException(status_code=404, detail="Takeaway receipt not found")
         order = await self.db.get(TakeawayOrder, order_id)
-        if order is None:
+        if order is None or order.company_id != self.current.company_id or receipt.branch_id != order.branch_id:
             raise HTTPException(status_code=404, detail="Takeaway order not found")
         assert_takeaway_scope(self.current, brand_id=order.brand_id, branch_id=order.branch_id)
+        # Recheck AFTER the receipt lock: concurrent confirmations are exactly once.
+        existing = await self.db.scalar(select(TakeawayOperationalOutbox.id).where(
+            TakeawayOperationalOutbox.company_id == self.current.company_id,
+            TakeawayOperationalOutbox.idempotency_key == outbox_key))
+        if existing is not None:
+            return receipt, True
         receipt.print_count += 1
         receipt.last_printed_at = datetime.now(timezone.utc)
         receipt.last_printed_copy = data.copy_type
+        payload = dict(receipt.payload or {})
+        copies = dict(payload.get("print_copies", {}))
+        copies[data.copy_type] = {"count": int(copies.get(data.copy_type, {}).get("count", 0)) + 1,
+            "last_at": receipt.last_printed_at.isoformat(), "batch_id": str(data.batch_id) if data.batch_id else None}
+        payload["print_copies"] = copies
+        receipt.payload = payload
         self._outbox(
             event_type="takeaway.receipt.printed.v1",
             aggregate_type="receipt",
@@ -1427,6 +1454,7 @@ class TakeawayService:
                 "order_id": str(order.id),
                 "receipt_number": receipt.receipt_number,
                 "copy_type": data.copy_type,
+                "batch_id": str(data.batch_id) if data.batch_id else None,
                 "print_count": receipt.print_count,
             },
             brand_id=order.brand_id,

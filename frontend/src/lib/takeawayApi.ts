@@ -86,6 +86,7 @@ export type TakeawayReceiptLine = {
   name: string;
   quantity: string;
   line_total: string;
+  note?: string | null;
 };
 
 export type TakeawayReceipt = TakeawayRecord & {
@@ -95,16 +96,19 @@ export type TakeawayReceipt = TakeawayRecord & {
     order_number: string;
     queue_number: number | null;
     items: TakeawayReceiptLine[];
+    preparation_items?: Array<Pick<TakeawayReceiptLine, "sku" | "name" | "quantity" | "note">>;
     subtotal: string;
     discount_amount: string;
     tax_amount: string;
     total_amount: string;
     payment_method: string;
+    note?: string | null;
+    print_copies?: Partial<Record<"customer" | "merchant" | "preparation", { count: number; last_at: string; batch_id: string | null }>>;
   };
   issued_at: string;
   print_count: number;
   last_printed_at: string | null;
-  last_printed_copy: "customer" | "merchant" | null;
+  last_printed_copy: "customer" | "merchant" | "preparation" | null;
 };
 
 export type TakeawayShiftSummary = {
@@ -231,10 +235,12 @@ export const takeawayApi = {
     api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/orders", { params }),
   receipt: (orderId: string) =>
     api.get<ApiResponse<TakeawayReceipt>>(`/takeaway/orders/${orderId}/receipt`),
-  markReceiptPrinted: (orderId: string, copyType: "customer" | "merchant", idempotencyKey: string) =>
+  receipts: () => api.get<ApiResponse<TakeawayReceipt[]>>("/takeaway/receipts"),
+  markReceiptPrinted: (orderId: string, copyType: "customer" | "merchant" | "preparation", idempotencyKey: string, batchId?: string) =>
     api.post<ApiResponse<TakeawayReceipt>>(`/takeaway/orders/${orderId}/receipt/prints`, {
       copy_type: copyType,
       idempotency_key: idempotencyKey,
+      ...(batchId ? { batch_id: batchId } : {}),
     }),
   tickets: (params?: Record<string, unknown>) =>
     api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/kitchen/tickets", { params }),

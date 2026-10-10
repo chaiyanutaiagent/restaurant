@@ -1,0 +1,6 @@
+FROM restaurant-pos-backend:uat-counter-uat13
+COPY takeaway_service.py mobile_store_policy.py /app/app/services/
+COPY takeaway.py /app/app/routers/takeaway.py
+COPY schemas_takeaway.py /app/app/schemas/takeaway.py
+COPY models_takeaway.py /app/app/models/takeaway.py
+COPY p6takeaway0010_preparation_print_copy.py /app/alembic_takeaway/versions/

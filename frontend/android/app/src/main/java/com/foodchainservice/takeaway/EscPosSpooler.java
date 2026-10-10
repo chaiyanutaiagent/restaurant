@@ -18,6 +18,33 @@ final class EscPosSpooler {
         final int offset, length, pause;
         Part(int offset, int length, int pause) { this.offset = offset; this.length = length; this.pause = pause; }
     }
+    static final class Job {
+        final byte[] bytes;
+        final List<Part> parts;
+        Job(byte[] bytes, List<Part> parts) { this.bytes = bytes; this.parts = parts; }
+    }
+
+    /** Each independently validated receipt ends in GS V 65 n (feed + FULL cut). */
+    static Job compound(byte[][] receipts) throws IOException {
+        if (receipts == null || receipts.length < 1 || receipts.length > 2) throw new IOException("One or two copies required");
+        List<Part> parts = new ArrayList<>();
+        int total = 0;
+        for (byte[] receipt : receipts) {
+            if (receipt == null) throw new IOException("Missing copy");
+            require(receipt, 0, new int[] {27,64,27,97,0});
+            for (Part part : plan(receipt)) parts.add(new Part(total + part.offset, part.length, part.pause));
+            total += receipt.length;
+            if (total > MAX_BYTES) throw new IOException("Compound job exceeds 1 MB");
+        }
+        byte[] bytes = new byte[total]; int offset = 0;
+        for (byte[] receipt : receipts) { System.arraycopy(receipt, 0, bytes, offset, receipt.length); offset += receipt.length; }
+        return new Job(bytes, parts);
+    }
+
+    static Job cutterTest() throws IOException {
+        byte[] sample = {27,64,27,97,0,29,118,48,0,1,0,1,0,(byte)255,27,100,4,29,86,65,16};
+        return compound(new byte[][] {sample, sample});
+    }
 
     static List<Part> plan(byte[] bytes) throws IOException {
         if (bytes == null || bytes.length == 0 || bytes.length > MAX_BYTES) throw new IOException("Invalid print byte limit");
@@ -33,7 +60,7 @@ final class EscPosSpooler {
             if (offset + 8 > bytes.length) throw new IOException("Incomplete raster header");
             int width = (bytes[offset + 4] & 255) | ((bytes[offset + 5] & 255) << 8);
             int rows = (bytes[offset + 6] & 255) | ((bytes[offset + 7] & 255) << 8);
-            if (width < 1 || width > 72 || rows < 1 || rows > 128) throw new IOException("Invalid raster band dimensions");
+            if (width < 1 || width > 72 || rows < 1 || rows > 64) throw new IOException("Invalid raster band dimensions");
             int end = offset + 8 + width * rows;
             if (end > bytes.length - 7) throw new IOException("Truncated raster pixels");
             parts.add(new Part(offset, 8, 0)); // Entire header in one write.
@@ -59,10 +86,13 @@ final class EscPosSpooler {
     }
 
     static void send(byte[] bytes, OutputStream out, Connection connected, Sleeper sleeper) throws IOException, InterruptedException {
-        List<Part> parts = plan(bytes); // Validate the WHOLE job before any byte is sent.
-        for (Part part : parts) {
+        send(new Job(bytes, plan(bytes)), out, connected, sleeper);
+    }
+
+    static void send(Job job, OutputStream out, Connection connected, Sleeper sleeper) throws IOException, InterruptedException {
+        for (Part part : job.parts) {
             if (!connected.isConnected()) throw new IOException("Bluetooth disconnected; partial print possible");
-            out.write(bytes, part.offset, part.length); // Blocking write provides transport backpressure.
+            out.write(job.bytes, part.offset, part.length); // Blocking write provides transport backpressure.
             out.flush(); // Flush is NOT an acknowledgement from the print head.
             if (part.pause > 0) sleeper.sleep(part.pause);
         }

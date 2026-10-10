@@ -27,6 +27,7 @@ STORE_API_ROUTES = (
     ("GET", r"/api/v1/takeaway/(status|catalog/categories|catalog/items|shifts|orders|stock|stock/locations|stock/movements|store/transfers)"),
     ("GET", r"/api/v1/takeaway/shifts/[0-9a-f-]+/summary"),
     ("GET", r"/api/v1/takeaway/orders/[0-9a-f-]+/receipt"),
+    ("GET", r"/api/v1/takeaway/receipts"),
     ("POST", r"/api/v1/takeaway/(sales|sales/offline-sync|shifts/open|ordering-links|stock/movements|store/central-orders)"),
     ("POST", r"/api/v1/takeaway/shifts/[0-9a-f-]+/close"),
     ("POST", r"/api/v1/takeaway/orders/[0-9a-f-]+/(capture-payment|picked-up|receipt/prints)"),

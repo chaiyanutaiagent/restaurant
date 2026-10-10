@@ -18,6 +18,8 @@ import {
   type TakeawayPrinterDevice,
 } from "@/lib/takeawayPrinter";
 
+import AutoCutterSettings from "@/components/takeaway/AutoCutterSettings";
+
 export default function TakeawayDeviceSettingsPage(): JSX.Element {
   const { toast } = useToast();
   const [devices, setDevices] = useState<TakeawayPrinterDevice[]>([]);
@@ -71,7 +73,7 @@ export default function TakeawayDeviceSettingsPage(): JSX.Element {
         </div>
         {native ? <>
           <div className="mt-4 space-y-2">{devices.map((device) => <button key={device.address} onClick={() => { setSelected(device); saveTakeawayPrinter(device); }} className={`flex w-full items-center justify-between rounded-xl border p-4 text-left ${selected?.address === device.address ? "border-emerald-500 bg-emerald-50" : "border-slate-200"}`}><span><strong className="block">{device.name}</strong><span className="text-xs text-slate-500">{device.address}</span></span>{selected?.address === device.address ? <CheckCircle2 className="h-5 w-5 text-emerald-600" /> : null}</button>)}</div>
-          {selected ? <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm"><p className="font-bold">เครื่องที่เลือก: {selected.name}</p><button disabled={testMutation.isPending} onClick={() => testMutation.mutate()} className="mt-3 flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 font-bold text-white disabled:opacity-40"><Printer className="h-4 w-4" /> ทดสอบพิมพ์และตัดกระดาษ</button></div> : null}
+          {selected ? <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm"><AutoCutterSettings key={selected.address} address={selected.address} /><p className="font-bold">เครื่องที่เลือก: {selected.name}</p><button disabled={testMutation.isPending} onClick={() => testMutation.mutate()} className="mt-3 flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 font-bold text-white disabled:opacity-40"><Printer className="h-4 w-4" /> ทดสอบพิมพ์และตัดกระดาษ</button></div> : null}
         </> : <div className={`mt-4 rounded-xl p-4 text-sm ${webPrinterQuery.data?.paired ? "bg-emerald-50 text-emerald-900" : "bg-amber-50 text-amber-900"}`}>
           <p className="font-bold">{webPrinterQuery.data?.paired ? `เชื่อมแล้ว: ${webPrinterQuery.data.printer?.name ?? "ESC/POS"}` : webPrinterQuery.data?.supported ? "ยังไม่ได้เชื่อมเครื่องพิมพ์" : "Browser นี้ไม่รองรับ Web USB"}</p>
           <p className="mt-1 text-xs">ใบเสร็จและสลิปจะยาวตามรายการจริงและตัดท้ายงานอัตโนมัติ</p>

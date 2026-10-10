@@ -1,5 +1,17 @@
 import { test, expect, type Page } from "@playwright/test";
 
+for (const long of [false, true]) test(`preparation raster contains Thai quantity/notes without prices, tax or payment (${long ? "80 items" : "short"})`, async ({ page }) => {
+  await page.goto(`/e2e/thermal-print-fixture.html?kind=customer${long ? "&long=1" : ""}`);
+  const raster = await page.evaluate(async () => (window as any).buildRaster("preparation"));
+  const text = raster.texts.join(" ");
+  expect(text).toContain("ใบเตรียมสินค้า"); expect(text).toContain("คิว 88"); expect(text).toContain("TW-PRINT-TEST");
+  expect(text).toContain("1 ×"); expect(text).toContain("ไม่เผ็ด แยกน้ำจิ้ม");
+  expect(text).not.toMatch(/ภาษี|VAT|สุทธิ|ชำระ|เงินทอน|ส่วนลด|฿|107[.,]00/);
+  expect(raster.widthBytes).toBe(72); expect(raster.bandCount).toBeGreaterThan(1);
+  expect(raster.suffix).toEqual([27,100,4,29,86,65,16]);
+  if (!long && process.env.UAT14_EVIDENCE_DIR) await page.locator("[data-preparation-preview]").screenshot({ path: `${process.env.UAT14_EVIDENCE_DIR}/preparation-slip.png` });
+});
+
 test("banded raster reconstructs every pixel including right edge and command-looking data", async ({ page }) => {
   await page.goto("/e2e/thermal-print-fixture.html");
   const results = await page.evaluate(async () => {

@@ -125,8 +125,9 @@ class TakeawayShiftClose(BaseSchema):
 
 
 class TakeawayReceiptPrintCreate(BaseSchema):
-    copy_type: Literal["customer", "merchant"]
+    copy_type: Literal["customer", "merchant", "preparation"]
     idempotency_key: str = Field(min_length=8, max_length=180)
+    batch_id: uuid.UUID | None = None
 
 
 class TakeawaySaleLine(BaseSchema):

@@ -17,6 +17,7 @@ import {
 } from "@/lib/takeawayOffline";
 import QRCode from "qrcode";
 import { printTakeawayReceipt } from "@/lib/takeawayPrinter";
+import { startStorePrint, isStorePrintTransporting } from "@/lib/takeawayPrintJobs";
 import { printTakeawaySlipFrame, TAKEAWAY_SLIP_PRINT_CSS } from "@/lib/takeawaySlipPrint";
 
 type CartLine = { row: TakeawayCatalogRow; quantity: number };
@@ -46,6 +47,7 @@ export default function TakeawayCounterPage({ mode = "combined", storeOnly = fal
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [productSearch, setProductSearch] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
+  const saleSubmitLock = useRef(false);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "other">("cash");
   const [paymentReference, setPaymentReference] = useState("");
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
@@ -104,7 +106,7 @@ export default function TakeawayCounterPage({ mode = "combined", storeOnly = fal
   const recentOrdersQuery = useQuery({
     queryKey: ["takeaway", "orders", "recent", context?.branch_id],
     queryFn: async () => (await takeawayApi.orders({ branch_id: context!.branch_id!, limit: 50 })).data.data,
-    enabled: Boolean(context?.branch_id),
+    enabled: !storeOnly && Boolean(context?.branch_id),
     refetchInterval: 5_000,
   });
   const openShift = shifts.find((row) => row.status === "open");
@@ -224,7 +226,7 @@ export default function TakeawayCounterPage({ mode = "combined", storeOnly = fal
           refreshTakeawayWorkspace(),
           queryClient.invalidateQueries({ queryKey: ["takeaway", "orders"] }),
           queryClient.invalidateQueries({ queryKey: ["takeaway", "stock"] }),
-        ]);
+        ]).catch(() => undefined); // Sale is already durable; refresh failure must never invite another charge.
         await queryClient.invalidateQueries({ queryKey: ["takeaway", "offline-workspace"] });
       } else {
         void queryClient.invalidateQueries({ queryKey: ["takeaway", "orders"], refetchType: "none" });
@@ -234,9 +236,18 @@ export default function TakeawayCounterPage({ mode = "combined", storeOnly = fal
         title: result.status === "synced" ? `รับเงินแล้ว · คิว ${String(order.queue_number)}` : result.status === "needs_review" ? "บันทึกในเครื่องแล้ว · ต้องตรวจสอบ" : "เก็บรายการไว้ในเครื่องแล้ว",
         description: result.status === "synced" ? String(order.order_number) : result.error || "ระบบจะส่งรายการอัตโนมัติเมื่อเชื่อมต่อได้",
       });
+      if (storeOnly && result.status !== "needs_review") {
+        try { await startStorePrint(result.receipt, result.clientSaleId, ["customer", "preparation"], true); }
+        catch (error) { toast({ title: "บันทึกการขายแล้ว แต่พิมพ์ไม่ได้", description: error instanceof Error ? error.message : "ไปที่บิลล่าสุด / พิมพ์ซ้ำ ห้ามรับชำระซ้ำ", variant: "destructive" }); }
+      }
     },
     onError: (error) => toast({ title: "ขายไม่สำเร็จ", description: error instanceof Error ? error.message : "กรุณาตรวจสต๊อกและยอดชำระ", variant: "destructive" }),
+    onSettled: () => { saleSubmitLock.current = false; },
   });
+  const submitSale = (): void => {
+    if (saleSubmitLock.current || isStorePrintTransporting()) return;
+    saleSubmitLock.current = true; saleMutation.mutate();
+  };
   const orderingLinkMutation = useMutation({
     mutationFn: () => {
       if (storeOnly || !writesEnabled) throw new Error("การสร้าง QR สั่งซื้อยังถูกล็อกในช่วง Dark launch");
@@ -392,18 +403,18 @@ export default function TakeawayCounterPage({ mode = "combined", storeOnly = fal
           {!workspaceQuery.isLoading && visibleItems.length === 0 ? <div className="col-span-full rounded-2xl border border-dashed bg-white p-10 text-center text-slate-500">ไม่พบสินค้าในหมวดหรือคำค้นหานี้</div> : null}
         </div>
         </> : null}
-        {(recentOrdersQuery.data ?? []).length ? <div className="rounded-2xl border bg-white p-4 shadow-sm"><h2 className="font-black">บิลล่าสุด</h2><div className="mt-3 flex gap-2 overflow-x-auto">{(recentOrdersQuery.data ?? []).slice(0, 8).map((order) => <button key={order.id} disabled={!writesEnabled || reprintMutation.isPending} onClick={() => reprintMutation.mutate(order.id)} className="min-w-fit rounded-xl border px-3 py-2 text-left text-sm disabled:opacity-40"><span className="font-black">คิว {String(order.queue_number ?? "-")}</span><span className="ml-2 text-slate-500">{money(Number(order.total_amount))}</span><Printer className="ml-2 inline h-4 w-4" /></button>)}</div></div> : null}
+        {!storeOnly && (recentOrdersQuery.data ?? []).length ? <div className="rounded-2xl border bg-white p-4 shadow-sm"><h2 className="font-black">บิลล่าสุด</h2><div className="mt-3 flex gap-2 overflow-x-auto">{(recentOrdersQuery.data ?? []).slice(0, 8).map((order) => <button key={order.id} disabled={!writesEnabled || reprintMutation.isPending} onClick={() => reprintMutation.mutate(order.id)} className="min-w-fit rounded-xl border px-3 py-2 text-left text-sm disabled:opacity-40"><span className="font-black">คิว {String(order.queue_number ?? "-")}</span><span className="ml-2 text-slate-500">{money(Number(order.total_amount))}</span><Printer className="ml-2 inline h-4 w-4" /></button>)}</div></div> : null}
       </section>
       {showSales ? <aside id="takeaway-sale-checkout" aria-label="ตะกร้าและชำระเงิน" className="flex scroll-mt-40 flex-col overflow-hidden rounded-2xl bg-slate-950 text-white shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-800 p-5"><div><h2 className="flex items-center gap-2 text-lg font-black"><ShoppingCart className="h-5 w-5" /> ตะกร้า</h2><p className="text-xs text-slate-400">{cart.length} รายการ</p></div>{lastQueue ? <span className="rounded-xl bg-emerald-500 px-3 py-2 font-black text-slate-950">คิวล่าสุด {lastQueue}</span> : null}</div>
         {!storeOnly && pickupQr && lastQueue ? <div className="border-b border-slate-800 bg-white p-4 text-center text-slate-950"><img className="mx-auto h-36 w-36" src={pickupQr} alt={`QR ติดตามคิว ${lastQueue}`} /><p className="mt-2 font-black">สแกนติดตามคิว {lastQueue}</p><p className="text-xs text-slate-500">ลูกค้าเปิดดูสถานะได้โดยไม่ต้องเข้าสู่ระบบ</p></div> : null}
-        {lastReceipt ? <div className="grid grid-cols-2 gap-2 border-b border-slate-800 p-4"><button disabled={!writesEnabled} onClick={() => void printReceipt(lastReceipt, "customer")} className="rounded-xl bg-white px-3 py-3 text-sm font-black text-slate-950 disabled:opacity-40"><Printer className="mr-2 inline h-4 w-4" />ใบลูกค้า</button><button disabled={!writesEnabled} onClick={() => void printReceipt(lastReceipt, "merchant")} className="rounded-xl border border-slate-600 px-3 py-3 text-sm font-black disabled:opacity-40"><Printer className="mr-2 inline h-4 w-4" />สำเนาร้าน</button></div> : null}
+        {!storeOnly && lastReceipt ? <div className="grid grid-cols-2 gap-2 border-b border-slate-800 p-4"><button disabled={!writesEnabled} onClick={() => void printReceipt(lastReceipt, "customer")} className="rounded-xl bg-white px-3 py-3 text-sm font-black text-slate-950 disabled:opacity-40"><Printer className="mr-2 inline h-4 w-4" />ใบลูกค้า</button><button disabled={!writesEnabled} onClick={() => void printReceipt(lastReceipt, "merchant")} className="rounded-xl border border-slate-600 px-3 py-3 text-sm font-black disabled:opacity-40"><Printer className="mr-2 inline h-4 w-4" />สำเนาร้าน</button></div> : null}
         <div className="flex-1 space-y-3 overflow-y-auto p-4">{cart.map((line) => <div key={line.row.item.id} className="rounded-2xl bg-slate-900 p-4"><div className="flex justify-between gap-3"><div><p className="font-bold">{line.row.item.name}</p><p className="text-sm text-emerald-400">{money(Number(line.row.effective_price) * line.quantity)}</p></div><div className="flex items-center gap-2"><button className="rounded-lg bg-slate-800 p-2" onClick={() => adjust(line.row, -1)}><Minus className="h-4 w-4" /></button><span className="w-5 text-center font-bold">{line.quantity}</span><button className="rounded-lg bg-emerald-500 p-2 text-slate-950" onClick={() => adjust(line.row, 1)}><Plus className="h-4 w-4" /></button></div></div></div>)}{cart.length === 0 ? <div className="grid h-full place-items-center text-center text-slate-500"><div><ShoppingCart className="mx-auto h-12 w-12" /><p className="mt-3">เลือกสินค้าเพื่อเริ่มขาย</p></div></div> : null}</div>
         <div className="space-y-2 border-t border-slate-800 p-5"><div className="flex justify-between text-sm text-slate-400"><span>สินค้า</span><span>{money(subtotal)}</span></div><div className="flex justify-between text-sm text-slate-400"><span>ภาษี</span><span>{money(tax)}</span></div><div className="flex justify-between text-2xl font-black"><span>สุทธิ</span><span>{money(total)}</span></div><fieldset className="space-y-3 rounded-xl border border-slate-700 p-3"><legend className="px-1 text-sm">วิธีรับชำระ</legend>
           <label className="flex items-center gap-3"><input type="radio" name="sale-payment" checked={paymentMethod === "cash"} onChange={() => setPaymentMethod("cash")} />เงินสด</label>
           <label className="flex items-center gap-3"><input type="radio" name="sale-payment" checked={paymentMethod === "other"} onChange={() => setPaymentMethod("other")} />โอน/ชำระภายนอก (ตรวจรับเอง)</label>
           {paymentMethod !== "cash" ? <><p className="text-xs text-amber-200">ไม่ใช่การเรียกเก็บผ่าน Provider หรือยืนยัน PromptPay อัตโนมัติ ต้องตรวจรับเงินจริงก่อน</p><label className="block text-sm">เลขอ้างอิงการรับเงิน<input aria-label="เลขอ้างอิงการรับเงิน" className="mt-1 w-full rounded p-3 text-slate-950" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} /></label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={paymentConfirmed} onChange={(event) => setPaymentConfirmed(event.target.checked)} />ตรวจสอบว่าได้รับเงินจริงแล้ว</label></> : null}
-        </fieldset><button disabled={!writesEnabled || !openShift || cart.length === 0 || saleMutation.isPending || (paymentMethod !== "cash" && (!paymentConfirmed || !paymentReference.trim()))} onClick={() => saleMutation.mutate()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-4 text-lg font-black text-slate-950 disabled:opacity-40"><ReceiptText className="h-5 w-5" />{saleMutation.isPending ? "กำลังรับชำระ" : writesEnabled ? "บันทึกการรับชำระ" : "รอเปิด Transaction Gate"}</button></div>
+        </fieldset><button disabled={!writesEnabled || !openShift || cart.length === 0 || saleMutation.isPending || (paymentMethod !== "cash" && (!paymentConfirmed || !paymentReference.trim()))} onClick={submitSale} className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-4 text-lg font-black text-slate-950 disabled:opacity-40"><ReceiptText className="h-5 w-5" />{saleMutation.isPending ? "กำลังรับชำระ" : writesEnabled ? (storeOnly ? "รับชำระและพิมพ์ 2 ใบ" : "บันทึกการรับชำระ") : "รอเปิด Transaction Gate"}</button></div>
       </aside> : null}
       {mode === "sales" ? <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-lg"><button disabled={!cart.length} onClick={() => document.getElementById("takeaway-sale-checkout")?.scrollIntoView({ behavior: "smooth", block: "start" })} className="mx-auto block min-h-12 w-full max-w-5xl rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white disabled:bg-slate-400">สรุปออเดอร์ · {cart.reduce((sum, line) => sum + line.quantity, 0)} ชิ้น · {money(total)}</button></div> : null}
       <div className="fixed -left-[10000px] top-0">

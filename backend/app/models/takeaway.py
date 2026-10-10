@@ -310,7 +310,7 @@ class TakeawayReceipt(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("receipt_number", name="uq_takeaway_receipt_number"),
         CheckConstraint(
-            "last_printed_copy IS NULL OR last_printed_copy IN ('customer', 'merchant')",
+            "last_printed_copy IS NULL OR last_printed_copy IN ('customer', 'merchant', 'preparation')",
             name="ck_takeaway_receipt_print_copy",
         ),
     )

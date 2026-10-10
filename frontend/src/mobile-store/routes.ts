@@ -1,5 +1,10 @@
 export const STORE_ROUTES = [
   {
+    path: "/takeaway/store/receipts",
+    label: "บิลล่าสุด / พิมพ์ซ้ำ", navLabel: "บิลล่าสุด", menuLabel: "บิลล่าสุด / พิมพ์ซ้ำ",
+    sectionLabel: "บิลล่าสุด / พิมพ์ซ้ำ", permission: "takeaway.sale.create", primary: false,
+  },
+  {
     path: "/takeaway/store/sales",
     label: "ขายสินค้า",
     navLabel: "ขาย",

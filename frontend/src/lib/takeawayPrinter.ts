@@ -5,6 +5,7 @@ import {
   buildEscPosReceiptBytes,
   buildEscPosCashDrawerPulse,
   buildEscPosTakeawayReceiptBytes,
+  buildEscPosPreparationBytes,
   buildEscPosLongTestBytes,
   buildEscPosTextReceiptBytes,
   buildEscPosWapOrderSlipBytes,
@@ -21,6 +22,10 @@ type TakeawayPrinterNative = {
   requestBluetoothPermission(): Promise<void>;
   pairedDevices(): Promise<{ devices: TakeawayPrinterDevice[] }>;
   printBase64(options: { address: string; data: string }): Promise<void>;
+  getCapabilities(options: { address: string }): Promise<{ protocolVersion: number; autoCutter: string; cutCommand: string }>;
+  testCutter(options: { address: string }): Promise<{ testId: string; outcome: string }>;
+  confirmCutter(options: { address: string; testId?: string; fullCut: boolean }): Promise<void>;
+  printBatch(options: { address: string; jobId: string; copies: Array<{ copyType: "customer" | "preparation"; data: string }> }): Promise<{ outcome: string }>;
 };
 
 const nativePrinter = registerPlugin<TakeawayPrinterNative>("TakeawayPrinter");
@@ -43,6 +48,39 @@ export function savedTakeawayPrinter(): TakeawayPrinterDevice | null {
 
 export function saveTakeawayPrinter(device: TakeawayPrinterDevice): void {
   window.localStorage.setItem(PRINTER_KEY, JSON.stringify(device));
+}
+
+export async function takeawayCutterCapability(): Promise<boolean> {
+  const printer = savedTakeawayPrinter();
+  if (!printer || !isNativeTakeawayPrinterAvailable()) return false;
+  try {
+    const status = await nativePrinter.getCapabilities({ address: printer.address });
+    return status.protocolVersion >= 2 && status.autoCutter === "operator_verified_full_cut";
+  } catch { return false; }
+}
+
+export async function testTakeawayCutter(): Promise<string> {
+  const printer = savedTakeawayPrinter();
+  if (!printer || !isNativeTakeawayPrinterAvailable()) throw new Error("ต้องเลือกเครื่องพิมพ์ Bluetooth ใน Android ก่อน");
+  return (await nativePrinter.testCutter({ address: printer.address })).testId;
+}
+
+export async function confirmTakeawayCutter(fullCut: boolean, testId?: string): Promise<void> {
+  const printer = savedTakeawayPrinter();
+  if (!printer) throw new Error("ยังไม่ได้เลือกเครื่องพิมพ์");
+  await nativePrinter.confirmCutter({ address: printer.address, testId, fullCut });
+}
+
+export async function printTakeawayBatch(receipt: TakeawayReceipt, copies: Array<"customer" | "preparation">, attemptId: string): Promise<void> {
+  if (!await takeawayCutterCapability()) throw new Error("ยังยืนยันการตัดกระดาษจริงไม่ได้ กรุณาทดสอบ Auto Cutter ในตั้งค่าเครื่องพิมพ์");
+  const printer = savedTakeawayPrinter()!;
+  const documents = [];
+  for (const copyType of copies) {
+    const bytes = copyType === "customer" ? await buildEscPosTakeawayReceiptBytes(receipt, "customer") : await buildEscPosPreparationBytes(receipt);
+    documents.push({ copyType, data: encodeBase64(bytes) });
+  }
+  // Exactly ONE native call, ONE socket, customer + full cut + preparation + full cut.
+  await nativePrinter.printBatch({ address: printer.address, jobId: attemptId, copies: documents });
 }
 
 export async function pairedTakeawayPrinters(): Promise<TakeawayPrinterDevice[]> {

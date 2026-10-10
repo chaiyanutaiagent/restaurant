@@ -31,12 +31,16 @@ import { onboardingApi } from "./api";
 import Onboarding from "./Onboarding";
 import { StoreCreditPage, StoreTransfersPage } from "./StoreSupportPages";
 import UpdateGate from "./UpdateGate";
+import TakeawayRecentBillsPage from "@/pages/takeaway/TakeawayRecentBillsPage";
+import StorePrintRecovery from "@/components/takeaway/StorePrintRecovery";
+import { assertPrintJobsSettled } from "@/lib/takeawayPrintJobs";
 import "../index.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 const StoreSalesPage = () => <TakeawayCounterPage mode="sales" storeOnly />;
 const StoreOrdersPage = () => <TakeawayCounterPage mode="orders" storeOnly />;
 const pages: Record<string, React.ComponentType> = {
+  "/takeaway/store/receipts": TakeawayRecentBillsPage,
   "/takeaway/store/sales": StoreSalesPage,
   "/takeaway/store/orders": StoreOrdersPage,
   "/takeaway/store/catalog": TakeawayCatalogPage,
@@ -49,6 +53,7 @@ const pages: Record<string, React.ComponentType> = {
 };
 
 const routeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+  "/takeaway/store/receipts": Printer,
   "/takeaway/store/sales": Store,
   "/takeaway/store/orders": ClipboardList,
   "/takeaway/store/catalog": PackageSearch,
@@ -101,6 +106,7 @@ function StoreApp(): JSX.Element {
     try {
       if (queryClient.isMutating()) throw new Error("กำลังบันทึกรายการ กรุณารอให้เสร็จก่อนออกจากระบบ");
       await queryClient.cancelQueries();
+      if (session.hasPermission("takeaway.sale.create")) await assertPrintJobsSettled();
       await cleanupStoreData();
       await onboardingApi.post("/auth/logout", { refresh_token: session.refreshToken });
       await clearSession(); queryClient.clear();
@@ -168,7 +174,7 @@ function StoreApp(): JSX.Element {
     {error && <p role="alert" className="mx-auto mt-3 max-w-5xl bg-red-50 p-4 text-red-800">{error}</p>}<main className="mx-auto max-w-5xl p-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:p-5">
     <Routes><Route path="/" element={<Navigate to={landingPath} replace />} /><Route path="/login" element={<Navigate to={landingPath} replace />} />
       {STORE_ROUTES.map((route) => { const Page = pages[route.path]; return <Route key={route.path} path={route.path} element={allowedStoreRoute(route.path, session.permissions) ? <Page /> : <p role="alert">ไม่มีสิทธิ์ใช้งานหน้านี้</p>} />; })}
-    </Routes></main></div>;
+    </Routes><StorePrintRecovery /></main></div>;
 }
 document.title = "Foodchainservice Takeaway Store UAT";
 document.documentElement.classList.add("native-app", "native-android");

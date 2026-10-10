@@ -1,0 +1,103 @@
+{
+  "candidate": "1.1.0-uat.14",
+  "version_code": 10113,
+  "package_id": "com.foodchainservice.takeaway.uat",
+  "branch": "codex/takeaway-store-uat14",
+  "base_commit": "edd71f5a596d2e030524ee23f402c50d113fab3e",
+  "status": "staged_for_code_review_not_activated",
+  "requires_physical_cut_validation": true,
+  "user_report": "PHOMARK JHP-A1 currently cuts automatically after printing; this is capability evidence, NOT UAT14 two-slip acceptance.",
+  "apk_url": "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/foodchainservice-takeaway-store-1.1.0-uat.14.apk",
+  "apk_sha256": "34eabc30c9ba6d7ddab37905c9ff3fa68f36adcd73bfde7d1558934428feacec",
+  "manifest_url": "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/latest-uat.14.json",
+  "manifest_sha256": "c5dd9f6b74c1fa7301a70d6fdf126ea7b039b2d0666197d952558ec3a5de1884",
+  "signing": {
+    "apk_certificate_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5",
+    "apk_signer": "Existing Android Debug/UAT certificate; not a Production release",
+    "manifest": "Ed25519 verified against existing UAT public key; downloaded APK checksum verified"
+  },
+  "release_hold": {
+    "public_latest": "1.1.0-uat.13 / 10112",
+    "latest_json_sha256": "026f7cb1d657660eabb8f604892607f66679fa683b9723a42800b9e56c2d926b",
+    "live_backend": "restaurant-pos-backend:uat-counter-uat13",
+    "live_web": "restaurant-pos-frontend:uat-recipes-6e595d8",
+    "live_takeaway_migration": "p6takeaway0009",
+    "production": "Untouched; no flags changed",
+    "backend_deployment": "NOT performed. Review and deploy candidate backend + additive migration in UAT before cashier physical acceptance; old backend cannot record preparation audits."
+  },
+  "staged_backend": {
+    "image": "restaurant-pos-backend:uat-print-uat14",
+    "image_id": "sha256:83eacd273d1ff6ca1111b42d3a11bf73b1ebaf279643b0ca15f06ad6ea76261c",
+    "directory": "/home/behappyaiagent/restaurant-uat-releases/takeaway-store-uat14-print-batch",
+    "migration": "p6takeaway0009 -> p6takeaway0010; additive preparation check constraint, no historical data relabeling"
+  },
+  "contract": {
+    "native": "Additive protocolVersion 2: getCapabilities, testCutter, confirmCutter, printBatch. Legacy printBase64 retained.",
+    "sequence": "One printBatch call / one socket: unchanged customer raster + ESC d 4 / GS V 65 16 full cut + preparation raster + ESC d 4 / GS V 65 16 full cut.",
+    "transport": "64-row raster bands, writes <=512 bytes, 60ms chunk/120ms band/500ms footer drain; validates ALL copies before sending.",
+    "acknowledgement": "sent_unconfirmed never implies physical completion. Full-cut capability requires device-specific operator test confirmation.",
+    "recovery": "Persist before native send. Durable native attempt ledger rejects replay after restart. Manual missing-copy selection only; no automatic retransmit after unknown transport.",
+    "audit": "One batch UUID with separate customer/preparation idempotency keys; receipt row lock serializes concurrent duplicates. Legacy merchant untouched.",
+    "navigation": "Recent bills removed from Android sales; /takeaway/store/receipts in submenu only; individual or explicit-warning two-copy reprint.",
+    "authorization": "Frontend local jobs company/brand/branch/user scoped; receipt history and confirmation server company/brand/branch scoped. Printing requires sale.create; backend read allows sale.view.",
+    "preparation": "Queue, order number, Bangkok time, quantities, Thai names and line/order notes only. Canonical order-note projection handles old receipt snapshots. No financial fields.",
+    "unrelated_scope": "No VAT calculation, order acceptance/handoff UX, payment provider, inventory behavior or Production changes."
+  },
+  "automated": {
+    "backend_unit": {
+      "passed": 52,
+      "failed": 0,
+      "command": "python -m unittest tests.test_takeaway_print_batch tests.test_takeaway_counter_flow tests.test_takeaway_service tests.test_takeaway_sales_catalog tests.test_takeaway_import_service tests.test_mobile_store_boundary -q"
+    },
+    "mobile_browser": {
+      "passed": 32,
+      "failed_remaining": 0,
+      "details": "31 main specs: 28 passed first run; 3 old single-slip assertions updated for removed sales buttons then passed targeted rerun. Compound/reprint spec extended and passed. Plus 1 actual signed candidate UpdateGate spec."
+    },
+    "thermal": {
+      "passed": 18,
+      "details": "16 legacy tests passed; 2 preparation tests passed after excluding font-readiness probe from text capture. Short and 80-item Thai raster, no financial fields, full-cut footer."
+    },
+    "native": {
+      "passed": 17,
+      "failed": 0,
+      "details": "10 spooler (including failure at every compound segment/cut), 2 persistent ledger, 4 update policy, 1 baseline; testDebugUnitTest/lintDebug/assembleDebug succeeded."
+    },
+    "build": "TypeScript passed; Android mobile bundle isolation passed; APK built once after final app changes.",
+    "isolated_postgresql": {
+      "passed": true,
+      "network": "network none; candidate joins disposable PostgreSQL network namespace over loopback only; no ports published",
+      "migration_applied_to": "temporary UAT data clone ONLY",
+      "concurrent_duplicate_results": [
+        false,
+        true,
+        false,
+        true
+      ],
+      "new_audits": 2,
+      "financial_unchanged": true,
+      "fulfillment_unchanged": true,
+      "foreign_company_empty": true,
+      "read_projection_clean": true,
+      "rollback_check": "UAT13 model reads receipts with preparation on additive schema. Runtime rollback not executed against live UAT.",
+      "cleanup": "Disposable container and tmpfs clone removed after tests; source UAT database unchanged."
+    },
+    "artifacts": "Public versioned APK and manifest downloaded and signature/hash verified; latest.json remained byte-for-byte UAT13.",
+    "not_run": [
+      "Physical PHOMARK full-cut sequence",
+      "Live Android install/Bluetooth with real hardware",
+      "Live candidate-backend authenticated smoke (backend intentionally not deployed)"
+    ]
+  },
+  "physical_acceptance": [
+    "After code/artifact review, back up UAT config + takeaway DB, deploy only UAT candidate backend with additive p6takeaway0010; keep public latest on UAT13.",
+    "Install versioned candidate on authorized test Android preserving existing package/signature; pair PHOMARK JHP-A1.",
+    "Printer settings: test two cuts; confirm full cut only when both slips detach completely. Perforation, blank feed or manual tearing is NOT a pass.",
+    "BKK-01 test sale: ONE payment tap -> customer receipt -> physical full cut -> preparation slip -> physical full cut. Verify Thai notes, long names and no financial fields on preparation.",
+    "Select complete/missing customer/missing preparation/neither once; verify only actually present copies audited. Recover only missing copies; no repeated sale.",
+    "Test Bluetooth interruption before first cut/between copies/second cut; inspect paper, no automatic resend. App restart and reconnect must not duplicate paper/payment/audits.",
+    "Open submenu recent bills; reprint each copy separately and set2 with duplicate warning; no sales-page recent bills.",
+    "Only after recorded physical acceptance and explicit release authorization may latest.json be switched."
+  ],
+  "rollback": "Do not schema-downgrade/delete/relabel preparation history. Retain additive constraint when rolling application backend back to UAT13. Public latest already UAT13; no rollback action required now. Android downgrade not tested."
+}

@@ -596,6 +596,15 @@ async def get_order_receipt(
     return ok(await TakeawayService(db, current).get_receipt(order_id))
 
 
+@router.get("/receipts")
+async def list_receipts(
+    limit: int = Query(default=50, ge=1, le=100),
+    current: TokenData = Depends(require_any_permission("takeaway.sale.create", "takeaway.sale.view")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).list_receipts(limit))
+
+
 @router.post("/orders/{order_id}/receipt/prints")
 async def mark_order_receipt_printed(
     order_id: uuid.UUID,

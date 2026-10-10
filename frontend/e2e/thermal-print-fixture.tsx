@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import TakeawayReceiptSlip from "../src/components/takeaway/TakeawayReceiptSlip";
 import { Slip } from "../src/pages/restaurant/WapOrderPage";
 import { printTakeawaySlipFrame, TAKEAWAY_SLIP_PRINT_CSS } from "../src/lib/takeawaySlipPrint";
-import { buildEscPosTakeawayReceiptBytes, buildEscPosWapOrderSlipBytes } from "../src/lib/escPosPrinter";
+import { buildEscPosTakeawayReceiptBytes, buildEscPosPreparationBytes, buildEscPosWapOrderSlipBytes } from "../src/lib/escPosPrinter";
 import type { TakeawayReceipt } from "../src/lib/takeawayApi";
 import type { WapOrder, WapMenu } from "../src/lib/wapApi";
 import "../src/index.css";
@@ -18,7 +18,7 @@ const name = count > 2 ? "หมูย่างกะทิชื่อสิน
 export const receipt = { id: "receipt", order_id: "order", receipt_number: "TR-PRINT-TEST", issued_at: "2026-10-10T12:00:00Z", print_count: 0,
   last_printed_at: null, last_printed_copy: null,
   payload: { order_number: "TW-PRINT-TEST", queue_number: 88, subtotal: "100", discount_amount: "0", tax_amount: "7", total_amount: "107", payment_method: "cash",
-    items: Array.from({ length: count }, (_, i) => ({ sku: `TEST-${i}`, name, quantity: "1", line_total: "10" })) },
+    items: Array.from({ length: count }, (_, i) => ({ sku: `TEST-${i}`, name, quantity: "1", line_total: "10", note: "ไม่เผ็ด แยกน้ำจิ้ม" })) },
 } as TakeawayReceipt;
 export const order = { session_id: "session", order_id: "order", sale_order_id: "sale", sale_order_number: "SO-PRINT-TEST", queue_display: "088", total_amount: 107, paid_amount: 120, change_amount: 13,
   payment_method: "promptpay", created_at: receipt.issued_at, customer_name: "ลูกค้าทดสอบ", customer_phone: null,
@@ -32,13 +32,13 @@ function Fixture() {
   useEffect(() => { void QRCode.toDataURL("https://example.invalid/test-only").then(setQr); }, []);
   const print = useReactToPrint({ contentRef: ref, pageStyle: TAKEAWAY_SLIP_PRINT_CSS, print: printTakeawaySlipFrame });
   useEffect(() => {
-    (window as any).buildRaster = async (copy: "customer" | "merchant" | "kitchen" | "wap-customer") => {
+    (window as any).buildRaster = async (copy: "customer" | "merchant" | "preparation" | "kitchen" | "wap-customer") => {
       const texts: string[] = [];
       const original = CanvasRenderingContext2D.prototype.fillText;
-      CanvasRenderingContext2D.prototype.fillText = function(text, ...args: [number, number, number?]) { texts.push(text); return original.call(this, text, ...args); };
+      CanvasRenderingContext2D.prototype.fillText = function(text, ...args: [number, number, number?]) { if (this.canvas.width === 576) texts.push(text); return original.call(this, text, ...args); };
       try {
         const bytes = copy === "kitchen" || copy === "wap-customer" ? await buildEscPosWapOrderSlipBytes(order, copy === "kitchen" ? "kitchen" : "customer", "Tester", menu, null)
-          : await buildEscPosTakeawayReceiptBytes(receipt, copy);
+          : copy === "preparation" ? await buildEscPosPreparationBytes(receipt) : await buildEscPosTakeawayReceiptBytes(receipt, copy);
         const widthBytes = bytes[9] + bytes[10] * 256;
         let offset = 5, height = 0, bandCount = 0;
         const pixels: number[] = [];
@@ -50,10 +50,17 @@ function Fixture() {
           offset += 8 + widthBytes * rows; height += rows; bandCount++;
         }
         let lastInkRow = -1;
+        if (copy === "preparation" && count === 2) {
+          const canvas = document.createElement("canvas"); canvas.dataset.preparationPreview = "true";
+          canvas.width = widthBytes * 8; canvas.height = height; canvas.style.width = "288px";
+          const ctx = canvas.getContext("2d")!; ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, height); ctx.fillStyle = "black";
+          for (let y = 0; y < height; y++) for (let x = 0; x < canvas.width; x++) if (pixels[y * widthBytes + (x >> 3)] & (128 >> (x % 8))) ctx.fillRect(x, y, 1, 1);
+          document.body.append(canvas);
+        }
         for (let y = 0; y < height; y++) {
           if (pixels.slice(y * widthBytes, (y + 1) * widthBytes).some(v => v !== 0)) lastInkRow = y;
         }
-        return { widthBytes, height, bandCount, blankRows: height - lastInkRow - 1, footerText: texts.slice(-6), suffix: Array.from(bytes.slice(-7)), size: bytes.length };
+        return { widthBytes, height, bandCount, blankRows: height - lastInkRow - 1, texts, footerText: texts.slice(-6), suffix: Array.from(bytes.slice(-7)), size: bytes.length };
       } finally { CanvasRenderingContext2D.prototype.fillText = original; }
     };
   }, []);

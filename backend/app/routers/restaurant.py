@@ -91,6 +91,7 @@ from app.services.fb_setup import (
     service_mode_for,
 )
 from app.services.admin_service import AdminService
+from app.services.restaurant_workspace_reference import ensure_restaurant_workspace_reference
 from app.schemas.user_mgmt import BranchSettingsRead, BranchSettingsUpdate
 from app.services.product_service import ProductService
 from app.services.recipe_service import RecipeService
@@ -1334,9 +1335,11 @@ async def create_brand_raw_material(
 async def get_fb_settings(
     current: TokenData = Depends(require_any_permission(*FB_WORKSPACE_PERMISSIONS)),
     db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
+    await ensure_restaurant_workspace_reference(identity_db, db, current)
     settings_row = await AdminService(db).get_branch_settings(
         current.branch_id,
         current.company_id,
@@ -1407,9 +1410,12 @@ async def setup_fb_workspace(
     payload: FBSetupRequest,
     current: TokenData = Depends(require_permission("fb.settings.manage")),
     db: AsyncSession = Depends(get_restaurant_service_db),
+    identity_db: AsyncSession = Depends(get_identity_db),
 ) -> dict[str, Any]:
     if not current.branch_id:
         raise HTTPException(status_code=400, detail="Branch context required")
+
+    await ensure_restaurant_workspace_reference(identity_db, db, current)
 
     planned_tables = []
     if payload.has_tables:

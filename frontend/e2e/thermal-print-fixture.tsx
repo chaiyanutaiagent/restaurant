@@ -39,13 +39,21 @@ function Fixture() {
       try {
         const bytes = copy === "kitchen" || copy === "wap-customer" ? await buildEscPosWapOrderSlipBytes(order, copy === "kitchen" ? "kitchen" : "customer", "Tester", menu, null)
           : await buildEscPosTakeawayReceiptBytes(receipt, copy);
-        const widthBytes = bytes[6] + bytes[7] * 256;
-        const height = bytes[8] + bytes[9] * 256;
+        const widthBytes = bytes[9] + bytes[10] * 256;
+        let offset = 5, height = 0, bandCount = 0;
+        const pixels: number[] = [];
+        while (offset < bytes.length - 7) {
+          if (bytes[offset] !== 29 || bytes[offset + 1] !== 118) throw new Error("Invalid band header");
+          const rows = bytes[offset + 6] + bytes[offset + 7] * 256;
+          if (rows < 1 || rows > 64) throw new Error("Invalid band height");
+          pixels.push(...bytes.slice(offset + 8, offset + 8 + widthBytes * rows));
+          offset += 8 + widthBytes * rows; height += rows; bandCount++;
+        }
         let lastInkRow = -1;
         for (let y = 0; y < height; y++) {
-          if (bytes.subarray(10 + y * widthBytes, 10 + (y + 1) * widthBytes).some(v => v !== 0)) lastInkRow = y;
+          if (pixels.slice(y * widthBytes, (y + 1) * widthBytes).some(v => v !== 0)) lastInkRow = y;
         }
-        return { widthBytes, height, blankRows: height - lastInkRow - 1, footerText: texts.slice(-6), suffix: Array.from(bytes.slice(-7)), size: bytes.length };
+        return { widthBytes, height, bandCount, blankRows: height - lastInkRow - 1, footerText: texts.slice(-6), suffix: Array.from(bytes.slice(-7)), size: bytes.length };
       } finally { CanvasRenderingContext2D.prototype.fillText = original; }
     };
   }, []);

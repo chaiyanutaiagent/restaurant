@@ -3,10 +3,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const companyA = "11111111-1111-4111-8111-111111111111";
 // Release acceptance uses the actual signed manifest; Android installer is a bridge fixture.
-if (process.env.STORE_RELEASE_MANIFEST) test("UAT10 receives mandatory signed UAT11 update and passes verified artifact to installer", async ({ page }) => {
+if (process.env.STORE_RELEASE_MANIFEST) test("UAT11 receives mandatory signed UAT12 update and passes verified artifact to installer", async ({ page }) => {
   const manifest = JSON.parse(readFileSync(process.env.STORE_RELEASE_MANIFEST!, "utf8"));
-  expect(manifest.version_code).toBe(10110);
-  expect(manifest.minimum_supported_version_code).toBe(10110);
+  expect(manifest.version_code).toBe(10111);
+  expect(manifest.minimum_supported_version_code).toBe(10111);
   await page.route("**/downloads/takeaway-store/latest.json", route => route.fulfill({ json: manifest }));
   await page.route("**/src/mobile-store/main.tsx", route => route.fulfill({ contentType: "application/javascript", body: `
     import React from '/node_modules/.vite-mobile-store/deps/react.js';
@@ -22,7 +22,7 @@ if (process.env.STORE_RELEASE_MANIFEST) test("UAT10 receives mandatory signed UA
       PluginHeaders: [{ name: "TakeawayUpdater", methods: [{ name: "getStatus", rtype: "promise" }, { name: "installUpdate", rtype: "promise" }] }],
       nativePromise: async (plugin: string, method: string, options: unknown) => {
         if (plugin !== "TakeawayUpdater") throw new Error("Unexpected native plugin");
-        if (method === "getStatus") return { packageId: "com.foodchainservice.takeaway.uat", versionName: "1.1.0-uat.10", versionCode: 10109, installPermission: true };
+        if (method === "getStatus") return { packageId: "com.foodchainservice.takeaway.uat", versionName: "1.1.0-uat.11", versionCode: 10110, installPermission: true };
         if (method === "installUpdate") { win.installerRequest = options; return; }
         throw new Error("Unexpected updater method");
       },
@@ -31,13 +31,13 @@ if (process.env.STORE_RELEASE_MANIFEST) test("UAT10 receives mandatory signed UA
   await page.goto("/");
   const dialog = page.getByRole("dialog", { name: "มีแอปเวอร์ชันใหม่" });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("1.1.0-uat.10 → 1.1.0-uat.11");
+  await expect(dialog).toContainText("1.1.0-uat.11 → 1.1.0-uat.12");
   await expect(dialog).toContainText("จำเป็นต้องอัปเดตก่อนใช้งานต่อ");
   await expect(dialog.getByRole("button", { name: "ไว้ทีหลัง" })).toHaveCount(0);
   if (process.env.CODEX_VISUAL_QA_PATH) await page.screenshot({ path: process.env.CODEX_VISUAL_QA_PATH.replace(".png", "-update.png") });
   await dialog.getByRole("button", { name: "ดาวน์โหลดและติดตั้ง", exact: true }).click();
   await expect(dialog.getByRole("status")).toContainText("ดาวน์โหลดเสร็จแล้ว");
-  expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).installerRequest)).toEqual({ apkUrl: manifest.apk_url, apkSha256: manifest.apk_sha256, versionCode: 10110 });
+  expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).installerRequest)).toEqual({ apkUrl: manifest.apk_url, apkSha256: manifest.apk_sha256, versionCode: 10111 });
 });
 const companyB = "22222222-2222-4222-8222-222222222222";
 test("UAT11 migration clears UAT10 catalog only and preserves pending sale and sequence", async ({ page }) => {
@@ -565,4 +565,47 @@ test("offline sale retry reuses the same idempotency key after a lost response",
   await expect.poll(() => keys.length).toBe(2);
   expect(keys[0]).toBe(keys[1]);
   await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toHaveCount(0);
+});
+
+test("Bluetooth transport failure records nothing; explicit retry and paper confirmation record each copy once", async ({ page }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true });
+  // Transport fixture only: actual raster and native spooling have separate byte tests.
+  await page.route("**/src/lib/takeawayPrinter.ts", async route => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace(/export async function printTakeawayReceipt\([\s\S]*?\n}\n/, `export async function printTakeawayReceipt(receipt, copyType) {
+      window.printJobs = [...(window.printJobs || []), copyType];
+      return new Promise((resolve, reject) => { window.finishPrint = ok => ok ? resolve(true) : reject(new Error('SPP disconnected')); });
+    }\n`);
+    await route.fulfill({ response, body });
+  });
+  const prints: any[] = [];
+  await page.route("**/receipt/prints", async route => {
+    prints.push(route.request().postDataJSON());
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await route.fulfill({ json: { data: { id: "receipt-1", order_id: "sale-1", payload: { items: [], subtotal: "55", total_amount: "58.85", tax_amount: "3.85", payment_method: "cash" }, print_count: prints.length } } });
+  });
+  await page.goto("/"); await login(page, "company-one", "sales");
+  await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
+  await page.getByRole("button", { name: "บันทึกการรับชำระ", exact: true }).click();
+  await page.getByRole("button", { name: "ใบลูกค้า", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).printJobs?.length)).toBe(1);
+  expect(prints).toHaveLength(0);
+  await page.evaluate(() => (window as any).finishPrint(false));
+  await expect(page.getByText(/SPP disconnected/).first()).toBeVisible();
+  expect(prints).toHaveLength(0);
+  for (const [button, copy] of [["ใบลูกค้า", "customer"], ["สำเนาร้าน", "merchant"]]) {
+    await page.getByRole("button", { name: button, exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).printJobs?.length)).toBe(copy === "customer" ? 2 : 3);
+    await page.evaluate(() => (window as any).finishPrint(true));
+    await expect(page.getByText("กระดาษออกครบแล้วหรือไม่?")).toBeVisible();
+    expect(prints).toHaveLength(copy === "customer" ? 0 : 1);
+    // Re-entrant click cannot start another transport job while confirmation is pending.
+    await page.getByRole("button", { name: button, exact: true }).click();
+    await page.getByRole("button", { name: "ยืนยันพิมพ์แล้ว", exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+    await expect.poll(() => prints.length).toBe(copy === "customer" ? 1 : 2);
+    await expect(page.getByText("กระดาษออกครบแล้วหรือไม่?")).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => (window as any).printJobs.length)).toBe(copy === "customer" ? 2 : 3);
+  }
+  expect(prints.map(p => p.copy_type)).toEqual(["customer", "merchant"]);
+  expect(new Set(prints.map(p => p.idempotency_key)).size).toBe(2);
 });

@@ -62,7 +62,7 @@ export default function TakeawayDeviceSettingsPage(): JSX.Element {
   });
 
   return <div className="space-y-5">
-    <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">device workspace</p><h1 className="mt-1 text-2xl font-black">อุปกรณ์ Takeaway</h1><p className="mt-1 text-sm text-slate-500">ตั้งค่าเครื่องพิมพ์ ESC/POS สำหรับ Web USB หรือ Android Bluetooth และตรวจเวอร์ชันแอป</p></div>
+    <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">device workspace</p><h1 className="mt-1 text-2xl font-black">อุปกรณ์ Takeaway</h1><p className="mt-1 text-sm text-slate-500">ตั้งค่าเครื่องพิมพ์ ESC/POS สำหรับ Web USB หรือ Android Bluetooth และตรวจเวอร์ชันแอป</p><a className="text-xs underline" href="/licenses/OFL-NotoSansThai.txt" target="_blank" rel="noreferrer">Noto Sans Thai — Open Font License</a></div>
     <div className="grid gap-4 xl:grid-cols-2">
       <section className="rounded-2xl border bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between gap-3">

@@ -20,7 +20,7 @@ import { printTakeawayReceipt } from "@/lib/takeawayPrinter";
 import { printTakeawaySlipFrame, TAKEAWAY_SLIP_PRINT_CSS } from "@/lib/takeawaySlipPrint";
 
 type CartLine = { row: TakeawayCatalogRow; quantity: number };
-type ReceiptPrintJob = { receipt: TakeawayReceipt; copyType: "customer" | "merchant"; clientSaleId: string | null; key: string; started: boolean };
+type ReceiptPrintJob = { receipt: TakeawayReceipt; copyType: "customer" | "merchant"; clientSaleId: string | null; key: string; started: boolean; recording?: boolean };
 
 function businessDate(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
@@ -68,6 +68,8 @@ export default function TakeawayCounterPage({ mode = "combined" }: { mode?: "com
     setConfirmPrinted(false); activePrintJob.current = null;
   };
   const recordPrint = async (job: ReceiptPrintJob): Promise<void> => {
+    if (activePrintJob.current !== job || job.recording) return;
+    job.recording = true;
     try {
       setLastReceipt(await markTakeawayReceiptPrinted(job.clientSaleId, job.receipt.order_id, job.copyType, job.key));
     } catch {
@@ -141,8 +143,9 @@ export default function TakeawayCounterPage({ mode = "combined" }: { mode?: "com
     activePrintJob.current = job;
     try {
       if (await printTakeawayReceipt(receipt, copyType)) {
-        await recordPrint(job);
-        toast({ title: "พิมพ์ใบเสร็จและตัดกระดาษแล้ว" });
+        // Bluetooth flush/USB ACK cannot certify paper or print-head success.
+        setConfirmPrinted(true);
+        toast({ title: "ส่งข้อมูลแล้ว กรุณาตรวจใบเสร็จก่อนยืนยัน" });
         return;
       }
     } catch (error) {
@@ -314,7 +317,7 @@ export default function TakeawayCounterPage({ mode = "combined" }: { mode?: "com
           <button className="m-2 rounded-lg bg-emerald-700 p-3 text-white" onClick={() => {
             const job = activePrintJob.current;
             if (!job) return;
-            activePrintJob.current = null; setConfirmPrinted(false); void recordPrint(job);
+            setConfirmPrinted(false); void recordPrint(job);
           }}>ยืนยันพิมพ์แล้ว</button>
           <button className="m-2 rounded-lg border p-3" onClick={releasePrintJob}>ไม่ได้พิมพ์</button>
         </div> : null}

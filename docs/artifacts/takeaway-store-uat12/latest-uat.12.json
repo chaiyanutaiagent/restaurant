@@ -1,0 +1,13 @@
+{
+  "surface": "takeaway_store",
+  "channel": "uat",
+  "package_id": "com.foodchainservice.takeaway.uat",
+  "version_name": "1.1.0-uat.12",
+  "version_code": 10111,
+  "minimum_supported_version_code": 10111,
+  "rollback_version_code": 10110,
+  "apk_url": "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/foodchainservice-takeaway-store-1.1.0-uat.12.apk",
+  "apk_sha256": "d196ab98929e49a4b64fa0db97b0dd8d98470e925a99a1dabbbd53ddd50e715d",
+  "published_at": "2026-10-10T16:24:20.088Z",
+  "signature": "9kgAYUsL628puFK/xzq522HPurMxvxmusuMaBBe5GYrmVjddoW5U5X1Mx4/EIqTt/Z9FzJwiQZnM+j/yvB/JDw=="
+}

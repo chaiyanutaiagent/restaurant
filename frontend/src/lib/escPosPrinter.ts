@@ -8,6 +8,7 @@ import {
 import type { SaleOrder } from "@/types/pos";
 import type { TakeawayReceipt } from "@/lib/takeawayApi";
 import type { WapMenu, WapOrder } from "@/lib/wapApi";
+import { ensureReceiptFontReady, RECEIPT_FONT_FAMILY } from "./receiptFont";
 
 const PHOMARK_VENDOR_ID = 0x0418;
 const PHOMARK_PRODUCT_ID = 0x5011;
@@ -16,7 +17,7 @@ const PAPER_DOTS = 576;
 const CONTENT_LEFT = 32;
 const CONTENT_RIGHT = 544;
 const CONTENT_WIDTH = CONTENT_RIGHT - CONTENT_LEFT;
-const FONT_FAMILY = 'Arial, "Noto Sans Thai", Thonburi, sans-serif';
+const FONT_FAMILY = RECEIPT_FONT_FAMILY;
 
 type UsbEndpointLike = {
   direction: "in" | "out";
@@ -56,7 +57,7 @@ type UsbDeviceLike = {
   claimInterface(interfaceNumber: number): Promise<void>;
   releaseInterface(interfaceNumber: number): Promise<void>;
   selectAlternateInterface(interfaceNumber: number, alternateSetting: number): Promise<void>;
-  transferOut(endpointNumber: number, data: BufferSource): Promise<{ status: string }>;
+  transferOut(endpointNumber: number, data: BufferSource): Promise<{ status: string; bytesWritten?: number }>;
 };
 
 type UsbManagerLike = {
@@ -642,11 +643,17 @@ function renderLongTestReceipt(): HTMLCanvasElement {
   return drawOperations(composer);
 }
 
-export function canvasToEscPosRaster(canvas: HTMLCanvasElement): Uint8Array {
+export function canvasToEscPosRaster(canvas: HTMLCanvasElement, bandRows = 64): Uint8Array {
+  if (!Number.isInteger(bandRows) || bandRows < 1 || bandRows > 128 || canvas.width < 1 || canvas.width > PAPER_DOTS || canvas.height < 1) {
+    throw new Error("ขนาดภาพหรือแถบพิมพ์ไม่ถูกต้อง");
+  }
+  const bytesPerRow = Math.ceil(canvas.width / 8);
+  const bandCount = Math.ceil(canvas.height / bandRows);
+  const size = 5 + bandCount * 8 + bytesPerRow * canvas.height + 7;
+  if (size > 1024 * 1024) throw new Error("ใบเสร็จยาวเกินขนาดพิมพ์ 1 MB");
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("อ่านภาพใบเสร็จไม่สำเร็จ");
   const image = context.getImageData(0, 0, canvas.width, canvas.height).data;
-  const bytesPerRow = Math.ceil(canvas.width / 8);
   const raster = new Uint8Array(bytesPerRow * canvas.height);
   for (let y = 0; y < canvas.height; y += 1) {
     for (let x = 0; x < canvas.width; x += 1) {
@@ -657,16 +664,18 @@ export function canvasToEscPosRaster(canvas: HTMLCanvasElement): Uint8Array {
     }
   }
 
-  const header = new Uint8Array([
-    0x1d, 0x76, 0x30, 0x00,
-    bytesPerRow & 0xff, (bytesPerRow >> 8) & 0xff,
-    canvas.height & 0xff, (canvas.height >> 8) & 0xff,
-  ]);
-  const output = new Uint8Array(2 + header.length + raster.length + 7);
-  let offset = 0;
-  output.set([0x1b, 0x40], offset); offset += 2;
-  output.set(header, offset); offset += header.length;
-  output.set(raster, offset); offset += raster.length;
+  const output = new Uint8Array(size);
+  // Initialize/align once, never between image bands. GS v 0 advances by its
+  // exact raster height: no LF/feed between bands, one feed/cut after all pixels.
+  output.set([0x1b, 0x40, 0x1b, 0x61, 0x00]);
+  let offset = 5;
+  for (let row = 0; row < canvas.height; row += bandRows) {
+    const rows = Math.min(bandRows, canvas.height - row);
+    output.set([0x1d, 0x76, 0x30, 0x00, bytesPerRow & 0xff, bytesPerRow >> 8, rows, 0], offset);
+    offset += 8;
+    const band = raster.subarray(row * bytesPerRow, (row + rows) * bytesPerRow);
+    output.set(band, offset); offset += band.length;
+  }
   output.set([0x1b, 0x64, 0x04, 0x1d, 0x56, 0x41, 0x10], offset);
   return output;
 }
@@ -680,6 +689,7 @@ export async function printEscPosBytes(bytes: Uint8Array): Promise<void> {
       const chunk = bytes.slice(offset, Math.min(bytes.length, offset + chunkSize));
       const result = await activeDevice.transferOut(endpointNumber, chunk);
       if (result.status !== "ok") throw new Error(`เครื่องพิมพ์ไม่รับข้อมูล (${result.status})`);
+      if (result.bytesWritten !== undefined && result.bytesWritten !== chunk.length) throw new Error("เครื่องพิมพ์ USB รับข้อมูลไม่ครบ กรุณาตรวจดูกระดาษก่อนลองใหม่");
     }
   });
 }
@@ -709,6 +719,7 @@ export async function buildEscPosReceiptBytes(
   branch: EscPosReceiptBranch,
   cashier: string,
 ): Promise<Uint8Array> {
+  await ensureReceiptFontReady();
   return canvasToEscPosRaster(await renderSaleReceipt(order, company, branch, cashier));
 }
 
@@ -716,6 +727,7 @@ export async function buildEscPosTakeawayReceiptBytes(
   receipt: TakeawayReceipt,
   copyType: "customer" | "merchant",
 ): Promise<Uint8Array> {
+  await ensureReceiptFontReady();
   return canvasToEscPosRaster(await renderTakeawayReceipt(receipt, copyType));
 }
 
@@ -733,6 +745,7 @@ export async function buildEscPosWapOrderSlipBytes(
   menu: WapMenu | null,
   promptpayQrDataUrl?: string | null,
 ): Promise<Uint8Array> {
+  await ensureReceiptFontReady();
   return canvasToEscPosRaster(await renderWapOrderSlip(order, type, employeeName, menu, promptpayQrDataUrl));
 }
 
@@ -746,12 +759,20 @@ export async function printEscPosWapOrderSlip(
   await printEscPosBytes(await buildEscPosWapOrderSlipBytes(order, type, employeeName, menu, promptpayQrDataUrl));
 }
 
-export function buildEscPosLongTestBytes(): Uint8Array {
+export async function buildEscPosLongTestBytes(): Promise<Uint8Array> {
+  await ensureReceiptFontReady();
   return canvasToEscPosRaster(renderLongTestReceipt());
 }
 
+export async function buildEscPosTextReceiptBytes(content: string): Promise<Uint8Array> {
+  await ensureReceiptFontReady();
+  const composer = new ReceiptComposer(createMeasureContext());
+  composer.wrapped(content, CONTENT_WIDTH, { size: 20, lineHeight: 27 });
+  return canvasToEscPosRaster(drawOperations(composer));
+}
+
 export async function printEscPosLongTest(): Promise<void> {
-  await printEscPosBytes(buildEscPosLongTestBytes());
+  await printEscPosBytes(await buildEscPosLongTestBytes());
 }
 
 export function describeEscPosError(error: unknown): string {

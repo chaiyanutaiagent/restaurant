@@ -6,6 +6,7 @@ import {
   buildEscPosCashDrawerPulse,
   buildEscPosTakeawayReceiptBytes,
   buildEscPosLongTestBytes,
+  buildEscPosTextReceiptBytes,
   buildEscPosWapOrderSlipBytes,
   getEscPosPrinterStatus,
   printEscPosBytes,
@@ -107,13 +108,7 @@ export function takeawayReceiptText(
 }
 
 export async function printTakeawayRaw(address: string, content: string): Promise<void> {
-  const init = new Uint8Array([0x1b, 0x40]);
-  const body = new TextEncoder().encode(content);
-  const cut = new Uint8Array([0x1d, 0x56, 0x41, 0x10]);
-  const bytes = new Uint8Array(init.length + body.length + cut.length);
-  bytes.set(init, 0);
-  bytes.set(body, init.length);
-  bytes.set(cut, init.length + body.length);
+  const bytes = await buildEscPosTextReceiptBytes(content);
   await nativePrinter.printBase64({ address, data: encodeBase64(bytes) });
 }
 
@@ -158,7 +153,7 @@ export async function printConfiguredWapOrderSlip(
 export async function printConfiguredLongReceiptTest(): Promise<boolean> {
   const transport = await configuredTransport();
   if (!transport) return false;
-  const bytes = buildEscPosLongTestBytes();
+  const bytes = await buildEscPosLongTestBytes();
   await sendConfiguredBytes(bytes, transport);
   return true;
 }

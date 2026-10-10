@@ -1,0 +1,47 @@
+{
+  "status": "STAGED_FOR_REVIEW_NOT_ACTIVATED",
+  "branch": "codex/takeaway-store-uat12",
+  "release": "1.1.0-uat.12",
+  "version_code": 10111,
+  "package_id": "com.foodchainservice.takeaway.uat",
+  "root_cause": {
+    "confirmed_in_source": "Previous renderer emitted one GS v 0 image for the full receipt height; Android wrote the entire byte array in one write without chunk pacing. Receipt content was already raster, not UTF-8/code-page text.",
+    "hardware_hypothesis": "SPP receive-buffer overrun or raster-height limitation is consistent with the reported first heading followed by corrupted pixels. No printer trace or physical reproduction is available; this remains unconfirmed on PHOMARK JHP-A1.",
+    "not_changed": "No CP874/TIS-620 conversion"
+  },
+  "implementation": {
+    "raster": "576 dots/80mm; default 64 rows per GS v 0 command, optional bounded bandRows up to 128; exact final short band; reset/left alignment once at start; no LF/feed/reset between bands; one feed/cut after final band",
+    "native_transport": "Length-aware complete-job validation before socket write. 8-byte raster headers intact; payload chunks at whole-row boundaries, at most 512 bytes (504 bytes for 72-byte rows). Blocking writes plus flush, 60ms chunk pauses, 120ms end-band pause and 500ms final drain.",
+    "limits": "1MiB decoded payload and bounded Base64 input; 15s connect and 180s total send watchdog close socket; reject malformed/truncated/oversized commands; single-job lock; never auto-retry",
+    "failure_recovery": "Partial output is possible. UI reports failure and asks to inspect paper and restart printer before manual retry; no printed history on failed send.",
+    "fonts": "Bundled OFL Noto Sans Thai variable TTF, font load and document.fonts.ready awaited before measuring/rendering; system Thai fallback validated by non-empty/distinct pixel probes. Font and license verified inside APK.",
+    "shared_paths": "Customer/merchant receipts, sale receipts, WAP customer/kitchen slips, long test receipt, and legacy raw-text helper all use the same banded raster encoder. Drawer pulse stays a separate validated command.",
+    "print_history": "Successful Bluetooth/USB send now requires explicit paper confirmation. One active print job, recording latch and existing idempotency key prevent double confirmation. Transport success is not claimed as physical print success.",
+    "web_usb": "Existing 16KiB sequential transfers retained; partial bytesWritten now rejected without retry"
+  },
+  "tests": {
+    "type_check": "PASS",
+    "thermal_playwright": {"passed": 16, "includes": ["20 exact raster reconstruction cases, 575/576 widths and 64/128-row bands, right-edge bits", "long Thai customer/merchant/WAP receipts, complete band lengths, footer/feed/cut", "font readiness, bundled Thai glyphs, blank glyph rejection", "pre-read byte limit", "Web USB order/completeness/partial write error", "browser history confirmation/cancel/history failure/QR regression"]},
+    "store_playwright": {"passed": 22, "includes": ["Actual signed UAT12 candidate update gate fixture", "SPP failure does not record history; manual retry, wait for completion and paper confirmation; double click yields one history call per customer/merchant copy", "existing catalog/cache/isolation/offline regression"]},
+    "android_unit": {"passed": 12, "new_spooler_tests": 7, "includes": ["100-band exact byte reconstruction/order/completeness/no duplicates", "whole headers/row-aligned chunks, command-like binary payload", "chunk/flush/pacing counts, final cut/drain", "disconnect/flush failure/interruption/final-drain disconnect", "byte limits, malformed/truncated job validation before first write", "drawer pulse"]},
+    "android_lint_build": "PASS: testDebugUnitTest lintDebug assembleDebug; existing flatDir/deprecation/META-INF signing warnings",
+    "boundary_checks": "PASS: 6 compiled JS files and 8 APK assets; font/license present; no absolute or cross-worktree references in APK",
+    "backend_tests": "Not repeated: backend unchanged in this hotfix"
+  },
+  "artifact": {
+    "apk_url": "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/foodchainservice-takeaway-store-1.1.0-uat.12.apk",
+    "manifest_url": "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/latest-uat.12.json",
+    "apk_sha256": "d196ab98929e49a4b64fa0db97b0dd8d98470e925a99a1dabbbd53ddd50e715d",
+    "certificate_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5",
+    "verification": "Fresh public download matches approved local candidate; Ed25519 manifest signature, APK SHA256/package/version and existing UAT certificate verified",
+    "latest_json_unchanged": true,
+    "latest_version": "1.1.0-uat.11 / 10110",
+    "latest_json_sha256": "9df626f2f72ed99febd115081f012ced65991d13f9574f2bd4159ca12246bd5c"
+  },
+  "release_gate": "Review code/tests/APK first. Do not switch latest.json without approval. After approval, print one real Thai receipt on PHOMARK JHP-A1 and inspect all text/numbers/rules/right edge/feed/cut before claiming physical acceptance or confirming printed history. Automated tests do not certify hardware.",
+  "scope": "Android UAT candidate only; no backend/web deployment, Production flags or ERP-POS changes",
+  "references": [
+    "https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_lv_0.html",
+    "https://github.com/google/fonts/tree/main/ofl/notosansthai"
+  ]
+}

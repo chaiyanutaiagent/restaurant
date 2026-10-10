@@ -1,5 +1,96 @@
 import { test, expect, type Page } from "@playwright/test";
 
+test("banded raster reconstructs every pixel including right edge and command-looking data", async ({ page }) => {
+  await page.goto("/e2e/thermal-print-fixture.html");
+  const results = await page.evaluate(async () => {
+    const { canvasToEscPosRaster } = await import("/src/lib/escPosPrinter.ts");
+    const results = [];
+    for (const width of [575, 576]) for (const height of [1, 63, 64, 65, 2051]) for (const rows of [64, 128]) {
+      const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+      const image = ctx.createImageData(width, height);
+      const stride = Math.ceil(width / 8), expected = new Uint8Array(stride * height);
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+        const black = x === width - 1 || ((x * 19 + y * 13) % 23 < 11);
+        const p = (y * width + x) * 4;
+        image.data[p] = image.data[p + 1] = image.data[p + 2] = black ? 0 : 255; image.data[p + 3] = 255;
+        if (black) expected[y * stride + (x >> 3)] |= 128 >> (x % 8);
+      }
+      ctx.putImageData(image, 0, 0);
+      const bytes = canvasToEscPosRaster(canvas, rows), actual: number[] = [];
+      let offset = 5, bands = 0, valid = true;
+      while (offset < bytes.length - 7) {
+        const header = Array.from(bytes.slice(offset, offset + 8));
+        const n = header[6] + header[7] * 256;
+        valid &&= header.slice(0, 4).join() === "29,118,48,0" && header[4] + header[5] * 256 === stride && n > 0 && n <= rows;
+        actual.push(...bytes.slice(offset + 8, offset + 8 + stride * n)); offset += 8 + stride * n; bands++;
+      }
+      results.push(valid && offset === bytes.length - 7 && bands === Math.ceil(height / rows) && actual.length === expected.length && actual.every((v, i) => v === expected[i]) && bytes.slice(0, 5).join() === "27,64,27,97,0" && bytes.slice(-7).join() === "27,100,4,29,86,65,16");
+    }
+    return results;
+  });
+  expect(results).toHaveLength(20); expect(results.every(Boolean)).toBe(true);
+});
+
+test("raster byte limit fails before reading a huge canvas", async ({ page }) => {
+  await page.goto("/e2e/thermal-print-fixture.html");
+  const result = await page.evaluate(async () => {
+    const { canvasToEscPosRaster } = await import("/src/lib/escPosPrinter.ts");
+    let reads = 0, denied = 0;
+    for (const [width, height, band] of [[576, 20000, 64], [577, 64, 64], [576, 64, 129], [576, 0, 64]]) {
+      try { canvasToEscPosRaster({ width, height, getContext: () => { reads++; throw Error("should not read"); } } as any, band); }
+      catch { denied++; }
+    }
+    return { reads, denied };
+  });
+  expect(result).toEqual({ reads: 0, denied: 4 });
+});
+
+test("Thai receipt waits for font readiness and rejects blank glyph pixels", async ({ page }) => {
+  await page.goto("/e2e/thermal-print-fixture.html");
+  const result = await page.evaluate(async () => {
+    let release!: () => void, complete = false;
+    Object.defineProperty(document.fonts, "ready", { configurable: true, value: new Promise<void>(resolve => { release = resolve; }) });
+    const fonts = await import("/src/lib/receiptFont.ts");
+    const pending = fonts.ensureReceiptFontReady().then(() => { complete = true; });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const blocked = !complete; release(); await pending;
+    fonts.assertThaiReceiptGlyphs();
+    const original = CanvasRenderingContext2D.prototype.getImageData;
+    CanvasRenderingContext2D.prototype.getImageData = () => new ImageData(64, 64);
+    let blankDenied = false;
+    try { fonts.assertThaiReceiptGlyphs(); } catch { blankDenied = true; }
+    finally { CanvasRenderingContext2D.prototype.getImageData = original; }
+    return { blocked, complete, blankDenied, bundled: document.fonts.check('400 24px "Receipt Noto Thai"', "หมูย่าง") };
+  });
+  expect(result).toEqual({ blocked: true, complete: true, blankDenied: true, bundled: true });
+});
+
+test("Web USB keeps byte order and reports partial writes without automatic retry", async ({ page }) => {
+  await page.goto("/e2e/thermal-print-fixture.html");
+  const result = await page.evaluate(async () => {
+    const { canvasToEscPosRaster, printEscPosBytes } = await import("/src/lib/escPosPrinter.ts");
+    const canvas = document.createElement("canvas"); canvas.width = 576; canvas.height = 1000;
+    canvas.getContext("2d")!.fillRect(0, 0, 576, 1000);
+    const bytes = canvasToEscPosRaster(canvas), received: number[] = [];
+    let partial = false, writes = 0, closed = 0;
+    const alternate = { alternateSetting: 0, interfaceClass: 7, endpoints: [{ direction: "out", endpointNumber: 1, type: "bulk" }] };
+    const configuration = { configurationValue: 1, interfaces: [{ interfaceNumber: 0, alternate, alternates: [alternate] }] };
+    const device = { vendorId: 0x0418, productId: 0x5011, opened: false, configuration, configurations: [configuration],
+      open: async () => { device.opened = true; }, close: async () => { closed++; device.opened = false; },
+      claimInterface: async () => {}, releaseInterface: async () => {},
+      transferOut: async (_: number, data: Uint8Array) => { writes++; received.push(...data); return { status: "ok", bytesWritten: data.length - (partial ? 1 : 0) }; } };
+    Object.defineProperty(navigator, "usb", { configurable: true, value: { getDevices: async () => [device] } });
+    await printEscPosBytes(bytes);
+    const equal = received.length === bytes.length && received.every((v, i) => v === bytes[i]);
+    const chunks = writes; partial = true; let rejected = false;
+    try { await printEscPosBytes(bytes); } catch { rejected = true; }
+    return { equal, chunks, extraWrites: writes - chunks, rejected, closed };
+  });
+  expect(result.equal).toBe(true); expect(result.chunks).toBeGreaterThan(1);
+  expect(result.extraWrites).toBe(1); expect(result.rejected).toBe(true); expect(result.closed).toBe(2);
+});
+
 export async function captureThermalPrint(page: Page): Promise<void> {
   await page.addInitScript(() => {
     (window as any).__thermalPrints = [];
@@ -60,7 +151,8 @@ test("thermal ESC/POS short and long raster preserve footer whitespace and a sin
     for (const copy of ["customer", "merchant", "kitchen", "wap-customer"]) {
       const result = await page.evaluate(copy => (window as any).buildRaster(copy), copy);
       expect(result.widthBytes).toBe(72); // 576-dot, 80mm ESC/POS head
-      expect(result.size).toBe(10 + result.widthBytes * result.height + 7);
+      expect(result.size).toBe(5 + result.bandCount * 8 + result.widthBytes * result.height + 7);
+      expect(result.bandCount).toBe(Math.ceil(result.height / 64));
       expect(result.blankRows).toBeGreaterThanOrEqual(72);
       expect(result.suffix).toEqual([27, 100, 4, 29, 86, 65, 16]);
       expect(result.footerText.join(' ')).toContain(copy === "kitchen" ? "ทำสินค้าแล้วส่งกลับเคาน์เตอร์" : copy === "wap-customer" ? "นำสลิปนี้ไปรับสินค้าที่เคาน์เตอร์" : "นำเลขคิวไปรับสินค้าที่เคาน์เตอร์");

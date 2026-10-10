@@ -50,7 +50,9 @@ export default function Onboarding(): JSX.Element {
       if (result.data.data.business_slug !== payload.business_code) {
         throw new Error("Business code does not match the login response");
       }
-      await saveSession({ tokens: result.data.data, companyId: result.data.data.user.company_id, deviceId: payload.device_id });
+      const selectedBranch = branches.find((item) => item.id === branch);
+      await saveSession({ tokens: result.data.data, companyId: result.data.data.user.company_id, deviceId: payload.device_id,
+        companyName: business.name, branchName: selectedBranch ? `${selectedBranch.code} · ${selectedBranch.name}` : undefined });
       setPassword("");
     } catch {
       setError("เข้าสู่ระบบไม่สำเร็จ ตรวจรหัสบริษัท บัญชี สิทธิ์สาขา และการเชื่อมต่อ");

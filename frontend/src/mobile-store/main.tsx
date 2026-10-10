@@ -34,8 +34,11 @@ import UpdateGate from "./UpdateGate";
 import "../index.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+const StoreSalesPage = () => <TakeawayCounterPage mode="sales" />;
+const StoreOrdersPage = () => <TakeawayCounterPage mode="orders" />;
 const pages: Record<string, React.ComponentType> = {
-  "/takeaway/store/orders": TakeawayCounterPage,
+  "/takeaway/store/sales": StoreSalesPage,
+  "/takeaway/store/orders": StoreOrdersPage,
   "/takeaway/store/catalog": TakeawayCatalogPage,
   "/takeaway/store/stock": TakeawayStoreStockPage,
   "/takeaway/store/shifts": TakeawayShiftPage,
@@ -46,6 +49,7 @@ const pages: Record<string, React.ComponentType> = {
 };
 
 const routeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+  "/takeaway/store/sales": Store,
   "/takeaway/store/orders": ClipboardList,
   "/takeaway/store/catalog": PackageSearch,
   "/takeaway/store/stock": Warehouse,
@@ -86,7 +90,7 @@ function StoreApp(): JSX.Element {
   if (forbidden) return <div className="p-8"><h1>ไม่อนุญาตให้เข้าหน้านี้</h1><Link to="/">กลับหน้าร้าน</Link></div>;
   if (!session.accessToken) return <Onboarding />;
   const visible = STORE_ROUTES.filter((route) => session.hasPermission(route.permission));
-  const landingPath = visible.find((route) => route.path === "/takeaway/store/orders")?.path
+  const landingPath = visible.find((route) => route.path === "/takeaway/store/sales")?.path
     ?? visible.find((route) => route.path === "/takeaway/store/stock")?.path
     ?? visible[0]?.path
     ?? "/login";
@@ -106,7 +110,7 @@ function StoreApp(): JSX.Element {
   return <div className="takeaway-app-shell min-h-screen bg-slate-50">
     <header className="native-safe-top sticky top-0 z-40 border-b border-slate-200 bg-white" role="banner">
       <nav aria-label="เมนูหลักหน้าร้าน" className="mx-auto flex max-w-5xl flex-wrap items-center gap-2 px-3 py-3">
-        <span className="mr-1 px-1 text-sm font-black tracking-wide text-slate-500 sm:mr-3">{displayBrand(session.businessSlug)}</span>
+        <span className="mr-1 break-words px-1 text-sm font-black tracking-wide text-slate-500 sm:mr-3">{session.companyName || displayBrand(session.businessSlug)}</span>
         {primary.map((route) => <Link
           aria-current={location.pathname === route.path ? "page" : undefined}
           className={`flex min-h-12 items-center rounded-xl px-4 py-2 text-base font-bold transition ${location.pathname === route.path ? "bg-slate-950 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
@@ -127,7 +131,7 @@ function StoreApp(): JSX.Element {
             onClick={() => setMenuOpen((value) => !value)}
           >{menuOpen ? <X className="h-6 w-6" /> : <Menu className="h-7 w-7" />}</button>
           <div className="min-w-0">
-            <p className="text-sm font-black leading-tight text-slate-950 sm:text-base">{currentRoute?.sectionLabel ?? "เมนูหน้าร้าน"} · {displayBrand(session.businessSlug)}</p>
+            <p className="text-sm font-black leading-tight text-slate-950 sm:text-base">{currentRoute?.sectionLabel ?? "เมนูหน้าร้าน"} · {session.branchName || displayBrand(session.businessSlug)}</p>
             <p className="truncate text-sm text-slate-500">พนักงาน: {session.user?.display_name || session.user?.username} · {session.stationKey}</p>
           </div>
         </div>

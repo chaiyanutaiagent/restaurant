@@ -41,7 +41,8 @@ api.interceptors.response.use((response) => {
       try {
         const result = await onboardingApi.post<ApiResponse<TokenResponse>>("/auth/refresh", { refresh_token: state.refreshToken });
         if (useAuthStore.getState().refreshToken !== state.refreshToken) throw new Error("Session changed");
-        await saveSession({ tokens: result.data.data, companyId: state.companyId!, deviceId: state.deviceId! });
+        await saveSession({ tokens: result.data.data, companyId: state.companyId!, deviceId: state.deviceId!,
+          companyName: state.companyName ?? undefined, branchName: state.branchName ?? undefined });
       } catch (failure) {
         if (axios.isAxiosError(failure) && failure.response
             && useAuthStore.getState().refreshToken === state.refreshToken) await clearSession();

@@ -8,17 +8,18 @@ const DEVICE_KEY = "foodchainservice.store.device.v1";
 type StoreClaims = { sub: string; company_id: string; brand_id: string; branch_id: string; station_key: string;
   client_surface: string; store_device_id: string; business_type: string; target_database: string;
   permissions: string[]; exp: number };
-type Session = { tokens: TokenResponse; companyId: string; deviceId: string };
+type Session = { tokens: TokenResponse; companyId: string; deviceId: string; companyName?: string; branchName?: string };
 type State = {
   accessToken: string | null; refreshToken: string | null; user: User | null;
   companyId: string | null; brandId: string | null; branchId: string | null; stationKey: string | null;
   businessSlug: string | null; businessType: string | null; targetDatabase: string | null;
   deviceId: string | null; scopeTypes: string[]; permissions: string[];
+  companyName: string | null; branchName: string | null;
   hasPermission: (code: string) => boolean; isAuthenticated: () => boolean;
 };
 const empty = { accessToken: null, refreshToken: null, user: null, companyId: null,
   brandId: null, branchId: null, stationKey: null, businessSlug: null, businessType: null,
-  targetDatabase: null, deviceId: null, scopeTypes: [], permissions: [] };
+  targetDatabase: null, deviceId: null, scopeTypes: [], permissions: [], companyName: null, branchName: null };
 export const useAuthStore = create<State>((_set, get) => ({ ...empty,
   hasPermission: (code) => get().permissions.includes(code),
   isAuthenticated: () => Boolean(get().accessToken && get().user),
@@ -43,7 +44,8 @@ export async function saveSession(session: Session): Promise<void> {
     user: session.tokens.user, companyId: session.companyId, brandId: claims.brand_id,
     branchId: claims.branch_id, stationKey: claims.station_key, businessSlug: session.tokens.business_slug,
     businessType: "takeaway", targetDatabase: "takeaway", deviceId: session.deviceId,
-    scopeTypes: ["branch"], permissions: claims.permissions });
+    scopeTypes: ["branch"], permissions: claims.permissions,
+    companyName: session.companyName ?? null, branchName: session.branchName ?? null });
 }
 export async function clearSession(): Promise<void> {
   useAuthStore.setState(empty);

@@ -1,6 +1,44 @@
 import { test, expect, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
 
 const companyA = "11111111-1111-4111-8111-111111111111";
+// Release acceptance uses the actual signed manifest; Android installer is a bridge fixture.
+if (process.env.STORE_RELEASE_MANIFEST) test("UAT9 receives mandatory signed UAT10 update and passes verified artifact to installer", async ({ page }) => {
+  const manifest = JSON.parse(readFileSync(process.env.STORE_RELEASE_MANIFEST!, "utf8"));
+  expect(manifest.version_code).toBe(10109);
+  expect(manifest.minimum_supported_version_code).toBe(10109);
+  await page.route("**/downloads/takeaway-store/latest.json", route => route.fulfill({ json: manifest }));
+  await page.route("**/src/mobile-store/main.tsx", route => route.fulfill({ contentType: "application/javascript", body: `
+    import React from '/node_modules/.vite-mobile-store/deps/react.js';
+    import ReactDOM from '/node_modules/.vite-mobile-store/deps/react-dom_client.js';
+    import UpdateGate from '/src/mobile-store/UpdateGate.tsx';
+    import '/src/index.css';
+    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(UpdateGate));
+  ` }));
+  await page.addInitScript(() => {
+    const win = window as unknown as Record<string, unknown>;
+    win.androidBridge = {};
+    win.Capacitor = {
+      PluginHeaders: [{ name: "TakeawayUpdater", methods: [{ name: "getStatus", rtype: "promise" }, { name: "installUpdate", rtype: "promise" }] }],
+      nativePromise: async (plugin: string, method: string, options: unknown) => {
+        if (plugin !== "TakeawayUpdater") throw new Error("Unexpected native plugin");
+        if (method === "getStatus") return { packageId: "com.foodchainservice.takeaway.uat", versionName: "1.1.0-uat.9", versionCode: 10108, installPermission: true };
+        if (method === "installUpdate") { win.installerRequest = options; return; }
+        throw new Error("Unexpected updater method");
+      },
+    };
+  });
+  await page.goto("/");
+  const dialog = page.getByRole("dialog", { name: "มีแอปเวอร์ชันใหม่" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("1.1.0-uat.9 → 1.1.0-uat.10");
+  await expect(dialog).toContainText("จำเป็นต้องอัปเดตก่อนใช้งานต่อ");
+  await expect(dialog.getByRole("button", { name: "ไว้ทีหลัง" })).toHaveCount(0);
+  if (process.env.CODEX_VISUAL_QA_PATH) await page.screenshot({ path: process.env.CODEX_VISUAL_QA_PATH.replace(".png", "-update.png") });
+  await dialog.getByRole("button", { name: "ดาวน์โหลดและติดตั้ง", exact: true }).click();
+  await expect(dialog.getByRole("status")).toContainText("ดาวน์โหลดเสร็จแล้ว");
+  expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).installerRequest)).toEqual({ apkUrl: manifest.apk_url, apkSha256: manifest.apk_sha256, versionCode: 10109 });
+});
 const companyB = "22222222-2222-4222-8222-222222222222";
 const branch = "33333333-3333-4333-8333-333333333333";
 const brand = "44444444-4444-4444-8444-444444444444";
@@ -22,7 +60,7 @@ function tokens(company: string, device: string, grantedPermissions = permission
     store_device_id: device, station_key: "counter-1", permissions: grantedPermissions, exp: Math.floor(Date.now()/1000)+3600 };
   return { access_token: `test.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.fixture`, refresh_token: `test-refresh-${company}`, user, business_slug: company === companyA ? "company-one" : "company-two" };
 }
-async function mockApi(page: Page, options: { catalogFailure?: boolean; grantedPermissions?: string[] } = {}) {
+async function mockApi(page: Page, options: { catalogFailure?: boolean; grantedPermissions?: string[]; writesEnabled?: boolean } = {}) {
   await page.route("https://uat-takeaway.foodchainservice.com/api/v1/**", async (route) => {
     const request = route.request(), url = new URL(request.url());
     let data: unknown = [];
@@ -33,7 +71,7 @@ async function mockApi(page: Page, options: { catalogFailure?: boolean; grantedP
     } else if (url.pathname.endsWith("/mobile-store/branches")) data = [{ id: branch, code: "BKK-01", name: "Branch" }];
     else if (url.pathname.endsWith("/mobile-store/login")) {
       const body = request.postDataJSON(); data = tokens(body.business_code === "company-one" ? companyA : companyB, body.device_id, options.grantedPermissions ?? permissions);
-    } else if (url.pathname.endsWith("/takeaway/status")) data = { enabled: true, writes_enabled: false, company_id: request.headers()["x-company-id"], branch_id: branch, brand_id: brand, hard_holds: [] };
+    } else if (url.pathname.endsWith("/takeaway/status")) data = { enabled: true, writes_enabled: options.writesEnabled ?? false, company_id: request.headers()["x-company-id"], branch_id: branch, brand_id: brand, hard_holds: [] };
     else if (url.pathname.endsWith("/takeaway/catalog/categories")) data = [{ id: "category-drink", name: "เครื่องดื่ม" }];
     else if (url.pathname.endsWith("/takeaway/catalog/items")) {
       if (options.catalogFailure) return route.fulfill({ status: 500, json: { detail: "catalog unavailable" } });
@@ -44,6 +82,10 @@ async function mockApi(page: Page, options: { catalogFailure?: boolean; grantedP
       effective_price: "55.00", branch_is_available: true, available_qty: "8.00", is_available: true,
       }];
     }
+    if (url.pathname.endsWith("/takeaway/shifts")) data = [{ id: "shift-1", status: "open", round_no: 1 }];
+    if (url.pathname.endsWith("/takeaway/orders")) data = options.writesEnabled ? [{ id: "queue-1", order_number: "QR-1", total_amount: "58.85", fulfillment_status: url.searchParams.get("fulfillment_status") || "queued" }] : [];
+    if (url.pathname.endsWith("/takeaway/sales/offline-sync")) data = { order: { id: "sale-1", order_number: "SALE-1", queue_number: 2, total_amount: "58.85" }, pickup_token: null };
+    if (url.pathname.endsWith("/receipt") || url.pathname.endsWith("/receipt/prints")) data = { id: "receipt-1", order_id: "sale-1", receipt_number: "R-1", payload: { items: [{ sku: "CF-001", name: "กาแฟเย็น", quantity: "1", line_total: "55.00" }], subtotal: "55.00", tax_amount: "3.85", total_amount: "58.85", payment_method: "cash" }, issued_at: new Date().toISOString(), print_count: 0 };
     return route.fulfill({ json: { data, meta: {}, error: null } });
   });
 }
@@ -61,7 +103,7 @@ test("Store shell matches the Chambo primary navigation and keeps secondary acti
   await page.setViewportSize({ width: 393, height: 851 });
   await mockApi(page, { grantedPermissions: chamboMenuPermissions });
   await page.goto("/");
-  await login(page, "company-one", "orders");
+  await login(page, "company-one", "sales");
 
   const primary = page.getByRole("navigation", { name: "เมนูหลักหน้าร้าน" });
   for (const label of ["ขาย", "Stock", "ปิดกะ", "สั่ง/รับสินค้า", "เครดิต"]) {
@@ -129,7 +171,7 @@ test("logout clears session; same APK resolves and logs into another company", a
   await expect(page.getByLabel("Business Code", { exact: true })).toHaveValue("");
   expect(await page.evaluate(() => localStorage.getItem("erp-auth"))).toBeNull();
   await login(page, "company-two");
-  await expect(page.getByRole("banner")).toContainText("COMPANY TWO");
+  await expect(page.getByRole("banner")).toContainText("company-two");
   expect(requests.some((url) => url.includes("auto-login"))).toBe(false);
 });
 
@@ -301,4 +343,97 @@ test("Store updater accepts only the matching signed manifest payload", async ({
     return { valid, tampered };
   });
   expect(result).toEqual({ valid: true, tampered: false });
+});
+
+
+test("sales landing, deep link, refresh and back remain distinct from QR queue on Redmi layout", async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 851 });
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true });
+  await page.goto("/"); await login(page, "company-one", "sales");
+  await expect(page.getByTestId("takeaway-sales-workspace")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "รายการเตรียมและส่งมอบ" })).toHaveCount(0);
+  await expect(page.getByRole("banner")).toContainText("company-one");
+  await expect(page.getByText(/BKK-01 · Branch/)).toBeVisible();
+  await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
+  await expect(page.getByLabel("จำนวน กาแฟเย็น")).toHaveText("1");
+  await page.getByRole("button", { name: "ลด กาแฟเย็น", exact: true }).click();
+  await expect(page.getByLabel("จำนวน กาแฟเย็น")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "เปิดเมนูหน้าร้าน", exact: true }).click();
+  await page.getByRole("link", { name: "รับออเดอร์", exact: true }).click();
+  await expect(page).toHaveURL(/\/takeaway\/store\/orders$/);
+  await expect(page.getByRole("heading", { name: "รายการเตรียมและส่งมอบ" })).toBeVisible();
+  await expect(page.getByTestId("sales-product")).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/takeaway\/store\/sales$/);
+  await page.reload();
+  await expect(page.getByTestId("takeaway-sales-workspace")).toBeVisible();
+  await page.goto("/takeaway/store/orders");
+  await expect(page.getByTestId("takeaway-orders-workspace")).toBeVisible();
+  await page.getByRole("navigation", { name: "เมนูหลักหน้าร้าน" }).getByRole("link", { name: "ขาย", exact: true }).click();
+  await expect(page.getByTestId("takeaway-sales-workspace")).toBeVisible();
+  if (process.env.CODEX_VISUAL_QA_PATH) await page.screenshot({ path: process.env.CODEX_VISUAL_QA_PATH.replace(".png", "-sales.png"), fullPage: true });
+});
+
+for (const method of ["cash", "other"]) test(`sales records ${method} with server price IDs and explicit external-payment confirmation`, async ({ page }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true });
+  await page.goto("/"); await login(page, "company-one", "sales");
+  await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
+  const pay = page.getByRole("button", { name: "บันทึกการรับชำระ", exact: true });
+  if (method === "other") {
+    await page.getByLabel("โอน/ชำระภายนอก (ตรวจรับเอง)", { exact: true }).check();
+    await expect(pay).toBeDisabled();
+    await page.getByLabel("เลขอ้างอิงการรับเงิน", { exact: true }).fill("UAT-EXTERNAL-1");
+    await page.getByLabel("ตรวจสอบว่าได้รับเงินจริงแล้ว").check();
+  }
+  const sent = page.waitForRequest((r) => r.url().endsWith("/takeaway/sales/offline-sync") && r.method() === "POST");
+  await pay.click();
+  const payload = (await sent).postDataJSON();
+  expect(payload.payment.method).toBe(method);
+  expect(payload.payment.amount).toBe("58.85");
+  expect(payload.items).toEqual([{ catalog_item_id: "item-coffee", quantity: "1" }]);
+  expect(payload.idempotency_key).toMatch(/^takeaway-sale:/);
+  await expect(page.getByLabel("จำนวน กาแฟเย็น")).toHaveText("0");
+  await expect(page.getByRole("button", { name: "ใบลูกค้า", exact: true })).toBeEnabled();
+  if (method === "cash") {
+    await page.getByRole("button", { name: "ใบลูกค้า", exact: true }).click();
+    await expect(page.getByText("กระดาษออกครบแล้วหรือไม่?")).toBeVisible();
+    const recorded = page.waitForRequest(r => r.url().endsWith("/receipt/prints") && r.method() === "POST");
+    await page.getByRole("button", { name: "ยืนยันพิมพ์แล้ว", exact: true }).click();
+    expect((await recorded).postDataJSON().copy_type).toBe("customer");
+  }
+});
+
+test("cash sale stays on device while offline, then syncs on reconnect", async ({ page, context }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true });
+  await page.goto("/"); await login(page, "company-one", "sales");
+  await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
+  await context.setOffline(true);
+  await page.getByRole("button", { name: "บันทึกการรับชำระ", exact: true }).click();
+  await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "ใบลูกค้า", exact: true })).toBeEnabled();
+  const synced = page.waitForRequest(r => r.url().endsWith("/takeaway/sales/offline-sync") && r.method() === "POST");
+  await context.setOffline(false);
+  expect((await synced).postDataJSON().payment.method).toBe("cash");
+  await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toHaveCount(0);
+});
+
+test("offline sale retry reuses the same idempotency key after a lost response", async ({ page }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true });
+  const keys: string[] = [];
+  let failing = true;
+  await page.route("**/takeaway/sales/offline-sync", async route => {
+    keys.push(route.request().postDataJSON().idempotency_key);
+    if (failing) return route.abort("failed");
+    return route.fulfill({ json: { data: { order: { id: "sale-1", order_number: "SALE-1", queue_number: 2 }, pickup_token: null } } });
+  });
+  await page.goto("/"); await login(page, "company-one", "sales");
+  await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
+  await page.getByRole("button", { name: "บันทึกการรับชำระ", exact: true }).click();
+  await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toBeVisible();
+  failing = false;
+  await page.getByRole("button", { name: "ส่งรายการค้าง", exact: true }).click();
+  await expect.poll(() => keys.length).toBe(2);
+  expect(keys[0]).toBe(keys[1]);
+  await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toHaveCount(0);
 });

@@ -1,4 +1,5 @@
 import axios, { type AxiosError } from "axios";
+import { platformValidationMessages } from "@/lib/platformValidation";
 import type { SaasBillingOverview, SaasBillingSummary, SaasInvoice, SaasPlan } from "@/types/billing";
 import type { PrivacyRequest, SupportAccessGrant, SupportContext, SupportMessage, SupportTicket } from "@/types/privacySupport";
 import type { CompanyModuleAccess } from "@/types/moduleAccess";
@@ -293,8 +294,11 @@ export const platformApi = {
 export function platformErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
+    const validation = platformValidationMessages(detail);
+    if (validation.length) return `กรุณาแก้ไขข้อมูลต่อไปนี้:\n${validation.join("\n")}`;
     if (typeof detail === "string") return detail;
     if (!error.response) return "เชื่อมต่อ Platform API ไม่ได้";
+    if (error.response.status === 422) return "ข้อมูลไม่ผ่านการตรวจสอบ กรุณาตรวจสอบข้อมูลในแบบฟอร์มแล้วลองอีกครั้ง";
   }
   return error instanceof Error ? error.message : "ดำเนินการไม่สำเร็จ";
 }

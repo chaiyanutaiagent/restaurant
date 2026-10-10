@@ -32,6 +32,40 @@ from app.utils.security import (
 
 
 class PlatformTenantSchemaTests(unittest.TestCase):
+    def test_company_form_contract_accepts_optional_blanks_without_altering_password(self) -> None:
+        payload = self._company_form_payload()
+        parsed = PlatformCompanyCreate(**payload)
+        self.assertIsNone(parsed.email)
+        self.assertIsNone(parsed.owner.email)
+        self.assertEqual(parsed.owner.password, payload["owner"]["password"])
+
+    @staticmethod
+    def _company_form_payload() -> dict:
+        return dict(
+            name="QA Company", business_slug="qa-company", email="", name_en="", tax_id="",
+            owner=dict(username="owner.shop", password=" test-password-kept ", display_name="Owner", email=""),
+            reason="Create company",
+        )
+
+    def test_company_form_rejects_invalid_owner_slug_password_and_limits(self) -> None:
+        for path, value, expected_path in (
+            (("owner", "username"), "owner@example.com", ("owner", "username")),
+            (("owner", "password"), "short", ("owner", "password")),
+            (("business_slug",), "restaurant", ("business_slug",)),
+            (("business_slug",), "shop--one", ("business_slug",)),
+            (("plan_limits",), {"users": 1.5}, ("plan_limits", "users")),
+            (("name",), "   ", ("name",)),
+        ):
+            with self.subTest(path=path):
+                payload = self._company_form_payload()
+                target = payload
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = value
+                with self.assertRaises(ValidationError) as error:
+                    PlatformCompanyCreate(**payload)
+                self.assertEqual(error.exception.errors()[0]["loc"], expected_path)
+
     def test_company_onboarding_normalizes_owner_and_manual_controls(self) -> None:
         payload = PlatformCompanyCreate(
             name=" ร้านทดสอบ ",

@@ -1,4 +1,65 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { platformValidationMessages } from "../src/lib/platformValidation";
+
+test("company validation messages are Thai and never expose rejected credentials", () => {
+  const messages = platformValidationMessages([
+    { loc: ["body", "owner", "password"], type: "string_too_short", ctx: { min_length: 12 }, input: "secret" },
+    { loc: ["body", "owner", "username"], type: "value_error", input: "private@example.com" },
+    { loc: ["body", "plan_limits", "users"], type: "int_from_float", input: 1.5 },
+    { loc: ["body", "name"], type: "value_error", msg: "Value error, name is required" },
+  ]).join("\n");
+  expect(messages).toContain("รหัสผ่าน Owner: ต้องมีอย่างน้อย 12");
+  expect(messages).toContain("Username Owner:");
+  expect(messages).toContain("จำนวนผู้ใช้งาน: กรอกจำนวนเต็ม");
+  expect(messages).toContain("ชื่อบริษัท: กรุณากรอกข้อมูล");
+  expect(messages).not.toContain("secret");
+  expect(messages).not.toContain("private@example.com");
+  expect(platformValidationMessages([null, "bad"])).toEqual([]);
+});
+
+test("company create explains rejected fields and allows corrected submission", async ({ page }) => {
+  await page.addInitScript((identity) => {
+    sessionStorage.setItem("restaurant-platform-auth", JSON.stringify({ state: {
+      accessToken: "test-platform-token", csrfToken: "test-csrf", sessionId: "test-session", operator: identity,
+    }, version: 0 }));
+  }, operator);
+  await page.route("**/api/v1/platform/**", (route) => route.fulfill({ json: { data: [], meta: {}, error: null } }));
+  let attempts = 0;
+  await page.route("**/api/v1/platform/companies", async (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ json: { data: [], meta: {}, error: null } });
+    attempts++;
+    const payload = route.request().postDataJSON();
+    if (payload.business_slug === "restaurant") return route.fulfill({ status: 422, json: { detail: [
+      { loc: ["body", "business_slug"], type: "value_error", msg: "Value error, business_slug must not be reserved" },
+    ] } });
+    expect(payload.owner.username).toBe("owner.shop");
+    expect(payload.owner.password).toBe("test-password-unchanged");
+    expect(payload.owner.email).toBe("");
+    return route.fulfill({ status: 201, json: { data: { id: companyId }, meta: {}, error: null } });
+  });
+  // The detail page is outside this form regression; verify navigation separately.
+  await page.route(`**/platform/companies/${companyId}`, (route) => route.fulfill({ contentType: "text/html", body: "Company created" }));
+  await page.goto("/platform/companies");
+  await page.getByRole("button", { name: "เปิด Company ใหม่" }).click();
+  await page.getByLabel("ชื่อบริษัท *", { exact: true }).fill("QA company");
+  await page.getByLabel("Business URL *", { exact: true }).fill("restaurant");
+  await page.getByLabel("ชื่อ Company Owner *", { exact: true }).fill("Owner Shop");
+  const username = page.getByLabel("Username Owner *", { exact: true });
+  await username.fill("owner@example.com");
+  await page.getByLabel("รหัสผ่านชั่วคราว Owner", { exact: false }).fill("test-password-unchanged");
+  await page.getByRole("button", { name: "สร้าง Company และ Owner" }).click();
+  expect(await username.evaluate((input: HTMLInputElement) => input.validity.patternMismatch)).toBe(true);
+  expect(attempts).toBe(0);
+  await username.fill("owner.shop");
+  await page.getByRole("button", { name: "สร้าง Company และ Owner" }).click();
+  await expect(page.getByRole("alert")).toContainText("Business URL:");
+  await expect(page.getByRole("alert")).toContainText("คำสงวน");
+  await expect(page.getByRole("alert")).not.toContainText("status code 422");
+  await page.getByLabel("Business URL *", { exact: true }).fill("qa-company-valid");
+  await page.getByRole("button", { name: "สร้าง Company และ Owner" }).click();
+  await expect(page).toHaveURL(new RegExp(`/platform/companies/${companyId}$`));
+  expect(attempts).toBe(2);
+});
 
 const companyId = "11111111-1111-4111-8111-111111111111";
 const operator = {

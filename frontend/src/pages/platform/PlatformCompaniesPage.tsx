@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Plus, Search } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { cloneElement, type FormEvent, type ReactElement, useId, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -72,22 +72,22 @@ export default function PlatformCompaniesPage(): JSX.Element {
           <h3 className="text-xl font-semibold">Company และ Owner คนแรก</h3>
           <p className="mt-1 text-sm text-slate-400">Owner จะได้สิทธิ์ระดับ Company แต่ไม่ใช่ Platform Owner</p>
           <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <Field label="ชื่อบริษัท *"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
-            <Field label="Business URL *"><Input value={form.business_slug ?? ""} minLength={3} maxLength={63} pattern="[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])" placeholder="coffee-house" onChange={(e) => setForm({ ...form, business_slug: e.target.value.toLowerCase() })} required /></Field>
+            <Field label="ชื่อบริษัท *"><Input maxLength={255} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
+            <Field label="Business URL *" hint="ใช้ a–z ตัวเลข หรือขีดกลาง 3–63 ตัว ห้ามขีดกลางติดกันและห้ามใช้คำสงวน เช่น restaurant, admin, pos"><Input value={form.business_slug ?? ""} minLength={3} maxLength={63} pattern="[a-z0-9]+(?:\-[a-z0-9]+)*" placeholder="coffee-house" onChange={(e) => setForm({ ...form, business_slug: e.target.value.toLowerCase() })} required /></Field>
             <Field label="ชื่ออังกฤษ"><Input value={form.name_en ?? ""} onChange={(e) => setForm({ ...form, name_en: e.target.value })} /></Field>
             <Field label="เลขประจำตัวผู้เสียภาษี"><Input value={form.tax_id ?? ""} onChange={(e) => setForm({ ...form, tax_id: e.target.value })} /></Field>
             <Field label="อีเมลบริษัท"><Input type="email" value={form.email ?? ""} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
             <Field label="ชื่อ Company Owner *"><Input value={form.owner.display_name} onChange={(e) => setForm({ ...form, owner: { ...form.owner, display_name: e.target.value } })} required /></Field>
-            <Field label="Username Owner *"><Input value={form.owner.username} onChange={(e) => setForm({ ...form, owner: { ...form.owner, username: e.target.value } })} required /></Field>
+            <Field label="Username Owner *" hint="ใช้ภาษาอังกฤษ ตัวเลข จุด ขีดกลาง หรือขีดล่าง 3–100 ตัว ไม่ใช่อีเมล เช่น owner.shop"><Input minLength={3} maxLength={100} pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{2,99}" title="Username 3–100 ตัว ใช้ภาษาอังกฤษ ตัวเลข จุด ขีดกลาง หรือขีดล่าง ไม่ใช้ @ หรือช่องว่าง" autoCapitalize="none" autoComplete="username" value={form.owner.username} onChange={(e) => setForm({ ...form, owner: { ...form.owner, username: e.target.value } })} required /></Field>
             <Field label="อีเมล Owner"><Input type="email" value={form.owner.email ?? ""} onChange={(e) => setForm({ ...form, owner: { ...form.owner, email: e.target.value } })} /></Field>
-            <Field label="รหัสผ่านชั่วคราว Owner (อย่างน้อย 12 ตัว) *"><Input type="password" minLength={12} value={form.owner.password} onChange={(e) => setForm({ ...form, owner: { ...form.owner, password: e.target.value } })} required /></Field>
+            <Field label="รหัสผ่านชั่วคราว Owner (อย่างน้อย 12 ตัว) *"><Input type="password" minLength={12} maxLength={128} autoComplete="new-password" value={form.owner.password} onChange={(e) => setForm({ ...form, owner: { ...form.owner, password: e.target.value } })} required /></Field>
             <Field label="Plan code"><Input value={form.plan_code} onChange={(e) => setForm({ ...form, plan_code: e.target.value })} required /></Field>
             <Field label="เหตุผลที่เปิด Company *"><Input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} required /></Field>
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-4">
             {Object.entries(form.plan_limits).map(([key, value]) => (
               <Field key={key} label={`Limit: ${key}`}>
-                <Input type="number" min={0} value={value} onChange={(event) => updateLimit(key, event.target.value)} />
+                <Input type="number" min={0} max={1000000} step={1} value={value} onChange={(event) => updateLimit(key, event.target.value)} />
               </Field>
             ))}
           </div>
@@ -99,7 +99,7 @@ export default function PlatformCompaniesPage(): JSX.Element {
               </label>
             ))}
           </div>
-          {createCompany.error ? <p className="mt-4 text-sm text-red-300">{platformErrorMessage(createCompany.error)}</p> : null}
+          {createCompany.error ? <p role="alert" className="mt-4 whitespace-pre-line text-sm text-red-300">{platformErrorMessage(createCompany.error)}</p> : null}
           <div className="mt-6 flex gap-3">
             <Button className="bg-emerald-400 text-slate-950 hover:bg-emerald-300" disabled={createCompany.isPending}>{createCompany.isPending ? "กำลังสร้าง..." : "สร้าง Company และ Owner"}</Button>
             <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>ยกเลิก</Button>
@@ -132,6 +132,7 @@ export default function PlatformCompaniesPage(): JSX.Element {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
-  return <div className="space-y-2"><Label className="text-slate-300">{label}</Label>{children}</div>;
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactElement }): JSX.Element {
+  const id = useId();
+  return <div className="space-y-2"><Label htmlFor={id} className="text-slate-300">{label}</Label>{cloneElement(children, { id, "aria-describedby": hint ? `${id}-hint` : undefined })}{hint ? <p id={`${id}-hint`} className="text-xs text-slate-400">{hint}</p> : null}</div>;
 }

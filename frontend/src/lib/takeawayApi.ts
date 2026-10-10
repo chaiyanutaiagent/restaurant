@@ -31,6 +31,7 @@ export type TakeawayContext = {
   brand_id: string | null;
   branch_id: string | null;
   fulfillment_mode: "counter_combined" | "separate_stations";
+  counter_two_step?: boolean;
 };
 
 export type TakeawayCatalogRow = {
@@ -241,6 +242,7 @@ export const takeawayApi = {
     api.post<ApiResponse<TakeawayRecord>>(`/takeaway/kitchen/tickets/${id}/${nextStatus}`),
   updateFulfillmentOrder: (id: string, nextStatus: "preparing" | "ready") =>
     api.post<ApiResponse<TakeawayRecord>>(`/takeaway/fulfillment/orders/${id}/${nextStatus}`),
+  counterOrderAction: (id: string, action: "accept" | "handoff") => api.post<ApiResponse<TakeawayRecord>>(`/takeaway/counter/orders/${id}/${action}`),
   markPickedUp: (id: string) =>
     api.post<ApiResponse<TakeawayRecord>>(`/takeaway/orders/${id}/picked-up`),
   recipes: (params?: Record<string, unknown>) =>

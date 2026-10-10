@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import TokenData
 from app.config import settings
 from app.services.takeaway_catalog_policy import sale_eligible
+from app.services.takeaway_fulfillment_policy import counter_mode_enabled
 from app.models.takeaway import (
     TakeawayBranchCatalogItem,
     TakeawayCatalogItem,
@@ -1294,6 +1295,7 @@ class TakeawayService:
         *,
         branch_id: uuid.UUID | None = None,
         fulfillment_status: str | None = None,
+        active_only: bool = False,
         limit: int = 100,
     ) -> list[TakeawayOrder]:
         statement = select(TakeawayOrder).where(TakeawayOrder.company_id == self.current.company_id)
@@ -1305,7 +1307,69 @@ class TakeawayService:
             statement = statement.where(TakeawayOrder.branch_id == branch_id)
         if fulfillment_status is not None:
             statement = statement.where(TakeawayOrder.fulfillment_status == fulfillment_status)
-        return list(await self.db.scalars(statement.order_by(TakeawayOrder.created_at.desc()).limit(limit)))
+        if active_only:
+            statement = statement.where(TakeawayOrder.status == "paid", TakeawayOrder.fulfillment_status.in_(["queued", "preparing", "ready"]))
+        ordering = TakeawayOrder.created_at.asc() if active_only else TakeawayOrder.created_at.desc()
+        return list(await self.db.scalars(statement.order_by(ordering).limit(limit)))
+
+    async def counter_order_action(self, order_id: uuid.UUID, action: str, platform_db: AsyncSession) -> TakeawayOrder:
+        if action not in {"accept", "handoff"}:
+            raise HTTPException(404, "Unknown counter action")
+        permissions = {"takeaway.sale.create", "takeaway.kitchen.manage" if action == "accept" else "takeaway.pickup.manage", "*"}
+        if not permissions.intersection(self.current.permissions):
+            raise HTTPException(403, "Counter action permission required")
+        order = await self.db.scalar(select(TakeawayOrder).where(
+            TakeawayOrder.id == order_id, TakeawayOrder.company_id == self.current.company_id,
+        ).with_for_update())
+        if order is None:
+            raise HTTPException(404, "Takeaway order not found")
+        assert_takeaway_scope(self.current, brand_id=order.brand_id, branch_id=order.branch_id)
+        await self._validate_context(brand_id=order.brand_id, branch_id=order.branch_id)
+        if not await counter_mode_enabled(platform_db, self.current.company_id, order.brand_id, order.branch_id):
+            raise HTTPException(409, "This branch requires its existing kitchen workflow")
+        if order.status != "paid":
+            raise HTTPException(409, "Only paid orders may be accepted or handed off")
+        previous = order.fulfillment_status
+        if previous == "picked_up" or (action == "accept" and previous in {"preparing", "ready"}):
+            return order  # Locked state is the idempotency boundary; no second audit/event.
+        if previous not in ({"queued"} if action == "accept" else {"preparing", "ready"}):
+            raise HTTPException(409, "Order must be accepted before handoff")
+        tickets = list(await self.db.scalars(select(TakeawayKitchenTicket).where(
+            TakeawayKitchenTicket.order_id == order.id,
+            TakeawayKitchenTicket.company_id == self.current.company_id,
+            TakeawayKitchenTicket.brand_id == order.brand_id,
+            TakeawayKitchenTicket.branch_id == order.branch_id,
+        ).with_for_update()))
+        now = datetime.now(timezone.utc)
+        for ticket in tickets:
+            if ticket.status in {"queued", "preparing"}:
+                ticket.status, ticket.ready_at = "ready", now
+        metadata = dict(order.source_metadata or {})
+        history = list(metadata.get("fulfillment_history", []))
+        # Normalize legacy preparing atomically with handoff, retaining its identity.
+        statuses = ["ready"] if action == "accept" else (["ready", "picked_up"] if previous == "preparing" else ["picked_up"])
+        for next_status in statuses:
+            history.append({"status": next_status, "from_status": order.fulfillment_status,
+                "action": action, "mode": "counter_two_step", "user_id": str(self.current.user_id), "at": now.isoformat()})
+            order.fulfillment_status = next_status
+            event_key = f"order:{order.id}:" + ("picked-up" if next_status == "picked_up" else "ready")
+            exists = await self.db.scalar(select(TakeawayOperationalOutbox.id).where(
+                TakeawayOperationalOutbox.company_id == self.current.company_id,
+                TakeawayOperationalOutbox.idempotency_key == event_key,
+            ))
+            if exists is None:
+                self._outbox(event_type=f"takeaway.order.{next_status}.v1", aggregate_type="order",
+                    aggregate_id=order.id, idempotency_key=event_key,
+                    payload={"order_number": order.order_number, "queue_number": order.queue_number,
+                        "operated_by": str(self.current.user_id), "action": action, "mode": "counter_two_step"},
+                    brand_id=order.brand_id, branch_id=order.branch_id)
+        if action == "handoff":
+            order.picked_up_at = now
+        metadata["fulfillment_history"] = history
+        order.source_metadata = metadata
+        await self.db.commit()
+        await self.db.refresh(order)
+        return order
 
     async def get_receipt(self, order_id: uuid.UUID) -> TakeawayReceipt:
         row = await self.db.scalar(

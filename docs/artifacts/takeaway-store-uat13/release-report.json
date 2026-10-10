@@ -1,0 +1,131 @@
+{
+  "release": "Takeaway Store UAT13",
+  "branch": "codex/takeaway-store-uat13",
+  "base_commit": "e216e7645cd607a7dc1d24285b0945f30f1f1c23",
+  "verified_at": "2026-10-10T17:03:50Z",
+  "status": "candidate_staged_backend_deployed_public_latest_remains_UAT12",
+  "behavior": {
+    "android": "storeOnly forces accept/handoff even if counter_two_step is missing or false; no QR ordering button, QR box, print QR or pending QR payment section",
+    "server": "Explicit active company/brand/branch counter_combined config required; other workflows return 409 and retain existing endpoints",
+    "transitions": [
+      "queued -> accept -> ready",
+      "ready -> handoff -> picked_up",
+      "legacy preparing -> handoff -> ready + picked_up atomically"
+    ],
+    "permission": {
+      "accept": [
+        "takeaway.sale.create",
+        "takeaway.kitchen.manage"
+      ],
+      "handoff": [
+        "takeaway.sale.create",
+        "takeaway.pickup.manage"
+      ],
+      "note": "Existing platform wildcard permission remains; restricted Store tokens cannot contain wildcard"
+    },
+    "idempotency": "Order ID + company row lock, scope checks before no-op, no repeat audit/outbox after picked_up; frontend in-flight ref latch prevents double tap",
+    "active_list": "Paid queued/preparing/ready, tenant/brand/branch scoped, oldest first before limit; completed retained in history",
+    "vat_or_pricing_changes": false,
+    "backend_qr_dark_launch_changes": false
+  },
+  "validation": {
+    "backend_unit": {
+      "passed": 45,
+      "failed": 0,
+      "suites": [
+        "test_takeaway_counter_flow",
+        "test_takeaway_service",
+        "test_takeaway_sales_catalog",
+        "test_takeaway_import_service",
+        "test_mobile_store_boundary"
+      ]
+    },
+    "real_database": {
+      "passed": 3,
+      "states": [
+        "queued",
+        "preparing",
+        "ready"
+      ],
+      "opt_in_script": "backend/tests/uat_counter_rollback_smoke.py",
+      "database": "takeaway_ops_db",
+      "all_fixture_writes_rolled_back": true,
+      "audit_outbox_once": true,
+      "active_removed_history_retained": true,
+      "actual_queue4_unchanged": true
+    },
+    "playwright": {
+      "passed": 27,
+      "failed": 0,
+      "includes": [
+        "signed candidate manifest update from UAT12",
+        "live UAT scoped employee session and read-only queue4",
+        "tenant boundaries",
+        "two-step including legacy preparing",
+        "double tap suppression",
+        "false/missing capability never shows kitchen stages",
+        "offline sale sync once",
+        "printer transport failure/retry simulation"
+      ]
+    },
+    "typescript": "passed",
+    "android_bundle_boundary": "passed",
+    "android_build_lint": "passed",
+    "native_unit": {
+      "passed": 12,
+      "failed": 0,
+      "execution": "Gradle UP-TO-DATE from unchanged UAT12 native code (7 spooler, 4 update policy, 1 example); lint and APK packaging executed"
+    },
+    "live_authentication": "Temporary 15-minute employee-scoped session; revoked after test. Password login not tested.",
+    "physical_android_install_printer_and_paper": "Not tested; still requires human/device UAT",
+    "screenshots": [
+      "live-store-queue4.png",
+      "live-store.png",
+      "live-store-update.png"
+    ]
+  },
+  "deployment": {
+    "backend_image": "restaurant-pos-backend:uat-counter-uat13",
+    "backend_image_id": "sha256:3b91b37bec3253f2774c32a0ab21b37bcc19a2aae198ff8cf27b012bf6913de5",
+    "health": "healthy; public /health/ready returns status ok",
+    "health_version_note": "Inherited APP_VERSION label is uat-mobile-store-60fd4d9; deployed image identity and four runtime file hashes independently verified",
+    "runtime_matches_source": {
+      "backend/app/services/takeaway_service.py": "1b679a0334c29834387b967945ce64775d8bbb677a33370e2b0b06692bba05db",
+      "backend/app/services/mobile_store_policy.py": "022246f64c60e56c5a0d98d405744c1031b7944d7e4ed608ba0b20ddca820c5e",
+      "backend/app/services/takeaway_fulfillment_policy.py": "f56f5c14a9237161b650654090272a87fe2d5411af3c25566d2e51926b67a9fb",
+      "backend/app/routers/takeaway.py": "a2c22a26c459fc4170e5d0b36288c30cbb4c7f0d616095cfc8a4609b3d7c129a"
+    },
+    "frontend": "Dedicated Mobile Store frontend bundled in staged APK; shared UAT web frontend not replaced",
+    "production_unchanged": true,
+    "flags_unchanged": true,
+    "migrations": false,
+    "rollback": {
+      "image": "restaurant-pos-backend:rollback-before-counter-uat13",
+      "backup": "/home/behappyaiagent/restaurant-uat-deploy-backups/takeaway-store-uat13-counter",
+      "checks": "Previous image retained; .env backed up; pg_dump archive verified by pg_restore --list. Rollback not executed on live UAT."
+    }
+  },
+  "candidate": {
+    "url": "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/foodchainservice-takeaway-store-1.1.0-uat.13.apk",
+    "manifest_url": "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/latest-uat.13.json",
+    "version_name": "1.1.0-uat.13",
+    "version_code": 10112,
+    "package": "com.foodchainservice.takeaway.uat",
+    "apk_sha256": "1738d10b2e3edb913136d893fa150ce6bfaff7a7e1681310bac4fdcb6336f3f2",
+    "certificate_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5",
+    "signing": "Same UAT Android Debug certificate as UAT12; Ed25519 release manifest verified against downloaded public APK",
+    "public_download_verified": true,
+    "latest_unchanged": {
+      "version": "1.1.0-uat.12",
+      "code": 10111,
+      "manifest_sha256": "1e9a23ab827435bcb082ed18b0ea27c461569164bcc7fb29bbf0b3baccab9be9"
+    }
+  },
+  "queue4": {
+    "id": "b27b4470-7506-4c2e-b901-ac79b1911aaf",
+    "order_number": "TW-20261007-1F3972-0004",
+    "status": "paid",
+    "fulfillment_status": "queued",
+    "mutated_by_test": false
+  }
+}

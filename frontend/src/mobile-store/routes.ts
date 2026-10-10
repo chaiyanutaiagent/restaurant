@@ -10,10 +10,10 @@ export const STORE_ROUTES = [
   },
   {
     path: "/takeaway/store/orders",
-    label: "ขายและเตรียมสินค้า",
+    label: "รับออเดอร์และส่งมอบ",
     navLabel: "รับออเดอร์",
     menuLabel: "รับออเดอร์",
-    sectionLabel: "รับออเดอร์ · เตรียมและส่งมอบ",
+    sectionLabel: "รับออเดอร์ · ส่งมอบ",
     permission: "takeaway.sale.create",
     primary: false,
   },

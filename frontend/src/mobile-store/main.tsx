@@ -34,8 +34,8 @@ import UpdateGate from "./UpdateGate";
 import "../index.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-const StoreSalesPage = () => <TakeawayCounterPage mode="sales" />;
-const StoreOrdersPage = () => <TakeawayCounterPage mode="orders" />;
+const StoreSalesPage = () => <TakeawayCounterPage mode="sales" storeOnly />;
+const StoreOrdersPage = () => <TakeawayCounterPage mode="orders" storeOnly />;
 const pages: Record<string, React.ComponentType> = {
   "/takeaway/store/sales": StoreSalesPage,
   "/takeaway/store/orders": StoreOrdersPage,

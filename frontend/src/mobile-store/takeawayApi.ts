@@ -25,6 +25,7 @@ export const takeawayApi = {
   receipt: (id: string) => api.get<ApiResponse<TakeawayReceipt>>(`/takeaway/orders/${id}/receipt`),
   markReceiptPrinted: (id: string, copy: "customer" | "merchant", key: string) => api.post<ApiResponse<TakeawayReceipt>>(`/takeaway/orders/${id}/receipt/prints`, { copy_type: copy, idempotency_key: key }),
   updateFulfillmentOrder: (id: string, next: "preparing" | "ready") => api.post<ApiResponse<TakeawayRecord>>(`/takeaway/fulfillment/orders/${id}/${next}`),
+  counterOrderAction: (id: string, action: "accept" | "handoff") => api.post<ApiResponse<TakeawayRecord>>(`/takeaway/counter/orders/${id}/${action}`),
   markPickedUp: (id: string) => api.post<ApiResponse<TakeawayRecord>>(`/takeaway/orders/${id}/picked-up`),
   stock: (id?: string) => api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/stock", { params: { location_id: id } }),
   stockLocations: () => api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/stock/locations"),

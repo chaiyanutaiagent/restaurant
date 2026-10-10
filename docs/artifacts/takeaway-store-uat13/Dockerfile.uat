@@ -1,0 +1,3 @@
+FROM restaurant-pos-backend:uat-catalog-uat11
+COPY takeaway_service.py mobile_store_policy.py takeaway_fulfillment_policy.py /app/app/services/
+COPY takeaway.py /app/app/routers/takeaway.py

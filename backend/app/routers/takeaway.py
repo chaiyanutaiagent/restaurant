@@ -24,6 +24,7 @@ from app.dependencies import (
     require_permission,
 )
 from app.database import get_platform_db
+from app.services.takeaway_fulfillment_policy import counter_mode_enabled
 from app.schemas.takeaway import (
     TakeawayBranchAvailabilityUpdate,
     TakeawayCatalogItemCreate,
@@ -398,6 +399,7 @@ async def takeaway_status(
             "brand_id": current.brand_id,
             "branch_id": current.branch_id,
             "fulfillment_mode": fulfillment_mode,
+            "counter_two_step": await counter_mode_enabled(platform_db, current.company_id, current.brand_id, current.branch_id),
         }
     )
 
@@ -568,6 +570,7 @@ async def capture_order_payment(
 async def list_orders(
     branch_id: uuid.UUID | None = None,
     fulfillment_status: str | None = Query(default=None, max_length=30),
+    active_only: bool = False,
     limit: int = Query(default=100, ge=1, le=500),
     current: TokenData = Depends(require_permission("takeaway.sale.view")),
     db: AsyncSession = Depends(get_takeaway_operational_db),
@@ -576,6 +579,7 @@ async def list_orders(
         await TakeawayService(db, current).list_orders(
             branch_id=branch_id,
             fulfillment_status=fulfillment_status,
+            active_only=active_only,
             limit=limit,
         )
     )
@@ -630,6 +634,17 @@ async def update_kitchen_ticket(
     db: AsyncSession = Depends(get_takeaway_operational_db),
 ) -> dict[str, Any]:
     return ok(await TakeawayService(db, current).update_kitchen_ticket(ticket_id, next_status))
+
+
+@router.post("/counter/orders/{order_id}/{action}")
+async def counter_order_action(
+    order_id: uuid.UUID,
+    action: str,
+    current: TokenData = Depends(require_any_permission("takeaway.sale.create", "takeaway.kitchen.manage", "takeaway.pickup.manage")),
+    db: AsyncSession = Depends(get_takeaway_operational_db),
+    platform_db: AsyncSession = Depends(get_platform_db),
+) -> dict[str, Any]:
+    return ok(await TakeawayService(db, current).counter_order_action(order_id, action, platform_db))
 
 
 @router.post("/fulfillment/orders/{order_id}/{next_status}")

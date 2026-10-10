@@ -3,10 +3,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const companyA = "11111111-1111-4111-8111-111111111111";
 // Release acceptance uses the actual signed manifest; Android installer is a bridge fixture.
-if (process.env.STORE_RELEASE_MANIFEST) test("UAT11 receives mandatory signed UAT12 update and passes verified artifact to installer", async ({ page }) => {
+if (process.env.STORE_RELEASE_MANIFEST) test("UAT12 receives mandatory signed UAT13 update and passes verified artifact to installer", async ({ page }) => {
   const manifest = JSON.parse(readFileSync(process.env.STORE_RELEASE_MANIFEST!, "utf8"));
-  expect(manifest.version_code).toBe(10111);
-  expect(manifest.minimum_supported_version_code).toBe(10111);
+  expect(manifest.version_code).toBe(10112);
+  expect(manifest.minimum_supported_version_code).toBe(10112);
   await page.route("**/downloads/takeaway-store/latest.json", route => route.fulfill({ json: manifest }));
   await page.route("**/src/mobile-store/main.tsx", route => route.fulfill({ contentType: "application/javascript", body: `
     import React from '/node_modules/.vite-mobile-store/deps/react.js';
@@ -22,7 +22,7 @@ if (process.env.STORE_RELEASE_MANIFEST) test("UAT11 receives mandatory signed UA
       PluginHeaders: [{ name: "TakeawayUpdater", methods: [{ name: "getStatus", rtype: "promise" }, { name: "installUpdate", rtype: "promise" }] }],
       nativePromise: async (plugin: string, method: string, options: unknown) => {
         if (plugin !== "TakeawayUpdater") throw new Error("Unexpected native plugin");
-        if (method === "getStatus") return { packageId: "com.foodchainservice.takeaway.uat", versionName: "1.1.0-uat.11", versionCode: 10110, installPermission: true };
+        if (method === "getStatus") return { packageId: "com.foodchainservice.takeaway.uat", versionName: "1.1.0-uat.12", versionCode: 10111, installPermission: true };
         if (method === "installUpdate") { win.installerRequest = options; return; }
         throw new Error("Unexpected updater method");
       },
@@ -31,13 +31,13 @@ if (process.env.STORE_RELEASE_MANIFEST) test("UAT11 receives mandatory signed UA
   await page.goto("/");
   const dialog = page.getByRole("dialog", { name: "มีแอปเวอร์ชันใหม่" });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("1.1.0-uat.11 → 1.1.0-uat.12");
+  await expect(dialog).toContainText("1.1.0-uat.12 → 1.1.0-uat.13");
   await expect(dialog).toContainText("จำเป็นต้องอัปเดตก่อนใช้งานต่อ");
   await expect(dialog.getByRole("button", { name: "ไว้ทีหลัง" })).toHaveCount(0);
   if (process.env.CODEX_VISUAL_QA_PATH) await page.screenshot({ path: process.env.CODEX_VISUAL_QA_PATH.replace(".png", "-update.png") });
   await dialog.getByRole("button", { name: "ดาวน์โหลดและติดตั้ง", exact: true }).click();
   await expect(dialog.getByRole("status")).toContainText("ดาวน์โหลดเสร็จแล้ว");
-  expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).installerRequest)).toEqual({ apkUrl: manifest.apk_url, apkSha256: manifest.apk_sha256, versionCode: 10111 });
+  expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).installerRequest)).toEqual({ apkUrl: manifest.apk_url, apkSha256: manifest.apk_sha256, versionCode: 10112 });
 });
 const companyB = "22222222-2222-4222-8222-222222222222";
 test("UAT11 migration clears UAT10 catalog only and preserves pending sale and sequence", async ({ page }) => {
@@ -152,6 +152,20 @@ if (process.env.STORE_LIVE_UAT_PASSWORD || process.env.STORE_LIVE_UAT_SESSION) t
     return response.status;
   });
   expect([403, 404]).toContain(wrongTenant);
+  if (process.env.STORE_LIVE_UAT13 === "1") {
+    expect(context.counter_two_step).toBe(true);
+    await page.goto("/takeaway/store/orders");
+    const queue4 = page.getByTestId("active-order-b27b4470-7506-4c2e-b901-ac79b1911aaf");
+    await expect(queue4).toContainText("คิว 4");
+    await expect(queue4).toContainText("รอรับออเดอร์");
+    await expect(queue4.getByRole("button", { name: "รับออเดอร์", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "เริ่มเตรียม", exact: true })).toHaveCount(0);
+    await expect(page.getByAltText("QR ลูกค้าสั่งเอง")).toHaveCount(0);
+    await expect(page.getByText("ออเดอร์ QR รอชำระ", { exact: true })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    // Read-only: the real customer's queue is never accepted or handed off here.
+    if (process.env.CODEX_VISUAL_QA_PATH) await page.screenshot({ path: process.env.CODEX_VISUAL_QA_PATH.replace(".png", "-queue4.png"), fullPage: true });
+  }
   if (process.env.CODEX_VISUAL_QA_PATH) {
     writeFileSync(process.env.CODEX_VISUAL_QA_PATH.replace(".png", "-api.json"), JSON.stringify({
       captured_at: new Date().toISOString(),
@@ -189,7 +203,7 @@ function tokens(company: string, device: string, grantedPermissions = permission
     store_device_id: device, station_key: "counter-1", permissions: grantedPermissions, exp: Math.floor(Date.now()/1000)+3600 };
   return { access_token: `test.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.fixture`, refresh_token: `test-refresh-${company}`, user, business_slug: company === companyA ? "company-one" : "company-two" };
 }
-async function mockApi(page: Page, options: { catalogFailure?: boolean; grantedPermissions?: string[]; writesEnabled?: boolean } = {}) {
+async function mockApi(page: Page, options: { catalogFailure?: boolean; grantedPermissions?: string[]; writesEnabled?: boolean; twoStep?: boolean } = {}) {
   await page.route("https://uat-takeaway.foodchainservice.com/api/v1/**", async (route) => {
     const request = route.request(), url = new URL(request.url());
     let data: unknown = [];
@@ -200,7 +214,7 @@ async function mockApi(page: Page, options: { catalogFailure?: boolean; grantedP
     } else if (url.pathname.endsWith("/mobile-store/branches")) data = [{ id: branch, code: "BKK-01", name: "Branch" }];
     else if (url.pathname.endsWith("/mobile-store/login")) {
       const body = request.postDataJSON(); data = tokens(body.business_code === "company-one" ? companyA : companyB, body.device_id, options.grantedPermissions ?? permissions);
-    } else if (url.pathname.endsWith("/takeaway/status")) data = { enabled: true, writes_enabled: options.writesEnabled ?? false, company_id: request.headers()["x-company-id"], branch_id: branch, brand_id: brand, hard_holds: [] };
+    } else if (url.pathname.endsWith("/takeaway/status")) data = { enabled: true, writes_enabled: options.writesEnabled ?? false, company_id: request.headers()["x-company-id"], branch_id: branch, brand_id: brand, counter_two_step: options.twoStep ?? true, hard_holds: [] };
     else if (url.pathname.endsWith("/takeaway/catalog/categories")) data = [{ id: "category-drink", name: "เครื่องดื่ม" }];
     else if (url.pathname.endsWith("/takeaway/catalog/items")) {
       if (options.catalogFailure) return route.fulfill({ status: 500, json: { detail: "catalog unavailable" } });
@@ -475,12 +489,12 @@ test("Store updater accepts only the matching signed manifest payload", async ({
 });
 
 
-test("sales landing, deep link, refresh and back remain distinct from QR queue on Redmi layout", async ({ page }) => {
+test("sales landing, deep link, refresh and back remain distinct from order queue on Redmi layout", async ({ page }) => {
   await page.setViewportSize({ width: 393, height: 851 });
   await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true });
   await page.goto("/"); await login(page, "company-one", "sales");
   await expect(page.getByTestId("takeaway-sales-workspace")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "รายการเตรียมและส่งมอบ" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "รายการรับออเดอร์และส่งมอบ" })).toHaveCount(0);
   await expect(page.getByRole("banner")).toContainText("company-one");
   await expect(page.getByText(/BKK-01 · Branch/)).toBeVisible();
   await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
@@ -491,7 +505,7 @@ test("sales landing, deep link, refresh and back remain distinct from QR queue o
   await page.getByRole("button", { name: "เปิดเมนูหน้าร้าน", exact: true }).click();
   await page.getByRole("link", { name: "รับออเดอร์", exact: true }).click();
   await expect(page).toHaveURL(/\/takeaway\/store\/orders$/);
-  await expect(page.getByRole("heading", { name: "รายการเตรียมและส่งมอบ" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "รายการรับออเดอร์และส่งมอบ" })).toBeVisible();
   await expect(page.getByTestId("sales-product")).toHaveCount(0);
   await page.goBack();
   await expect(page).toHaveURL(/\/takeaway\/store\/sales$/);
@@ -608,4 +622,75 @@ test("Bluetooth transport failure records nothing; explicit retry and paper conf
   }
   expect(prints.map(p => p.copy_type)).toEqual(["customer", "merchant"]);
   expect(new Set(prints.map(p => p.idempotency_key)).size).toBe(2);
+});
+
+test("counter has only accept and handoff, handles legacy preparing and removes completed orders", async ({ page }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true });
+  const rows = ["queued", "preparing", "ready"].map((fulfillment_status, i) => ({ id: `flow-${i}`, order_number: `TW-${i}`, queue_number: i + 4, total_amount: "20", status: "paid", fulfillment_status }));
+  const calls: string[] = [];
+  await page.route("**/takeaway/orders?*", route => route.fulfill({ json: { data: new URL(route.request().url()).searchParams.has("active_only") ? rows.filter(row => row.fulfillment_status !== "picked_up") : rows } }));
+  await page.route("**/takeaway/counter/orders/*/*", async route => {
+    const url = route.request().url(), [id, action] = url.split("/").slice(-2);
+    calls.push(action); await new Promise(resolve => setTimeout(resolve, 150));
+    const row = rows.find(row => row.id === id)!; row.fulfillment_status = action === "accept" ? "ready" : "picked_up";
+    await route.fulfill({ json: { data: row } });
+  });
+  await page.goto("/"); await login(page, "company-one", "sales");
+  await page.goto("/takeaway/store/orders");
+  await expect(page.getByTestId("active-order-flow-0")).toContainText("รอรับออเดอร์");
+  for (const i of [1, 2]) await expect(page.getByTestId(`active-order-flow-${i}`)).toContainText("รับออเดอร์แล้ว");
+  expect(await page.locator("body").innerText()).not.toMatch(/QR|เริ่มเตรียม|พร้อมรับ|เตรียมและส่งมอบ/);
+  await page.getByTestId("active-order-flow-0").getByRole("button", { name: "รับออเดอร์", exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+  await expect(page.getByTestId("active-order-flow-0").getByRole("button", { name: "ส่งมอบ", exact: true })).toBeEnabled();
+  expect(calls).toEqual(["accept"]);
+  for (const i of [0, 1, 2]) {
+    const row = page.getByTestId(`active-order-flow-${i}`);
+    await row.getByRole("button", { name: "ส่งมอบ", exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+    await expect(row).toHaveCount(0);
+  }
+  expect(calls).toEqual(["accept", "handoff", "handoff", "handoff"]);
+  await expect(page.getByText("ไม่มีออเดอร์รอรับหรือส่งมอบ")).toBeVisible();
+  await expect(page.getByText("บิลล่าสุด", { exact: true })).toBeVisible();
+});
+
+test("Android never falls back to kitchen stages when counter capability is false", async ({ page }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true, twoStep: false });
+  await page.goto("/"); await login(page, "company-one", "sales"); await page.goto("/takeaway/store/orders");
+  await expect(page.getByRole("button", { name: "รับออเดอร์", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "เริ่มเตรียม", exact: true })).toHaveCount(0);
+  await expect(page.getByText("QR ลูกค้าสั่งเอง", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("ออเดอร์ QR รอชำระ", { exact: true })).toHaveCount(0);
+});
+
+test("Android keeps two-step actions with missing capability and hides pending QR orders", async ({ page }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true });
+  // Older cached status lacks counter_two_step. Keep the server contract, not three-step UI.
+  await page.route("**/takeaway/status", async route => {
+    await route.fulfill({ json: { data: { enabled: true, writes_enabled: true,
+      company_id: companyA, branch_id: branch, brand_id: brand, hard_holds: [] } } });
+  });
+  await page.goto("/"); await login(page, "company-one", "sales"); await page.goto("/takeaway/store/orders");
+  await expect(page.getByRole("button", { name: "รับออเดอร์", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "เริ่มเตรียม", exact: true })).toHaveCount(0);
+  await expect(page.getByText("ออเดอร์ QR รอชำระ", { exact: true })).toHaveCount(0);
+  await expect(page.getByAltText("QR ลูกค้าสั่งเอง")).toHaveCount(0);
+});
+
+test("offline sale sync appears once in active order queue across retry and refresh", async ({ page, context }) => {
+  await mockApi(page, { grantedPermissions: chamboMenuPermissions, writesEnabled: true });
+  const received = new Set<string>();
+  const row = { id: "offline-one", order_number: "OFF-1", queue_number: 8, total_amount: "58.85", status: "paid", fulfillment_status: "queued" };
+  await page.route("**/takeaway/orders?*", route => route.fulfill({ json: { data: received.size ? [row] : [] } }));
+  await page.route("**/takeaway/sales/offline-sync", async route => {
+    received.add(route.request().postDataJSON().idempotency_key);
+    await route.fulfill({ json: { data: { order: row, pickup_token: null } } });
+  });
+  await page.goto("/"); await login(page, "company-one", "sales");
+  await page.getByRole("button", { name: "เพิ่ม กาแฟเย็น", exact: true }).click();
+  await context.setOffline(true); await page.getByRole("button", { name: "บันทึกการรับชำระ", exact: true }).click();
+  await expect(page.getByText(/รายการในเครื่อง: รอส่ง 1/)).toBeVisible();
+  await context.setOffline(false); await expect.poll(() => received.size).toBe(1);
+  await page.goto("/takeaway/store/orders"); await expect(page.getByTestId("active-order-offline-one")).toHaveCount(1);
+  await page.getByRole("button", { name: "ส่งรายการค้าง", exact: true }).click(); await page.reload();
+  await expect(page.getByTestId("active-order-offline-one")).toHaveCount(1); expect(received.size).toBe(1);
 });

@@ -95,22 +95,33 @@ async function fetchRecipe(id: string, brandSlug?: string): Promise<RecipeRead> 
   return res.data.data as RecipeRead;
 }
 
-async function fetchRecipeProducts(brandSlug?: string): Promise<ProductListItem[]> {
+async function fetchActiveProducts(brandId: string | null, productType?: string): Promise<ProductListItem[]> {
+  const products: ProductListItem[] = [];
+  for (let page = 1; ; page += 1) {
+    const response = await productApi.list({ page, limit: 100, is_active: true, product_type: productType });
+    const batch = response.data.data as ProductListItem[];
+    products.push(...batch);
+    const total = response.data.meta?.total;
+    if (batch.length === 0 || (typeof total === "number" ? products.length >= total : batch.length < 100)) break;
+  }
+  // Company-wide items are shared; another Brand's items are not recipe choices.
+  return products.filter((product) => product.is_active && (!product.brand_id || product.brand_id === brandId));
+}
+
+async function fetchRecipeProducts(brandSlug?: string, brandId: string | null = null): Promise<ProductListItem[]> {
   if (brandSlug) {
     const res = await api.get(`${recipeBasePath(brandSlug)}/recipe-products`);
     return res.data.data as ProductListItem[];
   }
-  const res = await api.get("/products?is_active=true&limit=300");
-  return res.data.data as ProductListItem[];
+  return fetchActiveProducts(brandId);
 }
 
-async function fetchRawMaterials(brandSlug?: string): Promise<ProductListItem[]> {
+async function fetchRawMaterials(brandSlug?: string, brandId: string | null = null): Promise<ProductListItem[]> {
   if (brandSlug) {
     const res = await api.get(`${recipeBasePath(brandSlug)}/recipe-products?product_type=raw_material`);
     return res.data.data as ProductListItem[];
   }
-  const res = await api.get("/products?product_type=raw_material&is_active=true&limit=200");
-  return res.data.data as ProductListItem[];
+  return fetchActiveProducts(brandId, "raw_material");
 }
 
 const UNIT_ALIASES: Record<string, string> = {
@@ -182,6 +193,8 @@ export default function RecipesPage(): JSX.Element {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const branchId = useAuthStore((s) => s.branchId);
+  const companyId = useAuthStore((s) => s.companyId);
+  const brandId = useAuthStore((s) => s.brandId);
   const scopeKey = brandSlug ?? branchId ?? "global";
   const isBrandCentral = Boolean(brandSlug);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -223,14 +236,14 @@ export default function RecipesPage(): JSX.Element {
   });
 
   const menuQuery = useQuery({
-    queryKey: ["products", "recipe_targets", scopeKey],
-    queryFn: () => fetchRecipeProducts(brandSlug),
+    queryKey: ["products", "recipe_targets", companyId, brandId, scopeKey],
+    queryFn: () => fetchRecipeProducts(brandSlug, brandId),
     enabled: showForm,
   });
 
   const rawQuery = useQuery({
-    queryKey: ["products", "raw_material", scopeKey],
-    queryFn: () => fetchRawMaterials(brandSlug),
+    queryKey: ["products", "raw_material", companyId, brandId, scopeKey],
+    queryFn: () => fetchRawMaterials(brandSlug, brandId),
     enabled: showForm,
   });
 
@@ -713,11 +726,12 @@ export default function RecipesPage(): JSX.Element {
             <div className="mt-6 space-y-5">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>สินค้าที่ผูกสูตร</Label>
+                  <Label htmlFor="recipe-product">สินค้าที่ผูกสูตร</Label>
                   <select
+                    id="recipe-product"
                     className="mt-1 h-10 w-full rounded-xl border border-slate-300 px-3 text-sm"
                     value={formProductId}
-                    disabled={Boolean(editingId)}
+                    disabled={Boolean(editingId) || menuQuery.isPending || menuQuery.isError}
                     onChange={(e) => {
                       const p = recipeProducts.find((m) => m.id === e.target.value);
                       setFormProductId(e.target.value);
@@ -730,7 +744,9 @@ export default function RecipesPage(): JSX.Element {
                       <option key={m.id} value={m.id}>{m.name}</option>
                     ))}
                   </select>
-                  {recipeProducts.length === 0 && (
+                  {menuQuery.isPending && <p className="mt-1 text-xs text-slate-500">กำลังโหลดสินค้า...</p>}
+                  {menuQuery.isError && <p role="alert" className="mt-1 text-xs text-red-600">โหลดสินค้าไม่สำเร็จ กรุณาลองใหม่ <button type="button" className="underline" onClick={() => void menuQuery.refetch()}>โหลดสินค้าใหม่</button></p>}
+                  {menuQuery.isSuccess && recipeProducts.length === 0 && (
                     <p className="mt-1 text-xs text-amber-600">ยังไม่มีสินค้า active — เพิ่มสินค้าก่อน</p>
                   )}
                   {editingId && (
@@ -898,7 +914,9 @@ export default function RecipesPage(): JSX.Element {
                             <option key={r.id} value={r.id}>{r.name}</option>
                           ))}
                         </select>
-                        {rawMaterials.length === 0 && idx === 0 && (
+                        {rawQuery.isPending && idx === 0 && <p className="text-xs text-slate-500">กำลังโหลดวัตถุดิบ...</p>}
+                        {rawQuery.isError && idx === 0 && <p role="alert" className="text-xs text-red-600">โหลดวัตถุดิบไม่สำเร็จ <button type="button" className="underline" onClick={() => void rawQuery.refetch()}>โหลดวัตถุดิบใหม่</button></p>}
+                        {rawQuery.isSuccess && rawMaterials.length === 0 && idx === 0 && (
                           <p className="text-xs text-amber-600">ยังไม่มีสินค้าประเภท raw_material</p>
                         )}
                       </div>

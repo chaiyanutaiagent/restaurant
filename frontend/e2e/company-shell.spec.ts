@@ -226,6 +226,49 @@ test("table QR auto print waits for decoded image and reprint keeps the same ses
   expect(creates).toBe(1);
 });
 
+test("recipe catalog paginates within API limits and offers company and current brand products", async ({ page }) => {
+  await installSession(page, ["*"]);
+  await mockCompanyApi(page);
+  await page.route("**/api/v1/restaurant/recipes?**", route => fulfill(route, []));
+  const requested: string[] = [];
+  await page.route("**/api/v1/products?**", async route => {
+    const params = new URL(route.request().url()).searchParams;
+    expect(Number(params.get("limit"))).toBe(100);
+    expect(params.get("is_active")).toBe("true");
+    const raw = params.get("product_type") === "raw_material";
+    const pageNo = Number(params.get("page"));
+    requested.push(`${raw ? "raw" : "menu"}:${pageNo}`);
+    const base = { name: "สินค้า", sku: "SKU", product_type: raw ? "raw_material" : "menu_item", is_active: true, brand_id: brandId, cost_price: 50, selling_price: 129 };
+    const data = pageNo === 1
+      ? Array.from({ length: 100 }, (_, i) => ({ ...base, id: `${raw}-${i}`, name: i === 0 ? "สินค้าแบรนด์อื่น" : `สินค้า ${i}`, brand_id: i === 0 ? secondBranchId : brandId }))
+      : [{ ...base, id: raw ? "ingredient-last" : "menu-last", name: raw ? "วัตถุดิบหน้าสอง" : "ข้าวผัดทดสอบ", brand_id: null }];
+    await route.fulfill({ json: { data, meta: { total: 101, page: pageNo, limit: 100 }, error: null } });
+  });
+  await page.goto("/restaurant/recipes");
+  await page.getByRole("button", { name: "สร้างสูตรใหม่", exact: true }).click();
+  const select = page.getByLabel("สินค้าที่ผูกสูตร", { exact: true });
+  await expect(select.locator('option[value="menu-last"]')).toHaveText("ข้าวผัดทดสอบ");
+  await expect(select.locator("option").filter({ hasText: "สินค้าแบรนด์อื่น" })).toHaveCount(0);
+  await select.selectOption("menu-last");
+  await expect(select).toHaveValue("menu-last");
+  await page.getByRole("button", { name: "เพิ่มวัตถุดิบ", exact: true }).click();
+  await expect(page.locator('option[value="ingredient-last"]')).toHaveText("วัตถุดิบหน้าสอง");
+  expect(requested.sort()).toEqual(["menu:1", "menu:2", "raw:1", "raw:2"]);
+  await expect(page.getByText("ยังไม่มีสินค้า active", { exact: false })).toHaveCount(0);
+});
+
+test("recipe catalog shows fetch errors rather than a false empty catalog", async ({ page }) => {
+  await installSession(page, ["*"]);
+  await mockCompanyApi(page);
+  await page.route("**/api/v1/restaurant/recipes?**", route => fulfill(route, []));
+  await page.route("**/api/v1/products?**", route => route.fulfill({ status: 422, json: { detail: "Rejected test request" } }));
+  await page.goto("/restaurant/recipes");
+  await page.getByRole("button", { name: "สร้างสูตรใหม่", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "โหลดสินค้าไม่สำเร็จ" })).toBeVisible();
+  await expect(page.getByText("ยังไม่มีสินค้า active", { exact: false })).toHaveCount(0);
+  await expect(page.getByLabel("สินค้าที่ผูกสูตร", { exact: true })).toBeDisabled();
+});
+
 async function mockCompanyApi(page: Page, options: MockOptions = {}): Promise<void> {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());

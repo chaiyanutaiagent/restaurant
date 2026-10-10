@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AxiosError } from "axios";
 import { Bell, ConciergeBell, Copy, MapPin, MoreVertical, Pencil, Plus, Printer, QrCode, ReceiptText, ShoppingBag, Trash2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import QRCode from "qrcode";
 import PageHeader from "@/components/layout/PageHeader";
@@ -84,6 +85,7 @@ export default function TableMapPage(): JSX.Element {
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [qrTarget, setQrTarget] = useState<QrPrintTarget | null>(null);
   const [autoPrintPending, setAutoPrintPending] = useState(false);
+  const [printReadyUrl, setPrintReadyUrl] = useState("");
   const [openTableDialogOpen, setOpenTableDialogOpen] = useState(false);
   const [openingTable, setOpeningTable] = useState<TableData | null>(null);
   const [takeawayDialogOpen, setTakeawayDialogOpen] = useState(false);
@@ -110,13 +112,16 @@ export default function TableMapPage(): JSX.Element {
   });
 
   useEffect(() => {
-    if (!qrOpen || !qrDataUrl || !autoPrintPending) return;
-    const timer = window.setTimeout(() => {
-      setAutoPrintPending(false);
-      window.print();
-    }, 350);
-    return () => window.clearTimeout(timer);
-  }, [autoPrintPending, qrDataUrl, qrOpen]);
+    if (!qrOpen || !qrDataUrl || printReadyUrl !== qrDataUrl || !autoPrintPending) return;
+    let nextFrame = 0;
+    const frame = window.requestAnimationFrame(() => {
+      nextFrame = window.requestAnimationFrame(() => {
+        setAutoPrintPending(false);
+        window.print();
+      });
+    });
+    return () => { window.cancelAnimationFrame(frame); window.cancelAnimationFrame(nextFrame); };
+  }, [autoPrintPending, printReadyUrl, qrDataUrl, qrOpen]);
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -734,12 +739,12 @@ export default function TableMapPage(): JSX.Element {
         open={qrOpen}
         onOpenChange={(open) => {
           setQrOpen(open);
-          if (!open) setAutoPrintPending(false);
+          if (!open) { setAutoPrintPending(false); setPrintReadyUrl(""); }
         }}
       >
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>{qrTarget?.title ?? "QR รอบนี้"}</DialogTitle></DialogHeader>
-          <div className="qr-print-card rounded-2xl border border-slate-200 bg-white p-5 text-center">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center">
             <div className="text-xs font-semibold uppercase text-slate-500">สแกนเพื่อสั่งอาหาร</div>
             <div className="mt-1 text-2xl font-bold text-slate-950">{qrTarget?.label}</div>
             <div className="mt-1 text-xs text-slate-500">{qrTarget?.description}</div>
@@ -758,13 +763,30 @@ export default function TableMapPage(): JSX.Element {
               <Copy className="mr-2 h-4 w-4" />
               คัดลอกลิงก์
             </Button>
-            <Button onClick={() => window.print()} className="bg-slate-950 hover:bg-slate-800">
+            <Button disabled={!qrDataUrl || printReadyUrl !== qrDataUrl || autoPrintPending} onClick={() => window.print()} className="bg-slate-950 hover:bg-slate-800">
               <Printer className="mr-2 h-4 w-4" />
               พิมพ์ซ้ำ
             </Button>
           </div>
         </DialogContent>
       </Dialog>
+      {qrOpen && qrTarget && qrDataUrl && createPortal(
+        <div className="table-qr-print-root" aria-hidden="true">
+          <div className="text-xs font-semibold">สแกนเพื่อสั่งอาหาร</div>
+          <div className="mt-1 text-2xl font-bold">{qrTarget.label}</div>
+          <div className="mt-1 text-xs">{qrTarget.description}</div>
+          <img key={qrDataUrl} src={qrDataUrl} alt={`QR ${qrTarget.label}`} onLoad={(event) => {
+            const image = event.currentTarget;
+            void image.decode().then(() => {
+              if (image.isConnected && image.naturalWidth > 0) setPrintReadyUrl(qrDataUrl);
+            }).catch(() => { setPrintReadyUrl(""); setAutoPrintPending(false); });
+          }} onError={() => {
+            setPrintReadyUrl(""); setAutoPrintPending(false);
+            toast({ title: "ภาพ QR สำหรับพิมพ์ยังไม่พร้อม", description: "กรุณาปิดแล้วเปิด QR รอบนี้อีกครั้ง", variant: "destructive" });
+          }} />
+          <div className="mt-3 break-all text-xs">{getQrUrl(qrTarget.token)}</div>
+        </div>, document.body,
+      )}
       {confirmDialog}
     </div>
   );

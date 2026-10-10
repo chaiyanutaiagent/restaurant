@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { companySetupErrorMessage } from "../src/lib/companySetupErrors";
+import { BinaryBitmap, HybridBinarizer, QRCodeReader, RGBLuminanceSource } from "@zxing/library";
 
 const companyId = "11111111-1111-4111-8111-111111111111";
 const brandId = "22222222-2222-4222-8222-222222222222";
@@ -143,8 +144,8 @@ async function fulfill(route: Route, data: unknown, status = 200): Promise<void>
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(status >= 400 ? { detail: "Permission denied" } : apiResponse(data)) });
 }
 
-async function installSession(page: Page): Promise<void> {
-  const payload = { permissions, scope_types: ["company", "branch"], branch_id: branchId, brand_id: brandId, business_type: "restaurant", target_database: "restaurant", station_key: null };
+async function installSession(page: Page, allowedPermissions = permissions): Promise<void> {
+  const payload = { permissions: allowedPermissions, scope_types: ["company", "branch"], branch_id: branchId, brand_id: brandId, business_type: "restaurant", target_database: "restaurant", station_key: null };
   const token = `header.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`;
   await page.addInitScript(({ accessToken, company, branch, brand, userPermissions }) => {
     window.localStorage.setItem("erp-auth", JSON.stringify({ state: {
@@ -161,8 +162,69 @@ async function installSession(page: Page): Promise<void> {
       stationKey: null,
       permissions: userPermissions,
     }, version: 0 }));
-  }, { accessToken: token, company: companyId, branch: branchId, brand: brandId, userPermissions: permissions });
+  }, { accessToken: token, company: companyId, branch: branchId, brand: brandId, userPermissions: allowedPermissions });
 }
+
+test("table QR print raster contains a scannable session QR without modal clipping", async ({ page }) => {
+  await installSession(page, ["*"]);
+  await mockCompanyApi(page);
+  await page.addInitScript(() => { window.print = () => {}; });
+  await page.route("**/api/v1/restaurant/settings", route => fulfill(route, { fb_setup_completed: true, fb_enabled: true, fb_service_mode: "both" }));
+  await page.route("**/api/v1/restaurant/tables", route => fulfill(route, [{ id: branchId, name: "A 1", zone: "โซนหลัก", capacity: 4, session_qr_token: "print-regression-session", table_type: "dine_in", status: "occupied", is_active: true, active_session_id: "existing-session", queue_number: null }]));
+  await page.goto("/restaurant/tables");
+  await page.getByRole("button", { name: "QR รอบนี้", exact: true }).click();
+  await expect(page.getByRole("img", { name: "QR โต๊ะ A 1" }).first()).toBeVisible();
+  await page.emulateMedia({ media: "print" });
+  await page.setViewportSize({ width: 400, height: 800 });
+  const png = await page.screenshot();
+  const pixels = await page.evaluate(async (base64) => {
+    const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
+    const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
+    const ctx = canvas.getContext("2d")!; ctx.drawImage(image, 0, 0);
+    const rgba = ctx.getImageData(0, 0, image.width, image.height).data;
+    return { width: image.width, height: image.height, gray: Array.from({ length: image.width * image.height }, (_, i) => (rgba[i*4]+2*rgba[i*4+1]+rgba[i*4+2])/4) };
+  }, png.toString("base64"));
+  const decoded = new QRCodeReader().decode(new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(Uint8ClampedArray.from(pixels.gray), pixels.width, pixels.height))));
+  expect(decoded.getText()).toBe(new URL("/menu/print-regression-session", page.url()).href);
+});
+
+test("table QR auto print waits for decoded image and reprint keeps the same session", async ({ page }) => {
+  await installSession(page, ["*"]);
+  await mockCompanyApi(page);
+  await page.addInitScript(() => {
+    Reflect.set(window, "qrPrintCalls", []);
+    const decode = HTMLImageElement.prototype.decode;
+    HTMLImageElement.prototype.decode = async function () {
+      await decode.call(this);
+      if (this.closest(".table-qr-print-root")) await new Promise<void>(resolve => Reflect.set(window, "releasePrintDecode", resolve));
+    };
+    window.print = () => {
+      const image = document.querySelector<HTMLImageElement>(".table-qr-print-root img");
+      Reflect.get(window, "qrPrintCalls").push({ ready: Boolean(image?.complete && image.naturalWidth > 0), src: image?.src });
+    };
+  });
+  let creates = 0;
+  await page.route("**/api/v1/restaurant/settings", route => fulfill(route, { fb_setup_completed: true, fb_enabled: true, fb_service_mode: "both" }));
+  await page.route("**/api/v1/restaurant/tables", route => fulfill(route, [{ id: branchId, name: "A 1", zone: "โซนหลัก", capacity: 4, session_qr_token: null, table_type: "dine_in", status: "available", is_active: true, active_session_id: null, queue_number: null }]));
+  await page.route("**/api/v1/restaurant/sessions", route => {
+    creates++;
+    return fulfill(route, { id: "new-session", qr_token: "auto-print-session", queue_number: null });
+  });
+  await page.goto("/restaurant/tables");
+  await page.getByRole("button", { name: "เปิดโต๊ะ", exact: true }).click();
+  await page.getByRole("button", { name: "เปิดโต๊ะและพิมพ์ QR", exact: true }).click();
+  await page.waitForFunction(() => Reflect.has(window, "releasePrintDecode"));
+  expect(await page.evaluate(() => Reflect.get(window, "qrPrintCalls").length)).toBe(0);
+  await expect(page.getByRole("button", { name: "พิมพ์ซ้ำ" })).toBeDisabled();
+  await page.evaluate(() => Reflect.get(window, "releasePrintDecode")());
+  await expect.poll(() => page.evaluate(() => Reflect.get(window, "qrPrintCalls").length)).toBe(1);
+  await page.getByRole("button", { name: "พิมพ์ซ้ำ" }).click();
+  const calls = await page.evaluate(() => Reflect.get(window, "qrPrintCalls"));
+  expect(calls).toHaveLength(2);
+  expect(calls[0].ready).toBe(true);
+  expect(calls[1]).toEqual(calls[0]);
+  expect(creates).toBe(1);
+});
 
 async function mockCompanyApi(page: Page, options: MockOptions = {}): Promise<void> {
   await page.route("**/api/v1/**", async (route) => {

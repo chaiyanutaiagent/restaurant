@@ -39,6 +39,9 @@ from app.schemas.product import (
 )
 from app.services.product_service import ProductService
 from app.services.upload_service import UploadService
+from pydantic import ValidationError
+from app.schemas.retail_intake import RetailIntakeRequest
+from app.services import retail_intake_service
 
 router = APIRouter(prefix="/api/v1", tags=["products"])
 
@@ -421,6 +424,33 @@ async def lookup_retail_product(
             error_code=None if result == "matched" else "retail_stock_unavailable",
         ).model_dump(mode="json")
     )
+
+
+@router.get("/products/retail/intake-lookup")
+async def retail_intake_lookup(
+    barcode: str = Query(min_length=1, max_length=100),
+    current: TokenData = Depends(require_permission("inventory.product.create")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    return ok(await retail_intake_service.lookup(db, current, barcode))
+
+
+@router.post("/products/retail/intake", status_code=status.HTTP_201_CREATED)
+async def retail_intake(
+    payload: str = Form(..., max_length=10000),
+    image: UploadFile | None = File(default=None),
+    current: TokenData = Depends(require_permission("inventory.product.create")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        data = RetailIntakeRequest.model_validate_json(payload)
+    except ValidationError:
+        raise HTTPException(422, "ข้อมูลไม่ถูกต้อง กรุณาตรวจชื่อ หน่วย ราคา จำนวน และคลัง")
+    try:
+        return ok(await retail_intake_service.intake(db, current, data, image))
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.get("/products/{product_id}")

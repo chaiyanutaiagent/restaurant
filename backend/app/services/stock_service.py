@@ -367,6 +367,8 @@ class StockService:
         company_id: uuid.UUID,
         user_id: uuid.UUID,
         data: ReceiveStockRequest,
+        *,
+        commit: bool = True,
     ) -> list[StockMovement]:
         if not data.items:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one item is required")
@@ -395,10 +397,12 @@ class StockService:
                 reference_type=data.reference_type,
                 reference_id=data.reference_id,
                 note=data.note,
+                suppress_low_stock_events=not commit,
             )
             movements.append(movement)
 
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
         return movements
 
     async def transfer(

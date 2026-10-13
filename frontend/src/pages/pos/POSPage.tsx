@@ -2760,6 +2760,9 @@ export default function POSPage(): JSX.Element {
                     <Camera className="mr-2 h-4 w-4" />
                     เปิดกล้องสแกน
                   </Button>
+                  {isRetailMode && hasPermission("inventory.product.create") && (
+                    <Button type="button" variant="outline" className="h-11 rounded-xl px-4" onClick={() => navigate("/retail/products/scan")}>สแกนเพิ่มสินค้า / รับสต๊อก</Button>
+                  )}
                   <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-xs text-slate-500">
                     Enter = เพิ่มสินค้า, F1 = โฟกัสค้นหา, F2 = ช่องเงินสด
                   </div>

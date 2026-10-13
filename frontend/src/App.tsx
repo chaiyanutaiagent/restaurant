@@ -32,6 +32,7 @@ import CRMPage from "@/pages/crm/CRMPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 import PayablePage from "@/pages/payable/PayablePage";
 import POSPage from "@/pages/pos/POSPage";
+import RetailProductIntakePage from "@/pages/products/RetailProductIntakePage";
 import POSAdminPage from "@/pages/pos/POSAdminPage";
 import OfflineSyncCenterPage from "@/pages/pos/OfflineSyncCenterPage";
 import POFormPage from "@/pages/purchase/POFormPage";
@@ -311,6 +312,9 @@ export default function App(): JSX.Element {
           </Route>
           <Route element={<ProductContextGuard businessType="retail_pos" />}>
             <Route path="/retail" element={<Navigate to="/retail/pos" replace />} />
+            <Route element={<ProtectedRoute permission="inventory.product.create" />}>
+              <Route path="/retail/products/scan" element={<RetailProductIntakePage />} />
+            </Route>
             <Route element={<ProtectedRoute permission="pos.sale.create" />}>
               <Route path="/retail/pos" element={<POSPage />} />
               <Route path="/retail/offline-sync" element={<OfflineSyncCenterPage />} />

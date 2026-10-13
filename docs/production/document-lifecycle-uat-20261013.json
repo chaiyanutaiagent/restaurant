@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-13",
+  "scope": "Item 3: document register, evidence and lifecycle for the existing six source types",
+  "status": "deployed_uat_engineering_verified_human_acceptance_pending",
+  "url": "https://uat-app.foodchainservice.com/company/documents",
+  "release": "/home/behappyaiagent/restaurant-uat-releases/document-lifecycle-20261013",
+  "backup": "/home/behappyaiagent/restaurant-uat-deploy-backups/document-lifecycle-20261013",
+  "backup_sha256": "a1e2b97be55e06109638387272145d94da764536d667a0e18d310f96df996ca8",
+  "migration": "doclife0030",
+  "stripe_migration_applied": false,
+  "images": {
+    "backend": "restaurant-pos-backend:uat-document-lifecycle-20261013",
+    "backend_digest": "sha256:5588ebbab4d3cd6d042a5710199b6f3756e6f18f0f3bb68b4e04b62a0bccb764",
+    "frontend": "restaurant-pos-frontend:uat-document-lifecycle-20261013",
+    "frontend_digest": "sha256:ef1d7ff7897a780702d5d9a7033b9b24ce2a9f52133e9f868fc5f3ea7460d5d5"
+  },
+  "checks": {
+    "unit_cases_passed": 69,
+    "browser_cases_passed": 13,
+    "repeat_policy": "Only failed cases rerun after fixture/assertion fixes; isolated integration reused validated post-payment fixture after AP success",
+    "typecheck_and_candidate_build": "passed",
+    "disposable_postgres": "all six snapshot kinds and PDFs; PO numbering; original export contention; AP idempotency/overpayment; revision/cancellation/replacement/credit-note linkage; profile freezing; scope; immutable triggers; atomic GR evidence rollback",
+    "uat_smoke": "six histories read without writes, deployed backend healthy",
+    "public_http": {"documents_page": 200, "health_ready": 200, "anonymous_history": 401},
+    "rollback": "old backend read expanded schema on isolated clone; real UAT image rollback executed automatically on first smoke-script failure",
+    "deploy_attempts": "First reverted due to smoke script using route.path on FastAPI _IncludedRouter. Corrected script uses OpenAPI paths; candidate read checks passed; second deployment passed. Application image unchanged between attempts."
+  },
+  "preservation": {
+    "production_unchanged": true,
+    "runtime_flags_unchanged": true,
+    "database_routing_unchanged": true,
+    "database_containers_unchanged": true,
+    "uat_financial_test_writes": false,
+    "historical_backfill": false,
+    "commit_or_push": false
+  },
+  "rollback": {
+    "script": "/home/behappyaiagent/restaurant-uat-releases/document-lifecycle-20261013/rollback-uat.sh",
+    "backend": "restaurant-pos-backend:uat-document-snapshot-20261013",
+    "frontend": "restaurant-pos-frontend:uat-document-register-20261013",
+    "schema_policy": "Keep doclife0030, snapshots and events. Never restore/drop the database for application rollback.",
+    "operations_policy": "Pause document issuance/revision while older writers are active until forward recovery."
+  },
+  "limits": [
+    "Accountant acceptance, official tax-form acceptance and physical printing are pending.",
+    "Checksums are not digital signatures; immutable HTML/payload is stored, not exact PDF bytes.",
+    "Legacy documents remain explicitly non-snapshot; no historical reconstruction.",
+    "Supplier invoice archive is an internal receiving register, not the supplier-issued original or attachment vault.",
+    "PO revisions apply to drafts; issued corrections use cancel/replacement and tax credit notes through existing source workflows.",
+    "No new arbitrary payment/GR cancellation bypass; no new tax filing or production flag enabled.",
+    "Existing database routing retained; Takeaway PO/GR and unconnected Retail procurement tables are not migrated into this registry."
+  ]
+}

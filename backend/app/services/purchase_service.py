@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.document_lifecycle_service import append_event, capture_po, capture_gr, po_revision, require_reason, next_number
+
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import logging
@@ -146,22 +148,28 @@ class PurchaseService:
         item_discount_total = Decimal("0")
         vat_total = Decimal("0")
         excluded_vat_total = Decimal("0")
+        included_vat_total = Decimal("0")
 
         for item in items:
             line_subtotal = q4((Decimal(item.qty_ordered) * Decimal(item.unit_cost)) - Decimal(item.discount_amount))
             if line_subtotal < 0:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Line subtotal cannot be negative")
-            line_vat = self._calc_vat(line_subtotal, item.vat_type or vat_type, Decimal(item.vat_rate or vat_rate))
+            line_vat = self._calc_vat(line_subtotal, item.vat_type or vat_type, Decimal(item.vat_rate if item.vat_rate is not None else vat_rate))
             subtotal += line_subtotal
             item_discount_total += Decimal(item.discount_amount)
             vat_total += line_vat
             if (item.vat_type or vat_type) == "excluded":
                 excluded_vat_total += line_vat
+            elif (item.vat_type or vat_type) == "included":
+                included_vat_total += line_vat
 
         order_discount = q2(order_discount)
         subtotal_q2 = q2(subtotal)
         subtotal_after_discount = q2(subtotal_q2 - order_discount)
-        wht_amount = q2((subtotal_after_discount * Decimal(wht_rate or 0)) / Decimal("100"))
+        # The configured withholding rate applies to income, not VAT.
+        # This affects new/recalculated drafts only; issued records are not rewritten.
+        wht_base = q2(subtotal_after_discount - included_vat_total)
+        wht_amount = q2((wht_base * Decimal(wht_rate or 0)) / Decimal("100"))
         total_amount = q2(subtotal_after_discount + q2(excluded_vat_total) - wht_amount)
         return {
             "subtotal": subtotal_q2,
@@ -177,6 +185,7 @@ class PurchaseService:
         company_id: uuid.UUID,
         user_id: uuid.UUID,
         data: CreatePORequest,
+        *, commit: bool = True,
     ) -> PurchaseOrder:
         if not data.items:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one item is required")
@@ -243,15 +252,20 @@ class PurchaseService:
             resource_id=str(po.id),
             new_value={"po_number": po.po_number, "supplier_id": str(supplier.id)},
         )
-        await self.db.commit()
+        await po_revision(self.db, po, user_id, "draft_created")
+        if commit:
+            await self.db.commit()
         return await self.get_po(po.id, company_id)
 
     async def update_po(
-        self, po_id: uuid.UUID, company_id: uuid.UUID, data: UpdatePORequest
+        self, po_id: uuid.UUID, company_id: uuid.UUID, data: UpdatePORequest, user_id: uuid.UUID
     ) -> PurchaseOrder:
         po = await self._get_po_entity(po_id, company_id)
         if po.status != "draft":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only draft purchase orders can be updated")
+
+        reason = require_reason(data.revision_reason)
+        await po_revision(self.db, po, user_id, "before_revision", reason)
 
         po.expected_date = data.expected_date
         po.note = data.note
@@ -261,7 +275,7 @@ class PurchaseService:
             if not data.items:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one item is required")
             prepared_items = await self._prepare_po_items(company_id, data.items, po.vat_type)
-            totals = await self._calc_po_totals(data.items, po.vat_type, Decimal(po.vat_rate or 7), Decimal(po.wht_rate or 0))
+            totals = await self._calc_po_totals(data.items, po.vat_type, Decimal(po.vat_rate if po.vat_rate is not None else 7), Decimal(po.wht_rate or 0))
             for item in list(po.items):
                 await self.db.delete(item)
             await self.db.flush()
@@ -294,6 +308,7 @@ class PurchaseService:
             po.total_amount = totals["total_amount"]
             po.remaining_amount = q2(Decimal(po.total_amount) - Decimal(po.paid_amount or 0))
 
+        await po_revision(self.db, po, user_id, "draft_revised", reason)
         await self.db.commit()
         return await self.get_po(po.id, company_id)
 
@@ -304,6 +319,7 @@ class PurchaseService:
         if po.status != "draft":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only draft purchase orders can be submitted")
         po.status = "pending_approval"
+        await po_revision(self.db, po, user_id, "submitted")
         self._audit(
             company_id=company_id,
             branch_id=po.branch_id,
@@ -338,6 +354,7 @@ class PurchaseService:
         po.approved_at = datetime.now(timezone.utc)
         if data.note:
             po.internal_note = "\n".join(filter(None, [po.internal_note, data.note]))
+        await capture_po(self.db, po, approver_id)
         self._audit(
             company_id=company_id,
             branch_id=po.branch_id,
@@ -356,6 +373,7 @@ class PurchaseService:
         user_id: uuid.UUID,
         reason: str,
     ) -> PurchaseOrder:
+        reason = require_reason(reason)
         po = await self._get_po_entity(po_id, company_id)
         if po.status not in {"draft", "pending_approval", "approved"}:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Purchase order cannot be cancelled")
@@ -365,6 +383,7 @@ class PurchaseService:
         po.status = "cancelled"
         po.cancelled_at = datetime.now(timezone.utc)
         po.cancel_reason = reason
+        await append_event(self.db, po, "purchase_order", "cancelled", user_id, reason)
         self._audit(
             company_id=company_id,
             branch_id=po.branch_id,
@@ -439,6 +458,7 @@ class PurchaseService:
         if not data.items:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one receipt item is required")
 
+        await self._get_po_entity(data.po_id, company_id)  # Serialize receive/cancel/revision.
         po = await self.get_po(data.po_id, company_id)
         if po.status not in {"approved", "partially_received"}:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Purchase order cannot receive goods in current status")
@@ -452,11 +472,15 @@ class PurchaseService:
         po_items = {item.id: item for item in po.items}
         stock_items: list[ReceiveItem] = []
         receipt_items_data: list[GRItemCreate] = []
+        seen_items = set()
 
         for item in data.items:
             po_item = po_items.get(item.po_item_id)
             if po_item is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Receipt item does not belong to this purchase order")
+            if item.po_item_id in seen_items or item.product_id != po_item.product_id or item.variant_id != po_item.variant_id:
+                raise HTTPException(422, "รายการรับซ้ำหรือสินค้าไม่ตรงใบสั่งซื้อ")
+            seen_items.add(item.po_item_id)
             remaining_qty = Decimal(po_item.qty_ordered) - Decimal(po_item.qty_received)
             if item.qty_received <= 0:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Received quantity must be positive")
@@ -533,6 +557,8 @@ class PurchaseService:
             resource_id=str(receipt.id),
             new_value={"gr_number": gr_number, "po_id": str(po.id)},
         )
+        await self.db.flush()
+        await capture_gr(self.db, await self.get_gr(receipt.id, company_id), user_id)
         await self.db.commit()
         if po.status == "fully_received":
             try:
@@ -633,6 +659,7 @@ class PurchaseService:
                 selectinload(PurchaseOrder.items),
                 selectinload(PurchaseOrder.supplier),
             )
+            .with_for_update().execution_options(populate_existing=True)
         )
         if po is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
@@ -671,7 +698,9 @@ class PurchaseService:
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant not found")
             subtotal = q4((Decimal(item.qty_ordered) * Decimal(item.unit_cost)) - Decimal(item.discount_amount))
             vat_type = item.vat_type or default_vat_type
-            vat_rate = Decimal(item.vat_rate or product.vat_rate or 7)
+            # Zero-rated goods must not fall back to the standard VAT rate.
+            vat_rate = Decimal(item.vat_rate if item.vat_rate is not None else
+                               product.vat_rate if product.vat_rate is not None else 7)
             prepared.append(
                 {
                     "product_id": product.id,
@@ -706,16 +735,7 @@ class PurchaseService:
         field,
         target_date: date,
     ) -> str:
-        day_prefix = f"{prefix}{target_date:%Y%m%d}-"
-        lock_key = hash(str(company_id) + target_date.strftime("%Y%m%d") + f"PURCHASE_{prefix}") % (2**31)
-        await self.db.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
-        count = await self.db.scalar(
-            select(func.count(model.id)).where(
-                model.company_id == company_id,
-                field.like(f"{day_prefix}%"),
-            )
-        ) or 0
-        return f"{day_prefix}{int(count) + 1:04d}"
+        return await next_number(self.db, prefix, model, field, target_date)
 
     def _audit(
         self,

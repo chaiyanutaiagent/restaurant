@@ -111,6 +111,7 @@ class CreatePORequest(BaseSchema):
 
 
 class UpdatePORequest(BaseSchema):
+    revision_reason: str = Field(min_length=1, max_length=1000)
     expected_date: date | None = None
     items: list[POItemCreate] | None = None
     note: str | None = None

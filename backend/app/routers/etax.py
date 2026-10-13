@@ -13,6 +13,9 @@ from app.dependencies import TokenData, require_permission
 from app.schemas.etax import CancelDocumentRequest, IssueCreditNoteRequest, IssueTaxInvoiceRequest
 from app.services.etax_service import ETaxService
 from app.utils.pdf_generator import generate_tax_invoice_pdf
+from app.services.document_snapshot_service import require_document_scope
+from app.services.document_archive_service import evidence_for, copy_html
+from app.utils.pdf_generator import html_to_pdf_or_html
 
 router = APIRouter(prefix="/api/v1/etax", tags=["etax"])
 
@@ -90,11 +93,14 @@ async def get_xml(
 ) -> Response:
     service = ETaxService(db)
     document = await service.get_document(document_id, current.company_id)
-    xml_content = await service.get_xml(document_id, current.company_id)
+    snapshot = await evidence_for(db, current, "sales_tax_document", document)
+    xml_content = snapshot.payload["source"].get("xml_content") if snapshot else await service.get_xml(document_id, current.company_id)
+    if not xml_content:
+        raise HTTPException(409, "เอกสารนี้ไม่มี XML ที่บันทึกไว้")
     return Response(
         content=xml_content,
         media_type="application/xml",
-        headers={"Content-Disposition": f"attachment; filename=\"{document.document_number}.xml\""},
+        headers={"Content-Disposition": f"attachment; filename=\"{document.document_number}.xml\"", "Cache-Control": "private, no-store"},
     )
 
 
@@ -106,17 +112,17 @@ async def get_pdf(
 ) -> Response:
     service = ETaxService(db)
     document = await service.get_document(document_id, current.company_id)
-    content, media_type = await generate_tax_invoice_pdf(
-        doc=document,
-        items=document.items,
-        company_name=document.seller_name,
-        company_address=document.seller_address or "-",
-    )
+    snapshot = await evidence_for(db, current, "sales_tax_document", document)
+    if snapshot:
+        content, media_type = html_to_pdf_or_html(copy_html(snapshot, document))
+    else:
+        content, media_type = await generate_tax_invoice_pdf(doc=document, items=document.items,
+            company_name=document.seller_name, company_address=document.seller_address or "-")
     extension = "pdf" if media_type == "application/pdf" else "html"
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Disposition": f"attachment; filename=\"{document.document_number}.{extension}\""},
+        headers={"Content-Disposition": f"attachment; filename=\"{document.document_number}.{extension}\"", "Cache-Control": "private, no-store"},
     )
 
 
@@ -128,6 +134,7 @@ async def cancel_document(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     service = ETaxService(db)
+    require_document_scope(current, await service.get_document(document_id, current.company_id))
     document = await service.cancel_document(document_id, current.company_id, current.user_id, payload)
     return ok(service.serialize_document(document))
 

@@ -798,6 +798,10 @@ class RefundService:
                 discount_amount=q4(item.discount_amount), vat_type=item.vat_type, vat_rate=item.vat_rate,
                 vat_amount=-q4(item.vat_amount), line_total=-q4(item.total_amount),
             ))
+        await self.db.flush()
+        await self.db.refresh(document, attribute_names=["items"])
+        from app.services.document_lifecycle_service import capture_tax
+        await capture_tax(self.db, document, actor_id)
         link.credit_note_id = document.id
         link.status = "issued"
         operation.status = "completed"

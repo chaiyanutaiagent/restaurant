@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/use-toast";
 import { PLATFORM_BRAND } from "@/config/platformBrand";
+import { DOCUMENT_CENTER_PERMISSIONS } from "@/config/businessDocuments";
 import { useLogout } from "@/hooks/useAuth";
 import { authApi, companyFoundationApi } from "@/lib/api";
 import { companyRequestState } from "@/lib/companyPresentation";
@@ -53,6 +54,10 @@ const navigation: CompanyNavItem[] = [
   { label: "หน้าหลัก", to: "/company", icon: Home, exact: true },
   { label: "งานและการแจ้งเตือน", to: "/company/actions", icon: Bell },
   { label: "Shared ERP", to: "/company/erp", icon: Database, permissions: ["inventory.purchase.view", "inventory.transfer.view", "inventory.stock.view", "accounting.report.view", "accounting.tax.view", "system.company.edit"] },
+  { label: "ศูนย์เอกสาร", to: "/company/documents", icon: ClipboardList, permissions: DOCUMENT_CENTER_PERMISSIONS },
+  { label: "ขายเชื่อและลูกหนี้ (UAT)", to: "/company/credit-sales", icon: ClipboardList, permissions: ["accounting.invoice.view"] },
+  { label: "อายุหนี้และกำหนดรับ–จ่าย", to: "/company/debt-aging", icon: ClipboardList, permission: "accounting.report.view" },
+  { label: "ต้นทุนและจุดคุ้มทุน", to: "/company/cost-analysis", icon: ClipboardList, permission: "accounting.report.view" },
   { label: "สถานะระบบและการออกเวอร์ชัน", to: "/company/governance", icon: Gauge, permissions: ["system.company.view", "system.company.edit", "accounting.report.view"] },
   { label: "องค์กร", to: "/company/organization", icon: Building2, permission: "system.branch.view" },
   { label: "พนักงานและสิทธิ์", to: "/company/people", icon: Users, permissions: ["system.user.view", "system.role.view"] },

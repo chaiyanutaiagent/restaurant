@@ -1,0 +1,74 @@
+{
+  "date": "2026-10-13",
+  "scope": "Item 4 credit-sales v1: quotation approval, full delivery and customer invoice, billing notice, partial/final collections and receipts",
+  "status": "deployed_uat_engineering_verified_accountant_acceptance_pending",
+  "url": "https://uat-app.foodchainservice.com/company/credit-sales",
+  "release": "/home/behappyaiagent/restaurant-uat-releases/credit-sales-20261013",
+  "backup": "/home/behappyaiagent/restaurant-uat-deploy-backups/credit-sales-20261013/final-predeploy.dump",
+  "backup_sha256": "a4b4aec4ffc2b5445eaf623f492ee679c31d459d4309cb815a8af4f674f231fe",
+  "migration": "creditsale0031",
+  "images": {
+    "backend": "restaurant-pos-backend:uat-credit-sales-20261013",
+    "backend_digest": "sha256:9e964fa4df2d83080bea8dbd06198de4974fa0d1996a9fd16345cd90a7959934",
+    "frontend": "restaurant-pos-frontend:uat-credit-sales-20261013",
+    "frontend_digest": "sha256:345d921da0a4243fc90f2ce8fa59d0f4782f83e7117893550071c50e1c1efa3b"
+  },
+  "behavior": {
+    "catalog": "Existing company CRM customers and products; prices/VAT from server catalog, no client override; immutable approved values",
+    "approval": "Different actor required with accounting.invoice.approve; permission registered but not automatically granted to staff",
+    "fulfillment": "Full delivery only; stock availability excludes reservations; stock movement, COGS, AR/revenue, invoice, delivery and snapshots commit atomically",
+    "collections": "Cash or manually verified bank transfer; partial/final, receipt idempotency and per-invoice duplicate evidence protection; no provider verification or automatic debit",
+    "accounting": "Shared journal source idempotency retained; stable globally unique JE numbers and company posting lock prevent sequence collision/lost balance updates",
+    "documents": "Five new kinds in document center, immutable issuance evidence, history and original/copy downloads; no accounting on quotation/billing/export",
+    "internal_company": "Matching company/customer tax ID blocks internal sale; use existing stock transfers. Recognized other-company buyer recorded without auto-posting in buyer company",
+    "cancel": "Before delivery only; issued quotation retained with cancellation event, no stock or ledger reversal needed"
+  },
+  "verification": {
+    "unit_cases": 26,
+    "browser_cases": 15,
+    "typecheck": "passed",
+    "candidate_build": "passed",
+    "isolated_postgres": [
+      "Migration restored from live backup; concurrent create and approval replay, maker-checker",
+      "Injected evidence failure rolls back delivery/stock/AR; concurrent delivery issues once",
+      "Balanced goods revenue/VAT/COGS; partial/final receipt with concurrent overpayment rejection",
+      "Duplicate receipt request/evidence protection; five document kinds and rendered PDF",
+      "Buyer snapshot unchanged after customer edit; company/branch/permission boundaries",
+      "Same-company transfer rejection, stock shortage, Retail data-source protection, closed period, pre-delivery cancellation",
+      "Existing AP payment/WHT regression passes with new journal numbering/serialization"
+    ],
+    "repeat_policy": "Only failed tablet-label case rerun after accessible-label correction; two missing unit modules mounted and run separately; full successful financial flow not repeated",
+    "live_smoke": "Scoped list/options read-only; schema/routes/source routing verified, no live credit-sale records created",
+    "public_http": { "page": 200, "ready": 200, "anonymous_api": 401 },
+    "backend": "healthy",
+    "rollback": "Prior application imported and read expanded schema on disposable clone; rollback script syntax checked, previous images retained; not executed against healthy live UAT this release"
+  },
+  "preserved": {
+    "production": true,
+    "runtime_flags": true,
+    "database_routing": true,
+    "database_containers": true,
+    "server_only_takeaway_catalog_and_table_routes": true,
+    "live_financial_test_writes": false,
+    "stripe_migration_applied": false,
+    "commit_or_push": false
+  },
+  "rollback": {
+    "script": "/home/behappyaiagent/restaurant-uat-releases/credit-sales-20261013/rollback-uat.sh",
+    "backend": "restaurant-pos-backend:uat-document-lifecycle-20261013",
+    "frontend": "restaurant-pos-frontend:uat-document-lifecycle-20261013",
+    "policy": "Roll back application images only. Keep expanded schema, financial balances and evidence. Pause credit sales/collections until forward recovery; never restore database over new transactions."
+  },
+  "not_in_v1": [
+    "Production is explicitly blocked by environment/hostname guard; accounting acceptance pending",
+    "Documents are UAT/non-fiscal; no official tax invoice, tax filing or legal certification. Stored VAT used only for UAT accounting rehearsal; tax points/service VAT require accountant acceptance",
+    "No partial delivery, quotation price override, editable draft revisions, consolidated multi-invoice billing or allocation",
+    "No customer withholding deductions, returns, credit notes, refund/reversal workflow after delivery",
+    "No variant/composite/recipe execution; current simple/service products only",
+    "No separated Retail/Takeaway stock source integration; goods requiring that source are rejected rather than rerouted",
+    "No auto-posting to the buyer company, credit limits, collection reminders or bank verification",
+    "Shared POS sales dashboard/report integration not added; journals are available via accounting, outstanding amounts on credit-sales page",
+    "Items 5 aging/due reporting and 6 cost/break-even reports remain separate work",
+    "Human accountant approval and physical printing remain pending"
+  ]
+}

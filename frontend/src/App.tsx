@@ -107,6 +107,11 @@ import CompanyActionCenterPage from "@/pages/company/CompanyActionCenterPage";
 import CompanyAppsPage from "@/pages/company/CompanyAppsPage";
 import CompanyHomePage from "@/pages/company/CompanyHomePage";
 import CompanyErpPage from "@/pages/company/CompanyErpPage";
+import CompanyDocumentsPage from "@/pages/company/CompanyDocumentsPage";
+import CreditSalesPage from "@/pages/company/CreditSalesPage";
+import DebtAgingPage from "@/pages/company/DebtAgingPage";
+import CostAnalysisPage from "@/pages/company/CostAnalysisPage";
+import { DOCUMENT_CENTER_PERMISSIONS } from "@/config/businessDocuments";
 import CompanyPeopleAccessPage from "@/pages/company/CompanyPeopleAccessPage";
 import CompanyAccessReviewPage from "@/pages/company/CompanyAccessReviewPage";
 import CompanyAuditPage from "@/pages/company/CompanyAuditPage";
@@ -395,7 +400,15 @@ export default function App(): JSX.Element {
             <Route element={<CompanyShell />}>
               <Route path="/company" element={<CompanyHomePage />} />
               <Route path="/company/erp" element={<CompanyErpPage />} />
+              <Route element={<ProtectedRoute permissions={DOCUMENT_CENTER_PERMISSIONS} />}>
+                <Route path="/company/documents" element={<CompanyDocumentsPage />} />
+                <Route path="/company/credit-sales" element={<CreditSalesPage />} />
+              </Route>
               <Route path="/company/actions" element={<CompanyActionCenterPage />} />
+              <Route element={<ProtectedRoute permission="accounting.report.view" />}>
+                <Route path="/company/debt-aging" element={<DebtAgingPage />} />
+                <Route path="/company/cost-analysis" element={<CostAnalysisPage />} />
+              </Route>
               <Route path="/company/apps" element={<CompanyAppsPage />} />
               <Route path="/company/people" element={<CompanyPeopleAccessPage />} />
               <Route element={<ProtectedRoute permission="system.user.view" />}>

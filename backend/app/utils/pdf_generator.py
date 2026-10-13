@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
+from html import escape
 
 from app.models.company import Company
 from app.models.etax import TaxDocument, TaxDocumentItem
@@ -13,6 +14,7 @@ from app.models.logistics import Shipment
 from app.schemas.payable import APPaymentAllocationRead
 from app.schemas.stock_count import VarianceReport
 from app.utils.thai_date import MONTHS_TH, format_thai_date
+from app.utils.business_documents import render_po_html, render_gr_html, render_payment_voucher_html
 
 TWOPLACES = Decimal("0.01")
 
@@ -44,164 +46,6 @@ def _css() -> str:
     """
 
 
-def render_po_html(
-    po: PurchaseOrder,
-    company_name: str,
-    company_address: str,
-    company_tax_id: str,
-) -> str:
-    item_rows = []
-    for index, item in enumerate(po.items, start=1):
-        line_total = q2(Decimal(item.subtotal) + (Decimal(item.vat_amount) if item.vat_type == "excluded" else Decimal("0")))
-        item_rows.append(
-            f"""
-            <tr>
-              <td>{index}</td>
-              <td>{item.product_name}</td>
-              <td>{item.sku}</td>
-              <td class="right">{Decimal(item.qty_ordered):,.2f}</td>
-              <td>{item.unit_code or "-"}</td>
-              <td class="right">{Decimal(item.unit_cost):,.2f}</td>
-              <td class="right">{Decimal(item.discount_amount):,.2f}</td>
-              <td class="right">{Decimal(item.subtotal):,.2f}</td>
-              <td class="right">{Decimal(item.vat_amount):,.2f}</td>
-              <td class="right">{line_total:,.2f}</td>
-            </tr>
-            """
-        )
-
-    return f"""
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <style>{_css()}</style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="title">ใบสั่งซื้อ / Purchase Order</div>
-          <p><strong>{company_name}</strong></p>
-          <p>{company_address or "-"}</p>
-          <p>เลขประจำตัวผู้เสียภาษี: {company_tax_id or "-"}</p>
-        </div>
-
-        <div class="grid">
-          <div class="box">
-            <p><strong>เลขที่ PO:</strong> {po.po_number}</p>
-            <p><strong>วันที่:</strong> {format_thai_date(po.created_at, "short")}</p>
-            <p><strong>กำหนดรับ:</strong> {format_thai_date(po.created_at, "short") if po.expected_date is None else po.expected_date.strftime("%d/%m/%Y")}</p>
-          </div>
-          <div class="box">
-            <p><strong>ผู้จำหน่าย:</strong> {po.supplier.name}</p>
-            <p><strong>เลขผู้เสียภาษี:</strong> {po.supplier.tax_id or "-"}</p>
-            <p><strong>เงื่อนไข:</strong> {po.supplier.payment_term_days} วัน</p>
-          </div>
-        </div>
-
-        <div class="section">
-          <table>
-            <thead>
-              <tr>
-                <th>ลำดับ</th>
-                <th>รายการ</th>
-                <th>SKU</th>
-                <th class="right">จำนวน</th>
-                <th>หน่วย</th>
-                <th class="right">ราคา/หน่วย</th>
-                <th class="right">ส่วนลด</th>
-                <th class="right">ก่อน VAT</th>
-                <th class="right">VAT</th>
-                <th class="right">รวม</th>
-              </tr>
-            </thead>
-            <tbody>
-              {''.join(item_rows)}
-            </tbody>
-          </table>
-        </div>
-
-        <table class="totals">
-          <tr><td>ยอดรวม</td><td class="right">{Decimal(po.subtotal):,.2f}</td></tr>
-          <tr><td>ส่วนลด</td><td class="right">{Decimal(po.discount_amount):,.2f}</td></tr>
-          <tr><td>VAT</td><td class="right">{Decimal(po.vat_amount):,.2f}</td></tr>
-          <tr><td>WHT</td><td class="right">- {Decimal(po.wht_amount):,.2f}</td></tr>
-          <tr><td class="grand">ยอดสุทธิ</td><td class="right grand">{Decimal(po.total_amount):,.2f}</td></tr>
-        </table>
-
-        <div class="signatures">
-          <div class="signature-box">ผู้สั่งซื้อ</div>
-          <div class="signature-box">ผู้อนุมัติ</div>
-          <div class="signature-box">ผู้จำหน่าย</div>
-        </div>
-      </body>
-    </html>
-    """
-
-
-def render_gr_html(
-    gr: GoodsReceipt,
-    po: PurchaseOrder,
-    company_name: str,
-    company_address: str,
-    company_tax_id: str,
-) -> str:
-    item_rows = []
-    for index, item in enumerate(gr.items, start=1):
-        item_rows.append(
-            f"""
-            <tr>
-              <td>{index}</td>
-              <td>{item.po_item.product_name}</td>
-              <td>{item.po_item.sku}</td>
-              <td class="right">{Decimal(item.qty_received):,.2f}</td>
-              <td class="right">{Decimal(item.unit_cost):,.2f}</td>
-              <td>{item.note or '-'}</td>
-            </tr>
-            """
-        )
-
-    return f"""
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <style>{_css()}</style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="title">ใบรับสินค้า / Goods Receipt</div>
-          <p><strong>{company_name}</strong></p>
-          <p>{company_address or "-"}</p>
-          <p>เลขประจำตัวผู้เสียภาษี: {company_tax_id or "-"}</p>
-        </div>
-        <div class="grid">
-          <div class="box">
-            <p><strong>เลขที่ GR:</strong> {gr.gr_number}</p>
-            <p><strong>เลขที่ PO:</strong> {po.po_number}</p>
-            <p><strong>วันที่รับ:</strong> {gr.received_date.strftime("%d/%m/%Y")}</p>
-          </div>
-          <div class="box">
-            <p><strong>ผู้จำหน่าย:</strong> {po.supplier.name}</p>
-            <p><strong>คลัง:</strong> {gr.location.name}</p>
-            <p><strong>ผู้รับสินค้า:</strong> {gr.receiver.display_name or gr.receiver.username}</p>
-          </div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>ลำดับ</th>
-              <th>รายการ</th>
-              <th>SKU</th>
-              <th class="right">จำนวนรับ</th>
-              <th class="right">ราคาทุน</th>
-              <th>หมายเหตุ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {''.join(item_rows)}
-          </tbody>
-        </table>
-      </body>
-    </html>
-    """
 
 
 def html_to_pdf_or_html(html: str) -> tuple[bytes, str]:
@@ -315,12 +159,21 @@ async def generate_payslip_pdf(
     return html_to_pdf_or_html(html)
 
 
-async def generate_tax_invoice_pdf(
+def render_tax_invoice_html(
     doc: TaxDocument,
     items: list[TaxDocumentItem],
     company_name: str,
     company_address: str,
-) -> tuple[bytes, str]:
+) -> str:
+    # Copy/escape text without mutating ORM source rows; block embedded resources.
+    from types import SimpleNamespace
+    from sqlalchemy import inspect
+    def safe(row):
+        return SimpleNamespace(**{c.key: escape(value, quote=True) if isinstance(value := getattr(row, c.key), str) else value
+            for c in inspect(type(row)).columns})
+    doc = safe(doc)
+    items = [safe(item) for item in items]
+    company_name, company_address = escape(company_name), escape(company_address)
     item_rows = []
     for item in items:
         item_rows.append(
@@ -417,7 +270,7 @@ async def generate_tax_invoice_pdf(
 
         <table class="totals">
           <tr><td>ยอดรวมก่อน VAT</td><td class="right">{Decimal(doc.subtotal):,.2f}</td></tr>
-          <tr><td>VAT 7%</td><td class="right">{Decimal(doc.vat_amount):,.2f}</td></tr>
+          <tr><td>VAT {Decimal(doc.vat_rate):g}%</td><td class="right">{Decimal(doc.vat_amount):,.2f}</td></tr>
           <tr><td class="grand">รวมทั้งสิ้น</td><td class="right grand">{Decimal(doc.total_amount):,.2f}</td></tr>
         </table>
 
@@ -428,17 +281,27 @@ async def generate_tax_invoice_pdf(
       </body>
     </html>
     """
-    return html_to_pdf_or_html(html)
+    import re
+    html = re.sub(r"@import url\('[^']*'\);", "", html)
+    return html.replace("font-family: 'Sarabun', sans-serif", "font-family: 'Noto Sans Thai', 'Sarabun', sans-serif")
 
 
-async def generate_wht_certificate_pdf(
+async def generate_tax_invoice_pdf(doc, items, company_name, company_address):
+    return html_to_pdf_or_html(render_tax_invoice_html(doc, items, company_name, company_address))
+
+
+def render_wht_certificate_html(
     cert: WHTCertificate,
     supplier_name: str,
     supplier_tax_id: str | None,
     company_name: str,
     company_tax_id: str,
     company_address: str,
-) -> tuple[bytes, str]:
+) -> str:
+    company_name, company_tax_id, company_address, supplier_name, supplier_tax_id = (
+        escape(str(value or "-"), quote=True)
+        for value in (company_name, company_tax_id, company_address, supplier_name, supplier_tax_id)
+    )
     html = f"""
     <html>
       <head>
@@ -459,7 +322,7 @@ async def generate_wht_certificate_pdf(
           <div class="box">
             <p><strong>ผู้มีเงินได้:</strong> {supplier_name}</p>
             <p><strong>เลขประจำตัวผู้เสียภาษี:</strong> {supplier_tax_id or "-"}</p>
-            <p><strong>เลขที่ใบรับรอง:</strong> {cert.certificate_number}</p>
+            <p><strong>เลขที่ใบรับรอง:</strong> {escape(str(cert.certificate_number), quote=True)}</p>
           </div>
         </div>
         <div class="section">
@@ -468,14 +331,14 @@ async def generate_wht_certificate_pdf(
               <tr>
                 <th>ประเภทเงินได้</th>
                 <th>วันที่จ่าย</th>
-                <th class="right">จำนวนเงินที่จ่าย</th>
+                <th class="right">จำนวนเงินได้ที่จ่าย (ไม่รวม VAT)</th>
                 <th class="right">อัตราภาษี</th>
                 <th class="right">ภาษีที่หัก</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td>{cert.wht_type}</td>
+                <td>{escape(str(cert.wht_type), quote=True)}</td>
                 <td>{format_thai_date(datetime.combine(cert.issue_date, datetime.min.time()), "long")}</td>
                 <td class="right">{Decimal(cert.base_amount):,.2f}</td>
                 <td class="right">{Decimal(cert.wht_rate):,.2f}%</td>
@@ -491,7 +354,16 @@ async def generate_wht_certificate_pdf(
       </body>
     </html>
     """
-    return html_to_pdf_or_html(html)
+    return html
+
+
+async def generate_wht_certificate_pdf(
+    cert: WHTCertificate, supplier_name: str, supplier_tax_id: str | None,
+    company_name: str, company_tax_id: str, company_address: str,
+) -> tuple[bytes, str]:
+    return html_to_pdf_or_html(render_wht_certificate_html(
+        cert, supplier_name, supplier_tax_id, company_name, company_tax_id, company_address,
+    ))
 
 
 async def generate_payment_voucher_pdf(
@@ -499,70 +371,11 @@ async def generate_payment_voucher_pdf(
     allocations: list[APPaymentAllocationRead],
     company_name: str,
     company_address: str,
+    company_tax_id: str = "",
 ) -> tuple[bytes, str]:
-    supplier_name = allocations[0].supplier_name if allocations else "-"
-    rows = []
-    for item in allocations:
-        net_paid = q2(Decimal(item.allocated_amount) - Decimal(item.wht_amount))
-        rows.append(
-            f"""
-            <tr>
-              <td>{item.invoice_number}</td>
-              <td class="right">{Decimal(item.allocated_amount):,.2f}</td>
-              <td class="right">{Decimal(item.wht_amount):,.2f}</td>
-              <td class="right">{net_paid:,.2f}</td>
-            </tr>
-            """
-        )
-
-    html = f"""
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <style>{_css()}</style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="title">ใบสำคัญจ่าย / Payment Voucher</div>
-          <p><strong>{company_name}</strong></p>
-          <p>{company_address or "-"}</p>
-        </div>
-        <div class="grid">
-          <div class="box">
-            <p><strong>เลขที่:</strong> {payment.payment_number}</p>
-            <p><strong>วันที่:</strong> {format_thai_date(datetime.combine(payment.payment_date, datetime.min.time()), "long")}</p>
-          </div>
-          <div class="box">
-            <p><strong>จ่ายให้:</strong> {supplier_name}</p>
-            <p><strong>วิธีจ่าย:</strong> {payment.payment_method}</p>
-            <p><strong>อ้างอิง:</strong> {payment.reference_no or "-"}</p>
-          </div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>เลขที่ใบแจ้งหนี้</th>
-              <th class="right">จำนวน</th>
-              <th class="right">WHT</th>
-              <th class="right">จ่ายสุทธิ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {''.join(rows)}
-          </tbody>
-        </table>
-        <table class="totals">
-          <tr><td>รวมจ่าย</td><td class="right">{Decimal(payment.total_amount):,.2f}</td></tr>
-        </table>
-        <div class="signatures">
-          <div class="signature-box">ผู้จ่าย</div>
-          <div class="signature-box">ผู้อนุมัติ</div>
-          <div class="signature-box">ผู้รับเงิน</div>
-        </div>
-      </body>
-    </html>
-    """
-    return html_to_pdf_or_html(html)
+    return html_to_pdf_or_html(render_payment_voucher_html(
+        payment, allocations, company_name, company_address, company_tax_id,
+    ))
 
 
 async def generate_po_pdf(

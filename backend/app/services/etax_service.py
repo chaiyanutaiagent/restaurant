@@ -16,6 +16,7 @@ from app.models.tax_settings import BranchTaxProfile, CompanyTaxProfile
 from app.models.pos import SaleOrder
 from app.schemas.etax import CancelDocumentRequest, IssueCreditNoteRequest, IssueTaxInvoiceRequest
 from app.services.payable_service import PayableService
+from app.services.document_lifecycle_service import capture_tax, append_event, require_reason, next_number
 from app.utils.etax_xml import compute_xml_hash, generate_credit_note_xml, generate_tax_invoice_xml
 
 TWOPLACES = Decimal("0.01")
@@ -36,9 +37,12 @@ class ETaxService:
             select(SaleOrder)
             .where(SaleOrder.id == data.sale_order_id, SaleOrder.company_id == company_id, SaleOrder.status == "completed")
             .options(selectinload(SaleOrder.items), selectinload(SaleOrder.payments))
+            .with_for_update()
         )
         if sale is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sale order not found")
+        if sale.branch_id != branch_id:
+            raise HTTPException(403, "Sale branch mismatch")
 
         existing = await self.db.scalar(
             select(TaxDocument.id).where(
@@ -144,6 +148,7 @@ class ETaxService:
                 resource_id=str(document.id),
             )
         )
+        await capture_tax(self.db, document, user_id)
         await self.db.commit()
         return await self.get_document(document.id, company_id)
 
@@ -151,6 +156,9 @@ class ETaxService:
         self, company_id: uuid.UUID, branch_id: uuid.UUID, user_id: uuid.UUID, data: IssueCreditNoteRequest
     ) -> TaxDocument:
         original = await self.get_document(data.original_document_id, company_id)
+        if original.branch_id != branch_id:
+            raise HTTPException(403, "Original document branch mismatch")
+        require_reason(data.reason)
         if original.status != "issued":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Original document is not issued")
 
@@ -216,12 +224,16 @@ class ETaxService:
                 resource_id=str(document.id),
             )
         )
+        await capture_tax(self.db, document, user_id)
         await self.db.commit()
         return await self.get_document(document.id, company_id)
 
     async def cancel_document(
         self, document_id: uuid.UUID, company_id: uuid.UUID, user_id: uuid.UUID, data: CancelDocumentRequest
     ) -> TaxDocument:
+        require_reason(data.cancel_reason)
+        await self.db.execute(select(TaxDocument.id).where(TaxDocument.id == document_id,
+            TaxDocument.company_id == company_id).with_for_update())
         document = await self.get_document(document_id, company_id)
         if document.status == "cancelled":
             return document
@@ -229,6 +241,7 @@ class ETaxService:
         document.cancelled_at = datetime.now(timezone.utc)
         document.cancelled_by = user_id
         document.cancel_reason = data.cancel_reason
+        await append_event(self.db, document, "sales_tax_document", "cancelled", user_id, data.cancel_reason)
         self.db.add(
             AuditLog(
                 company_id=company_id,
@@ -311,16 +324,7 @@ class ETaxService:
 
     async def _generate_document_number(self, company_id: uuid.UUID, prefix: str) -> str:
         today = datetime.now(timezone.utc).date()
-        prefix_value = f"{prefix}{today:%Y%m%d}-"
-        lock_key = hash(str(company_id) + today.strftime("%Y%m%d") + f"ETAX_{prefix}") % (2**31)
-        await self.db.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
-        count = await self.db.scalar(
-            select(func.count(TaxDocument.id)).where(
-                TaxDocument.company_id == company_id,
-                TaxDocument.document_number.like(f"{prefix_value}%"),
-            )
-        ) or 0
-        return f"{prefix_value}{int(count) + 1:04d}"
+        return await next_number(self.db, prefix, TaxDocument, TaxDocument.document_number, today)
 
     @staticmethod
     def serialize_item(item: TaxDocumentItem) -> dict[str, object]:

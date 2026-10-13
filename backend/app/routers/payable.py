@@ -4,8 +4,9 @@ from datetime import date
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.database import get_db
@@ -21,6 +22,9 @@ from app.schemas.payable import (
     WHTCertificateRead,
 )
 from app.services.payable_service import PayableService
+from app.services.document_snapshot_service import evidence_notice, load_snapshot
+from app.utils.business_documents import render_payment_voucher_html
+from app.utils.pdf_generator import html_to_pdf_or_html, render_wht_certificate_html
 from app.utils.pdf_generator import generate_payment_voucher_pdf, generate_wht_certificate_pdf
 
 router = APIRouter(prefix="/api/v1/payable", tags=["payable"])
@@ -28,6 +32,11 @@ router = APIRouter(prefix="/api/v1/payable", tags=["payable"])
 
 def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"data": data, "meta": {"version": settings.app_version, **(meta or {})}, "error": None}
+
+
+def check_write_branch(current: TokenData, branch_id: uuid.UUID) -> None:
+    if current.branch_id is not None and current.branch_id != branch_id:
+        raise HTTPException(status_code=403, detail="กรุณาสลับไปสาขาของเอกสารก่อนทำรายการ")
 
 
 async def _get_company(db: AsyncSession, company_id: uuid.UUID) -> Company:
@@ -69,6 +78,7 @@ async def create_invoice(
     current: TokenData = Depends(require_permission("accounting.payment.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    check_write_branch(current, payload.branch_id)
     invoice = await PayableService(db).create_invoice(current.company_id, current.user_id, payload)
     return ok(SupplierInvoiceRead.model_validate(invoice).model_dump())
 
@@ -83,13 +93,20 @@ async def get_invoice(
     return ok(SupplierInvoiceRead.model_validate(invoice).model_dump())
 
 
+class CancelInvoiceRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 @router.post("/invoices/{invoice_id}/cancel")
 async def cancel_invoice(
     invoice_id: uuid.UUID,
+    payload: CancelInvoiceRequest,
     current: TokenData = Depends(require_permission("accounting.payment.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    invoice = await PayableService(db).cancel_invoice(invoice_id, current.company_id, current.user_id)
+    source = await PayableService(db).get_invoice(invoice_id, current.company_id)
+    check_write_branch(current, source.branch_id)
+    invoice = await PayableService(db).cancel_invoice(invoice_id, current.company_id, current.user_id, payload.reason)
     return ok(SupplierInvoiceRead.model_validate(invoice).model_dump())
 
 
@@ -111,8 +128,19 @@ async def create_payment(
     current: TokenData = Depends(require_permission("accounting.payment.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    check_write_branch(current, payload.branch_id)
     payment = await PayableService(db).create_payment(current.company_id, current.user_id, payload)
     return ok(APPaymentRead.model_validate(payment).model_dump())
+
+
+@router.post("/payments/preview")
+async def preview_payment(
+    payload: CreateAPPaymentRequest,
+    current: TokenData = Depends(require_permission("accounting.payment.create")),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    check_write_branch(current, payload.branch_id)
+    return ok(await PayableService(db).preview_payment(current.company_id, payload))
 
 
 @router.get("/payments/{payment_id}")
@@ -133,19 +161,23 @@ async def get_payment_voucher(
 ) -> Response:
     service = PayableService(db)
     payment = await service.get_payment(payment_id, current.company_id)
-    company = await _get_company(db, current.company_id)
-    allocations = [APPaymentAllocationRead.model_validate(item) for item in payment.allocations]
-    content, media_type = await generate_payment_voucher_pdf(
-        payment=payment,
-        allocations=allocations,
-        company_name=company.name,
-        company_address=company.address or "-",
-    )
+    snapshot = await load_snapshot(db, current, "payment_voucher", payment, payment.id)
+    if snapshot is not None:
+        html = snapshot.rendered_html
+    else:
+        company = await _get_company(db, current.company_id)
+        allocations = [APPaymentAllocationRead.model_validate(item) for item in payment.allocations]
+        html = evidence_notice(render_payment_voucher_html(payment, allocations, company.name,
+            company.address or "-", company.tax_id or "-"),
+            "เอกสารเดิมไม่มีสำเนาข้อมูล ณ วันบันทึก — ข้อมูลผู้เกี่ยวข้องอาจเป็นข้อมูลปัจจุบัน")
+    content, media_type = html_to_pdf_or_html(html)
     ext = "pdf" if media_type == "application/pdf" else "html"
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Disposition": f"attachment; filename=voucher_{payment.payment_number}.{ext}"},
+        headers={"Content-Disposition": f"attachment; filename=voucher_{payment.payment_number}.{ext}",
+                 "Cache-Control": "private, no-store", "X-Document-Evidence": "issuance_snapshot" if snapshot else "legacy_live_profile",
+                 "X-Document-SHA256": snapshot.content_sha256 if snapshot else "unavailable"},
     )
 
 
@@ -180,20 +212,22 @@ async def get_wht_certificate_pdf(
 ) -> Response:
     service = PayableService(db)
     cert = await service.get_wht_certificate(cert_id, current.company_id)
-    company = await _get_company(db, current.company_id)
-    content, media_type = await generate_wht_certificate_pdf(
-        cert=cert,
-        supplier_name=cert.supplier_name,
-        supplier_tax_id=cert.supplier_tax_id,
-        company_name=company.name,
-        company_tax_id=company.tax_id or "-",
-        company_address=company.address or "-",
-    )
+    snapshot = await load_snapshot(db, current, "wht_certificate", cert, cert.payment_id)
+    if snapshot is not None:
+        html = snapshot.rendered_html
+    else:
+        company = await _get_company(db, current.company_id)
+        html = evidence_notice(render_wht_certificate_html(cert, cert.supplier_name, cert.supplier_tax_id,
+            company.name, company.tax_id or "-", company.address or "-"),
+            "เอกสารเดิมไม่มีสำเนาข้อมูล ณ วันบันทึก — ข้อมูลผู้เกี่ยวข้องอาจเป็นข้อมูลปัจจุบัน")
+    content, media_type = html_to_pdf_or_html(html)
     ext = "pdf" if media_type == "application/pdf" else "html"
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Disposition": f"attachment; filename={cert.certificate_number}.{ext}"},
+        headers={"Content-Disposition": f"attachment; filename={cert.certificate_number}.{ext}",
+                 "Cache-Control": "private, no-store", "X-Document-Evidence": "issuance_snapshot" if snapshot else "legacy_live_profile",
+                 "X-Document-SHA256": snapshot.content_sha256 if snapshot else "unavailable"},
     )
 
 

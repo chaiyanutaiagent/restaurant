@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-13",
+  "scope": "Item 5 current debt aging and due-date report",
+  "status": "deployed_uat_engineering_verified_accountant_acceptance_pending",
+  "url": "https://uat-app.foodchainservice.com/company/debt-aging",
+  "release": "/home/behappyaiagent/restaurant-uat-releases/debt-aging-20261013",
+  "source_policy": {
+    "payable": "SupplierInvoice unpaid/partial, non-deleted, positive remaining_amount. WHT is not deducted a second time.",
+    "receivable": "CreditSale invoiced/partial, total minus paid, linked customer invoice. Excludes draft/approved/cancelled/paid, POS sales, branch wallets and SaaS billing.",
+    "scope": "Selected company and branch only; no station scope or company-wide expansion. Requires accounting.report.view and the selected source view permission.",
+    "currency": "THB companies only",
+    "time": "Current balances; aging computed by Bangkok calendar date, not historical as-of balances.",
+    "consistency": "Summary, paginated details and top counterparties read in one PostgreSQL REPEATABLE READ READ ONLY transaction.",
+    "buckets": ["not_due", "due_today", "days_1_30", "days_31_60", "days_61_90", "days_91_plus"],
+    "due_windows": "Overdue, today, today through today+7, today through today+30. Future windows exclude overdue. All summary totals follow selected filters.",
+    "warnings": "Flags inconsistent AP balances or missing AR invoice evidence without repairing or hiding the outstanding amount."
+  },
+  "images": {
+    "backend": "restaurant-pos-backend:uat-debt-aging-20261013",
+    "backend_digest": "sha256:e2cc7ba4b82e923e012ca41b3ce582cc23cfd0ee05aee80d8eeafb069c5342ac",
+    "frontend": "restaurant-pos-frontend:uat-debt-aging-20261013",
+    "frontend_digest": "sha256:b140fb105bc3529dcd3c4ace93ba5376165b7a735f3ca981679e803833e61a3d"
+  },
+  "verification": {
+    "unit_cases": 4,
+    "browser_cases": 4,
+    "typecheck_and_build": "passed",
+    "postgres_clone": "One boundary matrix for both AP/AR: day -91/-90/-61/-60/-31/-30/-1/0/1/7/8/30/31, partial balances, paid/cancelled/draft/deleted/other branch exclusions, search, pagination, partner sums and read-only refresh.",
+    "repeat_policy": "Successful backend unit/integration checks ran once. Browser checks rerun after correcting missing username in shared test fixture; no financial retesting.",
+    "live_smoke": "Both scoped reports and bucket reconciliation read successfully, no live test writes.",
+    "public_http": {"page": 200, "anonymous_report": 401, "ready": 200},
+    "backend": "healthy",
+    "visual": "Tablet screenshot inspected; no page-level horizontal overflow, detail table scrolls within its container. Offline/error/mismatch/stale data are hidden."
+  },
+  "rollback": {
+    "script": "/home/behappyaiagent/restaurant-uat-releases/debt-aging-20261013/rollback-uat.sh",
+    "backend": "restaurant-pos-backend:uat-credit-sales-20261013",
+    "frontend": "restaurant-pos-frontend:uat-credit-sales-20261013",
+    "schema": "Unchanged creditsale0031; no migration or database restore required for image rollback.",
+    "backup": "/home/behappyaiagent/restaurant-uat-deploy-backups/debt-aging-20261013/predeploy.dump",
+    "backup_sha256": "1c4c14cd589dfaba45d5cbb29d827053e4fab598262874d627be3535c9b9e8be",
+    "verification": "Backup restored in isolated PostgreSQL; previous images retained and script syntax checked. Healthy live UAT was not unnecessarily rolled back."
+  },
+  "preserved": {
+    "production": true,
+    "runtime_flags": true,
+    "database_routing_and_schema": true,
+    "database_containers": true,
+    "server_only_routes": true,
+    "live_financial_test_writes": false,
+    "commit_or_push": false
+  },
+  "limits": [
+    "Current selected-branch report only; no historical as-of reconstruction or multi-branch rollup.",
+    "Top counterparties limited to 20 grouped rows; invoice details paginated. AR historical name changes can produce separate counterparty rows.",
+    "No automatic collection/payment, reminder notifications, cash-flow forecast or bank reconciliation.",
+    "No export file or physical-print acceptance added in this release.",
+    "Accountant acceptance pending; Item 6 cost/break-even reporting remains separate work."
+  ]
+}

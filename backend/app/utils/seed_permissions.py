@@ -379,6 +379,12 @@ PERMISSIONS: list[dict[str, str]] = [
         "description": "Create invoices.",
     },
     {
+        "code": "accounting.invoice.approve",
+        "name": "Approve Credit Sale Quotation",
+        "module": "accounting",
+        "description": "Approve another employee's credit-sale quotation. Does not grant collection access.",
+    },
+    {
         "code": "accounting.payment.view",
         "name": "View Payments",
         "module": "accounting",

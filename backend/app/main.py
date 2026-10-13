@@ -40,6 +40,10 @@ from app.routers import payment_gateway as payment_gw_router
 from app.routers import takeaway as takeaway_router
 from app.routers import restaurant as restaurant_router
 from app.routers import payable as payable_router
+from app.routers import company_documents
+from app.routers import credit_sales
+from app.routers import debt_aging
+from app.routers import cost_analysis
 from app.routers import auth, membership, pos, privacy_support, products, purchase, reports, stock, stock_count as stock_count_router, system, transfer
 from app.routers import router
 from app.routers import mobile_store_auth
@@ -271,6 +275,10 @@ app.include_router(etax_router.router)
 app.include_router(tax_settings_router.router)
 app.include_router(tax_operations_router.router)
 app.include_router(payable_router.router)
+app.include_router(company_documents.router)
+app.include_router(credit_sales.router)
+app.include_router(debt_aging.router)
+app.include_router(cost_analysis.router)
 app.include_router(hr_router.router)
 app.include_router(crm_router.router)
 app.include_router(api_mgmt.router)

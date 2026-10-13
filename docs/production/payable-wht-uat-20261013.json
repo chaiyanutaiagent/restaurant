@@ -1,0 +1,68 @@
+{
+  "release": "payable-wht-20261013-6e595d8",
+  "status": "uat_deployed_ready_for_accountant_review",
+  "deployment_date_bangkok": "2026-10-13",
+  "repository": "chaiyanutaiagent/restaurant",
+  "source_base_commit": "6e595d80bf9b3a60a098116495e6db8a0b9ff7ff",
+  "source_patch": "Selected local AP/WHT changes; no commit or push performed",
+  "host": "behappyaiagent@100.66.192.56",
+  "compose_project": "restaurant-pos-uat-drill",
+  "review_url": "https://uat-app.foodchainservice.com/payable",
+  "release_directory": "/home/behappyaiagent/restaurant-uat-releases/payable-wht-20261013-6e595d8",
+  "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/payable-wht-20261013-6e595d8",
+  "backend": {
+    "image": "restaurant-pos-backend:uat-payable-wht-20261013",
+    "image_id": "sha256:4c6d34e29352134d19e04cabde584ee0ca3f56db1b5c00c8c775692ccb4183bb",
+    "preserved_base": "restaurant-pos-backend:uat-documents-20261013",
+    "overlays": [
+      "app/services/payable_service.py",
+      "app/services/accounting_service.py",
+      "app/schemas/payable.py",
+      "app/routers/payable.py",
+      "app/utils/payable_tax.py",
+      "app/utils/pdf_generator.py"
+    ]
+  },
+  "frontend": {
+    "image": "restaurant-pos-frontend:uat-payable-wht-20261013",
+    "image_id": "sha256:6a4436eec42c463bcacb3676d7362fbcf8d06a016fa0bf13d33cb534c97416c9",
+    "preserved_source": "business-documents-20261013-6e595d8/frontend server assembly",
+    "overlays": ["src/lib/payableApi.ts", "src/pages/payable/CreateInvoiceDialog.tsx", "src/pages/payable/PaymentDialog.tsx"]
+  },
+  "included": [
+    "New supplier invoices keep gross liability; WHT applied at payment only",
+    "Server-authoritative VAT-exclusive WHT preview and payment calculation",
+    "Partial payments and certificate base reconciliation",
+    "Explicit tax review; legacy pre-withheld invoices blocked for accountant review",
+    "Persistent same-request receipts and invoice row locking",
+    "Stable payment/document number locks and atomic AP invoice cancellation"
+  ],
+  "excluded": ["Company Document Center navigation", "Other dirty local changes", "Production deployment", "Automatic changes to historical tax documents"],
+  "verification": {
+    "candidate_unit_tests": "25 passed in candidate container with networking disabled",
+    "frontend_build": "passed",
+    "isolated_database_integration": "Restored current restaurant_uat_db backup into temporary network-isolated PostgreSQL; no live business writes",
+    "partial_payment_and_concurrent_same_request": "one payment for the same request; passed",
+    "concurrent_distinct_requests": "one succeeds, competing overpayment rejected; passed",
+    "final_invoice_and_certificates": "invoice 1070 fully settled; certificate bases sum 1000, WHT sums 30; passed",
+    "ledger_and_receipts": "one balanced journal per payment and one request receipt per key; passed",
+    "wht_pdf": "actual PDF rendered from stored certificate in isolated clone; passed",
+    "isolated_database_cleanup": "temporary container and tmpfs clone removed after checks",
+    "public_health_ready": 200,
+    "public_payable_and_frontend_asset": "new preview endpoint and review controls present",
+    "authenticated_live_preview_guard": "unknown invoice rejected with 404",
+    "live_existing_invoice_calculation": "not exercised: two existing sample invoices were already paid",
+    "existing_live_voucher_download": "PDF passed",
+    "temporary_auth_sessions": "logged out",
+    "backup": "five database dumps; pg_restore --list and SHA256 verified; legacy database dump restored for isolated integration",
+    "production_and_database_containers": "unchanged identities",
+    "runtime_flags_and_database_routing": "unchanged"
+  },
+  "rollback_script": "/home/behappyaiagent/restaurant-uat-releases/payable-wht-20261013-6e595d8/rollback-uat.sh",
+  "rollback_images": ["restaurant-pos-backend:uat-documents-20261013", "restaurant-pos-frontend:uat-documents-20261013"],
+  "rollback_note": "Application-only rollback; no database restore or deletion. Retain accounting.payment.request audit receipts. Prior code does not implement the new WHT controls, so pause AP payment entry if rolling back.",
+  "database_migration": false,
+  "business_test_transactions_created_on_live_uat": false,
+  "production_deployment": false,
+  "remaining_gates": ["Accountant UAT and formal 50-thawi layout review", "Physical printing", "Historical pre-withheld invoice remediation", "Tax filing and immutable party snapshots"]
+}

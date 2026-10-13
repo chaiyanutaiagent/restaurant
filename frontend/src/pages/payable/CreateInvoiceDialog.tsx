@@ -100,14 +100,13 @@ export default function CreateInvoiceDialog({ open, onOpenChange, onSuccess }: P
   }
 
   function handleSupplierChange(value: string): void {
-    const nextSupplier = (suppliersQuery.data?.data ?? []).find((item) => item.id === value) ?? null;
     const subtotal = Number(form.subtotal || 0);
     setForm((prev) => ({
       ...prev,
       supplier_id: value,
       po_id: "",
       vat_amount: round2(subtotal * 0.07),
-      wht_amount: round2(subtotal * Number(nextSupplier?.wht_rate ?? 0) / 100)
+      wht_amount: "0.00"
     }));
   }
 
@@ -122,9 +121,9 @@ export default function CreateInvoiceDialog({ open, onOpenChange, onSuccess }: P
       setForm((prev) => ({
         ...prev,
         po_id: value,
-        subtotal: round2(Number(po.subtotal)),
+        subtotal: round2(Number(po.total_amount) + Number(po.wht_amount) - Number(po.vat_amount)),
         vat_amount: round2(Number(po.vat_amount)),
-        wht_amount: round2(Number(po.wht_amount))
+        wht_amount: "0.00"
       }));
     } catch (error) {
       toast({
@@ -161,7 +160,7 @@ export default function CreateInvoiceDialog({ open, onOpenChange, onSuccess }: P
         invoice_date: form.invoice_date,
         subtotal: Number(form.subtotal || 0),
         vat_amount: Number(form.vat_amount || 0),
-        wht_amount: Number(form.wht_amount || 0),
+        wht_amount: 0,
         note: form.note || null
       });
       toast({ title: `สร้างใบแจ้งหนี้แล้ว: ${response.data.data.invoice_number}` });
@@ -236,8 +235,8 @@ export default function CreateInvoiceDialog({ open, onOpenChange, onSuccess }: P
             <Input type="number" value={form.vat_amount} onChange={(event) => updateField("vat_amount", event.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label>WHT (หัก ณ ที่จ่าย)</Label>
-            <Input type="number" value={form.wht_amount} onChange={(event) => updateField("wht_amount", event.target.value)} />
+            <Label>WHT (คำนวณตอนจ่าย)</Label>
+            <Input value="ยังไม่หักตอนตั้งหนี้ ป้องกันการหักซ้ำ" readOnly />
           </div>
           <div className="space-y-2">
             <Label>ยอดสุทธิ</Label>

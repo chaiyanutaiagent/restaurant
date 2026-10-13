@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useSearchParams } from "react-router-dom";
+import { payableDocumentTab } from "@/config/businessDocuments";
 import { useToast } from "@/components/ui/use-toast";
 import { usePermission } from "@/hooks/usePermission";
 import { payableApi } from "@/lib/payableApi";
@@ -44,6 +46,8 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export default function PayablePage(): JSX.Element {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = payableDocumentTab(searchParams.get("tab"));
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const canCreate = usePermission("accounting.payment.create");
@@ -115,11 +119,12 @@ export default function PayablePage(): JSX.Element {
   }
 
   async function cancelInvoice(invoice: SupplierInvoice): Promise<void> {
-    if (!window.confirm(`ต้องการยกเลิก ${invoice.invoice_number} ใช่หรือไม่`)) {
+    const reason = window.prompt(`เหตุผลยกเลิก ${invoice.invoice_number} (เก็บในประวัติเอกสาร)`);
+    if (!reason?.trim()) {
       return;
     }
     try {
-      await payableApi.cancelInvoice(invoice.id);
+      await payableApi.cancelInvoice(invoice.id, reason.trim());
       toast({ title: `ยกเลิกแล้ว: ${invoice.invoice_number}` });
       await refreshAll();
     } catch (error) {
@@ -133,19 +138,25 @@ export default function PayablePage(): JSX.Element {
 
   async function downloadVoucher(payment: APPayment): Promise<void> {
     const response = await payableApi.downloadVoucher(payment.id);
-    downloadBlob(response.data, `voucher_${payment.payment_number}.html`);
+    const extension = String(response.headers["content-type"] ?? "").includes("application/pdf") ? "pdf" : "html";
+    downloadBlob(response.data, `voucher_${payment.payment_number}.${extension}`);
   }
 
   async function downloadWht(cert: WHTCertificate): Promise<void> {
     const response = await payableApi.downloadWhtCert(cert.id);
-    downloadBlob(response.data, `${cert.certificate_number}.html`);
+    const extension = String(response.headers["content-type"] ?? "").includes("application/pdf") ? "pdf" : "html";
+    downloadBlob(response.data, `${cert.certificate_number}.${extension}`);
   }
 
   return (
     <div className="space-y-6">
       <PageHeader title="เจ้าหนี้และการจ่าย" subtitle="Accounts Payable" actions={canCreate ? <Button onClick={() => setCreateDialogOpen(true)}><Plus className="mr-2 h-4 w-4" />สร้างใบแจ้งหนี้</Button> : undefined} />
 
-      <Tabs defaultValue="invoices" className="space-y-6">
+      <Tabs activationMode="manual" value={activeTab} onValueChange={(tab) => setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        next.set("tab", payableDocumentTab(tab));
+        return next;
+      })} className="space-y-6">
         <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
           <TabsTrigger value="invoices">ใบแจ้งหนี้</TabsTrigger>
           <TabsTrigger value="payments">บันทึกการจ่าย</TabsTrigger>

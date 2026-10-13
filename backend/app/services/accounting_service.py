@@ -133,6 +133,8 @@ class AccountingService:
         )
         if account is None:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"System account not found: {code}")
+        if account.is_header or not account.is_active:
+            raise HTTPException(409, f"Account is not available for posting: {code}")
         return account
 
     async def _post_entry(
@@ -154,6 +156,10 @@ class AccountingService:
         if debit_total != credit_total:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Posting lines are not balanced")
 
+        # Serialize balance read/modify/write across all posting sources in a company.
+        from app.services.document_lifecycle_service import document_lock, next_number
+        await document_lock(self.db, company_id, "accounting", "posting")
+
         if reference_type is not None and reference_id is not None:
             source_key = f"{company_id}:{entry_type}:{reference_type}:{reference_id}"
             lock_key = zlib.crc32(source_key.encode("utf-8"))
@@ -174,14 +180,7 @@ class AccountingService:
             if existing is not None:
                 return await self.get_entry(existing, company_id)
 
-        entry_prefix = f"JE{entry_date:%Y%m%d}-"
-        existing_count = await self.db.scalar(
-            select(func.count(JournalEntry.id)).where(
-                JournalEntry.company_id == company_id,
-                JournalEntry.entry_number.like(f"{entry_prefix}%"),
-            )
-        ) or 0
-        entry_number = f"{entry_prefix}{int(existing_count) + 1:04d}"
+        entry_number = await next_number(self.db, "JE", JournalEntry, JournalEntry.entry_number, entry_date)
         period_year = entry_date.year + 543
         period_month = entry_date.month
         posted_at = datetime.now(timezone.utc)
@@ -368,7 +367,7 @@ class AccountingService:
         await self.db.commit()
         return await self.get_entry(entry.id, company_id)
 
-    async def reverse_entry(self, entry_id: uuid.UUID, company_id: uuid.UUID, user_id: uuid.UUID) -> JournalEntry:
+    async def reverse_entry(self, entry_id: uuid.UUID, company_id: uuid.UUID, user_id: uuid.UUID, *, commit: bool = True) -> JournalEntry:
         entry = await self.get_entry(entry_id, company_id)
         if entry.is_reversed:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Journal entry already reversed")
@@ -411,7 +410,10 @@ class AccountingService:
                 resource_id=str(entry.id),
             )
         )
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         return await self.get_entry(reversed_entry.id, company_id)
 
     async def list_entries(

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import uuid
+import hashlib
+import json
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select, text
@@ -12,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.models.accounting import JournalEntry
 from app.models.audit import AuditLog
 from app.models.company import Company
+from app.models.branch import Branch
 from app.models.etax import TaxDocument
 from app.models.payable import APPayment, APPaymentAllocation, SupplierInvoice, WHTCertificate
 from app.models.purchase import PurchaseOrder, Supplier
@@ -20,6 +23,9 @@ from app.schemas.payable import CreateAPPaymentRequest, SupplierInvoiceCreate, V
 from app.services.accounting_service import AccountingService
 from app.utils.posting_rules import PostingLine
 from app.utils.thai_date import MONTHS_TH
+from app.utils.payable_tax import payment_tax
+from app.services.document_snapshot_service import capture_payment_snapshots
+from app.services.document_lifecycle_service import capture_invoice, append_event, require_reason
 
 TWOPLACES = Decimal("0.01")
 
@@ -38,6 +44,7 @@ class PayableService:
         user_id: uuid.UUID,
         data: SupplierInvoiceCreate,
     ) -> SupplierInvoice:
+        await self._validate_branch(company_id, data.branch_id)
         supplier = await self._get_supplier(company_id, data.supplier_id)
         due_date = data.invoice_date + timedelta(days=int(supplier.payment_term_days or 0))
         total_amount = q2(Decimal(data.subtotal) + Decimal(data.vat_amount) - Decimal(data.wht_amount))
@@ -57,6 +64,8 @@ class PayableService:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
             if po.supplier_id != data.supplier_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Purchase order supplier mismatch")
+            if po.branch_id != data.branch_id:
+                raise HTTPException(status_code=409, detail="Purchase order branch mismatch")
 
         invoice = SupplierInvoice(
             company_id=company_id,
@@ -97,6 +106,7 @@ class PayableService:
             reference_id=str(invoice.id),
         )
         self._audit(company_id, data.branch_id, user_id, "accounting.invoice.created", "SupplierInvoice", invoice.id)
+        await capture_invoice(self.db, invoice, supplier, user_id)
         await self.db.commit()
         return await self.get_invoice(invoice.id, company_id)
 
@@ -157,8 +167,14 @@ class PayableService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supplier invoice not found")
         return invoice
 
-    async def cancel_invoice(self, invoice_id: uuid.UUID, company_id: uuid.UUID, user_id: uuid.UUID) -> SupplierInvoice:
-        invoice = await self.get_invoice(invoice_id, company_id)
+    async def cancel_invoice(self, invoice_id: uuid.UUID, company_id: uuid.UUID, user_id: uuid.UUID, reason: str = "") -> SupplierInvoice:
+        reason = require_reason(reason)
+        invoice = await self.db.scalar(select(SupplierInvoice).where(
+            SupplierInvoice.id == invoice_id, SupplierInvoice.company_id == company_id,
+            SupplierInvoice.deleted_at.is_(None),
+        ).with_for_update().execution_options(populate_existing=True))
+        if invoice is None:
+            raise HTTPException(status_code=404, detail="Supplier invoice not found")
         if invoice.status != "unpaid":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only unpaid invoices can be cancelled")
 
@@ -171,11 +187,12 @@ class PayableService:
             )
         )
         if entry_id is not None:
-            await AccountingService(self.db).reverse_entry(entry_id, company_id, user_id)
+            await AccountingService(self.db).reverse_entry(entry_id, company_id, user_id, commit=False)
 
         invoice.status = "cancelled"
         invoice.paid_amount = Decimal("0.00")
         invoice.remaining_amount = Decimal("0.00")
+        await append_event(self.db, invoice, "supplier_invoice", "cancelled", user_id, reason)
         self._audit(company_id, invoice.branch_id, user_id, "accounting.invoice.cancelled", "SupplierInvoice", invoice.id)
         await self.db.commit()
         return await self.get_invoice(invoice.id, company_id)
@@ -186,31 +203,22 @@ class PayableService:
         user_id: uuid.UUID,
         data: CreateAPPaymentRequest,
     ) -> APPayment:
-        if not data.allocations:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one allocation is required")
-
-        invoice_ids = [item.invoice_id for item in data.allocations]
-        if len(invoice_ids) != len(set(invoice_ids)):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Duplicate invoice allocation is not allowed")
-
-        invoices = (
-            await self.db.scalars(
-                select(SupplierInvoice)
-                .where(
-                    SupplierInvoice.company_id == company_id,
-                    SupplierInvoice.id.in_(invoice_ids),
-                    SupplierInvoice.deleted_at.is_(None),
-                )
-                .options(selectinload(SupplierInvoice.supplier))
-            )
-        ).all()
+        # Persist the request receipt in the same transaction as the payment.
+        # Keep these audit receipts for at least the lifetime of the payment.
+        fingerprint = hashlib.sha256(json.dumps(data.model_dump(mode="json"), sort_keys=True).encode()).hexdigest()
+        lock_key = int.from_bytes(hashlib.sha256(f"AP_REQUEST:{company_id}:{data.idempotency_key}".encode()).digest()[:8], "big", signed=True)
+        await self.db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+        receipt = await self.db.scalar(select(AuditLog).where(
+            AuditLog.company_id == company_id, AuditLog.action == "accounting.payment.request",
+            AuditLog.resource_id == str(data.idempotency_key),
+        ))
+        if receipt is not None:
+            if receipt.new_value.get("fingerprint") != fingerprint or receipt.branch_id != data.branch_id:
+                raise HTTPException(status_code=409, detail="รหัสคำขอเดิมมีข้อมูลต่างกัน กรุณาตรวจประวัติการจ่าย")
+            return await self.get_payment(uuid.UUID(receipt.new_value["payment_id"]), company_id)
+        invoices = await self._payment_invoices(company_id, data, lock=True)
         invoice_map = {invoice.id: invoice for invoice in invoices}
-        if len(invoice_map) != len(invoice_ids):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more invoices not found")
-
-        supplier_ids = {invoice.supplier_id for invoice in invoices}
-        if len(supplier_ids) > 1:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="All allocations must be for the same supplier")
+        calculations = {item.invoice_id: payment_tax(invoice_map[item.invoice_id], item) for item in data.allocations}
 
         total_allocated = Decimal("0.00")
         total_wht = Decimal("0.00")
@@ -234,84 +242,112 @@ class PayableService:
 
         for item in data.allocations:
             invoice = invoice_map[item.invoice_id]
-            if invoice.status in {"paid", "cancelled"}:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice already paid or cancelled")
-            allocated_amount = q2(item.allocated_amount)
-            wht_amount = q2(item.wht_amount)
-            if allocated_amount <= 0:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Allocated amount must be positive")
-            if allocated_amount > q2(invoice.remaining_amount):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Allocated amount exceeds invoice remaining amount")
-            if wht_amount < 0 or wht_amount > allocated_amount:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid WHT amount")
-            if wht_amount > 0 and not (item.wht_type or invoice.supplier.wht_type):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="WHT type is required when WHT amount is provided")
-
+            calculated = calculations[invoice.id]
+            allocated_amount = calculated["allocated_amount"]
+            wht_amount = calculated["wht_amount"]
             allocation = APPaymentAllocation(
                 payment_id=payment.id,
                 invoice_id=invoice.id,
                 company_id=company_id,
                 allocated_amount=allocated_amount,
                 wht_amount=wht_amount,
-                wht_rate=q2(item.wht_rate),
-                wht_type=item.wht_type or invoice.supplier.wht_type,
+                wht_rate=calculated["wht_rate"],
+                wht_type=calculated["wht_type"],
             )
             self.db.add(allocation)
             created_allocations.append(allocation)
 
             invoice.paid_amount = q2(Decimal(invoice.paid_amount or 0) + allocated_amount)
-            remaining = q2(Decimal(invoice.total_amount or 0) - Decimal(invoice.paid_amount or 0))
-            if abs(remaining) <= TWOPLACES:
-                remaining = Decimal("0.00")
+            remaining = q2(Decimal(invoice.total_amount) - invoice.paid_amount)
             invoice.remaining_amount = remaining
             invoice.status = "paid" if remaining == 0 else "partial"
-
             total_allocated += allocated_amount
             total_wht += wht_amount
 
         payment.total_amount = q2(total_allocated - total_wht)
         await self.db.flush()
-
         await AccountingService(self.db)._post_entry(
-            company_id=company_id,
-            branch_id=data.branch_id,
-            user_id=user_id,
-            entry_date=data.payment_date,
-            entry_type="payment",
+            company_id=company_id, branch_id=data.branch_id, user_id=user_id,
+            entry_date=data.payment_date, entry_type="payment",
             description=f"จ่ายเจ้าหนี้ {payment.payment_number}",
             lines=self._build_payment_posting_lines(total_allocated, total_wht, payment.total_amount, data.payment_method),
-            reference_type="APPayment",
-            reference_id=str(payment.id),
+            reference_type="APPayment", reference_id=str(payment.id),
         )
-
+        certificates: list[WHTCertificate] = []
         for allocation in created_allocations:
-            if q2(allocation.wht_amount) <= 0:
+            if allocation.wht_amount <= 0:
                 continue
+            calculated = calculations[allocation.invoice_id]
             cert = WHTCertificate(
-                company_id=company_id,
-                branch_id=data.branch_id,
-                payment_id=payment.id,
+                company_id=company_id, branch_id=data.branch_id, payment_id=payment.id,
                 supplier_id=invoice_map[allocation.invoice_id].supplier_id,
-                certificate_number=await self._generate_running_number(
-                    WHTCertificate,
-                    company_id,
-                    "certificate_number",
-                    "WHT",
-                    data.payment_date,
-                ),
-                issue_date=data.payment_date,
-                wht_type=allocation.wht_type or "บริการ",
-                wht_rate=q2(allocation.wht_rate),
-                base_amount=q2(allocation.allocated_amount),
-                wht_amount=q2(allocation.wht_amount),
-                income_type=allocation.wht_type,
-                created_by=user_id,
+                certificate_number=await self._generate_running_number(WHTCertificate, company_id, "certificate_number", "WHT", data.payment_date),
+                issue_date=data.payment_date, wht_type=allocation.wht_type,
+                wht_rate=allocation.wht_rate, base_amount=calculated["wht_base_amount"],
+                wht_amount=allocation.wht_amount, income_type=allocation.wht_type, created_by=user_id,
             )
             self.db.add(cert)
-
+            await self.db.flush()
+            certificates.append(cert)
+        await capture_payment_snapshots(self.db, payment, created_allocations, invoice_map, certificates, user_id)
         self._audit(company_id, data.branch_id, user_id, "accounting.payment.created", "APPayment", payment.id)
+        self.db.add(AuditLog(
+            company_id=company_id, branch_id=data.branch_id, user_id=user_id,
+            action="accounting.payment.request", resource="APPaymentRequest",
+            resource_id=str(data.idempotency_key),
+            new_value={"fingerprint": fingerprint, "payment_id": str(payment.id), "document_snapshot_version": 1},
+        ))
         await self.db.commit()
         return await self.get_payment(payment.id, company_id)
+
+    async def _validate_branch(self, company_id, branch_id):
+        branch = await self.db.scalar(select(Branch.id).where(
+            Branch.id == branch_id, Branch.company_id == company_id,
+            Branch.deleted_at.is_(None), Branch.is_active.is_(True),
+        ))
+        if branch is None:
+            raise HTTPException(status_code=404, detail="Branch not found")
+
+    async def preview_payment(self, company_id, data):
+        invoices = {invoice.id: invoice for invoice in await self._payment_invoices(company_id, data, lock=False)}
+        rows = [payment_tax(invoices[item.invoice_id], item) for item in data.allocations]
+        return {"allocations": rows, "total_allocated": sum(row["allocated_amount"] for row in rows),
+                "total_wht": sum(row["wht_amount"] for row in rows),
+                "net_amount": sum(row["net_amount"] for row in rows)}
+
+    async def _payment_invoices(self, company_id, data, *, lock):
+        await self._validate_branch(company_id, data.branch_id)
+        if not data.allocations:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one allocation is required")
+
+        invoice_ids = [item.invoice_id for item in data.allocations]
+        if len(invoice_ids) != len(set(invoice_ids)):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Duplicate invoice allocation is not allowed")
+
+        query = (select(SupplierInvoice)
+                .where(
+                    SupplierInvoice.company_id == company_id,
+                    SupplierInvoice.branch_id == data.branch_id,
+                    SupplierInvoice.id.in_(invoice_ids),
+                    SupplierInvoice.deleted_at.is_(None),
+                )
+                .options(selectinload(SupplierInvoice.supplier))
+                .order_by(SupplierInvoice.id)
+                .execution_options(populate_existing=True))
+        if lock:
+            query = query.with_for_update(of=SupplierInvoice)
+        invoices = (await self.db.scalars(query)).all()
+        invoice_map = {invoice.id: invoice for invoice in invoices}
+        if len(invoice_map) != len(invoice_ids):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more invoices not found")
+
+        supplier_ids = {invoice.supplier_id for invoice in invoices}
+        if len(supplier_ids) > 1:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="All allocations must be for the same supplier")
+        if any(data.payment_date < invoice.invoice_date for invoice in invoices):
+            raise HTTPException(status_code=409, detail="วันที่จ่ายต้องไม่ก่อนวันที่ใบแจ้งหนี้")
+
+        return invoices
 
     async def list_payments(self, company_id: uuid.UUID, page: int = 1, limit: int = 20) -> tuple[list[APPayment], int]:
         filters = [APPayment.company_id == company_id]
@@ -472,12 +508,14 @@ class PayableService:
     ) -> str:
         prefix_value = f"{prefix}{entry_date:%Y%m%d}-"
         field = getattr(model, field_name)
-        lock_key = hash(str(company_id) + entry_date.strftime("%Y%m%d") + f"PAYABLE_{prefix}") % (2**31)
-        await self.db.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
-        count = await self.db.scalar(
-            select(func.count(model.id)).where(model.company_id == company_id, field.like(f"{prefix_value}%"))
-        ) or 0
-        return f"{prefix_value}{int(count) + 1:04d}"
+        # Numbers are globally unique in the existing schema. Python hash() is
+        # process-randomized and cannot serialize multiple workers.
+        lock_key = int.from_bytes(hashlib.sha256(f"PAYABLE:{prefix_value}".encode()).digest()[:8], "big", signed=True)
+        await self.db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+        await self.db.flush()
+        numbers = (await self.db.scalars(select(field).where(field.like(f"{prefix_value}%")))).all()
+        sequence = max((int(number[len(prefix_value):]) for number in numbers if number[len(prefix_value):].isdigit()), default=0) + 1
+        return f"{prefix_value}{sequence:04d}"
 
     def _build_invoice_posting_lines(self, invoice: SupplierInvoice) -> list[PostingLine]:
         lines = [

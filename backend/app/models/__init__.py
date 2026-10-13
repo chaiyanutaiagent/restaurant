@@ -19,6 +19,8 @@ from app.models.role import Role, Permission, role_permissions_table
 from app.models.user import User, UserBranch
 from app.models.staff_assignment import StaffRoleAssignment
 from app.models.audit import AuditLog
+from app.models.document_snapshot import DocumentSnapshot
+from app.models.credit_sales import CreditSale, CreditSaleDocument
 from app.models.auth import RefreshToken
 from app.models.approval import ApprovalGrantUsage, ManagerPinCredential
 from app.models.pricing import PriceCalculation, PriceOverrideAudit

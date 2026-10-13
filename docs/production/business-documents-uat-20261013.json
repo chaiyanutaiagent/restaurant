@@ -1,0 +1,55 @@
+{
+  "release": "business-documents-20261013-6e595d8",
+  "status": "uat_deployed_smoke_passed",
+  "deployment_date_bangkok": "2026-10-13",
+  "repository": "chaiyanutaiagent/restaurant",
+  "source_base_commit": "6e595d80bf9b3a60a098116495e6db8a0b9ff7ff",
+  "source_patch": "Selected uncommitted local document/tax changes; no commit or push performed",
+  "host": "behappyaiagent@100.66.192.56",
+  "compose_project": "restaurant-pos-uat-drill",
+  "release_directory": "/home/behappyaiagent/restaurant-uat-releases/business-documents-20261013-6e595d8",
+  "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/business-documents-20261013-6e595d8",
+  "backend": {
+    "image": "restaurant-pos-backend:uat-documents-20261013",
+    "image_id": "sha256:2cf5a82b03dbc7b67b4b5a20c1d95b8f3ae6d4899146cef1f207ea234fd7e4b7",
+    "preserved_base": "restaurant-pos-backend:uat-print-uat14"
+  },
+  "frontend": {
+    "image": "restaurant-pos-frontend:uat-documents-20261013",
+    "image_id": "sha256:1c6dbb8a5bc0c5284f3468626cad4263ccbed871493e46fe7eec4b04f8aae537",
+    "preserved_source": "recipe-quick-create-6e595d8/frontend server assembly",
+    "changed_pages": ["purchase/POFormPage.tsx", "payable/PayablePage.tsx download extensions only"]
+  },
+  "included": [
+    "PO, GR, payment voucher shared Thai document templates",
+    "Noto Thai fonts in backend image",
+    "Purchase VAT zero-rate preservation",
+    "Purchase WHT base excluding included VAT",
+    "Stored amounts retained in non-draft PO views",
+    "GR download and PDF/HTML filename correction"
+  ],
+  "excluded": ["Company Document Center navigation", "Login/Signup/Business name edits", "Other dirty workspace files"],
+  "verification": {
+    "candidate_unit_tests": "15 passed, isolated container with network disabled",
+    "candidate_pdf_render": "PO, GR, voucher produced application/pdf",
+    "frontend_build": "passed",
+    "public_health_ready": 200,
+    "purchase_orders_page": 200,
+    "payable_page": 200,
+    "authenticated_purchase_list": "passed",
+    "authenticated_existing_po_pdf": "passed",
+    "authenticated_payment_list": "passed",
+    "authenticated_existing_voucher_pdf": "passed",
+    "existing_gr_download": "not exercised: selected PO had no receipt; isolated GR rendering passed",
+    "temporary_auth_session": "logged out",
+    "backup": "five database dumps; pg_restore --list and SHA256 verified",
+    "backup_restore_drill": "not repeated for this migration-free application patch",
+    "production_and_database_container_identity": "unchanged",
+    "runtime_flags_and_database_routing": "unchanged"
+  },
+  "rollback_script": "/home/behappyaiagent/restaurant-uat-releases/business-documents-20261013-6e595d8/rollback-uat.sh",
+  "database_migration": false,
+  "business_test_transactions_created": false,
+  "production_deployment": false,
+  "remaining_gates": ["Physical printing", "AP withholding/certificate tax basis", "Payroll tax and social security review"]
+}

@@ -1,0 +1,70 @@
+{
+  "release": "document-snapshot-20261013",
+  "status": "uat_deployed_ap_issuance_evidence",
+  "date_bangkok": "2026-10-13",
+  "repository": "chaiyanutaiagent/restaurant",
+  "review_url": "https://uat-app.foodchainservice.com/payable",
+  "host": "behappyaiagent@100.66.192.56",
+  "release_directory": "/home/behappyaiagent/restaurant-uat-releases/document-snapshot-20261013",
+  "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/document-snapshot-20261013",
+  "backend": {
+    "image": "restaurant-pos-backend:uat-document-snapshot-20261013",
+    "image_id": "sha256:5f37cc5a3ee6a726d8b5594969df301bf0d8d34a76fe1fe1d909c8a21995627f",
+    "base_image": "restaurant-pos-backend:uat-document-register-20261013",
+    "selected_changes": [
+      "app/models/document_snapshot.py",
+      "app/models/__init__.py (one import applied to deployed version, preserving UAT-only differences)",
+      "app/services/document_snapshot_service.py",
+      "app/services/payable_service.py",
+      "app/routers/payable.py",
+      "app/utils/pdf_generator.py",
+      "alembic/versions/docarchive0028_add_document_snapshots.py"
+    ]
+  },
+  "frontend": "unchanged: restaurant-pos-frontend:uat-document-register-20261013",
+  "schema": {
+    "before": "wp65govern0026",
+    "after": "docarchive0028",
+    "database": "restaurant_uat_db",
+    "change": "Add document_snapshots, unique source constraint and update/delete/truncate guards",
+    "existing_business_records_changed": false,
+    "historical_backfill": false,
+    "snapshots_immediately_after_deployment": 0,
+    "stripe_migration_applied": false,
+    "local_merge_revision": "docmerge0029 (not deployed)"
+  },
+  "verification": {
+    "targeted_tests": "44 passed: 8 snapshot, 26 AP/WHT, 10 register",
+    "isolated_postgresql": "restored current legacy UAT backup into network-isolated tmpfs PostgreSQL; applied exact migration",
+    "concurrent_payment_idempotency": "passed; same request produces one payment and competing requests cannot overpay",
+    "accounting": "certificate bases, WHT sums and balanced journals passed",
+    "profile_mutation": "snapshot HTML remains identical after company/supplier edits; voucher and WHT PDFs rendered",
+    "database_guards": "UPDATE, DELETE and TRUNCATE rejected; all four isolated test snapshots retained",
+    "atomic_failure": "simulated evidence storage failure rolled back payment, invoice balance and snapshot insertion",
+    "clone_cleanup": "temporary test database container removed; no live test transactions",
+    "uat_live_read": "existing legacy voucher downloads with explicit legacy_live_profile header and no-store",
+    "public_ready": 200,
+    "unauthenticated_download": 401,
+    "backend_health": "healthy",
+    "production_frontend_and_database_container_identities": "unchanged",
+    "runtime_flags_and_routing": "unchanged"
+  },
+  "rollback": {
+    "script": "/home/behappyaiagent/restaurant-uat-releases/document-snapshot-20261013/rollback-uat.sh",
+    "backend_image": "restaurant-pos-backend:uat-document-register-20261013",
+    "preserve": "snapshot table, schema revision and evidence; no database restore or destructive downgrade",
+    "operational_hold": "Pause AP payment entry while reverted because previous writer does not capture snapshots",
+    "verification": "script syntax and retained image checked; full database backup restored in isolated rehearsal; no live rollback executed"
+  },
+  "commit_or_push_performed": false,
+  "production_deployment": false,
+  "limitations": [
+    "Only new AP payment vouchers and WHT certificates are captured",
+    "Stored HTML and structured payload are frozen; PDF binary is generated at download",
+    "Legacy records remain explicitly non-snapshot; no fabricated historical party information",
+    "Checksum is not a digital signature or tax authority certification",
+    "Formal 50-thawi layout, filing and physical printing remain accountant acceptance gates",
+    "PO/GR snapshots, revision/cancellation history, original/copy and registry evidence indicators remain pending",
+    "Credit sales, aging and break-even reporting not implemented in this release"
+  ]
+}

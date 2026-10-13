@@ -201,16 +201,27 @@ export default function POFormPage(): JSX.Element {
   const receipts = receiptsQuery.data?.data ?? [];
   const productOptions = productsQuery.data ?? [];
   const productMap = new Map((productDetailsQuery.data ?? []).map((product) => [product.id, product]));
-  const isReadOnly = currentPO ? ["fully_received", "cancelled"].includes(currentPO.status) : false;
+  const isReadOnly = currentPO ? currentPO.status !== "draft" : false;
 
   const summary = useMemo(() => {
+    // Approved/history views must show the saved amounts, not today's supplier settings or formulas.
+    if (currentPO && currentPO.status !== "draft") {
+      return {
+        subtotal: Number(currentPO.subtotal),
+        vatAmount: Number(currentPO.vat_amount),
+        whtAmount: Number(currentPO.wht_amount),
+        totalAmount: Number(currentPO.total_amount)
+      };
+    }
     const subtotal = items.reduce((sum, item) => sum + calcLineSubtotal(item), 0);
     const vatAmount = items.reduce((sum, item) => sum + calcVat(calcLineSubtotal(item), item.vat_type, item.vat_rate), 0);
+    const includedVat = items.reduce((sum, item) => sum + (item.vat_type === "included" ? calcVat(calcLineSubtotal(item), item.vat_type, item.vat_rate) : 0), 0);
+    const excludedVat = items.reduce((sum, item) => sum + (item.vat_type === "excluded" ? calcVat(calcLineSubtotal(item), item.vat_type, item.vat_rate) : 0), 0);
     const whtRate = Number(selectedSupplier?.wht_rate ?? 0);
-    const whtAmount = subtotal * whtRate / 100;
-    const totalAmount = subtotal + (form.vat_type === "excluded" ? vatAmount : 0) - whtAmount;
+    const whtAmount = (subtotal - includedVat) * whtRate / 100;
+    const totalAmount = subtotal + excludedVat - whtAmount;
     return { subtotal, vatAmount, whtAmount, totalAmount };
-  }, [form.vat_type, items, selectedSupplier?.wht_rate]);
+  }, [currentPO, items, selectedSupplier?.wht_rate]);
 
   function updateForm<K extends keyof FormValues>(field: K, value: FormValues[K]): void {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -258,7 +269,7 @@ export default function POFormPage(): JSX.Element {
 
     try {
       const response = isEditMode && id
-        ? await poApi.update(id, payload)
+        ? await poApi.update(id, { ...payload, revision_reason: window.prompt("เหตุผลแก้ไขร่างใบสั่งซื้อ (เก็บประวัติ)")?.trim() || "" })
         : await poApi.create(payload);
       const po = (response.data as ApiResponse<PurchaseOrder>).data;
       await queryClient.invalidateQueries({ queryKey: ["purchase"] });
@@ -345,6 +356,16 @@ export default function POFormPage(): JSX.Element {
         description: error instanceof Error ? error.message : "กรุณาลองใหม่อีกครั้ง",
         variant: "destructive"
       });
+    }
+  }
+
+  async function downloadReceipt(receiptId: string, receiptNumber: string): Promise<void> {
+    try {
+      const response = await grApi.pdf(receiptId);
+      const extension = String(response.headers["content-type"] ?? "").includes("application/pdf") ? "pdf" : "html";
+      downloadBlob(response.data as Blob, `${receiptNumber}.${extension}`);
+    } catch (error) {
+      toast({ title: "ดาวน์โหลดใบรับสินค้าไม่สำเร็จ", description: error instanceof Error ? error.message : "กรุณาลองใหม่", variant: "destructive" });
     }
   }
 
@@ -526,7 +547,7 @@ export default function POFormPage(): JSX.Element {
         <CardContent className="space-y-2 text-right">
           <div>ยอดรวมก่อน VAT: {formatThaiCurrency(summary.subtotal)}</div>
           <div>VAT 7%: {formatThaiCurrency(summary.vatAmount)}</div>
-          <div>WHT {selectedSupplier?.wht_rate ?? 0}%: - {formatThaiCurrency(summary.whtAmount)}</div>
+          <div>WHT {isReadOnly ? currentPO?.wht_rate ?? 0 : selectedSupplier?.wht_rate ?? 0}%: - {formatThaiCurrency(summary.whtAmount)}</div>
           <div className="border-t pt-3 text-xl font-semibold text-blue-700">
             ยอดสุทธิ: {formatThaiCurrency(summary.totalAmount)}
           </div>
@@ -553,6 +574,9 @@ export default function POFormPage(): JSX.Element {
                     </div>
                     <div className="text-sm text-gray-600">{receipt.items.length} รายการ</div>
                     <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => void downloadReceipt(receipt.id, receipt.gr_number)}>
+                        ดาวน์โหลดใบรับสินค้า
+                      </Button>
                       <Button variant="outline" size="sm" onClick={() => navigate(`/purchase/orders/${currentPO.id}`)}>
                         ดูรายละเอียด
                       </Button>

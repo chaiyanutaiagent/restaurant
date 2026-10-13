@@ -4,8 +4,12 @@ from datetime import date
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from pydantic import BaseModel, Field
+from app.models.document_snapshot import DocumentEvent
+from app.services.document_lifecycle_service import append_event, require_reason
 
 from app.config import settings
 from app.dependencies import TokenData, get_scoped_operational_db as get_db, require_permission
@@ -24,6 +28,8 @@ from app.schemas.purchase import (
     UpdatePORequest,
 )
 from app.services.purchase_service import PurchaseService
+from app.services.document_snapshot_service import require_document_scope, evidence_notice
+from app.services.document_archive_service import evidence_for, copy_html
 from app.utils.pdf_generator import html_to_pdf_or_html, render_gr_html, render_po_html
 
 router = APIRouter(prefix="/api/v1/purchase", tags=["purchase"])
@@ -144,6 +150,8 @@ async def create_purchase_order(
     current: TokenData = Depends(require_permission("inventory.purchase.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    from types import SimpleNamespace
+    require_document_scope(current, SimpleNamespace(company_id=current.company_id, branch_id=payload.branch_id))
     po = await PurchaseService(db).create_po(current.company_id, current.user_id, payload)
     return ok(PurchaseOrderRead.model_validate(po).model_dump())
 
@@ -165,7 +173,9 @@ async def update_purchase_order(
     current: TokenData = Depends(require_permission("inventory.purchase.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    po = await PurchaseService(db).update_po(po_id, current.company_id, payload)
+    service = PurchaseService(db)
+    require_document_scope(current, await service.get_po(po_id, current.company_id))
+    po = await service.update_po(po_id, current.company_id, payload, current.user_id)
     return ok(PurchaseOrderRead.model_validate(po).model_dump())
 
 
@@ -175,7 +185,9 @@ async def submit_purchase_order(
     current: TokenData = Depends(require_permission("inventory.purchase.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    po = await PurchaseService(db).submit_for_approval(po_id, current.company_id, current.user_id)
+    service = PurchaseService(db)
+    require_document_scope(current, await service.get_po(po_id, current.company_id))
+    po = await service.submit_for_approval(po_id, current.company_id, current.user_id)
     return ok(PurchaseOrderRead.model_validate(po).model_dump())
 
 
@@ -186,7 +198,9 @@ async def approve_purchase_order(
     current: TokenData = Depends(require_permission("inventory.purchase.approve")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    po = await PurchaseService(db).approve_po(po_id, current.company_id, current.user_id, payload)
+    service = PurchaseService(db)
+    require_document_scope(current, await service.get_po(po_id, current.company_id))
+    po = await service.approve_po(po_id, current.company_id, current.user_id, payload)
     return ok(PurchaseOrderRead.model_validate(po).model_dump())
 
 
@@ -197,7 +211,9 @@ async def cancel_purchase_order(
     current: TokenData = Depends(require_permission("inventory.purchase.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    po = await PurchaseService(db).cancel_po(po_id, current.company_id, current.user_id, payload.reason)
+    service = PurchaseService(db)
+    require_document_scope(current, await service.get_po(po_id, current.company_id))
+    po = await service.cancel_po(po_id, current.company_id, current.user_id, payload.reason)
     return ok(PurchaseOrderRead.model_validate(po).model_dump())
 
 
@@ -209,15 +225,54 @@ async def purchase_order_pdf(
 ) -> Response:
     service = PurchaseService(db)
     po = await service.get_po(po_id, current.company_id)
-    company = await _get_company(db, current.company_id)
-    html = render_po_html(po, company.name, company.address or "", company.tax_id or "")
+    snapshot = await evidence_for(db, current, "purchase_order", po)
+    if snapshot:
+        html = copy_html(snapshot, po)
+    else:
+        company = await _get_company(db, current.company_id)
+        html = evidence_notice(render_po_html(po, company.name, company.address or "", company.tax_id or ""),
+            "ฉบับร่าง / เอกสารเก่า ไม่มีหลักฐาน ณ วันออก ชื่อและที่อยู่อาจเป็นข้อมูลปัจจุบัน")
     content, media_type = html_to_pdf_or_html(html)
     ext = "pdf" if media_type == "application/pdf" else "html"
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Disposition": f"attachment; filename={po.po_number}.{ext}"},
+        headers={"Content-Disposition": f"attachment; filename={po.po_number}.{ext}", "Cache-Control": "private, no-store"},
     )
+
+
+class ReplacementRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+@router.post("/orders/{po_id}/replacement", status_code=201)
+async def replace_purchase_order(po_id: uuid.UUID, payload: ReplacementRequest,
+    current: TokenData = Depends(require_permission("inventory.purchase.create")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = PurchaseService(db)
+    source = await service._get_po_entity(po_id, current.company_id)
+    require_document_scope(current, source)
+    reason = require_reason(payload.reason)
+    if source.status != "cancelled":
+        raise HTTPException(409, "ต้องยกเลิกใบสั่งซื้อเดิมผ่านขั้นตอนเดิมก่อนสร้างร่างทดแทน")
+    prior = await db.scalar(select(DocumentEvent.id).where(DocumentEvent.company_id == current.company_id,
+        DocumentEvent.document_kind == "purchase_order", DocumentEvent.source_id == po_id,
+        DocumentEvent.action == "replacement_created").limit(1))
+    if prior:
+        raise HTTPException(409, "มีร่างทดแทนแล้ว กรุณาดูประวัติ ห้ามสร้างซ้ำ")
+    from app.schemas.purchase import POItemCreate
+    data = CreatePORequest(supplier_id=source.supplier_id, branch_id=source.branch_id,
+        expected_date=source.expected_date, vat_type=source.vat_type, note=source.note,
+        items=[POItemCreate(product_id=i.product_id, variant_id=i.variant_id, qty_ordered=i.qty_ordered,
+            unit_cost=i.unit_cost, discount_amount=i.discount_amount, vat_type=i.vat_type, vat_rate=i.vat_rate) for i in source.items])
+    replacement = await service.create_po(current.company_id, current.user_id, data, commit=False)
+    await append_event(db, source, "purchase_order", "replacement_created", current.user_id, reason,
+        {"replacement_id": replacement.id, "number": replacement.po_number})
+    await append_event(db, replacement, "purchase_order", "replaces", current.user_id, reason,
+        {"original_id": source.id, "number": source.po_number})
+    await db.commit()
+    return ok({"id": replacement.id, "po_number": replacement.po_number, "status": "draft"})
 
 
 @router.post("/receipts", status_code=status.HTTP_201_CREATED)
@@ -226,7 +281,9 @@ async def create_goods_receipt(
     current: TokenData = Depends(require_permission("inventory.purchase.create")),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    receipt = await PurchaseService(db).receive_goods(current.company_id, current.branch_id, current.user_id, payload)
+    service = PurchaseService(db)
+    require_document_scope(current, await service.get_po(payload.po_id, current.company_id))
+    receipt = await service.receive_goods(current.company_id, current.branch_id, current.user_id, payload)
     return ok(GoodsReceiptRead.model_validate(receipt).model_dump())
 
 
@@ -259,18 +316,17 @@ async def goods_receipt_pdf(
 ) -> Response:
     service = PurchaseService(db)
     receipt = await service.get_gr(gr_id, current.company_id)
-    company = await _get_company(db, current.company_id)
-    html = render_gr_html(
-        receipt,
-        receipt.purchase_order,
-        company.name,
-        company.address or "",
-        company.tax_id or "",
-    )
+    snapshot = await evidence_for(db, current, "goods_receipt", receipt)
+    if snapshot:
+        html = copy_html(snapshot, receipt)
+    else:
+        company = await _get_company(db, current.company_id)
+        html = evidence_notice(render_gr_html(receipt, receipt.purchase_order, company.name, company.address or "", company.tax_id or ""),
+            "เอกสารเก่า ไม่มีหลักฐาน ณ วันออก ชื่อและที่อยู่อาจเป็นข้อมูลปัจจุบัน")
     content, media_type = html_to_pdf_or_html(html)
     ext = "pdf" if media_type == "application/pdf" else "html"
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Disposition": f"attachment; filename={receipt.gr_number}.{ext}"},
+        headers={"Content-Disposition": f"attachment; filename={receipt.gr_number}.{ext}", "Cache-Control": "private, no-store"},
     )

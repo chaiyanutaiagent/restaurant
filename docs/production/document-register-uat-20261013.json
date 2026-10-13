@@ -1,0 +1,56 @@
+{
+  "release": "document-register-20261013",
+  "status": "uat_deployed_read_only_register_ready_for_review",
+  "date_bangkok": "2026-10-13",
+  "review_url": "https://uat-app.foodchainservice.com/company/documents",
+  "repository": "chaiyanutaiagent/restaurant",
+  "source_base_commit": "6e595d80bf9b3a60a098116495e6db8a0b9ff7ff",
+  "source": "Selected working-tree document changes over existing payable-wht UAT source; no commit or push",
+  "host": "behappyaiagent@100.66.192.56",
+  "release_directory": "/home/behappyaiagent/restaurant-uat-releases/document-register-20261013",
+  "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/document-register-20261013",
+  "backend": {
+    "image": "restaurant-pos-backend:uat-document-register-20261013",
+    "image_id": "sha256:046b0c13cc64ba798257d5b1b42ce008c974ae024244e6a17948c060a64c91b7",
+    "overlays": ["app/main.py", "app/routers/company_documents.py", "app/services/document_register_service.py"]
+  },
+  "frontend": {
+    "image": "restaurant-pos-frontend:uat-document-register-20261013",
+    "image_id": "sha256:5ec2e78769f3b4c063d793de22b385d1c08947d51215fcc7c3e942d362d041b5",
+    "overlays": ["src/App.tsx (document route patch only)", "src/components/layout/CompanyShell.tsx", "src/config/businessDocuments.ts", "src/pages/company/CompanyDocumentsPage.tsx", "src/components/company/DocumentRegister.tsx", "src/pages/payable/PayablePage.tsx"],
+    "preserved": "Existing UAT Takeaway catalog routes and Restaurant table permissions; AP/WHT changes from prior release"
+  },
+  "verification": {
+    "local_type_check": "passed",
+    "local_browser_tests": "11 passed; desktop/tablet, permissions, context mismatch, filters, pagination, offline, deep-link tabs",
+    "visual_review": "820px tablet screenshot inspected",
+    "candidate_backend_tests": "10 passed with networking disabled",
+    "frontend_build": "passed",
+    "read_only_uat_asgi": "six source queries passed; identity overridden only in isolated process, permission and forged query scope checks passed",
+    "existing_payment": "PAY20260916-0002, amount 832.00 matched existing source via read-only query",
+    "public_page": 200,
+    "unauthenticated_public_api": 401,
+    "backend_health": "healthy",
+    "production_and_database_container_identities": "unchanged",
+    "runtime_flags_and_routing": "unchanged; checked before activation"
+  },
+  "database_migration": false,
+  "business_test_transactions_created": false,
+  "production_deployment": false,
+  "rollback": {
+    "script": "/home/behappyaiagent/restaurant-uat-releases/document-register-20261013/rollback-uat.sh",
+    "backend_image": "restaurant-pos-backend:uat-payable-wht-20261013",
+    "frontend_image": "restaurant-pos-frontend:uat-payable-wht-20261013",
+    "verified": "script syntax and retained images checked; no live rollback rehearsal",
+    "database_restore_required": false
+  },
+  "limitations": [
+    "Read-only live reference register, NOT issuance-time immutable snapshots",
+    "Requires branch context; no company-wide cross-database aggregation or station context",
+    "Takeaway purchase and goods receipt register not connected",
+    "Existing source APIs keep their own permissions/routing; no claim all legacy source branch-isolation gaps are fixed",
+    "Revision, original/copy, issuance snapshots and complete numbering audit remain work 3B",
+    "Credit sales workflow, aging and break-even reports remain pending",
+    "Accountant acceptance and physical printing remain pending"
+  ]
+}

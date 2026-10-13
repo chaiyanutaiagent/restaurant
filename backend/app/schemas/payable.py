@@ -5,6 +5,7 @@ from decimal import Decimal
 import uuid
 
 from pydantic import ConfigDict, Field, model_validator
+from typing import Literal
 
 from app.schemas import BaseSchema
 
@@ -19,13 +20,15 @@ class SupplierInvoiceCreate(BaseSchema):
     input_vat_claimable: bool = True
     nonclaimable_reason: str | None = Field(default=None, max_length=500)
     invoice_date: date
-    subtotal: Decimal
-    vat_amount: Decimal = Decimal("0")
-    wht_amount: Decimal = Decimal("0")
+    subtotal: Decimal = Field(ge=0, max_digits=15, decimal_places=2)
+    vat_amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=15, decimal_places=2)
+    wht_amount: Decimal = Field(default=Decimal("0"), ge=0, le=0)
     note: str | None = None
 
     @model_validator(mode="after")
     def validate_input_tax_evidence(self) -> "SupplierInvoiceCreate":
+        if self.subtotal + self.vat_amount <= 0:
+            raise ValueError("ยอดตั้งหนี้ต้องมากกว่า 0; WHT ให้บันทึกตอนจ่ายเท่านั้น")
         if not self.input_vat_claimable and not (self.nonclaimable_reason or "").strip():
             raise ValueError("กรุณาระบุเหตุผลที่ไม่ใช้สิทธิ์ภาษีซื้อ")
         return self
@@ -71,6 +74,9 @@ class SupplierInvoiceListItem(BaseSchema):
     input_vat_claimable: bool
     nonclaimable_reason: str | None = None
     total_amount: Decimal
+    subtotal: Decimal
+    vat_amount: Decimal
+    wht_amount: Decimal
     paid_amount: Decimal
     remaining_amount: Decimal
     is_overdue: bool
@@ -80,16 +86,19 @@ class SupplierInvoiceListItem(BaseSchema):
 
 class PaymentAllocationInput(BaseSchema):
     invoice_id: uuid.UUID
-    allocated_amount: Decimal
-    wht_amount: Decimal = Decimal("0")
-    wht_rate: Decimal = Decimal("0")
-    wht_type: str | None = None
+    allocated_amount: Decimal = Field(gt=0, max_digits=15, decimal_places=2)
+    wht_amount: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
+    wht_base_amount: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
+    wht_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100, max_digits=5, decimal_places=2)
+    wht_type: str = Field(min_length=1, max_length=50)
 
 
 class CreateAPPaymentRequest(BaseSchema):
+    idempotency_key: uuid.UUID
     branch_id: uuid.UUID
     payment_date: date
-    payment_method: str
+    payment_method: Literal["bank_transfer", "cheque", "cash"]
+    wht_reviewed: Literal[True]
     bank_account: str | None = None
     reference_no: str | None = None
     allocations: list[PaymentAllocationInput] = Field(min_length=1)

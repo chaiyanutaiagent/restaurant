@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import TokenData
@@ -217,6 +217,36 @@ class CompanyActionCenterService:
                 )
                 for row in rows
             )
+
+        from app.services.recipe_governance_guard import enabled
+        from app.services.recipe_review_service import visible, can_manage
+        if enabled() and not current.station_key and any(_has(current, p) for p in ("company.kitchen.manage", "fb.recipe.manage", "takeaway.production.manage")):
+            from app.database import AsyncSessionLocal
+            from app.models.recipe_review import RecipeReview, RecipeProductionRun
+            async with AsyncSessionLocal() as recipe_db:
+                query = visible(current)
+                if can_manage(current):
+                    query = query.where(or_(and_(RecipeReview.status.in_(["submitted", "approved_hold"]), RecipeReview.created_by != current.user_id),
+                        and_(RecipeReview.created_by == current.user_id, RecipeReview.status.in_(["returned", "rejected", "approved_hold", "published"]))))
+                else:
+                    query = query.where(RecipeReview.created_by == current.user_id, RecipeReview.status.in_(["returned", "rejected", "approved_hold", "published"]))
+                reviews = (await recipe_db.scalars(query.order_by(RecipeReview.updated_at.desc()).limit(100))).all()
+                for row in reviews:
+                    items.append(CompanyWorkItemRead(id=f"recipe_review:{row.id}", type="recipe_review",
+                        source_app="company_admin", severity="warning" if row.status == "submitted" else "info",
+                        title=f"สูตร {row.proposal['name']} · {row.status}", company_id=row.company_id,
+                        brand_id=row.brand_id, branch_id=row.branch_id, status="open",
+                        permission_required="company.kitchen.manage" if can_manage(current) else ("fb.recipe.manage" if row.system == "restaurant" else "takeaway.production.manage"),
+                        available_actions=["acknowledge", "dismiss"], deep_link="/company/recipe-reviews", unread=True,
+                        business_impact=70, created_at=row.created_at, updated_at=row.updated_at))
+                if can_manage(current):
+                    pending = (await recipe_db.scalars(select(RecipeProductionRun).where(RecipeProductionRun.company_id == current.company_id,
+                        RecipeProductionRun.status == "output_pending").order_by(RecipeProductionRun.created_at).limit(100))).all()
+                    for run in pending:
+                        items.append(CompanyWorkItemRead(id=f"recipe_output:{run.id}", type="recipe_output_pending", source_app="company_admin",
+                            severity="error", title="ผลิตแล้ว รอส่งผลผลิตเข้าคลังแบรนด์", company_id=run.company_id, brand_id=run.brand_id,
+                            status="open", permission_required="company.kitchen.manage", available_actions=["acknowledge"],
+                            deep_link="/company/recipe-reviews", unread=True, business_impact=90, created_at=run.created_at, updated_at=run.updated_at))
 
         await self._apply_action_overlay(items, current)
         items = [item for item in items if item.status != "dismissed"]

@@ -10,6 +10,7 @@ class IngredientProposal(BaseModel):
     requested_name: str = Field(default="", max_length=255)
     quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=4)
     unit: str = Field(min_length=1, max_length=30)
+    canonical_id: UUID | None = None
     @model_validator(mode="after")
     def identity(self):
         if not self.item_id and not self.requested_name:
@@ -47,8 +48,18 @@ class ReviewCreate(BaseModel):
 class ReviewAction(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     revision: int = Field(ge=1)
-    action: Literal["save", "submit", "return", "reject", "approve", "resolve"]
+    action: Literal["save", "submit", "return", "reject", "approve", "resolve", "material", "publish"]
     reason: str = Field(min_length=3, max_length=1000)
     proposal: RecipeProposal | None = None
     line_index: int | None = Field(default=None, ge=0, le=199)
     item_id: UUID | None = None
+    canonical_id: UUID | None = None
+
+
+class RecipeProductionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    review_id: UUID
+    request_key: UUID
+    quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=4)
+    output_location_id: UUID
+    reason: str = Field(min_length=3, max_length=1000)

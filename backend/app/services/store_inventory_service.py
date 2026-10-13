@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException
 
 from app.models.audit import AuditLog
 from app.models.pos import SaleOrder
@@ -310,11 +311,13 @@ class StoreInventoryService:
             order.recipe_stock_posted_at = order.recipe_stock_posted_at or datetime.now(timezone.utc)
             return self._decode_warnings(order.recipe_stock_warnings)
 
+        recipe_snapshots: list[dict] = []
         usage, warnings = await self._expand_items(
             company_id=company_id,
             brand_id=brand_id,
             branch_id=branch_id,
             items=items,
+            snapshots=recipe_snapshots,
         )
         negative_items: list[tuple[Product, Decimal, Decimal]] = []
         for product, qty in usage.values():
@@ -360,6 +363,7 @@ class StoreInventoryService:
                     "location_id": str(location_id),
                     "movement_count": len(usage),
                     "warnings": warnings,
+                    "recipe_snapshots": recipe_snapshots,
                 },
             )
         )
@@ -401,12 +405,46 @@ class StoreInventoryService:
             return
         if mark_fully_reversed and order.recipe_stock_reversed_at is not None:
             return
-        usage, _warnings = await self._expand_items(
-            company_id=company_id,
-            brand_id=brand_id,
-            branch_id=branch_id,
-            items=items,
-        )
+        evidence = await self.db.scalar(select(AuditLog).where(AuditLog.company_id == company_id,
+            AuditLog.action == "brand.store.stock.sale_recipe_post", AuditLog.resource_id == str(order.id))
+            .order_by(AuditLog.created_at).limit(1))
+        snapshots = (evidence.new_value or {}).get("recipe_snapshots") if evidence else None
+        if snapshots is not None:
+            # Reverse the frozen sale BOM, never today's edited recipe.
+            usage = {}
+            for menu, returned in items:
+                rows = [r for r in snapshots if r["menu_product_id"] == str(menu.id)]
+                sold = sum((Decimal(r["sold_qty"]) for r in rows), Decimal(0))
+                if not sold:
+                    continue
+                quantities: dict[str, Decimal] = {}
+                for row in rows:
+                    for line in row["ingredients"]:
+                        quantities[line["product_id"]] = quantities.get(line["product_id"], Decimal(0)) + Decimal(line["quantity"])
+                for product_id, quantity in quantities.items():
+                    product = await self.db.get(Product, uuid.UUID(product_id))
+                    if product is None or product.company_id != company_id:
+                        raise ValueError("ไม่พบวัตถุดิบจากหลักฐานการขายเดิม")
+                    old = usage.get(product.id, (product, Decimal(0)))[1]
+                    usage[product.id] = (product, q4(old + quantity * Decimal(returned) / sold))
+        else:
+            # Never reconstruct an old partial return from today's BOM. A full
+            # void can safely reverse the net quantity of original movements.
+            if not mark_fully_reversed:
+                raise HTTPException(409, "บิลเก่าไม่มีหลักฐานสูตร ณ วันขาย ต้องให้ผู้จัดการตรวจยอดคืนวัตถุดิบก่อนคืนบางรายการ")
+            posted = (await self.db.execute(select(StockMovement.product_id, func.sum(StockMovement.qty))
+                .where(StockMovement.company_id == company_id, StockMovement.location_id == location_id,
+                    StockMovement.reference_id == str(order.id), StockMovement.reference_type.in_(
+                        ["pos_sale_recipe", "pos_sale_recipe_void", "pos_sale_recipe_refund"]))
+                .group_by(StockMovement.product_id))).all()
+            usage = {}
+            for product_id, net in posted:
+                if net >= 0:
+                    continue
+                product = await self.db.get(Product, product_id)
+                if not product or product.company_id != company_id:
+                    raise HTTPException(409, "ไม่พบวัตถุดิบจากบิลเก่า")
+                usage[product_id] = (product, -Decimal(net))
         for product, qty in usage.values():
             balance = await self.stock_service._get_or_create_balance(
                 company_id=company_id,
@@ -435,10 +473,12 @@ class StoreInventoryService:
         brand_id: uuid.UUID,
         branch_id: uuid.UUID,
         items: list[tuple[Product, Decimal]],
+        snapshots: list[dict] | None = None,
     ) -> tuple[dict[uuid.UUID, tuple[Product, Decimal]], list[str]]:
         usage: dict[uuid.UUID, tuple[Product, Decimal]] = {}
         warnings: list[str] = []
         for menu_product, sold_qty in items:
+            snapshot = {"menu_product_id": str(menu_product.id), "sold_qty": str(sold_qty), "ingredients": []}
             recipe = await self.recipe_service.get_recipe_by_product(
                 menu_product.id,
                 company_id,
@@ -452,6 +492,7 @@ class StoreInventoryService:
             if not recipe.ingredients:
                 warnings.append(f"สูตร {recipe.name} ยังไม่มีวัตถุดิบ")
                 continue
+            snapshot.update({"recipe_id": str(recipe.id), "version": recipe.version_no})
             for ingredient in recipe.ingredients:
                 product = ingredient.ingredient
                 if product is None:
@@ -470,6 +511,9 @@ class StoreInventoryService:
                 required = q4(convert_quantity(recipe_qty, ingredient.unit, base_unit))
                 current_qty = usage.get(product.id, (product, Decimal("0")))[1]
                 usage[product.id] = (product, q4(current_qty + required))
+                snapshot["ingredients"].append({"product_id": str(product.id), "quantity": str(required), "unit": base_unit})
+            if snapshots is not None:
+                snapshots.append(snapshot)
         return usage, list(dict.fromkeys(warnings))
 
     @staticmethod

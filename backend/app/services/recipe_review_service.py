@@ -1,21 +1,17 @@
-"""UAT review pilot. Cross-database sources are read-only; approval is NOT activation.
-
-The operational BOM/stock bridge is deliberately held until canonical mappings
-and single-ledger ownership are accepted. This workspace never enables stock flags.
-"""
+"""Scoped UAT recipe governance. Approval and explicit publication are separate."""
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 from urllib.parse import urlparse
 from fastapi import HTTPException
-from sqlalchemy import select, or_, text
+from sqlalchemy import select, or_, text, func
 from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.database import AsyncSessionLocal, active_identity_session_factory, active_takeaway_service_session_factory
 from app.models.recipe_review import RecipeReview
 from app.models.restaurant import Brand, BrandBranch, Recipe
 from app.models.product import Product
-from app.models.takeaway import TakeawayRecipe, TakeawayRecipeIngredient, TakeawayCatalogItem
+from app.models.takeaway import TakeawayRecipe, TakeawayRecipeIngredient, TakeawayCatalogItem, TakeawayStockBalance
 from app.schemas.recipe_review import RecipeProposal
 from app.services.recipe_service import unit_conversion_factor
 
@@ -72,9 +68,17 @@ async def catalog(current, system, brand_id, ids=None, search=""):
         if search:
             q=q.where(or_(model.name.icontains(search,autoescape=True),model.sku.icontains(search,autoescape=True)))
         rows=(await db.scalars(q.order_by(model.name,model.id).limit(250))).all()
+        costs = {}
+        if system == "takeaway" and rows:
+            for item_id, value, quantity in (await db.execute(select(TakeawayStockBalance.item_id,
+                func.sum(TakeawayStockBalance.average_cost * TakeawayStockBalance.on_hand_qty),
+                func.sum(TakeawayStockBalance.on_hand_qty)).where(TakeawayStockBalance.company_id == current.company_id,
+                TakeawayStockBalance.item_id.in_([r.id for r in rows]), TakeawayStockBalance.on_hand_qty > 0)
+                .group_by(TakeawayStockBalance.item_id))).all():
+                costs[item_id] = str(value / quantity)
         return [{"id":str(r.id), "name":r.name, "sku":r.sku,
             "unit":r.unit.code if system=="restaurant" and r.unit else r.unit if system=="takeaway" else "",
-            "reference_cost":str(r.cost_price) if system=="restaurant" else None} for r in rows]
+            "reference_cost":str(r.cost_price) if system=="restaurant" else costs.get(r.id)} for r in rows]
 
 async def sources(current, system, brand_id, source_id=None, search=""):
     await scope(current, system, brand_id)
@@ -136,7 +140,7 @@ async def validate_proposal(current, row, *, complete=False):
                 raise HTTPException(422,str(exc)) from exc
     return {"items":list(items.values()),"ingredient_reference_costs":costs,
         "batch_reference_cost":str(sum(Decimal(c) for c in costs)) if all(c is not None for c in costs) else None,
-        "notice":"ราคาตั้งต้นสินค้า ณ เวลาตรวจ ไม่ใช่ต้นทุนจริงจากล็อต; Takeaway ยังไม่มีต้นทุนอ้างอิงในทะเบียนนี้"}
+        "notice":"Restaurant ใช้ราคาตั้งต้นสินค้า; Takeaway ใช้ต้นทุนเฉลี่ยถ่วงน้ำหนักสต๊อกคงเหลือ หากไม่มีสต๊อกจะแสดงว่าไม่ทราบ ไม่ใช่ต้นทุนผลิตจริง"}
 
 def visible(current):
     q=select(RecipeReview).where(RecipeReview.company_id==current.company_id)
@@ -146,7 +150,7 @@ def visible(current):
 
 def serial(row):
     return {k:getattr(row,k) for k in ("id","company_id","brand_id","branch_id","system","source_id","created_by",
-        "status","revision","baseline","proposal","history","created_at","updated_at")}
+        "status","revision","baseline","proposal","history","publication","created_at","updated_at")}
 
 def event(row,current,action,reason,**extra):
     row.history=[*row.history,{"action":action,"reason":reason,"actor_id":str(current.user_id),
@@ -156,7 +160,7 @@ async def create(db,current,payload):
     await scope(current,payload.system,payload.brand_id,payload.branch_id,write=True)
     await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key,0))"),
         {"key":f"recipe-review:{current.company_id}:{payload.request_key}"})
-    old=await db.scalar(visible(current).where(RecipeReview.request_key==payload.request_key))
+    old=await db.scalar(select(RecipeReview).where(RecipeReview.company_id==current.company_id,RecipeReview.request_key==payload.request_key))
     if old:
         original=old.history[0].get("request")
         if original != payload.model_dump(mode="json") or old.created_by!=current.user_id:
@@ -182,10 +186,11 @@ def transition_allowed(row,current,action):
     if action in {"save","submit"}:
         if not owner or row.status not in {"draft","returned"}:
             raise HTTPException(409,"เฉพาะผู้เสนอแก้ไขหรือส่งร่างของตนได้")
-    elif action in {"approve","reject","return","resolve"}:
+    elif action in {"approve","reject","return","resolve","material","publish"}:
         if not can_manage(current) or owner:
             raise HTTPException(403,"ต้องเป็นแอดมินครัวกลางระดับบริษัทคนละคนกับผู้เสนอ")
-        if row.status!="submitted": raise HTTPException(409,"คำขอไม่ได้อยู่ระหว่างรออนุมัติ")
+        allowed = {"approved_hold", "published"} if action == "publish" else {"submitted"}
+        if row.status not in allowed: raise HTTPException(409,"สถานะคำขอไม่รองรับการดำเนินการนี้")
 
 async def act(db,current,id,payload):
     row=await db.scalar(visible(current).where(RecipeReview.id==id).with_for_update())
@@ -193,6 +198,8 @@ async def act(db,current,id,payload):
     await scope(current,row.system,row.brand_id,row.branch_id,write=True)
     if row.revision!=payload.revision: raise HTTPException(409,"มีผู้แก้ไขคำขอนี้แล้ว กรุณาโหลดใหม่")
     transition_allowed(row,current,payload.action)
+    if payload.action == "publish" and row.status == "published":
+        return serial(row)
     if payload.action=="save":
         if not payload.proposal: raise HTTPException(422,"กรุณาระบุสูตร")
         if payload.proposal.output_id != UUID(row.proposal["output_id"]): raise HTTPException(422,"ห้ามเปลี่ยนสินค้าผลลัพธ์")
@@ -210,12 +217,25 @@ async def act(db,current,id,payload):
             RecipeProposal.model_validate(row.proposal)
         except ValidationError as exc:
             raise HTTPException(422,"จับคู่แล้ววัตถุดิบซ้ำหรือไม่ถูกต้อง กรุณาตรวจร่าง") from exc
-    evidence=await validate_proposal(current,row,complete=payload.action=="approve")
+    if payload.action == "material":
+        from app.services.recipe_publication_service import material
+        await material(db,current,row,payload)
+        RecipeProposal.model_validate(row.proposal)
+        evidence = {"notice": "ตรวจวัตถุดิบกลางแล้ว ไม่สร้างยอดสต๊อก"}
+    else:
+        evidence=await validate_proposal(current,row,complete=payload.action=="approve")
     if payload.action in {"submit","approve"} and row.source_id:
         now=await sources(current,row.system,row.brand_id,row.source_id)
         if not now or now[0]!=row.baseline:
             raise HTTPException(409,"สูตรต้นฉบับเปลี่ยนแล้ว ให้สร้างคำขอใหม่จากสูตรล่าสุด")
     row.status={"save":"draft","submit":"submitted","approve":"approved_hold","return":"returned","reject":"rejected"}.get(payload.action,row.status)
+    if payload.action == "approve" and row.proposal["recipe_type"] == "production":
+        from app.services.recipe_publication_service import canonical_snapshot
+        # Existing pilot approvals remain held until their mapping is reviewed.
+        await canonical_snapshot(db,row)
+    if payload.action == "publish":
+        from app.services.recipe_publication_service import publish
+        await publish(db,current,row)
     row.revision+=1
     event(row,current,payload.action,payload.reason,reference=evidence)
     await db.commit(); await db.refresh(row)

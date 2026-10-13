@@ -105,6 +105,7 @@ export default function CompanyKitchenPage(): JSX.Element {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6" data-testid="company-kitchen-page">
+      <Button asChild><Link to="/company/recipe-reviews">ทะเบียนสูตร · อนุมัติวัตถุดิบ · ผลิตจากสูตร</Link></Button>
       <header className="rounded-2xl bg-slate-950 p-6 text-white shadow-lg">
         <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end"><div><p className="text-xs font-black uppercase tracking-[0.24em] text-emerald-300">Company Admin · Central Kitchen</p><h1 className="mt-2 text-3xl font-black">ครัวกลางและวัตถุดิบร่วม</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">วัตถุดิบหนึ่งกองใช้ได้หลายแบรนด์ แต่สูตร ใบผลิต ผลผลิต ต้นทุน และรายงานยังแยกเจ้าของชัดเจน</p></div><div className="flex flex-wrap gap-2"><Button asChild variant="outline" className="border-slate-600 bg-slate-900 text-white"><Link to="/company-distribution">งานกระจายสินค้า <ArrowRight className="h-4 w-4" /></Link></Button><Button variant="outline" className="border-slate-600 bg-slate-900 text-white" onClick={() => void dashboardQuery.refetch()}><RefreshCw className="h-4 w-4" /> โหลดล่าสุด</Button></div></div>
       </header>

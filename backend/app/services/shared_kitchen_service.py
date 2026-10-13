@@ -649,6 +649,8 @@ class SharedKitchenService:
         output_product_id: uuid.UUID,
         recipe_id: uuid.UUID | None,
     ) -> Recipe:
+        from app.services.recipe_governance_guard import legacy_production
+        await legacy_production(company_id, "restaurant", [output_product_id])
         filters = [
             Recipe.company_id == company_id,
             Recipe.brand_id == brand_id,
@@ -1536,6 +1538,23 @@ class SharedKitchenService:
                 row["output_qty"] += q4(order.actual_output_qty)
                 row["waste_qty"] += q4(order.waste_qty)
                 row["input_cost"] += q4(order.total_input_cost)
+        from app.services.recipe_governance_guard import enabled
+        if enabled():
+            from app.models.recipe_review import RecipeProductionRun
+            runs = (await self.db.scalars(select(RecipeProductionRun).where(RecipeProductionRun.company_id == company_id,
+                RecipeProductionRun.created_at >= start, RecipeProductionRun.created_at <= end))).all()
+            for run in runs:
+                brand = await self.db.get(Brand, run.brand_id)
+                row = production_by_brand.setdefault(str(run.brand_id), {"brand_id": run.brand_id,
+                    "brand_name": brand.name if brand else "", "order_count": 0, "completed_count": 0,
+                    "output_qty": Decimal(0), "waste_qty": Decimal(0), "input_cost": Decimal(0)})
+                row["order_count"] += 1
+                if run.status == "completed":
+                    row["completed_count"] += 1
+                    row["input_cost"] += q4(run.snapshot["total_cost"])
+                    row["output_qty"] += q4(run.snapshot["request"]["quantity"])
+                else:
+                    row["pending_output_cost"] = row.get("pending_output_cost", Decimal(0)) + q4(run.snapshot["total_cost"])
         return {
             "date_from": date_from,
             "date_to": date_to,

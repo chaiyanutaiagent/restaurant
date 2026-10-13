@@ -110,7 +110,7 @@ export default function TakeawayCentralRecipesPage(): JSX.Element {
 
   return <div className="space-y-5">
     <div className="flex flex-wrap items-end justify-between gap-3">
-      <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">central workspace</p><h1 className="mt-1 text-2xl font-black">สูตรและการเติมสินค้า</h1><p className="mt-1 text-sm text-slate-500">สูตรแบบมีเวอร์ชัน ตรวจสูตรวนซ้ำ คำนวณต้นทุน และกำหนด safety stock รายสาขา</p></div>
+      <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">central workspace</p><h1 className="mt-1 text-2xl font-black">สูตรและการเติมสินค้า</h1><p className="mt-1 text-sm text-slate-500">สูตรแบบมีเวอร์ชัน ตรวจสูตรวนซ้ำ คำนวณต้นทุน และกำหนด safety stock รายสาขา</p><a className="mt-3 inline-flex min-h-11 items-center rounded-xl bg-blue-700 px-4 text-white" href="/company/recipe-reviews">เสนอสูตร / อนุมัติวัตถุดิบ / ผลิตจากสูตร</a></div>
       <button onClick={() => void recipesQuery.refetch()} className="flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold"><RefreshCw className="h-4 w-4" /> รีเฟรช</button>
     </div>
     <div className="grid gap-4 xl:grid-cols-2">

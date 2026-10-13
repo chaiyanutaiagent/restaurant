@@ -4,6 +4,8 @@ const output="44444444-4444-4444-8444-444444444444",ingredient="55555555-5555-45
 async function setup(page:Page,mode="normal"):Promise<string[]> {
   const writes:string[]=[];
   let rows:Record<string,unknown>[]=[];
+  if (mode === "manager") rows = [{ id: "review-1", company_id: companyId, brand_id: brandId, branch_id: branchId, system: "restaurant", source_id: null, created_by: "another-maker", revision: 2, status: "submitted", baseline: {},
+    proposal: { output_id: output, name: "สูตรรอตรวจ", recipe_type: "production", yield_qty: "1", yield_unit: "kg", loss_percent: "0", effective_from: "2026-01-01", reason: "New recipe", ingredients: [{ item_id: ingredient, requested_name: "", quantity: "500", unit: "g" }] }, history: [] }];
   await page.addInitScript(({companyId,brandId,branchId})=>localStorage.setItem("erp-auth",JSON.stringify({state:{accessToken:"test",refreshToken:"test",user:{id:"author",username:"recipe.author",company_id:companyId,display_name:"ผู้เสนอ",is_active:true},companyId,brandId,branchId,permissions:["fb.recipe.manage"],scopeTypes:["branch"],businessType:"restaurant",targetDatabase:"restaurant",stationKey:null},version:0})),{companyId,brandId,branchId});
   await page.route("**/api/v1/**",async route=>{
     const req=route.request(),p=new URL(req.url()).pathname;
@@ -13,7 +15,7 @@ async function setup(page:Page,mode="normal"):Promise<string[]> {
     else if(p.endsWith("/company/action-center")) data={items:[],total:0,unread:0};
     else if(p.endsWith("/recipe-reviews/options")) {
       if(mode==="error") return route.fulfill({status:403,json:{detail:"Denied"}});
-      data={company_id:mode==="mismatch"?"other":companyId,manager:false,brands:[{id:brandId,name:"ร้านทดสอบ",system:"restaurant"}],branches:[{id:branchId,brand_id:brandId,name:"สาขาทดสอบ",code:"BKK-01"}]};
+      data={company_id:mode==="mismatch"?"other":companyId,manager:mode==="manager",brands:[{id:brandId,name:"ร้านทดสอบ",system:"restaurant"}],branches:[{id:branchId,brand_id:brandId,name:"สาขาทดสอบ",code:"BKK-01"}]};
     } else if(p.endsWith("/recipe-reviews/catalog")) data=[{id:output,name:"หมูย่าง",sku:"FG",unit:"kg"},{id:ingredient,name:"หมูดิบ",sku:"RAW",unit:"kg"}];
     else if(p.endsWith("/recipe-reviews/sources")) data=[];
     else if(p.endsWith("/recipe-reviews") && req.method()==="GET") data={items:rows,has_more:false};
@@ -21,7 +23,12 @@ async function setup(page:Page,mode="normal"):Promise<string[]> {
       const body=req.postDataJSON();
       const row={id:"review-1",company_id:companyId,brand_id:brandId,branch_id:branchId,system:"restaurant",source_id:null,created_by:"author",revision:1,status:"draft",proposal:body.proposal,baseline:{},history:[{action:"create",actor_id:"author",reason:body.proposal.reason,at:new Date().toISOString()}]};
       rows=[row]; data=row;
-    } else if(p.endsWith("/review-1/actions")) { rows=[{...rows[0],revision:2,status:"submitted"}]; data=rows[0]; }
+    } else if(p.endsWith("/review-1/actions")) {
+      const action=req.postDataJSON().action;
+      rows=[{...rows[0],revision:Number(rows[0].revision)+1,status:action==="publish"?"published":action==="approve"?"approved_hold": "submitted"}]; data=rows[0];
+    } else if(p.endsWith("/recipe-reviews/canonical")) data=[{id:ingredient,name:"หมูดิบกลาง",unit:"g",code:"PORK"}];
+    else if(p.endsWith("/recipe-reviews/output-locations")) data=[{id:branchId,name:"คลังสำเร็จรูป"}];
+    else if(p.endsWith("/recipe-reviews/production")) data=[];
     return route.fulfill({json:{data,error:null}});
   });
   return writes;
@@ -50,4 +57,21 @@ for(const mode of ["error","mismatch"]) test(`review ${mode} fails closed`,async
   await setup(page,mode); await page.goto("/company/recipe-reviews");
   await expect(page.getByRole("alert")).toContainText("อ่านข้อมูลไม่ได้");
   await expect(page.getByRole("button",{name:"สร้างร่างสูตรใหม่",exact:true})).toHaveCount(0);
+});
+test("central manager reviews, explicitly publishes and sees production controls",async({page},info)=>{
+  const writes=await setup(page,"manager");
+  await page.setViewportSize({width:1180,height:820}); await page.goto("/company/recipe-reviews");
+  await page.getByRole("button",{name:/สูตรรอตรวจ/}).click();
+  await expect(page.getByRole("heading",{name:"อนุมัติวัตถุดิบกลาง",exact:true})).toBeVisible();
+  await page.getByLabel("เหตุผลการดำเนินการ").fill("ตรวจสูตรและส่วนผสมแล้ว");
+  await page.getByRole("button",{name:"อนุมัติเนื้อหา (ยังไม่เปิดใช้)",exact:true}).click();
+  await expect(page.getByRole("button",{name:"เปิดใช้สูตรที่อนุมัติ",exact:true})).toBeDisabled();
+  await page.getByLabel("เหตุผลการดำเนินการ").fill("เปิดใช้ตามกำหนด UAT");
+  page.once("dialog",d=>void d.accept());
+  await page.getByRole("button",{name:"เปิดใช้สูตรที่อนุมัติ",exact:true}).click();
+  await expect(page.getByRole("heading",{name:/ผลิตจากสูตรอนุมัติ/})).toBeVisible();
+  await expect(page.getByRole("button",{name:"ยืนยันผลิตและตัดวัตถุดิบ",exact:true})).toBeDisabled();
+  expect(await page.getByTestId("recipe-reviews").evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+  await page.screenshot({path:info.outputPath("recipe-operations-tablet.png"),fullPage:true});
+  expect(writes).toEqual(["/api/v1/company/recipe-reviews/review-1/actions","/api/v1/company/recipe-reviews/review-1/actions"]);
 });

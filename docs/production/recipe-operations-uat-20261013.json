@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-13",
+  "scope": "Seven-work-package Restaurant/Takeaway recipe governance engineering completion; UAT only",
+  "url": "https://uat-app.foodchainservice.com/company/recipe-reviews",
+  "engineering_status": "complete",
+  "physical_acceptance_status": "deferred_by_owner",
+  "production_deployed": false,
+  "production_flags_changed": false,
+  "database_routing_changed": false,
+  "work_packages": [
+    {"number": 1, "delivered": "Company/brand/branch ownership, production versus sale recipes, scoped authoring, company-level maker/checker, stale-revision protection"},
+    {"number": 2, "delivered": "Unified Restaurant/Takeaway registry, brand/branch/status filters, source links from Restaurant/Takeaway/Company Kitchen, read existing source recipes without copying operational BOMs"},
+    {"number": 3, "delivered": "Create/edit/submit drafts with output, quantities, units, yield, loss, effective date and reason; no active-source change on draft/submit/approval"},
+    {"number": 4, "delivered": "Manager resolves requested materials to canonical Company ingredients or approves metadata creation; same-name checks, unit conversion, deterministic Takeaway projection, zero opening stock"},
+    {"number": 5, "delivered": "Before/after proposal, reference costs, separate manager approve/return/reject, immutable decision snapshots, Action Center notifications and pending-output alerts"},
+    {"number": 6, "delivered": "Explicit approved-version publication; future dates held until explicit publication when due; immutable source versions; raw materials issued from shared Company FIFO lots for both systems; recoverable output delivery; store-only Takeaway assembly consumption; frozen Restaurant sale BOM returns; per-brand cost reporting"},
+    {"number": 7, "delivered": "Both databases backed up and restored in isolated verification; 20 legacy source snapshots registered without changing operational recipes or stock; Chambo latest active 5 kg/full-marinade recipe verified; UAT smoke and rollback preconditions checked"}
+  ],
+  "deployment": {
+    "host": "100.66.192.56",
+    "compose_project": "restaurant-pos-uat-drill",
+    "release": "/home/behappyaiagent/restaurant-uat-releases/recipe-operations-20261013",
+    "backend_image": "restaurant-pos-backend:uat-recipe-operations-20261013-r1",
+    "backend_digest": "sha256:36115287ddbb35fd48285debc225dbc11528e402c05e98658fc27d37ef31a1b9",
+    "frontend_image": "restaurant-pos-frontend:uat-recipe-operations-20261013",
+    "frontend_digest": "sha256:7aac3bdd3ac537a589a92b37c7e7a58409afd0f8ddfd512e6b6af0bae0b5f21a",
+    "schema": "recipeops0034",
+    "repository_merge_only": "recipeopsmerge0035; not applied to UAT; Stripe/other migration branch not activated",
+    "overlay_note": "Deployment patched the live source and preserved existing server-only Takeaway/catalog/receipt and App routes. Unrelated local changes were excluded. Images were not built by blindly replacing the server application with this checkout."
+  },
+  "backups": {
+    "directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/recipe-operations-20261013",
+    "legacy": {"file": "predeploy.dump", "sha256": "15e044d0016312e53e81d3cd82ce5ab529866e2652d69b5abb5b4357029157e1", "isolated_restore": "pass"},
+    "takeaway": {"file": "takeaway-predeploy.dump", "sha256": "30ca3c0c89caea0c0337e98cc3c892b9da3a31e6cf9fc29388d6463da5c91434", "isolated_restore": "pass, 13 recipes"},
+    "rollback": "Preserve additive tables and evidence; never downgrade stock or review history. Prior pilot-image rollback is allowed only while no approved/published recipes and no production runs exist, covering uncertain source publication commits too. Otherwise retain governance guards and forward-fix/recover pending outputs. Full database restore requires a separately coordinated write freeze; do not independently restore one database over new transactions."
+  },
+  "automated_checks": {
+    "backend_unit_cases": 6,
+    "split_database_integration": ["maker/checker", "unresolved-material rejection", "canonical metadata creates no stock", "shared material across Restaurant and Takeaway", "source commit succeeded / central commit lost publication retry", "raw-issue committed / output delivery failed recovery", "no duplicate raw or finished stock", "FIFO excluding expired lots", "idempotency-key mismatch", "immutable approved proposal", "legacy registration idempotency", "Takeaway store assembly and historical refund", "shared-kitchen report per brand"],
+    "frontend": "TypeScript pass; build pass; four Playwright cases covering tablet draft/submit, offline, permission/context failures, manager approval and explicit publish/production controls; visual inspection pass",
+    "public_http": {"page": 200, "anonymous_api": 401},
+    "backend_health": "healthy",
+    "production_and_existing_data_containers": "IDs and images unchanged"
+  },
+  "live_data": {
+    "restaurant_krua_pa": {"recipes_registered": 7, "catalog_items": 52},
+    "takeaway_chambo": {"recipes_registered": 13, "catalog_items": 48, "active_marinade": "CHAMBO-PORK-MARINADE-NB-V3 — น้ำหมักเต็มชุดเดิมสำหรับหมู 5 กก.", "active_marinade_version": 6, "marinade_yield_g": "976.0000", "active_pork_recipe_version": 6},
+    "restaurant_the_loft": {"recipes_registered": 0, "catalog_items": 16},
+    "new_published_recipes": 0,
+    "new_production_runs": 0,
+    "existing_source_recipes_and_stock": "unchanged",
+    "maintenance_attribution": "Registration maintenance explicitly selects an active system superuser. Initial first-active-user attribution was corrected with separate AuditLog entries; frozen source snapshots were retained."
+  },
+  "operating_boundaries": [
+    "Legacy operational recipes remain unchanged; creating or editing recipes through old UAT entry points is blocked in favor of the review workflow.",
+    "Approval is not publication. A different company-level kitchen manager must approve, then explicitly publish on or after the requested start date.",
+    "Production requires reviewed canonical ingredient mapping, a configured shared raw kitchen, real received unexpired lots, and the brand's ready location. No opening stock, automatic approval or physical inventory migration was invented.",
+    "The new production command uses recipe-scaled input quantities and explicit actual good output. It does not silently consume existing Takeaway raw stock or convert existing ready/semifinished balances into Company raw lots.",
+    "After raw commit, output_pending is durable. Retry that run, not a new request. The Action Center and production list expose pending delivery.",
+    "New Restaurant sales freeze their BOM for later returns. Partial returns for legacy bills without a frozen BOM fail closed for manager reconciliation; full voids use original net movements instead of today's recipe.",
+    "Reference material costs are not actual production costs. Actual raw-lot cost is recorded on production and remains separated by brand."
+  ],
+  "human_checks_deferred": ["recipe taste/yield and actual raw consumption", "canonical ingredient identity and physical opening-lot verification", "semifinished/ready-stock ownership and real warehouse workflow", "two-person role acceptance on actual devices", "physical production, receipt/transfer and stock count", "approval to enable Production"],
+  "repository": "https://github.com/chaiyanutaiagent/restaurant",
+  "branch": "codex/recipe-quick-create"
+}

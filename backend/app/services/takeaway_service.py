@@ -558,6 +558,9 @@ class TakeawayService:
         return balance
 
     async def create_stock_movement(self, data: TakeawayStockMovementCreate) -> TakeawayStockBalance:
+        if data.movement_type.startswith("production"):
+            from app.services.recipe_governance_guard import legacy_production
+            await legacy_production(self.current.company_id, "takeaway", [data.item_id])
         if self.current.client_surface == "takeaway_store":
             await self._store_location(data.location_id)
             assert_takeaway_scope(self.current, brand_id=data.brand_id, branch_id=data.branch_id)
@@ -879,7 +882,9 @@ class TakeawayService:
                     quantity=item.quantity,
                 )
             )
-            if item.catalog_item_id is not None and str(item.catalog_item_id) in stock_item_ids:
+            from app.services.recipe_takeaway_sale import consume
+            assembled = await consume(self, order, item, sale_location_id) if item.catalog_item_id else False
+            if not assembled and item.catalog_item_id is not None and str(item.catalog_item_id) in stock_item_ids:
                 await self._apply_stock(
                     location_id=sale_location_id,
                     item_id=item.catalog_item_id,
@@ -1105,7 +1110,9 @@ class TakeawayService:
                     quantity=line.quantity,
                 )
             )
-            if item.track_stock:
+            from app.services.recipe_takeaway_sale import consume
+            assembled = await consume(self, order, order_item, sale_location_id)
+            if not assembled and item.track_stock:
                 await self._apply_stock(
                     location_id=sale_location_id,
                     item_id=item.id,
@@ -1520,6 +1527,8 @@ class TakeawayService:
         return walk(output_item_id)
 
     async def create_recipe(self, data: TakeawayRecipeCreate) -> TakeawayRecipe:
+        from app.services.recipe_governance_guard import direct_write
+        direct_write()
         await self._validate_context(brand_id=data.brand_id, branch_id=data.branch_id)
         item_ids = {data.output_item_id, *(line.item_id for line in data.ingredients)}
         catalog_ids = set(
@@ -2340,6 +2349,8 @@ class TakeawayService:
         return row
 
     async def create_production_batch(self, data: TakeawayProductionBatchCreate) -> TakeawayProductionBatch:
+        from app.services.recipe_governance_guard import legacy_production
+        await legacy_production(self.current.company_id, "takeaway", [r.item_id for r in data.lines if r.line_type == "output"])
         await self._validate_context(brand_id=data.brand_id)
         sequence = int(
             await self.db.scalar(
@@ -2435,6 +2446,8 @@ class TakeawayService:
         }
         if set(lines) != {line.line_id for line in data.lines}:
             raise HTTPException(status_code=422, detail="Actual production lines must match the batch")
+        from app.services.recipe_governance_guard import legacy_production
+        await legacy_production(self.current.company_id, "takeaway", [r.item_id for r in lines.values() if r.line_type == "output"])
         for actual in data.lines:
             line = lines[actual.line_id]
             line.actual_qty = actual.actual_qty

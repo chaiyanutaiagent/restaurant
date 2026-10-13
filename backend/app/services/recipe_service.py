@@ -731,6 +731,8 @@ class RecipeService:
         payload: RecipeCreate,
         actor_id: uuid.UUID | None = None,
     ) -> tuple[Recipe, list[RecipeInventoryUpdate]]:
+        from app.services.recipe_governance_guard import direct_write
+        direct_write()
         await self._validate_ingredient_units(company_id, payload.ingredients)
         await self._validate_no_recipe_cycle(
             company_id,
@@ -793,6 +795,8 @@ class RecipeService:
         payload: RecipeUpdate,
         actor_id: uuid.UUID | None = None,
     ) -> tuple[Recipe, list[RecipeInventoryUpdate]]:
+        from app.services.recipe_governance_guard import direct_write
+        direct_write()
         if payload.name is not None:
             recipe.name = payload.name
         if payload.selling_price is not None and recipe.product is not None:
@@ -857,6 +861,8 @@ class RecipeService:
         return saved, inventory_updates  # type: ignore[return-value]
 
     async def delete_recipe(self, recipe: Recipe) -> None:
+        from app.services.recipe_governance_guard import direct_write
+        direct_write()
         await self.db.delete(recipe)
         await self.db.commit()
 

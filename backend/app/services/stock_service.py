@@ -474,6 +474,9 @@ class StockService:
         if not inputs and not outputs:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one production item is required")
 
+        from app.services.recipe_governance_guard import legacy_production
+        await legacy_production(company_id, "restaurant", [r["product_id"] for r in outputs])
+
         location = await self._get_location(location_id, company_id)
         movements: list[StockMovement] = []
 

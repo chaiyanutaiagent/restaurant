@@ -430,6 +430,7 @@ export default function RecipesPage({ brandSlug: brandOverride, companyKitchen =
 
   return (
     <div>
+      <a className="m-4 inline-flex min-h-11 items-center rounded-xl bg-blue-700 px-4 text-white" href="/company/recipe-reviews">เสนอสูตร / อนุมัติสูตร Restaurant และ Takeaway</a>
       <PageHeader
         title={isBrandCentral ? `สูตรแบรนด์ ${brandSlug}` : "สูตรอาหาร / เครื่องดื่ม"}
         subtitle={isBrandCentral ? "แยกสูตรผลิตครัวกลางออกจากสูตรเมนูหน้าร้าน เพื่อควบคุมต้นทุนและสูตรลับให้ชัดเจน" : "จัดการสูตร ต้นทุนวัตถุดิบ และ Gross Margin"}

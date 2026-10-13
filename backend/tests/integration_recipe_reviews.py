@@ -12,7 +12,7 @@ from app.dependencies import TokenData
 from app.models.restaurant import Brand, BrandBranch, Recipe
 from app.models.branch import Branch
 from app.models.product import Product, Unit
-from app.models.takeaway import TakeawayCatalogItem, TakeawayRecipe, TakeawayRecipeIngredient
+from app.models.takeaway import TakeawayCatalogItem, TakeawayRecipe, TakeawayRecipeIngredient, TakeawayStockBalance
 from app.models.recipe_review import RecipeReview
 from app.schemas.recipe_review import ReviewCreate, ReviewAction
 from app.services import recipe_review_service as service
@@ -24,7 +24,7 @@ async def main():
     # Build only its three source tables inside the isolated test clone.
     async with engine.begin() as connection:
         assert await connection.scalar(text("select current_database()"))=="unused"
-        for model in (TakeawayCatalogItem,TakeawayRecipe,TakeawayRecipeIngredient):
+        for model in (TakeawayCatalogItem,TakeawayRecipe,TakeawayRecipeIngredient,TakeawayStockBalance):
             await connection.run_sync(lambda sync,table=model.__table__: table.create(sync,checkfirst=True))
     async with AsyncSessionLocal() as db:
         assert await db.scalar(text("select current_database()"))=="unused"
@@ -56,7 +56,7 @@ async def main():
         for actor,items in actors:
             system="restaurant" if actor.permissions[0]=="fb.recipe.manage" else "takeaway"
             p=ReviewCreate(system=system,brand_id=actor.brand_id,branch_id=actor.branch_id,request_key=uuid4(),proposal=dict(
-                output_id=items[0].id,name="Review test",recipe_type="production",yield_qty=1,yield_unit="kg",effective_from=date.today(),reason="Need review",
+                output_id=items[0].id,name="Review test",recipe_type="sale",yield_qty=1,yield_unit="kg",effective_from=date.today(),reason="Need review",
                 ingredients=[dict(requested_name="New material",quantity="150",unit="g")]))
             async with AsyncSessionLocal() as db: created=await service.create(db,actor,p)
             async with AsyncSessionLocal() as db: assert (await service.create(db,actor,p))["id"]==created["id"]

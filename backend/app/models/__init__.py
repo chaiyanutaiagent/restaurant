@@ -21,6 +21,7 @@ from app.models.staff_assignment import StaffRoleAssignment
 from app.models.audit import AuditLog
 from app.models.document_snapshot import DocumentSnapshot
 from app.models.credit_sales import CreditSale, CreditSaleDocument
+from app.models.recipe_review import RecipeReview
 from app.models.auth import RefreshToken
 from app.models.approval import ApprovalGrantUsage, ManagerPinCredential
 from app.models.pricing import PriceCalculation, PriceOverrideAudit

@@ -58,6 +58,7 @@ const navigation: CompanyNavItem[] = [
   { label: "ขายเชื่อและลูกหนี้ (UAT)", to: "/company/credit-sales", icon: ClipboardList, permissions: ["accounting.invoice.view"] },
   { label: "อายุหนี้และกำหนดรับ–จ่าย", to: "/company/debt-aging", icon: ClipboardList, permission: "accounting.report.view" },
   { label: "ต้นทุนและจุดคุ้มทุน", to: "/company/cost-analysis", icon: ClipboardList, permission: "accounting.report.view" },
+  { label: "สูตรและอนุมัติครัวกลาง (UAT)", to: "/company/recipe-reviews", icon: ClipboardList, permissions: ["fb.recipe.manage", "takeaway.production.manage", "company.kitchen.manage"] },
   { label: "สถานะระบบและการออกเวอร์ชัน", to: "/company/governance", icon: Gauge, permissions: ["system.company.view", "system.company.edit", "accounting.report.view"] },
   { label: "องค์กร", to: "/company/organization", icon: Building2, permission: "system.branch.view" },
   { label: "พนักงานและสิทธิ์", to: "/company/people", icon: Users, permissions: ["system.user.view", "system.role.view"] },

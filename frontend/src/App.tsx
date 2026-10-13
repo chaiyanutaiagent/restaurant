@@ -111,6 +111,7 @@ import CompanyDocumentsPage from "@/pages/company/CompanyDocumentsPage";
 import CreditSalesPage from "@/pages/company/CreditSalesPage";
 import DebtAgingPage from "@/pages/company/DebtAgingPage";
 import CostAnalysisPage from "@/pages/company/CostAnalysisPage";
+import RecipeReviewsPage from "@/pages/company/RecipeReviewsPage";
 import { DOCUMENT_CENTER_PERMISSIONS } from "@/config/businessDocuments";
 import CompanyPeopleAccessPage from "@/pages/company/CompanyPeopleAccessPage";
 import CompanyAccessReviewPage from "@/pages/company/CompanyAccessReviewPage";
@@ -405,6 +406,9 @@ export default function App(): JSX.Element {
                 <Route path="/company/credit-sales" element={<CreditSalesPage />} />
               </Route>
               <Route path="/company/actions" element={<CompanyActionCenterPage />} />
+              <Route element={<ProtectedRoute permissions={["fb.recipe.manage", "takeaway.production.manage", "company.kitchen.manage"]} />}>
+                <Route path="/company/recipe-reviews" element={<RecipeReviewsPage />} />
+              </Route>
               <Route element={<ProtectedRoute permission="accounting.report.view" />}>
                 <Route path="/company/debt-aging" element={<DebtAgingPage />} />
                 <Route path="/company/cost-analysis" element={<CostAnalysisPage />} />

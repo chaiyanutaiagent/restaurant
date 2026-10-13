@@ -201,7 +201,8 @@ class RefundService:
             items_snapshot.append({
                 "sale_order_item_id": str(item.id), "product_id": str(item.product_id),
                 "variant_id": str(item.variant_id) if item.variant_id else None,
-                "product_name": item.product_name, "quantity": str(qty),
+                "product_name": (" · ".join(filter(None, [item.product_name[:150], (item.variant_name or "")[:200], (item.sku or "")[:100]]))
+                    if self.retail_cash_pilot else item.product_name), "quantity": str(qty),
                 "subtotal_amount": str(line_net), "discount_amount": str(line_discount),
                 "vat_amount": str(line_vat), "total_amount": str(line_total),
                 "vat_type": item.vat_type, "vat_rate": str(item.vat_rate),

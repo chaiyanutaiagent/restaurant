@@ -3,7 +3,7 @@ import QRCode from "qrcode";
 
 const company="11111111-1111-4111-8111-111111111111", brand="22222222-2222-4222-8222-222222222222", branch="33333333-3333-4333-8333-333333333333";
 const unit="44444444-4444-4444-8444-444444444444", location="55555555-5555-4555-8555-555555555555", product="66666666-6666-4666-8666-666666666666";
-async function setup(page:Page, existing=false, retry=false) {
+async function setup(page:Page, existing=false, retry=false, variant=false) {
   await page.setViewportSize({width:1024,height:768});
   await page.addInitScript(({company,brand,branch})=>{
     localStorage.setItem("erp-auth",JSON.stringify({state:{accessToken:"fixture-token",refreshToken:"fixture-refresh",companyId:company,brandId:brand,branchId:branch,businessType:"retail_pos",targetDatabase:"retail_pos",permissions:["*"],scopeTypes:["company","branch"],user:{id:company,company_id:company,username:"tester",is_active:true}},version:0}));
@@ -15,7 +15,7 @@ async function setup(page:Page, existing=false, retry=false) {
     if(path.endsWith("/units"))return ok([{id:unit,name:"ชิ้น",is_active:true}]);
     if(path.endsWith("/categories"))return ok([]);
     if(path.endsWith("/stock/locations"))return ok([{id:location,branch_id:branch,code:"SHOP",name:"หน้าร้าน",is_active:true}]);
-    if(path.endsWith("/intake-lookup"))return ok({product:existing?{id:product,name:"น้ำดื่ม",barcode:"000123",sku:"WATER",selling_price:"10",cost_price:"5"}:null});
+    if(path.endsWith("/intake-lookup"))return ok({product:existing?{id:product,name:"น้ำดื่ม",barcode:"000123",sku:"WATER",selling_price:"10",cost_price:"5",variant_id:variant?unit:null,variant_name:variant?"500 ml":null}:null});
     if(path.endsWith("/intake")){
       submissions.push(route.request().postData()??"");
       if(retry&&submissions.length===1)return route.fulfill({status:503,body:"unavailable"});
@@ -70,6 +70,68 @@ test("retail intake goes offline without submitting",async({page,context})=>{
   await expect(page.getByRole("alert")).toContainText("ต้องออนไลน์");
   await expect(page.getByRole("button",{name:"บันทึกสินค้าและสต๊อก",exact:true})).toBeDisabled();
   expect(submissions).toHaveLength(0);
+});
+
+test("retail custom options creates a product brand and color size SKU on mobile",async({page})=>{
+  const submissions=await setup(page);
+  await page.setViewportSize({width:390,height:844});
+  await page.route("**/products/retail/product-brands",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({data:route.request().method()==="POST"?{id:brand,name:"Demo Clothing"}:[]})}));
+  await page.getByLabel("ชื่อแบรนด์สินค้าใหม่",{exact:true}).fill("Demo Clothing");
+  await page.getByRole("button",{name:"เพิ่มแบรนด์สินค้า",exact:true}).click();
+  await expect(page.getByLabel("แบรนด์สินค้า",{exact:true})).toHaveValue(brand);
+  await page.getByLabel("รูปแบบสินค้า",{exact:true}).selectOption("variant");
+  await page.getByLabel("ชื่อสินค้า",{exact:true}).fill("เสื้อยืด");
+  await page.getByLabel("ชื่อกลุ่มตัวเลือก 1",{exact:true}).fill("สี");
+  await page.getByLabel("ค่าตัวเลือก 1",{exact:true}).fill("ดำ");
+  await page.getByRole("button",{name:"+ กลุ่มตัวเลือก",exact:true}).click();
+  await page.getByLabel("ชื่อกลุ่มตัวเลือก 2",{exact:true}).fill("ไซซ์");
+  await page.getByLabel("ค่าตัวเลือก 2",{exact:true}).fill("M");
+  await page.getByLabel("หน่วยสินค้า",{exact:true}).selectOption(unit);
+  await page.getByLabel("ราคาขาย (บาท)",{exact:true}).fill("199");
+  await page.getByLabel("จำนวนรับเข้า",{exact:true}).fill("3");
+  await page.getByLabel("คลังรับสินค้า",{exact:true}).selectOption(location);
+  for(const width of [320,390,820,1440]){
+    await page.setViewportSize({width,height:900});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  }
+  await page.getByRole("button",{name:"บันทึกสินค้าและสต๊อก",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"บันทึกเรียบร้อย"})).toBeVisible();
+  expect(submissions).toHaveLength(1);
+  expect(submissions[0]).toContain('"product_type":"variant"');
+  expect(submissions[0]).toContain('"product_brand_id":"'+brand+'"');
+  expect(submissions[0]).toContain('"attributes":{"สี":"ดำ","ไซซ์":"M"}');
+});
+
+test("retail custom options appends only to a selected family and uses its dimensions",async({page})=>{
+  const submissions=await setup(page);
+  await page.route("**/products/retail/variant-parents?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({data:[{id:product,name:"รองเท้า",product_brand_name:"Demo",option_names:["สี","เบอร์"],variants:[{name:"ดำ / 42",barcode:"old"}]}]})}));
+  await page.getByLabel("รูปแบบสินค้า",{exact:true}).selectOption("append");
+  await page.getByLabel("สินค้าหลัก",{exact:true}).selectOption(product);
+  await expect(page.getByLabel("ชื่อสินค้า",{exact:true})).toBeDisabled();
+  await expect(page.getByLabel("ชื่อสินค้า",{exact:true})).toHaveValue("รองเท้า");
+  await expect(page.getByLabel("ชื่อกลุ่มตัวเลือก 1",{exact:true})).toBeDisabled();
+  await page.getByLabel("ค่าตัวเลือก 1",{exact:true}).fill("ขาว");
+  await page.getByLabel("ค่าตัวเลือก 2",{exact:true}).fill("43");
+  await page.getByLabel("ราคาขาย (บาท)",{exact:true}).fill("990");
+  await expect(page.getByLabel("หน่วยสินค้า",{exact:true})).toHaveCount(0);
+  await page.getByRole("button",{name:"บันทึกสินค้าและสต๊อก",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"บันทึกเรียบร้อย"})).toBeVisible();
+  expect(submissions[0]).toContain('"parent_product_id":"'+product+'"');
+  expect(submissions[0]).toContain('"attributes":{"สี":"ขาว","เบอร์":"43"}');
+});
+
+test("retail existing variant intake preserves variant identity and price on retry",async({page})=>{
+  const submissions=await setup(page,true,true,true);
+  await expect(page.getByText("แบบสินค้า: 500 ml",{exact:true})).toBeVisible();
+  await expect(page.getByLabel("ราคาขาย (บาท)",{exact:true})).toBeDisabled();
+  await page.getByLabel("คลังรับสินค้า",{exact:true}).selectOption(location);
+  await page.getByRole("button",{name:"ยืนยันรับสินค้าเดิมเพิ่ม",exact:true}).click();
+  await page.getByRole("button",{name:"ลองบันทึกเดิมอีกครั้ง",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"บันทึกเรียบร้อย"})).toBeVisible();
+  expect(submissions).toHaveLength(2);
+  expect(submissions[0]).toContain('"existing_variant_id":"'+unit+'"');
+  const ids=submissions.map(body=>body.match(/"request_id":"([^"]+)"/)?.[1]);
+  expect(ids[0]).toBe(ids[1]);
 });
 
 test("retail intake mobile form supports photo and stock without horizontal overflow",async({page})=>{

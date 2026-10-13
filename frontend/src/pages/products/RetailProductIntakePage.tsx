@@ -12,11 +12,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ProductBarcodeScanner from "@/components/products/ProductBarcodeScanner";
 import RetailCategoryCreateDialog from "@/components/products/RetailCategoryCreateDialog";
+import RetailProductOptions, { emptyRetailOptions, type RetailOptions } from "@/components/products/RetailProductOptions";
 import type { Category, Unit } from "@/types/product";
 import type { ApiResponse } from "@/types/api";
 
-type Existing = {id:string;name:string;barcode:string;sku:string;selling_price:string;cost_price:string};
-type Receipt = {product_id:string;name:string;created:boolean;qty_received:string;replayed:boolean};
+type Existing = {id:string;name:string;barcode:string;sku:string;selling_price:string;cost_price:string;variant_id?:string;variant_name?:string};
+type Receipt = {product_id:string;name:string;created:boolean;qty_received:string;replayed:boolean;variant_name?:string};
 const empty = {name:"",description:"",unit_id:"",category_id:"",selling_price:"0",cost_price:"0",qty:"0",location_id:"",vat_type:"included",vat_rate:"7"};
 
 function Workspace(): JSX.Element {
@@ -25,12 +26,13 @@ function Workspace(): JSX.Element {
   const companyId = useAuthStore(s=>s.companyId);
   const brandId = useAuthStore(s=>s.brandId);
   const hasPermission = useAuthStore(s=>s.hasPermission);
-  const canReceive = ["inventory.stock.adjust","brand.store.stock.adjust","brand.central.raw_stock.manage","brand.central.ready_stock.manage"].some(hasPermission);
+  const canReceive = ["inventory.stock.adjust","brand.store.stock.adjust"].some(hasPermission);
   const cache = useQueryClient();
   const [barcode,setBarcode] = useState("");
   const [checked,setChecked] = useState("");
   const [existing,setExisting] = useState<Existing|null>(null);
   const [fields,setFields] = useState(empty);
+  const [options,setOptions] = useState<RetailOptions>(emptyRetailOptions);
   const [image,setImage] = useState<File|null>(null);
   const [preview,setPreview] = useState("");
   const [scanning,setScanning] = useState(false);
@@ -57,6 +59,7 @@ function Workspace(): JSX.Element {
       const result=(await api.get<ApiResponse<{product:Existing|null}>>("/products/retail/intake-lookup",{params:{barcode:normalized}})).data.data.product;
       if(sequence!==lookupSequence.current)return;
       setExisting(result);setChecked(normalized);setImage(null);
+      setOptions(emptyRetailOptions);
       setFields(result?{...empty,name:result.name,selling_price:result.selling_price,cost_price:result.cost_price,qty:"1"}:empty);
     } catch(e) {if(sequence===lookupSequence.current)setError(message(e));} finally {setBusy(false);}
   }
@@ -68,13 +71,22 @@ function Workspace(): JSX.Element {
   }
   async function save(event:React.FormEvent) {
     event.preventDefault();
-    if(inFlight.current||!online||checked!==barcode.trim())return;
+    if(inFlight.current||busy||!online||checked!==barcode.trim())return;
+    if(!pending.current&&!existing&&options.mode!=="simple"){
+      const keys=options.attributes.map(row=>row.key.trim().replace(/\s+/g," ").toLocaleLowerCase());
+      if(new Set(keys).size!==keys.length){setError("ชื่อกลุ่มตัวเลือกซ้ำกัน กรุณาแก้ไข");return;}
+      if(options.mode==="append"&&!options.parent){setError("กรุณาเลือกสินค้าหลัก");return;}
+    }
     inFlight.current=true;setBusy(true);setError("");
     if(!pending.current){
       const form=new FormData();
       form.append("payload",JSON.stringify({...fields,request_id:crypto.randomUUID(),barcode:checked,
         unit_id:fields.unit_id||null,category_id:fields.category_id||null,location_id:fields.location_id||null,
-        existing_product_id:existing?.id??null}));
+        existing_product_id:existing?.id??null,existing_variant_id:existing?.variant_id??null,
+        parent_product_id:!existing&&options.mode==="append"?options.parent?.id:null,
+        product_brand_id:options.productBrandId||null,
+        product_type:options.mode==="simple"?"simple":"variant",
+        attributes:!existing&&options.mode!=="simple"?Object.fromEntries(options.attributes.map(row=>[row.key.trim(),row.value.trim()])):{}}));
       if(image&&!existing)form.append("image",image);
       pending.current=form;
     }
@@ -100,7 +112,7 @@ function Workspace(): JSX.Element {
     <p className="text-sm text-slate-600">1 สแกนและตรวจสินค้า → 2 รายละเอียดและราคา → 3 คลังและจำนวน → 4 รูปสินค้า → บันทึก</p>
     {!online&&<p role="alert" className="rounded-xl bg-amber-100 p-4">ต้องออนไลน์เพื่อป้องกันสินค้าซ้ำและยืนยันยอดสต๊อก</p>}
     {error&&<p role="alert" className="rounded-xl bg-red-50 p-4 text-red-700">{error}</p>}
-    {receipt?<section className="rounded-2xl border bg-white p-6" role="status"><h2 className="text-xl font-bold">บันทึกเรียบร้อย</h2><p>{receipt.name} · รับเข้า {receipt.qty_received} หน่วย</p><p>{receipt.created?"สร้างสินค้าใหม่แล้ว":"รับสินค้าเดิมเพิ่ม โดยไม่เปลี่ยนราคาขายหรือรูปเดิม"}</p><Button className="mt-4" onClick={()=>{setReceipt(null);setChecked("");setBarcode("");setFields(empty);setExisting(null);setImage(null);}}>เพิ่มสินค้าถัดไป</Button></section>:<>
+    {receipt?<section className="rounded-2xl border bg-white p-6" role="status"><h2 className="text-xl font-bold">บันทึกเรียบร้อย</h2><p>{receipt.name}{receipt.variant_name?` · ${receipt.variant_name}`:""} · รับเข้า {receipt.qty_received} หน่วย</p><p>{receipt.created?"สร้างสินค้า / ตัวเลือกใหม่แล้ว":"รับสินค้าเดิมเพิ่ม โดยไม่เปลี่ยนราคาขายหรือรูปเดิม"}</p><Button className="mt-4" onClick={()=>{setReceipt(null);setChecked("");setBarcode("");setFields(empty);setOptions(emptyRetailOptions);setExisting(null);setImage(null);}}>เพิ่มสินค้าถัดไป</Button></section>:<>
       <section className="rounded-2xl border bg-white p-5"><label className="mb-2 block font-semibold" htmlFor="intake-barcode">บาร์โค้ดสินค้า</label><div className="flex flex-wrap gap-3">
         <Input id="intake-barcode" autoCapitalize="none" autoCorrect="off" spellCheck={false} className="h-12 min-w-40 flex-1" value={barcode} maxLength={100} disabled={busy||locked} onChange={e=>changeCode(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();void lookup();}}} placeholder="สแกน / ยิงบาร์โค้ด / กรอกรหัส" />
         <Button className="h-12" disabled={busy||locked||!online} onClick={()=>void lookup()}>ตรวจบาร์โค้ด</Button>
@@ -108,13 +120,15 @@ function Workspace(): JSX.Element {
       </div></section>
       {checked&&<form onSubmit={save} className="space-y-4"><fieldset disabled={busy||locked} className="grid gap-4 md:grid-cols-2">
         <section className="space-y-3 rounded-2xl border bg-white p-5"><h2 className="font-bold">{existing?"พบสินค้าเดิม — รับเพิ่ม":"สินค้าใหม่ — รายละเอียดและราคา"}</h2>
-          <label className="block">ชื่อสินค้า<Input required value={fields.name} disabled={!!existing} maxLength={500} onChange={e=>field("name",e.target.value)}/></label>
-          {!existing&&<><label className="block">รายละเอียด<Input value={fields.description} maxLength={2000} onChange={e=>field("description",e.target.value)}/></label>
+          {existing?.variant_name&&<p className="font-semibold text-blue-700">แบบสินค้า: {existing.variant_name}</p>}
+          <label className="block">ชื่อสินค้า<Input required={options.mode!=="append"} value={options.mode==="append"?options.parent?.name??"":fields.name} disabled={!!existing||options.mode==="append"} maxLength={500} onChange={e=>field("name",e.target.value)}/></label>
+          {!existing&&<RetailProductOptions value={options} onChange={setOptions} disabled={busy||locked||!online} onBusyChange={setBusy}/>}
+          {!existing&&options.mode!=="append"&&<><label className="block">รายละเอียด<Input value={fields.description} maxLength={2000} onChange={e=>field("description",e.target.value)}/></label>
           {hasPermission("inventory.product.create")&&<Button type="button" variant="outline" disabled={!online} onClick={()=>setCategoryCreateOpen(true)}>+ เพิ่มหมวดสินค้า</Button>}
           <label className="block">หน่วยสินค้า<select aria-label="หน่วยสินค้า" className="mt-1 h-12 w-full rounded border bg-white px-3" required value={fields.unit_id} onChange={e=>field("unit_id",e.target.value)}><option value="">เลือกหน่วย</option>{units.data?.data.filter(u=>u.is_active).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
           <label className="block">หมวดหมู่<select aria-label="หมวดหมู่" className="mt-1 h-12 w-full rounded border bg-white px-3" value={fields.category_id} onChange={e=>field("category_id",e.target.value)}><option value="">ไม่ระบุ</option>{categories.data?.data.filter(c=>c.is_active).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label></>}
           <label className="block">ราคาขาย (บาท)<Input type="number" min="0" step="0.0001" required value={fields.selling_price} disabled={!!existing} onChange={e=>field("selling_price",e.target.value)}/></label>
-          {!existing&&<><label className="block">รูปแบบ VAT<select className="mt-1 h-12 w-full rounded border bg-white px-3" value={fields.vat_type} onChange={e=>field("vat_type",e.target.value)}><option value="included">รวม VAT</option><option value="excluded">แยก VAT</option><option value="exempt">ยกเว้น VAT</option></select></label><label className="block">อัตรา VAT (%)<Input type="number" min="0" max="100" step="0.01" required value={fields.vat_rate} onChange={e=>field("vat_rate",e.target.value)}/></label></>}
+          {!existing&&options.mode!=="append"&&<><label className="block">รูปแบบ VAT<select className="mt-1 h-12 w-full rounded border bg-white px-3" value={fields.vat_type} onChange={e=>field("vat_type",e.target.value)}><option value="included">รวม VAT</option><option value="excluded">แยก VAT</option><option value="exempt">ยกเว้น VAT</option></select></label><label className="block">อัตรา VAT (%)<Input type="number" min="0" max="100" step="0.01" required value={fields.vat_rate} onChange={e=>field("vat_rate",e.target.value)}/></label></>}
         </section>
         <section className="space-y-3 rounded-2xl border bg-white p-5"><h2 className="font-bold">{existing?"รับสินค้าเพิ่ม":"สต๊อกเริ่มต้น"}</h2><p className="text-sm text-slate-500">ใช้สาขา Retail ที่เลือกอยู่ หากต้องการสาขาอื่นให้กลับไปเปลี่ยนบริบทก่อนเริ่ม</p>
           <label className="block">ต้นทุนต่อหน่วย (บาท)<Input type="number" min="0" step="0.0001" required value={fields.cost_price} onChange={e=>field("cost_price",e.target.value)}/></label>

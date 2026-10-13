@@ -43,6 +43,8 @@ from app.models.product import (
     PriceListItem,
 )
 from app.models.stock import StockLocation, StockBalance, StockMovement
+from app.models.retail_catalog import RetailProductBrand, RetailProductBrandLink
+from app.models.retail_transfer import RetailTransferScope
 from app.models.shared_kitchen import (
     CompanyIngredient,
     CompanyIngredientAlias,

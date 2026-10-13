@@ -75,6 +75,7 @@ export interface Product {
 }
 
 export interface ProductListItem {
+  product_brand_name?: string | null;
   id: string;
   sku: string;
   barcode: string | null;
@@ -97,6 +98,8 @@ export interface ProductListItem {
 }
 
 export interface RetailLookupVariant {
+  attributes?: Record<string, string> | null;
+  image_url?: string | null;
   id: string;
   name: string;
   sku: string;

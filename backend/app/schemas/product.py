@@ -210,6 +210,8 @@ class ProductListItem(BaseSchema):
 
 
 class RetailLookupVariant(BaseSchema):
+    attributes: dict[str, str] | None = None
+    image_url: str | None = None
     id: uuid.UUID
     name: str
     sku: str

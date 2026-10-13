@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.dependencies import TokenData, get_scoped_operational_db as get_db, require_permission
+from app.dependencies import TokenData, get_scoped_operational_db, get_current_user, require_permission
 from app.schemas.transfer import (
     ApproveTORequest,
     CancelTORequest,
@@ -21,6 +21,14 @@ from app.schemas.transfer import (
 from app.services.transfer_service import TransferService
 
 router = APIRouter(prefix="/api/v1/transfer", tags=["transfer"])
+
+
+async def get_db(current: TokenData = Depends(get_current_user)):
+    # Retail transfers must use the branch/brand-scoped, idempotent adapter.
+    if current.business_type == "retail_pos" or current.target_database == "retail_pos":
+        raise HTTPException(403, "ใช้หน้าโอนสินค้า Retail เพื่อรักษาสิทธิ์สาขาและป้องกันรับซ้ำ")
+    async for db in get_scoped_operational_db(current):
+        yield db
 
 
 def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-14",
+  "timezone": "Asia/Bangkok",
+  "scope": "Retail work items 1-5: store stock, product brands, custom variants, barcode intake and POS",
+  "status": "local_implementation_verified_not_deployed",
+  "commit_created": false,
+  "deployment_performed": false,
+  "production_changed": false,
+  "existing_business_data_modified": false,
+  "implementation": {
+    "brands": "Company-owned product brands and product links, separate from operational store brands; duplicate-name reuse and audit",
+    "options": "Up to five custom dimensions, e.g. flavor, color, size; create one sellable combination per save, append to an existing variant family, independent generated SKU/barcode/price/cost/image",
+    "intake": "New product or variant, append variant, exact existing-variant receipt; signed Retail branch/brand, atomic stock plus audit, stable retry receipt, no automatic conversion of existing products",
+    "stock": "Store branch only, excludes configured central locations and other store-brand mappings even for wildcard operators; central-only permission cannot receive; no base stock for newly created variant families",
+    "pos": "Product-brand labels and search, choose variant or scan exact variant, per-variant cart identity and authoritative price, store stock, mobile/tablet/desktop form; sale rejects variant-parent-only lines"
+  },
+  "verification": {
+    "backend_unit": "7 focused intake tests passed",
+    "backend_integration": "Passed in a disposable PostgreSQL container with network disabled, using schema-only UAT snapshot and synthetic data; test container removed after execution",
+    "integration_checks": [
+      "Migration upgrade/downgrade/upgrade on empty disposable schema",
+      "Concurrent idempotent intake, duplicate code, fingerprint mismatch, image/stock failure rollback",
+      "Product-brand reuse and company isolation",
+      "Create/append/receive variants, duplicate option combination and dimension mismatch rejection",
+      "Brand/branch/central-location isolation, including wildcard actor",
+      "Variant lookup, brand search, family chooser and authoritative variant prices",
+      "Open cashier shift and complete synthetic cash sale: only selected variant balance decreases; no parent balance; parent-only sale rejected"
+    ],
+    "browser": "6 distinct targeted Playwright scenarios passed across the focused runs: existing simple intake, new brand/color-size product, append family, existing variant retry, POS choose/scan with different prices, existing desktop/tablet workspace regression",
+    "viewports": [320, 390, 820, 1440],
+    "visual_review": "/private/tmp/retail-custom-variant-picker.png",
+    "type_check": "passed",
+    "frontend_build": "passed; existing large-chunk warnings",
+    "physical_device_tests": "not performed"
+  },
+  "deployment_requirements": {
+    "migration": "Retail boundary only: retailcatalog0009 after wp84retail0008. Do not upgrade unrelated legacy/restaurant heads.",
+    "sequence": "Backup Retail data, verify store/central location mappings, apply additive Retail migration, deploy backend then frontend, targeted UAT smoke",
+    "source_drift": "UAT includes unrelated server-only changes. Apply this feature onto the reviewed deployed baseline; do not replace with the entire local checkout blindly.",
+    "rollback": "Revert application images first and retain the additive tables and recorded transactions. Downgrade drops product-brand links and must not be used after real data entry without a separate approved recovery plan."
+  },
+  "deferred": [
+    "Work item 6: optional central-warehouse transfers",
+    "Work item 7: expanded returns, document and reporting acceptance",
+    "Work item 8: UAT seed, commit/push and deployment",
+    "Bulk combination creation and automatic conversion of stocked simple products are not enabled",
+    "Physical camera, barcode hardware, printing and customer UAT"
+  ]
+}

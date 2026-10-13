@@ -362,7 +362,8 @@ def _sale_service(db: AsyncSession, current: TokenData) -> SaleService:
         current.target_database == "retail_pos"
         and settings.retail_service_database == "retail"
     )
-    return SaleService(db, legacy_side_effects_enabled=not retail_cutover)
+    return SaleService(db, legacy_side_effects_enabled=not retail_cutover,
+        retail_actor=current if current.business_type == "retail_pos" else None)
 
 
 def _hold_service(db: AsyncSession, current: TokenData) -> HoldDraftService:

@@ -11,6 +11,11 @@ class RetailIntakeRequest(BaseSchema):
     request_id: UUID
     barcode: str = Field(min_length=1, max_length=100)
     existing_product_id: UUID | None = None
+    existing_variant_id: UUID | None = None
+    parent_product_id: UUID | None = None
+    product_brand_id: UUID | None = None
+    product_type: Literal["simple", "variant"] = "simple"
+    attributes: dict[str, str] = Field(default_factory=dict, max_length=5)
     name: str = Field(default="", max_length=500)
     description: str = Field(default="", max_length=2000)
     category_id: UUID | None = None
@@ -25,14 +30,45 @@ class RetailIntakeRequest(BaseSchema):
     @field_validator("barcode", "name", "description", mode="before")
     @classmethod
     def trim_text(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("ต้องเป็นข้อความ")
         return value.strip()
 
     @model_validator(mode="after")
     def validate_operation(self):
-        if not self.existing_product_id and (not self.name or not self.unit_id):
+        if not self.existing_product_id and not self.parent_product_id and (not self.name or not self.unit_id):
             raise ValueError("กรุณาระบุชื่อสินค้าและหน่วยสินค้า")
+        if self.existing_product_id and self.parent_product_id:
+            raise ValueError("เลือกรับสินค้าเดิมหรือเพิ่มตัวเลือกอย่างใดอย่างหนึ่ง")
+        if self.existing_variant_id and not self.existing_product_id:
+            raise ValueError("ต้องระบุสินค้าหลักของตัวเลือก")
+        normalized = {}
+        for key, value in self.attributes.items():
+            key, value = " ".join(key.split()), " ".join(value.split())
+            if not key or not value or len(key) > 40 or len(value) > 80 or key.casefold() in {k.casefold() for k in normalized}:
+                raise ValueError("ตัวเลือกต้องมีชื่อและค่าไม่ซ้ำ ชื่อไม่เกิน 40 และค่าไม่เกิน 80 ตัว")
+            normalized[key] = value
+        self.attributes = normalized
+        if len(" / ".join(normalized.values())) > 255:
+            raise ValueError("ชื่อตัวเลือกรวมยาวเกิน 255 ตัว")
+        if not self.existing_product_id:
+            if (self.product_type == "variant" or self.parent_product_id) and not self.attributes:
+                raise ValueError("กรุณาระบุตัวเลือกสินค้า")
+            if self.product_type == "simple" and not self.parent_product_id and self.attributes:
+                raise ValueError("สินค้าทั่วไปไม่รองรับตัวเลือก")
         if self.qty > 0 and self.location_id is None:
             raise ValueError("กรุณาเลือกคลังรับสินค้า")
         if self.existing_product_id and self.qty <= 0:
             raise ValueError("จำนวนรับเพิ่มต้องมากกว่า 0")
         return self
+
+
+class RetailProductBrandCreate(BaseSchema):
+    name: str = Field(min_length=1, max_length=150)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("ชื่อแบรนด์ต้องเป็นข้อความ")
+        return " ".join(value.split())

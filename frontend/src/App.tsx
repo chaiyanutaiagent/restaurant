@@ -33,6 +33,8 @@ import NotFoundPage from "@/pages/NotFoundPage";
 import PayablePage from "@/pages/payable/PayablePage";
 import POSPage from "@/pages/pos/POSPage";
 import RetailProductIntakePage from "@/pages/products/RetailProductIntakePage";
+import RetailTransfersPage from "@/pages/stock/RetailTransfersPage";
+import RetailSkuReportPage from "@/pages/reports/RetailSkuReportPage";
 import POSAdminPage from "@/pages/pos/POSAdminPage";
 import OfflineSyncCenterPage from "@/pages/pos/OfflineSyncCenterPage";
 import POFormPage from "@/pages/purchase/POFormPage";
@@ -314,6 +316,12 @@ export default function App(): JSX.Element {
             <Route path="/retail" element={<Navigate to="/retail/pos" replace />} />
             <Route element={<ProtectedRoute permission="inventory.product.create" />}>
               <Route path="/retail/products/scan" element={<RetailProductIntakePage />} />
+            </Route>
+            <Route element={<ProtectedRoute permission="inventory.transfer.view" />}>
+              <Route path="/retail/transfers" element={<RetailTransfersPage />} />
+            </Route>
+            <Route element={<ProtectedRoute permission="pos.report.view" />}>
+              <Route path="/retail/reports/skus" element={<RetailSkuReportPage />} />
             </Route>
             <Route element={<ProtectedRoute permission="pos.sale.create" />}>
               <Route path="/retail/pos" element={<POSPage />} />

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
+import hashlib
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.branch import Branch
@@ -206,6 +207,12 @@ class StockService:
         product_id: uuid.UUID,
         variant_id: uuid.UUID | None,
     ) -> StockBalance:
+        # A row lock cannot protect a balance that does not exist yet. Share one
+        # transaction lock across receiving/transfers/sales, including base SKUs
+        # whose nullable variant_id is not protected by a regular UNIQUE key.
+        key = f"stock-balance:{company_id}:{location_id}:{product_id}:{variant_id}"
+        lock_id = int.from_bytes(hashlib.sha256(key.encode()).digest()[:8], "big", signed=True)
+        await self.db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_id})
         statement = (
             select(StockBalance)
             .where(

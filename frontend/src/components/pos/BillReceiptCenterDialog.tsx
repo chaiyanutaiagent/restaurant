@@ -287,7 +287,7 @@ export default function BillReceiptCenterDialog({
                       const remaining = Math.max(Number(item.qty) - Number(item.refunded_qty ?? 0), 0);
                       return (
                         <div key={item.id} className="flex items-start justify-between gap-4 rounded-xl bg-slate-50 p-3 text-sm">
-                          <div className="min-w-0"><div className="font-semibold text-slate-900">{item.product_name}</div><div className="mt-1 text-xs text-slate-500">{money(item.unit_price)} × {item.qty}{Number(item.refunded_qty ?? 0) > 0 ? ` · คืนแล้ว ${item.refunded_qty}` : ""}</div></div>
+                          <div className="min-w-0"><div className="font-semibold text-slate-900">{item.product_name}</div><div className="text-xs text-slate-600">{item.variant_name} · {item.sku}</div><div className="mt-1 text-xs text-slate-500">{money(item.unit_price)} × {item.qty}{Number(item.refunded_qty ?? 0) > 0 ? ` · คืนแล้ว ${item.refunded_qty}` : ""}</div></div>
                           <div className="text-right"><div className="font-bold">{money(item.subtotal)}</div><div className="mt-1 text-xs text-slate-500">คืนได้อีก {remaining}</div></div>
                         </div>
                       );

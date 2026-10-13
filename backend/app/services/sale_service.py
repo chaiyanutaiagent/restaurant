@@ -147,10 +147,12 @@ class SaleService:
         db: AsyncSession,
         *,
         legacy_side_effects_enabled: bool = True,
+        retail_actor=None,
     ):
         self.db = db
         self.stock_service = StockService(db)
         self.legacy_side_effects_enabled = legacy_side_effects_enabled
+        self.retail_actor = retail_actor
 
     async def open_shift(
         self,
@@ -913,6 +915,11 @@ class SaleService:
         for line in pricing.lines:
             product = line.product
             variant = line.variant
+            if self.retail_actor is not None:
+                if product.brand_id != self.retail_actor.brand_id or product.product_type in ("menu_item", "raw_material"):
+                    raise HTTPException(404, "Product not found in Retail brand")
+                if product.product_type == "variant" and variant is None:
+                    raise HTTPException(422, "กรุณาเลือกแบบสินค้า ห้ามตัดสต๊อกสินค้าหลักโดยตรง")
             key = (product.id, variant.id if variant else None)
             stock_needs[key] = stock_needs.get(key, Decimal("0")) + Decimal(line.request.qty)
             effective_unit_price = q4(
@@ -2039,6 +2046,9 @@ class SaleService:
         return shift
 
     async def _get_location(self, company_id: uuid.UUID, location_id: uuid.UUID) -> StockLocation:
+        if self.retail_actor is not None:
+            from app.services.stock_access_service import StockAccessService
+            await StockAccessService(self.db).resolve_scope(self.retail_actor, requested_location_id=location_id, store_only=True)
         location = await self.db.scalar(
             select(StockLocation).where(
                 StockLocation.id == location_id,

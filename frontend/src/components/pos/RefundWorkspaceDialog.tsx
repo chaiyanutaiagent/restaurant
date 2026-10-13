@@ -209,6 +209,7 @@ export default function RefundWorkspaceDialog({ open, order, shift, online, cash
                   return (
                     <div key={item.id} className="rounded-2xl border border-slate-200 p-4">
                       <div className="font-semibold text-slate-900">{item.product_name}</div>
+                      <div className="text-sm text-slate-600">{item.variant_name} · {item.sku}</div>
                       <div className="mt-1 text-sm text-slate-500">คืนได้ {available} · คืนสะสม {item.refunded_qty || 0}</div>
                       <div className="mt-3 flex items-center justify-end gap-3">
                         <Button aria-label={`ลดจำนวน ${item.product_name}`} className="h-12 w-12" variant="outline" disabled={current <= 0} onClick={() => setQty((value) => ({ ...value, [item.id]: Math.max(0, current - 1) }))}><Minus /></Button>

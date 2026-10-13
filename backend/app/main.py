@@ -44,7 +44,7 @@ from app.routers import company_documents
 from app.routers import credit_sales
 from app.routers import debt_aging
 from app.routers import cost_analysis
-from app.routers import recipe_reviews
+from app.routers import recipe_reviews, retail_transfer, retail_reports
 from app.routers import auth, membership, pos, privacy_support, products, purchase, reports, stock, stock_count as stock_count_router, system, transfer
 from app.routers import router
 from app.routers import mobile_store_auth
@@ -271,6 +271,8 @@ app.include_router(pos.router)
 app.include_router(reports.router)
 app.include_router(purchase.router)
 app.include_router(transfer.router)
+app.include_router(retail_transfer.router)
+app.include_router(retail_reports.router)
 app.include_router(accounting_router.router)
 app.include_router(etax_router.router)
 app.include_router(tax_settings_router.router)

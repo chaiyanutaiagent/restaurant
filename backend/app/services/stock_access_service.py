@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import TokenData
 from app.models.restaurant import Brand, BrandBranch
 from app.models.stock import StockLocation
+from app.models.branch import Branch
 
 
 CENTRAL_RAW_VIEW_PERMISSIONS = {
@@ -82,7 +83,36 @@ class StockAccessService:
         requested_location_id: uuid.UUID | None = None,
         *,
         manage: bool = False,
+        store_only: bool = False,
     ) -> StockAccessScope:
+        if current.business_type == "retail_pos":
+            if current.target_database != "retail_pos" or not current.brand_id or not current.company_id:
+                raise HTTPException(403, "Signed Retail context required")
+            branch_id = self.require_current_branch(current, requested_branch_id)
+            if store_only and await self.db.scalar(select(Branch.is_warehouse).where(Branch.id==branch_id,Branch.company_id==current.company_id)):
+                raise HTTPException(403, "คลังสินค้ากลางต้องโอนเข้าร้านก่อน ไม่สามารถขายจากคลังกลางผ่าน POS")
+            if manage and "*" not in current.permissions and not {"inventory.stock.adjust", "inventory.stock.adjust.request", "brand.store.stock.adjust"}.intersection(current.permissions):
+                raise HTTPException(403, "ไม่มีสิทธิ์จัดการสต๊อกร้าน Retail")
+            # Even a company owner operates in the selected store, never central stock.
+            central_rows = (await self.db.execute(select(Brand.central_location_id, Brand.central_ready_location_id).where(
+                Brand.company_id == current.company_id,
+            ))).all()
+            excluded = {item for row in central_rows for item in row if item}
+            other_stores = (await self.db.scalars(select(BrandBranch.store_location_id).where(
+                BrandBranch.company_id == current.company_id, BrandBranch.branch_id == branch_id,
+                BrandBranch.brand_id != current.brand_id, BrandBranch.is_active.is_(True),
+            ))).all()
+            excluded.update(item for item in other_stores if item)
+            locations = tuple((await self.db.scalars(select(StockLocation.id).where(
+                StockLocation.company_id == current.company_id, StockLocation.branch_id == branch_id,
+                StockLocation.is_active.is_(True), StockLocation.deleted_at.is_(None),
+            ))).all())
+            allowed = tuple(item for item in locations if item not in excluded)
+            if requested_location_id:
+                if requested_location_id not in allowed:
+                    raise HTTPException(404, "ไม่พบคลังหน้าร้านในสาขา Retail ที่เลือก")
+                allowed = (requested_location_id,)
+            return StockAccessScope(branch_id=branch_id, location_ids=allowed)
         if "*" in current.permissions:
             return StockAccessScope(
                 branch_id=requested_branch_id,

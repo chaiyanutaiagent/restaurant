@@ -40,8 +40,8 @@ from app.schemas.product import (
 from app.services.product_service import ProductService
 from app.services.upload_service import UploadService
 from pydantic import ValidationError
-from app.schemas.retail_intake import RetailIntakeRequest
-from app.services import retail_intake_service
+from app.schemas.retail_intake import RetailIntakeRequest, RetailProductBrandCreate
+from app.services import retail_intake_service, retail_catalog_service
 
 router = APIRouter(prefix="/api/v1", tags=["products"])
 
@@ -230,8 +230,13 @@ async def list_products(
         brand_id=effective_brand_id,
         include_company_wide=include_company_wide,
         excluded_product_types=excluded_product_types,
+        retail_merchandising=catalog_scope == "retail_sale",
     )
     data = [ProductListItem.model_validate(product).model_dump() for product in products]
+    if catalog_scope == "retail_sale":
+        names = await retail_catalog_service.brand_names(db, current.company_id, [p.id for p in products])
+        for row in data:
+            row["product_brand_name"] = names.get(row["id"])
     return ok(data, meta={"total": total, "page": page, "limit": limit})
 
 
@@ -265,6 +270,8 @@ async def lookup_retail_product(
     )
     if location is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Retail stock location not found")
+    from app.services.stock_access_service import StockAccessService
+    await StockAccessService(db).resolve_scope(current, requested_location_id=location.id, store_only=True)
 
     normalized_code = code.strip()
     product_filters = (
@@ -361,6 +368,8 @@ async def lookup_retail_product(
                 server_price=await service.get_product_price(product.id, current.company_id, None, row.id, qty),
                 available_qty=await stock_available(row.id),
                 is_active=row.is_active,
+                attributes=row.attributes,
+                image_url=row.image_url,
             )
         )
 
@@ -424,6 +433,36 @@ async def lookup_retail_product(
             error_code=None if result == "matched" else "retail_stock_unavailable",
         ).model_dump(mode="json")
     )
+
+
+@router.get("/products/retail/product-brands")
+async def retail_product_brands(
+    current: TokenData = Depends(require_permission("inventory.product.view")),
+    db: AsyncSession = Depends(get_db),
+):
+    return ok(await retail_catalog_service.list_brands(db, current))
+
+
+@router.post("/products/retail/product-brands", status_code=201)
+async def retail_create_product_brand(
+    payload: RetailProductBrandCreate,
+    current: TokenData = Depends(require_permission("inventory.product.create")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return ok(await retail_catalog_service.create_brand(db, current, payload.name))
+    except Exception:
+        await db.rollback()
+        raise
+
+
+@router.get("/products/retail/variant-parents")
+async def retail_variant_parents(
+    search: str = Query(default="", max_length=150),
+    current: TokenData = Depends(require_permission("inventory.product.create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return ok(await retail_catalog_service.parents(db, current, search.strip()))
 
 
 @router.get("/products/retail/intake-lookup")

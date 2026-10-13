@@ -144,6 +144,7 @@ class ProductService:
         brand_id: uuid.UUID | None = None,
         include_company_wide: bool = False,
         excluded_product_types: set[str] | None = None,
+        retail_merchandising: bool = False,
     ) -> tuple[list[Product], int]:
         filters = [Product.company_id == company_id, Product.deleted_at.is_(None)]
         if category_id:
@@ -163,9 +164,18 @@ class ProductService:
             filters.append(brand_filter)
         if search:
             like = f"%{search.strip()}%"
-            filters.append(
-                or_(Product.name.ilike(like), Product.sku.ilike(like), Product.barcode.ilike(like))
-            )
+            search_filters = [Product.name.ilike(like), Product.sku.ilike(like), Product.barcode.ilike(like)]
+            if retail_merchandising:
+                from app.models.retail_catalog import RetailProductBrand, RetailProductBrandLink
+                branded = select(RetailProductBrandLink.product_id).join(RetailProductBrand,
+                    RetailProductBrand.id == RetailProductBrandLink.product_brand_id).where(
+                    RetailProductBrandLink.company_id == company_id, RetailProductBrand.company_id == company_id,
+                    RetailProductBrand.deleted_at.is_(None), RetailProductBrand.name.ilike(like))
+                variants = select(ProductVariant.product_id).where(ProductVariant.company_id == company_id,
+                    ProductVariant.deleted_at.is_(None), ProductVariant.is_active.is_(True),
+                    or_(ProductVariant.name.ilike(like), ProductVariant.barcode.ilike(like), ProductVariant.sku.ilike(like)))
+                search_filters.extend([Product.id.in_(branded), Product.id.in_(variants)])
+            filters.append(or_(*search_filters))
 
         total = await self.db.scalar(select(func.count(Product.id)).where(*filters)) or 0
         statement = (

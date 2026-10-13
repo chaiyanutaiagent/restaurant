@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-14",
+  "work_item": 6,
+  "feature": "Optional Retail warehouse to store transfers",
+  "status": "implemented_local_verified_not_deployed",
+  "route": "/retail/transfers",
+  "scope": {
+    "database": "signed Retail operational database only",
+    "ownership": "same company and store brand, active brand-branch mapping",
+    "source": "warehouse branch",
+    "destination": "store branch",
+    "excluded": ["Restaurant/Central Kitchen stock", "cross-brand and cross-company transfers", "automatic warehouse or staff creation"],
+    "permissions": ["inventory.transfer.view", "inventory.transfer.create", "inventory.transfer.approve"],
+    "approval": "source branch, requester and approver must be different users",
+    "receipt": "destination branch only"
+  },
+  "flow": ["draft", "pending_approval", "approved and reserved", "in_transit with source deducted", "partial or full destination receipt", "optional final shortage with reason"],
+  "safety": [
+    "Atomic command, stock movement, version increment and idempotency receipt",
+    "Identical UUID retries replay result; conflicting payload is rejected",
+    "Expected version prevents stale updates",
+    "Cumulative receipt quantities prevent repeated delta posting",
+    "Stock balance creation transaction lock shared with other inventory workflows",
+    "No destination stock at shipping; no automatic stock for missing quantity",
+    "Approved cancellation releases reserved stock; no cancellation after shipping",
+    "Warehouse cannot sell directly through Retail POS",
+    "Generic transfer-order API rejects Retail to prevent bypass"
+  ],
+  "validation": {
+    "frontend_typecheck": "passed",
+    "frontend_build": "passed; existing large-chunk warning remains",
+    "browser": "4 targeted Playwright scenarios passed, including widths 320/820/1440",
+    "database": "PostgreSQL 15 disposable container, schema-only copy, synthetic data; no UAT data writes",
+    "integration": ["variant reserve/ship/partial/full/shortage/cancel", "concurrent identical requests", "stale version and conflicting replay", "maker-checker and wrong-branch guards", "over/under/no-change receipt rejection", "injected movement failure rolls back version and stock", "unit cost and exact variant preserved", "scoped HTTP API and generic bypass rejection", "concurrent first base-SKU receipts create one balance"],
+    "migration": "retailtransfer0010 upgrade/downgrade/upgrade verified against empty disposable Retail schema",
+    "diff_check": "passed",
+    "physical_uat": "not performed"
+  },
+  "deployment_notes": [
+    "Requires previous retailcatalog0009 then retailtransfer0010 on Retail DB before serving the new page",
+    "Configure a Retail warehouse branch and stock location, linked to the same brand as the destination store",
+    "Grant existing transfer permissions to warehouse and store staff as appropriate",
+    "For application rollback preserve transfer tables and transaction history; do not downgrade populated tables",
+    "No commit, push or deployment performed in this work item"
+  ]
+}

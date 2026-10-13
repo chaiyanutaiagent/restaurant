@@ -1198,6 +1198,10 @@ export default function POSPage(): JSX.Element {
   }
 
   function getAvailableStock(productId: string, variantId: string | null = null): number {
+    if (isRetailMode && variantId === null && products.find(p => p.id === productId)?.product_type === "variant") {
+      return stockBalances.filter(row => row.product_id === productId && row.variant_id !== null)
+        .reduce((total, row) => total + Math.max(0, Number(row.qty_available)), 0);
+    }
     const row = stockByProduct.get(`${productId}:${variantId ?? "base"}`);
     return Number(row?.qty_available ?? 0);
   }
@@ -1326,7 +1330,7 @@ export default function POSPage(): JSX.Element {
     qty = 1,
   ): Promise<void> {
     const serverLookupPrice = Number(variant?.server_price ?? lookup.server_price);
-    const expectedPrice = Number(variant?.server_price ?? sourceProduct.selling_price);
+    const expectedPrice = Number(variant?.server_price ?? (lookup.selected_variant_id ? lookup.server_price : sourceProduct.selling_price));
     const quote = (await posApi.calculatePricing({
       items: [{
         product_id: lookup.id,
@@ -1416,7 +1420,7 @@ export default function POSPage(): JSX.Element {
       if (result.result === "variant_required") {
         setRetailVariantProduct(result.product);
         setSelectedRetailVariantId(null);
-        setRetailException({ kind: "variant_required", code, message: "เลือก Variant ที่ต้องการก่อนเพิ่มลงตะกร้า" });
+        setRetailException({ kind: "variant_required", code, message: "เลือกแบบสินค้าที่ต้องการก่อนเพิ่มลงตะกร้า" });
         return;
       }
       if (result.result === "unavailable") {
@@ -2792,6 +2796,12 @@ export default function POSPage(): JSX.Element {
                   {isRetailMode && hasPermission("inventory.product.create") && (
                     <Button type="button" variant="outline" className="h-11 rounded-xl px-4" onClick={() => openWorkspace("/retail/products/scan", "เพิ่มสินค้า / รับสต๊อก")}>สแกนเพิ่มสินค้า / รับสต๊อก</Button>
                   )}
+                  {isRetailMode && hasPermission("inventory.transfer.view") && (
+                    <Button type="button" variant="outline" className="h-11 rounded-xl px-4" onClick={() => openWorkspace("/retail/transfers", "โอนสินค้าจากคลังกลาง")}>โอนสินค้าจากคลังกลาง</Button>
+                  )}
+                  {isRetailMode && hasPermission("pos.report.view") && (
+                    <Button type="button" variant="outline" className="h-11 rounded-xl px-4" onClick={() => openWorkspace("/retail/reports/skus", "รายงาน SKU")}>รายงาน SKU</Button>
+                  )}
                   <div data-retail-keyboard-hints className="flex items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-xs text-slate-500">
                     Enter = เพิ่มสินค้า, F1 = โฟกัสค้นหา, F2 = ช่องเงินสด
                   </div>
@@ -3142,8 +3152,10 @@ export default function POSPage(): JSX.Element {
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="line-clamp-2 text-sm font-medium text-slate-900">{product.name}</p>
+                        {isRetailMode && product.product_brand_name && <p className="text-xs text-blue-700">{product.product_brand_name}</p>}
+                        {isRetailMode && product.product_type === "variant" && <p className="text-xs text-slate-600">เลือกรส / สี / ขนาด · ราคาตามแบบ</p>}
                         <p className="mt-1 text-xs text-slate-400">{product.sku}</p>
-                        <p className="mt-2 text-base font-semibold text-blue-600">{formatThaiCurrency(Number(product.selling_price))}</p>
+                        <p className="mt-2 text-base font-semibold text-blue-600">{isRetailMode&&product.product_type==="variant"?"เลือกราคาแต่ละแบบ":formatThaiCurrency(Number(product.selling_price))}</p>
                         <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${stockStyle}`}>{stockLabel}</span>
                       </div>
                     </button>
@@ -3179,7 +3191,9 @@ export default function POSPage(): JSX.Element {
                           : <ShoppingCart className="h-4 w-4 text-slate-400" />}
                       </div>
                       <p className="mt-2 line-clamp-2 w-full text-xs font-medium leading-tight text-slate-900">{product.name}</p>
-                      <p className="mt-1.5 text-sm font-bold text-blue-600">{formatThaiCurrency(Number(product.selling_price))}</p>
+                      {isRetailMode && product.product_brand_name && <p className="text-xs text-blue-700">{product.product_brand_name}</p>}
+                      {isRetailMode && product.product_type === "variant" && <p className="text-xs">เลือกแบบ</p>}
+                      <p className="mt-1.5 text-sm font-bold text-blue-600">{isRetailMode&&product.product_type==="variant"?"เลือกราคาแต่ละแบบ":formatThaiCurrency(Number(product.selling_price))}</p>
                       {outOfStock && <p className="mt-1 text-[10px] text-red-500 font-medium">หมด</p>}
                     </button>
                   );
@@ -3209,10 +3223,12 @@ export default function POSPage(): JSX.Element {
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-slate-900">{product.name}</p>
+                        {isRetailMode && product.product_brand_name && <p className="text-xs text-blue-700">{product.product_brand_name}</p>}
+                        {isRetailMode && product.product_type === "variant" && <p className="text-xs">เลือกแบบ · ราคาตามแบบ</p>}
                         <p className="text-xs text-slate-400">{product.sku}{product.barcode ? ` · ${product.barcode}` : ""}</p>
                       </div>
                       <div className="flex flex-shrink-0 flex-col items-end gap-1">
-                        <p className="text-sm font-bold text-blue-600">{formatThaiCurrency(Number(product.selling_price))}</p>
+                        <p className="text-sm font-bold text-blue-600">{isRetailMode&&product.product_type==="variant"?"เลือกราคาแต่ละแบบ":formatThaiCurrency(Number(product.selling_price))}</p>
                         <p className={`text-[11px] font-medium ${stockColor}`}>
                           {outOfStock ? "หมด" : stock <= 5 ? `เหลือ ${stock}` : `${stock} ชิ้น`}
                         </p>
@@ -3709,11 +3725,11 @@ export default function POSPage(): JSX.Element {
           }
         }}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>เลือก Variant</DialogTitle>
+            <DialogTitle>เลือกแบบสินค้า</DialogTitle>
             <DialogDescription>
-              เลือกขนาดหรือรูปแบบที่ตรงกับสินค้า Server จะตรวจราคาและ Stock อีกครั้งก่อนเพิ่มลงตะกร้า
+              {retailVariantProduct?.name} — เลือกรส สี หรือขนาด ระบบจะตรวจราคาและสต๊อกร้านนี้ก่อนเพิ่มลงตะกร้า
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -3730,6 +3746,8 @@ export default function POSPage(): JSX.Element {
                   onClick={() => setSelectedRetailVariantId(variant.id)}
                 >
                   <div className="font-semibold">{variant.name}</div>
+                  {variant.image_url&&<img src={variant.image_url} alt={variant.name} className="my-2 h-16 w-16 rounded-lg object-cover"/>}
+                  {variant.attributes&&<p className="break-words text-xs text-slate-600">{Object.entries(variant.attributes).map(([key,value])=>`${key}: ${value}`).join(" · ")}</p>}
                   <div className="mt-1 text-xs text-slate-500">{variant.sku}{variant.barcode ? ` · ${variant.barcode}` : ""}</div>
                   <div className="mt-2 flex items-center justify-between text-sm">
                     <span className="font-semibold text-blue-700">{formatThaiCurrency(Number(variant.server_price))}</span>

@@ -4,7 +4,7 @@ const artifactDir = process.env.RETAIL_E2E_ARTIFACT_DIR ?? "/private/tmp/restaur
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["retail-workspace.spec.ts", "retail-intake.spec.ts"],
+  testMatch: ["retail-workspace.spec.ts", "retail-intake.spec.ts", "retail-transfers.spec.ts"],
   fullyParallel: false,
   workers: 1,
   retries: 0,

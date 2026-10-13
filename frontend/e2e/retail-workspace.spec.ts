@@ -188,6 +188,50 @@ async function mobileCatalog(page: Page) {
   return {sales,setPrice:(next:number)=>{price=next;}};
 }
 
+test("Retail variants choose or scan an exact SKU with independent cart prices and stock",async({page})=>{
+  const id="99999999-9999-4999-8999-999999999999";
+  const parent={id,company_id:companyId,brand_id:brandId,name:"เสื้อทดสอบ",product_brand_name:"Demo Clothing",sku:"SHIRT",barcode:null,product_type:"variant",inventory_role:"store_local",selling_price:199,cost_price:100,vat_type:"included",vat_rate:7,is_active:true,is_for_sale:true,unit:{code:"PCS",name:"ตัว"},category_id:null,created_at:"2026-10-14T00:00:00Z"};
+  const variants=[
+    {id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",name:"ดำ / M",sku:"BLACK-M",barcode:"00011",attributes:{สี:"ดำ",ไซซ์:"M"},server_price:199,available_qty:3,is_active:true},
+    {id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",name:"ขาว / L",sku:"WHITE-L",barcode:"00022",attributes:{สี:"ขาว",ไซซ์:"L"},server_price:299,available_qty:5,is_active:true},
+    {id:"cccccccc-cccc-4ccc-8ccc-cccccccccccc",name:"แดง / S",sku:"RED-S",barcode:"00033",attributes:{สี:"แดง",ไซซ์:"S"},server_price:99,available_qty:0,is_active:true},
+  ];
+  await page.route("**/api/v1/products?**",route=>fulfill(route,[parent],{total:1,page:1,limit:100}));
+  await page.route("**/api/v1/stock/balances?**",route=>fulfill(route,variants.map(v=>({id:v.id,product_id:id,branch_id:branchId,location_id:locationId,variant_id:v.id,qty_available:v.available_qty}))));
+  await page.route("**/api/v1/products/retail/lookup?**",route=>{
+    const code=new URL(route.request().url()).searchParams.get("code");
+    const v=variants.find(v=>v.barcode===code);
+    return fulfill(route,{result:v?"matched":"variant_required",code,product:{...parent,server_price:v?.server_price??199,available_qty:v?.available_qty??8,selected_variant_id:v?.id??null,variants},validation_time:new Date().toISOString()});
+  });
+  const quoted:string[]=[];
+  await page.route("**/api/v1/pos/pricing/calculate",route=>{
+    const line=route.request().postDataJSON().items[0];
+    const v=variants.find(v=>v.id===line.variant_id)!;
+    quoted.push(v.id);
+    return fulfill(route,{quote_id:"variant-quote",lines:[{product_id:id,variant_id:v.id,authoritative_unit_price:v.server_price,price_version:"v1",discrepancy:line.expected_unit_price!==v.server_price}]});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto("/retail/pos");
+  const productButton=page.getByTestId("pos-product-panel").getByRole("button",{name:/เสื้อทดสอบ/});
+  await expect(productButton).toContainText("Demo Clothing");
+  await productButton.click();
+  const dialog=page.getByRole("dialog");
+  await expect(dialog.getByRole("heading",{name:"เลือกแบบสินค้า"})).toBeVisible();
+  await expect(dialog.getByRole("button",{name:/แดง \/ S/})).toBeDisabled();
+  await dialog.getByRole("button",{name:/ดำ \/ M/}).click();
+  await page.screenshot({path:"/private/tmp/retail-custom-variant-picker.png",fullPage:true});
+  await dialog.getByRole("button",{name:/เพิ่มลงตะกร้า/}).click();
+  await expect(page.getByTestId("retail-mobile-footer")).toContainText("ดูตะกร้า (1)");
+  const search=page.getByPlaceholder("สแกนบาร์โค้ด / ค้นหาชื่อ / SKU");
+  await search.fill("00022");await search.press("Enter");
+  await expect(page.getByTestId("retail-mobile-footer")).toContainText("ดูตะกร้า (2)");
+  await expect(page.getByTestId("retail-mobile-footer")).toContainText("498.00");
+  expect(quoted).toEqual([variants[0].id,variants[1].id]);
+  await page.getByTestId("retail-mobile-footer").getByRole("button").click();
+  await expect(page.getByTestId("pos-cart-panel")).toContainText("ดำ / M");
+  await expect(page.getByTestId("pos-cart-panel")).toContainText("ขาว / L");
+});
+
 test("Retail phone flow retains cart, validates payment, blocks offline and surfaces server price changes",async({page,context})=>{
   const mock=await mobileCatalog(page);
   await page.setViewportSize({width:390,height:844});

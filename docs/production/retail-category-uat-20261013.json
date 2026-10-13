@@ -1,0 +1,34 @@
+{
+  "feature_commit": "861ac95",
+  "repository": "chaiyanutaiagent/restaurant",
+  "branch": "codex/recipe-quick-create",
+  "environment": "UAT only",
+  "deployed_at_utc": "2026-10-13T16:53:56Z",
+  "url": "https://uat-retail.foodchainservice.com/retail/pos",
+  "image": "restaurant-pos-frontend:uat-retail-category-861ac95",
+  "digest": "sha256:94cc86952e1bcdc649ecb0a25c97ae198f1223b47b95a55ed1a4b6b614a66aa1",
+  "previous_image": "restaurant-pos-frontend:uat-retail-mobile-21698d6",
+  "release_directory": "/home/behappyaiagent/restaurant-uat-releases/retail-category-861ac95",
+  "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-category-861ac95",
+  "assembly": "Copied previous UAT frontend source and applied only category feature. Adapted two POS import/state insertion contexts, preserving all existing server fixes and mobile layout.",
+  "checks": {
+    "prior_local": "Type-check, build and three focused browser tests passed: permission visibility, category creation while retaining cart, duplicate reuse and uncertain-response recovery into intake selection",
+    "release_build": "passed",
+    "live_smoke": "passed",
+    "widths_px": [320, 390, 820, 1440],
+    "live_scope": ["Storefront create-category button", "Required name validation", "Existing-name detection and reuse without POST", "Automatic category selection in intake", "Responsive layout without horizontal page overflow"],
+    "live_created_categories_or_business_transactions": false,
+    "backend_health_and_nginx": "passed",
+    "backend_database_and_other_containers_unchanged": true,
+    "production_and_flags_unchanged": true,
+    "schema_changes": false
+  },
+  "rollback": {
+    "script": "/home/behappyaiagent/restaurant-uat-releases/retail-category-861ac95/rollback-uat.sh",
+    "previous_image_available": true,
+    "script_syntax_checked": true,
+    "executed": false,
+    "database_restore_required": false
+  },
+  "pending": ["User acceptance of creating a real UAT category; live smoke intentionally did not create test data"]
+}

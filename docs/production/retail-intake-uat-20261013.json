@@ -1,0 +1,46 @@
+{
+  "feature_commit": "1190fd8",
+  "branch": "codex/recipe-quick-create",
+  "repository": "chaiyanutaiagent/restaurant",
+  "environment": "UAT only",
+  "deployed_at_utc": "2026-10-13T16:18:06Z",
+  "url": "https://uat-retail.foodchainservice.com/retail/products/scan",
+  "backend": {
+    "image": "restaurant-pos-backend:uat-retail-intake-1190fd8",
+    "digest": "sha256:2d80c478b1e509386460445c94c8f7d5134d4605be81ff10e45926dfd0d567c0",
+    "previous": "restaurant-pos-backend:uat-recipe-operations-20261013-r2",
+    "assembly": "Previous deployed image plus two modified and two new intake files; modified router and stock service SHA256 match feature commit. Other runtime files preserved."
+  },
+  "frontend": {
+    "image": "restaurant-pos-frontend:uat-retail-intake-1190fd8",
+    "digest": "sha256:dc37b9a15d2a1eab10a61f984aad64a916fd257f330489d524af0c766ed7a8d5",
+    "previous": "restaurant-pos-frontend:uat-business-name-c8a3c3c",
+    "assembly": "Copied previous UAT release source, applied intake page/scanner and App route patch. Added only the intake button to deployed POSPage because its layout differs from local. Preserved existing server-only fixes."
+  },
+  "release_directory": "/home/behappyaiagent/restaurant-uat-releases/retail-intake-1190fd8",
+  "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-intake-1190fd8",
+  "rollback": {
+    "script": "/home/behappyaiagent/restaurant-uat-releases/retail-intake-1190fd8/rollback-uat.sh",
+    "previous_images_present": true,
+    "script_syntax_checked": true,
+    "executed": false,
+    "database_backup": "retail-predeploy.dump (custom format, SHA256 recorded, pg_restore list checked)",
+    "note": "No schema migration. Rollback restores prior application images without restoring data or removing any subsequent UAT transactions."
+  },
+  "verification": {
+    "prior_local_tests": "5 backend unit tests; isolated actual-Retail-schema integration including transaction rollback, retry, tenant/branch/permission checks, actual multipart PNG upload; 4 focused browser tests including synthetic camera",
+    "release_frontend_build": "passed",
+    "backend_readiness": "passed",
+    "frontend_and_nginx": "passed",
+    "live_browser_viewport": "1024x768",
+    "live_browser": "Passed real UAT login/context selection, intake form, units/categories/branch warehouses, unknown barcode lookup, return to POS and button navigation. No page errors or API 5xx observed.",
+    "invalid_multipart_payload_status": 422,
+    "unauthenticated_lookup_status": 401,
+    "signed_business_type": "retail_pos",
+    "signed_database": "retail_pos",
+    "live_smoke_created_products_or_stock": false,
+    "production_and_other_container_ids_unchanged": true,
+    "flags_and_database_routing_unchanged": true
+  },
+  "pending": ["Physical mobile/tablet camera and photo test", "User acceptance of actual UAT product creation/receipt"]
+}

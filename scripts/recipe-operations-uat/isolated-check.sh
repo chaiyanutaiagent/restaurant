@@ -4,7 +4,7 @@ release=/home/behappyaiagent/restaurant-uat-releases/recipe-operations-20261013
 backup=/home/behappyaiagent/restaurant-uat-deploy-backups/recipe-operations-20261013
 qa=/home/behappyaiagent/restaurant-uat-releases/document-lifecycle-20261013/qa.env
 name=fcs-recipeops-isolated-20261013
-image=restaurant-pos-backend:uat-recipe-operations-20261013-r1
+image=restaurant-pos-backend:uat-recipe-operations-20261013-r2
 umask 077
 if ! test -s "$backup/predeploy.dump"; then
  docker exec restaurant-pos-uat-drill-postgres-1 pg_dump -U restaurant_uat -d restaurant_uat_db -Fc > "$backup/predeploy.dump"

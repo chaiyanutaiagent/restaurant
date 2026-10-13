@@ -2,8 +2,8 @@
 set -euo pipefail
 cd /home/behappyaiagent/restaurant-uat-releases/3760d60
 backup=/home/behappyaiagent/restaurant-uat-deploy-backups/recipe-operations-20261013
-old=restaurant-pos-backend:uat-recipe-operations-20261013
-new=restaurant-pos-backend:uat-recipe-operations-20261013-r1
+old=restaurant-pos-backend:uat-recipe-operations-20261013-r1
+new=restaurant-pos-backend:uat-recipe-operations-20261013-r2
 test "$(docker inspect restaurant-pos-uat-drill-backend-1 --format '{{.Config.Image}}')" = "$old"
 compose=(docker compose -p restaurant-pos-uat-drill --env-file .env.uat -f docker-compose.prod.yml -f docker-compose.uat.yml -f docker-compose.uat-superadmin.yml)
 rollback() {

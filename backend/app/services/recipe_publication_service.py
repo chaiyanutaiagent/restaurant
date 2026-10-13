@@ -140,7 +140,6 @@ async def publish(db, current, row):
     from datetime import date
     if date.fromisoformat(p["effective_from"]) > today():
         raise HTTPException(409, "ยังไม่ถึงวันเริ่มใช้ อนุมัติไว้ก่อนได้แล้วกดเปิดใช้เมื่อถึงกำหนด")
-    await review.validate_proposal(current, row, complete=True)
     if row.system == "restaurant":
         async with review.source_factory("restaurant")() as inventory:
             product = await inventory.get(Product, UUID(p["output_id"]))
@@ -158,9 +157,12 @@ async def publish(db, current, row):
     output = model.product_id if row.system == "restaurant" else model.output_item_id
     recipe_type = ("production_recipe" if p["recipe_type"] == "production" else "menu_recipe") if row.system == "restaurant" else p["recipe_type"]
     async with review.source_factory(row.system)() as source:
-        await lock(source, f"recipe-publish:{row.company_id}:{row.brand_id}:{p['output_id']}")
+        # Serialise the whole brand graph, not only one output. Otherwise two
+        # concurrent A->B and B->A publications could both pass cycle checks.
+        await lock(source, f"recipe-publish:{row.company_id}:{row.brand_id}")
         existing = await source.get(model, target_id)
         if not existing:
+            await review.validate_proposal(current, row, complete=True)
             # Optimistic baseline is checked under the same lock as other publications.
             if row.source_id:
                 found = await review.sources(current, row.system, row.brand_id, row.source_id)

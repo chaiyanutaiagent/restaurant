@@ -6,7 +6,7 @@ cd /home/behappyaiagent/restaurant-uat-releases/3760d60
 compose=(docker compose -p restaurant-pos-uat-drill --env-file .env.uat -f docker-compose.prod.yml -f docker-compose.uat.yml -f docker-compose.uat-superadmin.yml)
 old_backend=restaurant-pos-backend:uat-recipe-reviews-20261013
 old_frontend=restaurant-pos-frontend:uat-recipe-reviews-20261013
-new_backend=restaurant-pos-backend:uat-recipe-operations-20261013-r1
+new_backend=restaurant-pos-backend:uat-recipe-operations-20261013-r2
 new_frontend=restaurant-pos-frontend:uat-recipe-operations-20261013
 unchanged=(restaurant-pos-prod-backend-1 restaurant-pos-prod-frontend-1 restaurant-pos-prod-postgres-1 restaurant-pos-prod-nginx-1 restaurant-pos-prod-redis-1 restaurant-pos-uat-drill-postgres-1 restaurant-pos-uat-drill-redis-1)
 test "$(docker inspect restaurant-pos-uat-drill-backend-1 --format '{{.Config.Image}}')" = "$old_backend"

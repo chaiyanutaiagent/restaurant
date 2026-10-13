@@ -105,6 +105,9 @@ async def main():
                     try: await review.act(db, manager, row["id"], ReviewAction(revision=4, action="publish", reason="Publish test"))
                     except RuntimeError: pass
                     else: raise AssertionError("failure injection")
+            from app.services.recipe_governance_guard import legacy_production
+            with patch("app.services.recipe_governance_guard.enabled", return_value=True):
+                await expect(409, lambda: legacy_production(c, system, [output]))
             row = await action(manager, 4, "publish")
             assert row["status"] == "published"
             async with factory(system)() as source:

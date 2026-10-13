@@ -73,7 +73,10 @@ export default function PlatformCompaniesPage(): JSX.Element {
           <p className="mt-1 text-sm text-slate-400">Owner จะได้สิทธิ์ระดับ Company แต่ไม่ใช่ Platform Owner</p>
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             <Field label="ชื่อบริษัท *"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
-            <Field label="Business URL *"><Input value={form.business_slug ?? ""} minLength={3} maxLength={63} pattern="[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])" placeholder="coffee-house" onChange={(e) => setForm({ ...form, business_slug: e.target.value.toLowerCase() })} required /></Field>
+            <Field label="Business name *">
+              <Input aria-label="Business name" aria-describedby="business-name-help" value={form.business_slug ?? ""} minLength={3} maxLength={63} pattern="(?!.*--)[a-z0-9](?:[a-z0-9]|-){1,61}[a-z0-9]" placeholder="test2" onChange={(e) => setForm({ ...form, business_slug: e.target.value.toLowerCase() })} required />
+              <p id="business-name-help" className="text-sm text-slate-400">ชื่อสำหรับเข้าใช้งานธุรกิจใน Foodchainservice ไม่ใช่เว็บไซต์ของลูกค้า เช่น test2 หรือ sketch-biz ไม่ต้องใส่ https:// หรือ .com ใช้ a–z ตัวเลข หรือขีดกลาง 3–63 ตัว ห้ามขึ้นต้นหรือลงท้ายด้วยขีดกลาง ห้ามมีขีดกลางติดกัน และห้ามใช้คำสงวน เช่น restaurant, admin, pos</p>
+            </Field>
             <Field label="ชื่ออังกฤษ"><Input value={form.name_en ?? ""} onChange={(e) => setForm({ ...form, name_en: e.target.value })} /></Field>
             <Field label="เลขประจำตัวผู้เสียภาษี"><Input value={form.tax_id ?? ""} onChange={(e) => setForm({ ...form, tax_id: e.target.value })} /></Field>
             <Field label="อีเมลบริษัท"><Input type="email" value={form.email ?? ""} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>

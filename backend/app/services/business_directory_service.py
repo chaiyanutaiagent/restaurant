@@ -28,7 +28,7 @@ async def allocate_business_slug(
     if requested_slug:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Business URL is already in use",
+            detail="Business name นี้มีผู้ใช้งานแล้ว กรุณาเลือกชื่ออื่น",
         )
     for attempt in range(1, 101):
         suffix = company_id.hex[:8] if attempt == 1 else f"{company_id.hex[:8]}-{attempt}"
@@ -39,7 +39,7 @@ async def allocate_business_slug(
             return generated
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
-        detail="Could not allocate a unique business URL",
+        detail="ไม่สามารถกำหนด Business name ที่ไม่ซ้ำได้ กรุณาเลือกชื่ออื่น",
     )
 
 

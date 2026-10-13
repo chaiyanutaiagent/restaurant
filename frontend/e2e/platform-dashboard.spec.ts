@@ -915,6 +915,12 @@ test("public SaaS owner can complete signup, verification, and password recovery
   await expect(page.getByTestId("signup-product-hotel_pms")).toHaveAttribute("aria-disabled", "true");
   await page.getByTestId("signup-product-restaurant_pos").click();
   await expect(page).toHaveURL(/\/signup\/restaurant$/);
+  await expect(page.getByLabel("Business name *")).toBeVisible();
+  await expect(page.getByText(/ไม่ใช่เว็บไซต์ของลูกค้า/)).toBeVisible();
+  await page.locator("#business_slug").fill("test2.com");
+  expect(await page.locator("#business_slug").evaluate((input: HTMLInputElement) => input.validity.patternMismatch)).toBe(true);
+  await page.locator("#business_slug").fill("test2");
+  expect(await page.locator("#business_slug").evaluate((input: HTMLInputElement) => input.validity.valid)).toBe(true);
   await page.locator("#company_name").fill("ร้านสมาชิก SaaS");
   await page.locator("#business_slug").fill("public-saas-restaurant");
   await page.locator("#owner_display_name").fill("เจ้าของร้าน");
@@ -924,7 +930,7 @@ test("public SaaS owner can complete signup, verification, and password recovery
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "เริ่มทดลองใช้" }).click();
   await expect(page.getByText("สร้างบัญชีแล้ว กรุณาตรวจอีเมลเพื่อยืนยัน")).toBeVisible();
-  await expect(page.getByText("/public-saas-restaurant", { exact: true })).toBeVisible();
+  await expect(page.getByText("public-saas-restaurant", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "ไปหน้าเข้าสู่ระบบของธุรกิจ" })).toHaveAttribute("href", "/public-saas-restaurant/login");
 
   await page.goto("/verify-email#token=browser-verification-token-1234567890");

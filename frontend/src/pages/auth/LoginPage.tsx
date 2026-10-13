@@ -154,7 +154,7 @@ export default function LoginPage(): JSX.Element {
               ) : null}
             </div>
 
-            {canonicalSlug && business.isLoading ? <p className="rounded-lg bg-slate-100 p-3 text-sm text-slate-600">กำลังตรวจสอบ URL ธุรกิจ...</p> : null}
+            {canonicalSlug && business.isLoading ? <p className="rounded-lg bg-slate-100 p-3 text-sm text-slate-600">กำลังตรวจสอบ Business name...</p> : null}
             {canonicalSlug && business.isError ? <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">ไม่พบธุรกิจนี้ หรือธุรกิจยังไม่เปิดใช้งาน</p> : null}
 
             <div className="space-y-2">

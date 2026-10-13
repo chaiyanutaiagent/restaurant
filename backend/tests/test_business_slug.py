@@ -13,9 +13,10 @@ from app.utils.business_slug import normalize_business_slug, suggest_business_sl
 class BusinessSlugTests(unittest.TestCase):
     def test_normalizes_valid_slug(self) -> None:
         self.assertEqual(normalize_business_slug(" Coffee-House "), "coffee-house")
+        self.assertEqual(normalize_business_slug("test2"), "test2")
 
     def test_rejects_reserved_ambiguous_and_non_ascii_values(self) -> None:
-        for value in ("admin", "platform", "ab", "coffee--house", "ร้านกาแฟ", "-coffee"):
+        for value in ("admin", "platform", "ab", "coffee--house", "ร้านกาแฟ", "-coffee", "test2.com", "https://test2.com"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 normalize_business_slug(value)
 
@@ -42,6 +43,8 @@ class BusinessSlugAllocationTests(unittest.IsolatedAsyncioTestCase):
                 company_id=uuid.uuid4(),
             )
         self.assertEqual(raised.exception.status_code, 409)
+        self.assertIn("Business name", raised.exception.detail)
+        self.assertNotIn("Business URL", raised.exception.detail)
 
     async def test_generated_collision_receives_company_suffix(self) -> None:
         company_id = uuid.UUID("12345678-1234-1234-1234-123456789abc")

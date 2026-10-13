@@ -1,0 +1,39 @@
+{
+  "feature_commit": "21698d6",
+  "branch": "codex/recipe-quick-create",
+  "repository": "chaiyanutaiagent/restaurant",
+  "environment": "UAT only",
+  "deployed_at_utc": "2026-10-13T16:33:21Z",
+  "url": "https://uat-retail.foodchainservice.com/retail/pos",
+  "image": "restaurant-pos-frontend:uat-retail-mobile-21698d6",
+  "digest": "sha256:92180e22ffe51d2493affca10aa6733c8e18f7f4468d441b34ba8848d35bd016",
+  "previous_image": "restaurant-pos-frontend:uat-retail-intake-1190fd8",
+  "release_directory": "/home/behappyaiagent/restaurant-uat-releases/retail-mobile-21698d6",
+  "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-mobile-21698d6",
+  "assembly": {
+    "base": "Previous deployed frontend source, not wholesale local checkout",
+    "changed_files": ["src/index.css", "src/pages/pos/POSPage.tsx", "src/pages/products/RetailProductIntakePage.tsx"],
+    "integration": "Preserved server compact-header controls and omitted previously removed keyboard hints/Pilot banner. Mobile menu integrates with existing retailHeaderExpanded control; all other source files unchanged."
+  },
+  "checks": {
+    "prior_local_engineering": "Type check, build, desktop/tablet regression, mobile cart/payment and server-price-change/offline guards, mobile intake/photo mocked submission passed",
+    "release_build": "passed",
+    "live_browser": "passed",
+    "live_widths_px": [320, 390, 820, 1440],
+    "live_scope": ["No horizontal page overflow on phone", "Mobile catalog/cart navigation and empty-cart payment guard", "Collapsed/expanded mobile menu", "Tablet/desktop panels visible", "Mobile intake barcode width, real lookup and unit options, camera capture attribute"],
+    "business_transactions_created": false,
+    "health_and_nginx": "passed",
+    "backend_and_all_other_container_ids_unchanged": true,
+    "production_unchanged": true,
+    "flags_and_database_routing_unchanged": true,
+    "schema_changes": false
+  },
+  "rollback": {
+    "script": "/home/behappyaiagent/restaurant-uat-releases/retail-mobile-21698d6/rollback-uat.sh",
+    "previous_image_available": true,
+    "script_syntax_checked": true,
+    "executed": false,
+    "database_restore_required": false
+  },
+  "pending": ["Physical phone Safari/Chrome, camera, keyboard and actual user payment acceptance"]
+}

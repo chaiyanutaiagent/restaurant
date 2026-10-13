@@ -72,6 +72,29 @@ test("retail intake goes offline without submitting",async({page,context})=>{
   expect(submissions).toHaveLength(0);
 });
 
+test("retail intake mobile form supports photo and stock without horizontal overflow",async({page})=>{
+  const submissions=await setup(page);
+  for(const width of [320,390]){
+    await page.setViewportSize({width,height:844});
+    await expect(page.getByLabel("ชื่อสินค้า",{exact:true})).toBeVisible();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+    expect(await page.getByLabel("ชื่อสินค้า",{exact:true}).evaluate(el=>getComputedStyle(el).fontSize)).toBe("16px");
+    expect((await page.getByLabel("บาร์โค้ดสินค้า",{exact:true}).boundingBox())?.width).toBeGreaterThan(240);
+  }
+  await page.getByLabel("ชื่อสินค้า",{exact:true}).fill("น้ำดื่มมือถือ");
+  await page.getByLabel("หน่วยสินค้า",{exact:true}).selectOption(unit);
+  await page.getByLabel("ราคาขาย (บาท)",{exact:true}).fill("10");
+  await page.getByLabel("จำนวนรับเข้า",{exact:true}).fill("2");
+  await page.getByLabel("คลังรับสินค้า",{exact:true}).selectOption(location);
+  await expect(page.getByLabel("ถ่ายรูป",{exact:true})).toHaveAttribute("capture","environment");
+  await page.getByLabel("ถ่ายรูป",{exact:true}).setInputFiles({name:"mobile.png",mimeType:"image/png",buffer:Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1V8AAAAASUVORK5CYII=","base64")});
+  await page.screenshot({path:"/private/tmp/restaurant-retail-mobile-intake.png",fullPage:true});
+  await page.getByRole("button",{name:"บันทึกสินค้าและสต๊อก",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"บันทึกเรียบร้อย"})).toBeVisible();
+  expect(submissions).toHaveLength(1);
+  expect(submissions[0]).toContain('filename="mobile.png"');
+});
+
 test("retail intake scanner reads simulated camera and releases its stream",async({page})=>{
   await setup(page);
   const dataUrl=await QRCode.toDataURL("000123",{width:480,margin:5});

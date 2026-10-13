@@ -191,6 +191,76 @@ a {
   min-width: var(--app-touch-target);
 }
 
+/* Retail phone flow reuses the same cart and checkout. Tablet/desktop and
+   Restaurant are intentionally outside this scope. */
+@media (max-width: 767px) {
+  [data-retail-mobile-step] {
+    min-height: 100dvh;
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
+  }
+  [data-retail-mobile-step="payment"] {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  [data-retail-mobile-step] [data-retail-identity-context] {
+    flex-basis: 100%;
+    order: 2;
+    white-space: nowrap;
+    padding-bottom: 4px;
+  }
+  [data-retail-mobile-step] #retail-header-actions {
+    order: 3;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  [data-retail-mobile-step][data-retail-menu-open="false"] #retail-header-actions,
+  [data-retail-mobile-step][data-retail-menu-open="false"] #retail-navigation,
+  [data-retail-mobile-step] [data-retail-keyboard-hints],
+  [data-retail-mobile-step="catalog"] [data-testid="pos-cart-panel"],
+  [data-retail-mobile-step="cart"] [data-retail-catalog],
+  [data-retail-mobile-step="payment"] [data-retail-catalog],
+  [data-retail-mobile-step="cart"] [data-testid="pos-checkout-panel"],
+  [data-retail-mobile-step="payment"] [data-testid="pos-cart-header"],
+  [data-retail-mobile-step="payment"] [data-testid="pos-cart-body"] {
+    display: none;
+  }
+  [data-retail-mobile-step] [data-testid="pos-cart-panel"] {
+    overflow: visible;
+    min-width: 0;
+  }
+  [data-retail-mobile-step] [data-testid="pos-cart-header"] {
+    position: static;
+  }
+  [data-retail-mobile-step] [data-testid="pos-checkout-panel"],
+  [data-retail-mobile-step] [data-testid="pos-cart-body"] {
+    padding: 12px;
+  }
+  [data-retail-mobile-step] [data-retail-product-grid] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+  [data-retail-mobile-step] [data-retail-product-grid="normal"] > button {
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    overflow-wrap: anywhere;
+  }
+  [data-retail-mobile-step] #retail-navigation nav > div {
+    flex-wrap: wrap;
+  }
+  [data-retail-mobile-step] input,
+  [data-retail-mobile-step] select,
+  [data-retail-intake] input,
+  [data-retail-intake] select {
+    font-size: 16px;
+    min-width: 0;
+  }
+  [data-retail-intake] input[type="file"] { max-width: 100%; }
+  [data-retail-intake] #intake-barcode {
+    flex-basis: 100%;
+    width: 100%;
+  }
+}
+
 @media (min-width: 768px) and (max-width: 1279px) {
   :root {
     --app-radius: 14px;

@@ -386,6 +386,14 @@ export default function POSPage(): JSX.Element {
   const user = useAuthStore((state) => state.user);
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const isRetailMode = businessType === "retail_pos";
+  const [mobileStep, setMobileStep] = useState<"catalog" | "cart" | "payment">("catalog");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileStepHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (!isRetailMode || !window.matchMedia("(max-width: 767px)").matches) return;
+    window.scrollTo({ top: 0, behavior: "instant" });
+    mobileStepHeading.current?.focus({ preventScroll: true });
+  }, [mobileStep, isRetailMode]);
   const isTakeawayMode = !isRetailMode && new URLSearchParams(location.search).get("channel") === "takeaway";
   const retailContextValid = !isRetailMode || Boolean(companyId && brandId && branchId && targetDatabase === "retail_pos");
   const catalogScope = isRetailMode ? "retail_sale" as const : "restaurant_menu" as const;
@@ -479,6 +487,10 @@ export default function POSPage(): JSX.Element {
   const [secondaryPaymentReference, setSecondaryPaymentReference] = useState("");
   const [deviceStatusOpen, setDeviceStatusOpen] = useState(false);
   const [retailException, setRetailException] = useState<RetailExceptionState | null>(null);
+  useEffect(() => {
+    // Price/stock exceptions live beside the catalog, never behind a mobile step.
+    if (retailException && isRetailMode) setMobileStep("catalog");
+  }, [retailException, isRetailMode]);
   const [retailLookupBusy, setRetailLookupBusy] = useState(false);
   const [retailVariantProduct, setRetailVariantProduct] = useState<RetailLookupProduct | null>(null);
   const [selectedRetailVariantId, setSelectedRetailVariantId] = useState<string | null>(null);
@@ -1280,7 +1292,9 @@ export default function POSPage(): JSX.Element {
     setPendingRetailLine(null);
     setPendingRetailQuote(null);
     setSearch("");
-    window.setTimeout(() => searchRef.current?.focus(), 0);
+    if (!window.matchMedia("(max-width: 767px)").matches) {
+      window.setTimeout(() => searchRef.current?.focus(), 0);
+    }
   }
 
   function updateCartQuantity(item: CartItem, requestedQty: number): void {
@@ -1686,6 +1700,7 @@ export default function POSPage(): JSX.Element {
   }
 
   function resetActiveSale(): void {
+    setMobileStep("catalog");
     setCartItems([]);
     setOrderDiscount(0);
     setPaymentMethod("cash");
@@ -2195,6 +2210,7 @@ export default function POSPage(): JSX.Element {
         if (isRetailMode) {
           const firstChangedLine = quote.lines.find((line) => line.discrepancy) ?? quote.lines[0];
           setPendingRetailQuote(quote);
+          setMobileStep("catalog");
           setRetailException({
             kind: "price_changed",
             code: firstChangedLine?.product_id ?? "retail-cart",
@@ -2628,18 +2644,19 @@ export default function POSPage(): JSX.Element {
   }
 
   return (
-    <div data-pos-touch-surface className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] md:h-screen">
+    <div data-pos-touch-surface data-retail-mobile-step={isRetailMode ? mobileStep : undefined} data-retail-menu-open={mobileMenuOpen} className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] md:h-screen">
       <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
         {/* Tablet v2: compact identity and health header */}
         <div className="border-b border-slate-200/80 bg-white/90 px-4 py-2.5 backdrop-blur">
-          <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
+          <div data-retail-identity className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
             <div className="flex shrink-0 items-center gap-2">
               <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-base font-black text-white shadow-sm" aria-hidden="true">F</span>
               <span className="hidden whitespace-nowrap text-base font-black text-blue-700 xl:inline">{PLATFORM_BRAND.productName}</span>
               <span className="hidden h-7 w-px bg-slate-200 xl:block" aria-hidden="true" />
               <span className="whitespace-nowrap text-base font-black text-slate-900">{isRetailMode ? "Retail POS" : "ขายหน้าร้าน"}</span>
             </div>
-            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto text-xs">
+            {isRetailMode && <Button variant="outline" className="ml-auto md:hidden" aria-expanded={mobileMenuOpen} aria-controls="retail-header-actions retail-navigation" onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen ? "ปิดเมนู" : "เมนูเพิ่มเติม"}</Button>}
+            <div data-retail-identity-context className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto text-xs">
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-700">{branchName}</span>
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-600">
                 {isRetailMode ? (currentCounterDevice?.device_code ?? "Counter ยังไม่จับคู่") : currentLocationName}
@@ -2685,7 +2702,7 @@ export default function POSPage(): JSX.Element {
                 </button>
               ) : null}
             </div>
-            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <div id="retail-header-actions" className="ml-auto flex shrink-0 items-center gap-1.5">
               {isRetailMode ? (
                 <Button size="sm" variant="outline" className="min-h-11" onClick={() => openWorkspace("/retail/offline-sync", "ศูนย์สถานะและการกู้คืน")}>
                   <CloudUpload className="h-4 w-4" />สถานะซิงก์
@@ -2715,6 +2732,7 @@ export default function POSPage(): JSX.Element {
           </div>
         </div>
 
+        <div id="retail-navigation" className="shrink-0">
         <PosWorkspaceNav
           mode={isRetailMode ? "retail" : "restaurant"}
           heldBillCount={activeHeldBillCount}
@@ -2725,9 +2743,19 @@ export default function POSPage(): JSX.Element {
           onDeviceStatus={() => setDeviceStatusOpen(true)}
           onNavigate={openWorkspace}
         />
+        </div>
+
+        {isRetailMode && mobileStep !== "catalog" && (
+          <div className="sticky top-0 z-30 flex items-center gap-3 border-b bg-white p-3 md:hidden">
+            <Button variant="outline" disabled={isSubmitting} onClick={() => setMobileStep(mobileStep === "payment" ? "cart" : "catalog")}>
+              <ArrowLeft className="mr-1 h-4 w-4" />{mobileStep === "payment" ? "กลับตะกร้า" : "เลือกสินค้าเพิ่ม"}
+            </Button>
+            <h1 ref={mobileStepHeading} tabIndex={-1} className="text-lg font-bold outline-none">{mobileStep === "payment" ? "รับชำระเงิน" : "ตรวจตะกร้า"}</h1>
+          </div>
+        )}
 
         <div className="flex min-h-0 flex-1 flex-col md:flex-row md:overflow-hidden">
-          <div className="flex min-w-0 flex-1 flex-col p-3 md:overflow-hidden md:p-4">
+          <div data-retail-catalog className="flex min-w-0 flex-1 flex-col p-3 md:overflow-hidden md:p-4">
             <div className="rounded-[28px] border border-white/80 bg-white/85 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
                 <div className="relative flex-1">
@@ -2744,7 +2772,8 @@ export default function POSPage(): JSX.Element {
                         void handleBarcodeLookup();
                       }
                     }}
-                    autoFocus
+                    autoFocus={!isRetailMode || window.matchMedia("(min-width: 768px)").matches}
+                    aria-label="ค้นหาหรือสแกนสินค้า"
                   />
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -2761,9 +2790,9 @@ export default function POSPage(): JSX.Element {
                     เปิดกล้องสแกน
                   </Button>
                   {isRetailMode && hasPermission("inventory.product.create") && (
-                    <Button type="button" variant="outline" className="h-11 rounded-xl px-4" onClick={() => navigate("/retail/products/scan")}>สแกนเพิ่มสินค้า / รับสต๊อก</Button>
+                    <Button type="button" variant="outline" className="h-11 rounded-xl px-4" onClick={() => openWorkspace("/retail/products/scan", "เพิ่มสินค้า / รับสต๊อก")}>สแกนเพิ่มสินค้า / รับสต๊อก</Button>
                   )}
-                  <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-xs text-slate-500">
+                  <div data-retail-keyboard-hints className="flex items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-xs text-slate-500">
                     Enter = เพิ่มสินค้า, F1 = โฟกัสค้นหา, F2 = ช่องเงินสด
                   </div>
                 </div>
@@ -2792,7 +2821,8 @@ export default function POSPage(): JSX.Element {
 
             {isRetailMode ? (
               <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${retailContextValid ? "border-blue-200 bg-blue-50 text-blue-900" : "border-red-200 bg-red-50 text-red-800"}`}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                {retailContextValid && <p className="text-xs font-medium md:hidden">{isOnline ? "ออนไลน์ · ตรวจราคาและสต๊อกก่อนขาย" : "ออฟไลน์ · ยังรับชำระเงินไม่ได้"}{!catalogCacheTrusted ? " · กำลังโหลดสินค้า" : ""}</p>}
+                <div className={`${retailContextValid ? "hidden md:flex" : "flex"} flex-wrap items-center justify-between gap-2`}>
                   <div>
                     <div className="font-semibold">Retail Scan-first · Pilot</div>
                     <div className="mt-1 text-xs opacity-80">
@@ -3089,7 +3119,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Normal Mode */}
             {cardDensity === "normal" && (
-              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-2 gap-3 overflow-x-hidden overflow-y-auto xl:grid-cols-3 2xl:grid-cols-4">
+              <div data-retail-product-grid="normal" className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-2 gap-3 overflow-x-hidden overflow-y-auto xl:grid-cols-3 2xl:grid-cols-4">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const stockLabel = stock <= 0 ? "หมด" : stock <= 5 ? "ใกล้หมด" : `${stock}`;
@@ -3121,7 +3151,7 @@ export default function POSPage(): JSX.Element {
 
             {/* Product Grid — Compact Mode (มากขึ้นต่อแถว) */}
             {cardDensity === "compact" && (
-              <div className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-3 gap-2 overflow-x-hidden overflow-y-auto lg:grid-cols-4 2xl:grid-cols-5">
+              <div data-retail-product-grid="compact" className="mt-3 grid flex-1 auto-rows-max content-start grid-cols-3 gap-2 overflow-x-hidden overflow-y-auto lg:grid-cols-4 2xl:grid-cols-5">
                 {visibleProducts.map((product) => {
                   const stock = getAvailableStock(product.id);
                   const outOfStock = stock <= 0;
@@ -3385,7 +3415,7 @@ export default function POSPage(): JSX.Element {
                             แก้
                           </button>
                         ) : null}
-                        <button type="button" className="text-slate-300 hover:text-red-400" onClick={() => updateCartItem(item.product_id, () => null, item.variant_id)}>×</button>
+                        <button type="button" aria-label={`นำ ${item.product_name} ออกจากตะกร้า`} className="text-slate-300 hover:text-red-400" onClick={() => updateCartItem(item.product_id, () => null, item.variant_id)}>×</button>
                       </div>
                     </div>
                     <div className="mt-1.5 flex items-center justify-between gap-2">
@@ -3568,6 +3598,8 @@ export default function POSPage(): JSX.Element {
                   <input
                     ref={cashInputRef}
                     type="number"
+                    inputMode="decimal"
+                    aria-label="จำนวนเงินที่รับ"
                     className="h-12 w-full rounded-xl border border-emerald-200 bg-white px-3 text-right text-xl font-semibold"
                     value={paidAmount}
                     onChange={(event) => setPaidAmount(Number(event.target.value))}
@@ -3577,7 +3609,7 @@ export default function POSPage(): JSX.Element {
                       <button
                         key={value}
                         type="button"
-                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm"
                         onClick={() => setPaidAmount(value)}
                       >
                         {formatThaiCurrency(value)}
@@ -3647,6 +3679,14 @@ export default function POSPage(): JSX.Element {
             </div>
           </aside>
         </div>
+        {isRetailMode && mobileStep !== "payment" && (
+          <div data-testid="retail-mobile-footer" className="fixed inset-x-0 bottom-0 z-30 border-t bg-white px-3 pt-3 shadow-lg md:hidden" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
+            <Button className="min-h-14 w-full justify-between gap-3 text-base" disabled={mobileStep === "cart" && (cart.items.length === 0 || !currentShift)} onClick={() => {setMobileMenuOpen(false);setMobileStep(mobileStep === "catalog" ? "cart" : "payment");}}>
+              <span>{mobileStep === "catalog" ? `ดูตะกร้า (${cart.items.reduce((total, item) => total + item.qty, 0)})` : "ไปรับชำระเงิน"}</span>
+              <span aria-live="polite">{formatThaiCurrency(finalTotal)}</span>
+            </Button>
+          </div>
+        )}
       </div>
 
       <Dialog

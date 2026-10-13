@@ -93,14 +93,14 @@ function Workspace(): JSX.Element {
     window.addEventListener("beforeunload",guard);return()=>window.removeEventListener("beforeunload",guard);
   },[locked]);
   const field=(key:keyof typeof empty,value:string)=>setFields(previous=>({...previous,[key]:value}));
-  return <main className="min-h-screen bg-slate-50 p-4 md:p-8"><div className="mx-auto max-w-5xl space-y-5">
+  return <main data-retail-intake data-pos-touch-surface className="min-h-screen bg-slate-50 p-4 md:p-8" style={{paddingBottom:"max(16px, env(safe-area-inset-bottom))"}}><div className="mx-auto max-w-5xl space-y-5">
     <header className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm text-blue-700">Retail · บริษัท / แบรนด์ / สาขาที่เลือก</p><h1 className="text-2xl font-bold">สแกนเพิ่มสินค้า / รับสต๊อก</h1></div>{!locked&&<Button asChild variant="outline"><Link to="/retail/pos">กลับหน้าขาย</Link></Button>}</header>
     <p className="text-sm text-slate-600">1 สแกนและตรวจสินค้า → 2 รายละเอียดและราคา → 3 คลังและจำนวน → 4 รูปสินค้า → บันทึก</p>
     {!online&&<p role="alert" className="rounded-xl bg-amber-100 p-4">ต้องออนไลน์เพื่อป้องกันสินค้าซ้ำและยืนยันยอดสต๊อก</p>}
     {error&&<p role="alert" className="rounded-xl bg-red-50 p-4 text-red-700">{error}</p>}
     {receipt?<section className="rounded-2xl border bg-white p-6" role="status"><h2 className="text-xl font-bold">บันทึกเรียบร้อย</h2><p>{receipt.name} · รับเข้า {receipt.qty_received} หน่วย</p><p>{receipt.created?"สร้างสินค้าใหม่แล้ว":"รับสินค้าเดิมเพิ่ม โดยไม่เปลี่ยนราคาขายหรือรูปเดิม"}</p><Button className="mt-4" onClick={()=>{setReceipt(null);setChecked("");setBarcode("");setFields(empty);setExisting(null);setImage(null);}}>เพิ่มสินค้าถัดไป</Button></section>:<>
       <section className="rounded-2xl border bg-white p-5"><label className="mb-2 block font-semibold" htmlFor="intake-barcode">บาร์โค้ดสินค้า</label><div className="flex flex-wrap gap-3">
-        <Input id="intake-barcode" className="h-12 min-w-40 flex-1" value={barcode} maxLength={100} disabled={busy||locked} onChange={e=>changeCode(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();void lookup();}}} placeholder="สแกน / ยิงบาร์โค้ด / กรอกรหัส" />
+        <Input id="intake-barcode" autoCapitalize="none" autoCorrect="off" spellCheck={false} className="h-12 min-w-40 flex-1" value={barcode} maxLength={100} disabled={busy||locked} onChange={e=>changeCode(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();void lookup();}}} placeholder="สแกน / ยิงบาร์โค้ด / กรอกรหัส" />
         <Button className="h-12" disabled={busy||locked||!online} onClick={()=>void lookup()}>ตรวจบาร์โค้ด</Button>
         <Button variant="outline" className="h-12" disabled={busy||locked||!online} onClick={()=>setScanning(true)}><ScanBarcode className="mr-2 h-4 w-4"/>เปิดกล้องสแกน</Button>
       </div></section>

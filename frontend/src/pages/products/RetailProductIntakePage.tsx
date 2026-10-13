@@ -11,6 +11,7 @@ import { useAuthStore } from "@/stores/auth.store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ProductBarcodeScanner from "@/components/products/ProductBarcodeScanner";
+import RetailCategoryCreateDialog from "@/components/products/RetailCategoryCreateDialog";
 import type { Category, Unit } from "@/types/product";
 import type { ApiResponse } from "@/types/api";
 
@@ -33,6 +34,7 @@ function Workspace(): JSX.Element {
   const [image,setImage] = useState<File|null>(null);
   const [preview,setPreview] = useState("");
   const [scanning,setScanning] = useState(false);
+  const [categoryCreateOpen,setCategoryCreateOpen] = useState(false);
   const [busy,setBusy] = useState(false);
   const [locked,setLocked] = useState(false);
   const [error,setError] = useState("");
@@ -108,6 +110,7 @@ function Workspace(): JSX.Element {
         <section className="space-y-3 rounded-2xl border bg-white p-5"><h2 className="font-bold">{existing?"พบสินค้าเดิม — รับเพิ่ม":"สินค้าใหม่ — รายละเอียดและราคา"}</h2>
           <label className="block">ชื่อสินค้า<Input required value={fields.name} disabled={!!existing} maxLength={500} onChange={e=>field("name",e.target.value)}/></label>
           {!existing&&<><label className="block">รายละเอียด<Input value={fields.description} maxLength={2000} onChange={e=>field("description",e.target.value)}/></label>
+          {hasPermission("inventory.product.create")&&<Button type="button" variant="outline" disabled={!online} onClick={()=>setCategoryCreateOpen(true)}>+ เพิ่มหมวดสินค้า</Button>}
           <label className="block">หน่วยสินค้า<select aria-label="หน่วยสินค้า" className="mt-1 h-12 w-full rounded border bg-white px-3" required value={fields.unit_id} onChange={e=>field("unit_id",e.target.value)}><option value="">เลือกหน่วย</option>{units.data?.data.filter(u=>u.is_active).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
           <label className="block">หมวดหมู่<select aria-label="หมวดหมู่" className="mt-1 h-12 w-full rounded border bg-white px-3" value={fields.category_id} onChange={e=>field("category_id",e.target.value)}><option value="">ไม่ระบุ</option>{categories.data?.data.filter(c=>c.is_active).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label></>}
           <label className="block">ราคาขาย (บาท)<Input type="number" min="0" step="0.0001" required value={fields.selling_price} disabled={!!existing} onChange={e=>field("selling_price",e.target.value)}/></label>
@@ -124,6 +127,10 @@ function Workspace(): JSX.Element {
       </fieldset><Button className="h-14 w-full text-lg" disabled={busy||!online||(!canReceive&&!!existing)} type="submit">{busy?"กำลังบันทึก...":locked?"ลองบันทึกเดิมอีกครั้ง":existing?"ยืนยันรับสินค้าเดิมเพิ่ม":"บันทึกสินค้าและสต๊อก"}</Button></form>}
     </>}
     <ProductBarcodeScanner open={scanning} onClose={()=>setScanning(false)} onScan={code=>{setScanning(false);void lookup(code);}}/>
+    <RetailCategoryCreateDialog open={categoryCreateOpen} onOpenChange={setCategoryCreateOpen} onCreated={async(category)=>{
+      cache.setQueryData<ApiResponse<Category[]>>(["retail-intake",companyId,brandId,branchId,"categories"], previous=>({...previous!,data:[...(previous?.data??[]).filter(row=>row.id!==category.id),category]}));
+      field("category_id",category.id);
+    }}/>
   </div></main>;
 }
 

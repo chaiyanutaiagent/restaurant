@@ -52,6 +52,7 @@ import {
 import { posApi } from "@/lib/posApi";
 import { gatewayApi } from "@/lib/paymentGatewayApi";
 import { productApi } from "@/lib/productApi";
+import RetailCategoryCreateDialog, { categoryNameKey } from "@/components/products/RetailCategoryCreateDialog";
 import {
   getQueuedRestaurantOrder,
   getRestaurantOutboxSummary,
@@ -404,6 +405,7 @@ export default function POSPage(): JSX.Element {
   const [search, setSearch] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [categoryCreateOpen, setCategoryCreateOpen] = useState(false);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [orderDiscount, setOrderDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
@@ -857,19 +859,17 @@ export default function POSPage(): JSX.Element {
       }));
   }, [eligibleProducts, isTakeawayMode, restaurantProducts, takeawayMenuByProductId, takeawayMenuQuery.data]);
   const categories = useMemo(() => {
-    const categoryById = new Map(catalogCategories.map((category) => [category.id, category]));
     const groups = new Map<string, { key: string; name: string; ids: Set<string> }>();
-    for (const product of eligibleProducts) {
-      if (!product.category_id) continue;
-      const category = categoryById.get(product.category_id);
-      if (!category?.is_active) continue;
-      const key = category.name.trim().replace(/\s+/g, " ").toLocaleLowerCase("th-TH");
+    const usedIds = new Set(eligibleProducts.map(product => product.category_id));
+    for (const category of catalogCategories) {
+      if (!category.is_active || (!isRetailMode && !usedIds.has(category.id))) continue;
+      const key = categoryNameKey(category.name);
       const group = groups.get(key) ?? { key, name: category.name.trim(), ids: new Set<string>() };
       group.ids.add(category.id);
       groups.set(key, group);
     }
     return [...groups.values()].sort((left, right) => left.name.localeCompare(right.name, "th"));
-  }, [catalogCategories, eligibleProducts]);
+  }, [catalogCategories, eligibleProducts, isRetailMode]);
   const stockByProduct = useMemo(
     () => new Map(stockBalances.map((item) => [`${item.product_id}:${item.variant_id ?? "base"}`, item])),
     [stockBalances],
@@ -2919,6 +2919,9 @@ export default function POSPage(): JSX.Element {
             <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
               <nav data-testid="pos-category-panel" aria-label="หมวดสินค้า" className="shrink-0 rounded-2xl border border-white/80 bg-white/80 p-2 shadow-sm lg:w-40 lg:overflow-y-auto">
                 <div className="hidden px-2 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 lg:block">หมวดสินค้า</div>
+                {isRetailMode && retailContextValid && hasPermission("inventory.product.create") && (
+                  <Button variant="outline" className="mb-2 min-h-11 w-full border-dashed text-blue-700" disabled={!isOnline} onClick={()=>setCategoryCreateOpen(true)}>+ เพิ่มหมวดสินค้า</Button>
+                )}
                 <div className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-x-visible">
                   <button
                     type="button"
@@ -3085,7 +3088,7 @@ export default function POSPage(): JSX.Element {
             {/* P5: Product Card Density — toggle bar */}
             {isRetailMode && retailContextValid && catalogCacheTrusted && !onlineSearchQuery.isLoading && visibleProducts.length === 0 ? (
               <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-white/80 px-6 py-10 text-center text-sm text-slate-600">
-                <div className="font-semibold text-slate-900">{searchTerm.trim() ? "ไม่พบสินค้าใน Retail Catalog" : "Retail Catalog ยังไม่มีสินค้าพร้อมขาย"}</div>
+                <div className="font-semibold text-slate-900">{selectedCategory ? "หมวดนี้ยังไม่มีสินค้าตรงกับที่เลือก" : searchTerm.trim() ? "ไม่พบสินค้าใน Retail Catalog" : "Retail Catalog ยังไม่มีสินค้าพร้อมขาย"}</div>
                 <div className="mt-1">{searchTerm.trim() ? "ตรวจบาร์โค้ด ชื่อ หรือ SKU แล้วลองใหม่" : "ให้ผู้ดูแลเพิ่มสินค้าของ Brand นี้ก่อนเริ่มขาย"}</div>
               </div>
             ) : null}
@@ -3688,6 +3691,13 @@ export default function POSPage(): JSX.Element {
           </div>
         )}
       </div>
+
+      {isRetailMode && <RetailCategoryCreateDialog open={categoryCreateOpen} onOpenChange={setCategoryCreateOpen} onCreated={async(category)=>{
+        await db.categories.put({...category,synced_at:Date.now()});
+        await queryClient.invalidateQueries({queryKey:["pos","categories"]});
+        setSelectedCategory(categoryNameKey(category.name));
+        toast({title:"เลือกหมวดสินค้าแล้ว",description:category.name});
+      }} />}
 
       <Dialog
         open={Boolean(retailVariantProduct)}

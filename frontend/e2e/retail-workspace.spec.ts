@@ -154,6 +154,7 @@ test("Retail workspace stays server-authoritative and usable on desktop and tabl
     await expect(page.getByText(/Pilot · Production ใช้ Legacy/)).toBeVisible();
     await expect(page.getByText(/Retail Scan-first · Pilot/)).toBeVisible();
     await expect(page.getByText(/signed Company \/ Brand \/ Branch/)).toBeVisible();
+    await expect(page.getByRole("button",{name:"+ เพิ่มหมวดสินค้า",exact:true})).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   }
 
@@ -257,4 +258,40 @@ test("Retail small phone and tablet resize preserves cart and both desktop panel
   await expect(page.getByLabel("จำนวน น้ำดื่มทดสอบมือถือ",{exact:true})).toHaveValue("1");
   await page.getByRole("button",{name:"นำ น้ำดื่มทดสอบมือถือ ออกจากตะกร้า",exact:true}).click();
   await expect(footer.getByRole("button")).toBeDisabled();
+});
+
+test("Retail storefront creates and displays an empty category without losing the mobile cart",async({page})=>{
+  await mobileCatalog(page);
+  await page.addInitScript(()=>{
+    const auth=JSON.parse(localStorage.getItem("erp-auth")!);
+    auth.state.permissions.push("inventory.product.create","inventory.product.view");
+    localStorage.setItem("erp-auth",JSON.stringify(auth));
+  });
+  const rows:Record<string,unknown>[]=[];
+  let creates=0;
+  await page.route("**/api/v1/categories?**",route=>fulfill(route,rows));
+  await page.route("**/api/v1/categories",route=>{
+    creates++;
+    const body=route.request().postDataJSON();
+    const row={...body,id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",company_id:companyId,is_active:true,sort_order:0,parent_id:null};
+    rows.push(row);return fulfill(route,row,{},201);
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto("/retail/pos");
+  await page.getByTestId("pos-product-panel").getByRole("button",{name:/น้ำดื่มทดสอบมือถือ/}).click();
+  await expect(page.getByTestId("retail-mobile-footer")).toContainText("ดูตะกร้า (1)");
+  await page.getByRole("button",{name:"+ เพิ่มหมวดสินค้า",exact:true}).click();
+  await page.getByLabel("ชื่อหมวดสินค้า",{exact:true}).fill("  ขนมทดสอบ  ");
+  await page.getByRole("button",{name:"บันทึกหมวด",exact:true}).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByTestId("pos-category-panel").getByRole("button",{name:"ขนมทดสอบ",exact:true})).toBeVisible();
+  await expect(page.getByText("หมวดนี้ยังไม่มีสินค้าตรงกับที่เลือก",{exact:true})).toBeVisible();
+  await expect(page.getByTestId("retail-mobile-footer")).toContainText("ดูตะกร้า (1)");
+  expect(creates).toBe(1);
+  await page.getByRole("button",{name:"+ เพิ่มหมวดสินค้า",exact:true}).click();
+  await page.getByLabel("ชื่อหมวดสินค้า",{exact:true}).fill("ขนมทดสอบ");
+  await page.getByRole("button",{name:"บันทึกหมวด",exact:true}).click();
+  await page.getByRole("button",{name:"ใช้หมวดเดิม",exact:true}).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(creates).toBe(1);
 });

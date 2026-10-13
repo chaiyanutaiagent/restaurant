@@ -95,6 +95,31 @@ test("retail intake mobile form supports photo and stock without horizontal over
   expect(submissions[0]).toContain('filename="mobile.png"');
 });
 
+test("intake creates a category and recovers uncertain response without a second create",async({page,context})=>{
+  await setup(page);
+  const rows:Record<string,unknown>[]=[];
+  let creates=0;
+  const categoryId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  await page.route("**/api/v1/categories?**",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({data:rows,meta:{},error:null})}));
+  await page.route("**/api/v1/categories",route=>{
+    creates++;
+    rows.push({...route.request().postDataJSON(),id:categoryId,is_active:true});
+    return route.fulfill({status:503,body:"uncertain response"});
+  });
+  await page.getByLabel("ชื่อสินค้า",{exact:true}).fill("รักษาชื่อสินค้าที่กรอกไว้");
+  await page.getByRole("button",{name:"+ เพิ่มหมวดสินค้า",exact:true}).click();
+  await page.getByLabel("ชื่อหมวดสินค้า",{exact:true}).fill("เครื่องดื่ม");
+  await page.getByRole("button",{name:"บันทึกหมวด",exact:true}).click();
+  await expect(page.getByLabel("ชื่อหมวดสินค้า",{exact:true})).toBeDisabled();
+  await page.getByRole("button",{name:"ตรวจผลอีกครั้ง",exact:true}).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByLabel("หมวดหมู่",{exact:true})).toHaveValue(categoryId);
+  await expect(page.getByLabel("ชื่อสินค้า",{exact:true})).toHaveValue("รักษาชื่อสินค้าที่กรอกไว้");
+  expect(creates).toBe(1);
+  await context.setOffline(true);
+  await expect(page.getByRole("button",{name:"+ เพิ่มหมวดสินค้า",exact:true})).toBeDisabled();
+});
+
 test("retail intake scanner reads simulated camera and releases its stream",async({page})=>{
   await setup(page);
   const dataUrl=await QRCode.toDataURL("000123",{width:480,margin:5});

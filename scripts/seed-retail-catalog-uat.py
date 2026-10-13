@@ -20,6 +20,7 @@ from app.services.retail_intake_service import intake, lock
 from app.services.retail_catalog_service import create_brand
 from app.services.retail_reference_projector import project_retail_reference_snapshot
 from app.services.stock_service import StockService
+from app.services.stock_access_service import StockAccessService
 
 
 async def main(args):
@@ -41,8 +42,11 @@ async def main(args):
             db.add(AuditLog(company_id=company,user_id=user,action="retail.demo.warehouse.create",resource="Branch",resource_id=str(warehouse_id),new_value={"uat_only":True}))
             await db.commit()
     await project_retail_reference_snapshot(company_id=company,brand_ids=(brand,))
+    current=TokenData(company_id=company,brand_id=brand,branch_id=branch,user_id=user,permissions=["*"],business_type="retail_pos",target_database="retail_pos")
     async with RetailSessionLocal() as db:
-        location=await db.scalar(select(StockLocation).where(StockLocation.company_id==company,StockLocation.branch_id==branch,StockLocation.is_active.is_(True),StockLocation.deleted_at.is_(None)).order_by(StockLocation.created_at).limit(1))
+        scope=await StockAccessService(db).resolve_scope(current)
+        preferred=await db.scalar(select(BrandBranch.store_location_id).where(BrandBranch.company_id==company,BrandBranch.brand_id==brand,BrandBranch.branch_id==branch,BrandBranch.is_active.is_(True)))
+        location=await db.scalar(select(StockLocation).where(StockLocation.id.in_(scope.location_ids or ()),StockLocation.is_active.is_(True),StockLocation.deleted_at.is_(None)).order_by((StockLocation.id==preferred).desc(),StockLocation.created_at).limit(1))
         if not location: raise RuntimeError("Configure the store location before seeding")
         store_location=location.id
         if not await db.get(StockLocation,warehouse_location):
@@ -52,7 +56,6 @@ async def main(args):
         for name in ("ขนม","เสื้อผ้า","รองเท้า","ของใช้"):
             if not await db.get(Category,identity(name)): db.add(Category(id=identity(name),company_id=company,code="UAT-"+str(identity(name))[:8],name="UAT ตัวอย่าง · "+name))
         await db.commit()
-    current=TokenData(company_id=company,brand_id=brand,branch_id=branch,user_id=user,permissions=["*"],business_type="retail_pos",target_database="retail_pos")
     catalog=[
         ("ขนม","UAT Snack","UAT มันฝรั่งทอด",[("FCS-UAT-SNACK-01",{"รสชาติ":"ดั้งเดิม","ขนาด":"48 กรัม"},20,12),("FCS-UAT-SNACK-02",{"รสชาติ":"บาร์บีคิว","ขนาด":"48 กรัม"},22,13)]),
         ("เสื้อผ้า","UAT Wear","UAT เสื้อยืด",[("FCS-UAT-SHIRT-01",{"สี":"ดำ","ไซซ์":"M"},199,90),("FCS-UAT-SHIRT-02",{"สี":"ขาว","ไซซ์":"L"},219,100)]),

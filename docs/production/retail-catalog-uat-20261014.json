@@ -1,0 +1,73 @@
+{
+  "release": "retail-catalog-20261014-r2",
+  "status": "deployed_to_uat_physical_acceptance_pending",
+  "feature_commit": "5731546",
+  "repository": "chaiyanutaiagent/restaurant",
+  "branch": "codex/recipe-quick-create",
+  "scope": [
+    "Retail catalog and custom variants, barcode intake, exact SKU prices and separate branch stock (items 1-5)",
+    "Optional Retail warehouse-to-store transfers with approval, partial receipt and shortage accounting (item 6)",
+    "Return and receipt variant labels; immutable-price refund acceptance; scoped SKU report and CSV (item 7)",
+    "Idempotent UAT demonstration seed, migration validation, GitHub push and UAT deployment (item 8)"
+  ],
+  "images": {
+    "backend": "restaurant-pos-backend:uat-retail-catalog-20261014-r2",
+    "frontend": "restaurant-pos-frontend:uat-retail-catalog-20261014-r2"
+  },
+  "deployment": {
+    "host": "100.66.192.56",
+    "release_directory": "/home/behappyaiagent/restaurant-uat-releases/retail-catalog-20261014",
+    "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-catalog-20261014-r2",
+    "backups": ["retail_ops_db.dump", "restaurant_platform_core_db.dump"],
+    "backup_validation": "Nonempty custom-format dumps, pg_restore table of contents and SHA256 recorded. Full data restore not rehearsed.",
+    "retail_migration": "p13retail0007 -> wp84retail0008 -> retailcatalog0009 -> retailtransfer0010",
+    "baseline_repair": "The previous deployed image omitted the wp84 migration file. First attempt failed before schema changes and rolled back application images. Added the existing repository migration, validated the full chain on a disposable schema snapshot, then deployed successfully.",
+    "rollback_script": "/home/behappyaiagent/restaurant-uat-releases/retail-catalog-20261014/rollback-uat.sh",
+    "rollback_images": {
+      "backend": "restaurant-pos-backend:uat-retail-intake-1190fd8",
+      "frontend": "restaurant-pos-frontend:uat-retail-category-861ac95"
+    },
+    "rollback_policy": "Application-image rollback preserves new tables and recorded UAT data. Do not downgrade populated tables or restore backups over subsequent transactions without reconciliation.",
+    "production_unchanged": true,
+    "existing_flags_and_database_routing_unchanged": true
+  },
+  "demo": {
+    "company": "บริษัท สเก็ตช์ บีซ จำกัด",
+    "brand": "The Loft Mini Mart",
+    "store_branch": "The Loft Mini Mart สาขาไทรน้อย",
+    "store_location_id": "49b53ccb-81b7-5d5d-996f-2f6c4d708f52",
+    "warehouse_branch": "UAT คลังกลาง Retail ตัวอย่าง",
+    "warehouse_branch_id": "c14fea17-99de-54f4-b31f-917b1efae996",
+    "warehouse_location_id": "07e5403c-c044-5333-a317-8bd2baf7904b",
+    "product_families": 4,
+    "sellable_skus": 7,
+    "barcode_search_prefix": "FCS-UAT-",
+    "families": ["มันฝรั่งทอด", "เสื้อยืด", "รองเท้าผ้าใบ", "ถุงผ้า"],
+    "initial_units_per_sku": {"store": 15, "warehouse": 40},
+    "seed_creates_sales_payments_or_tax_documents": false,
+    "permissions_changed": false,
+    "seed_location_selection": "Use StockAccessService allowed locations and prefer BrandBranch.store_location_id; never select legacy central-kitchen aliases by creation date."
+  },
+  "verification": [
+    "TypeScript and frontend build passed; existing large-bundle warning remains.",
+    "Retail intake/refund/report integration passed on disposable PostgreSQL and again against assembled release sources: exact variant restock, sellable/nonsellable partial refunds, replay, immutable original price and cross-brand isolation.",
+    "Demo seed twice on disposable DB produced 4 families, 7 SKUs, 14 balances and 14 movements without refilling stock on replay.",
+    "Full observed-baseline migration upgrade and empty-schema downgrade passed on disposable UAT schema snapshot.",
+    "Report browser test passed for filtering, CSV and viewport containment.",
+    "Final deployed report layout checked visually and at 320/820/1440 widths: 7 demonstration rows, readable minimum column widths and no page-level horizontal overflow.",
+    "Live UAT authenticated smoke passed: 7 demo SKUs with store stock 15, exact white-L shirt price 219, warehouse options and intake lookup; no business transaction writes.",
+    "Backend readiness and frontend HTTP checks passed; running flags matched compose configuration.",
+    "Container identity/image snapshot confirmed all containers except the two intended UAT application containers unchanged."
+  ],
+  "limitations": [
+    "Report line subtotal is before bill-level discounts, not net revenue or a fiscal report; return period is determined by refund finalization date and stock is current.",
+    "Provider refunds, fiscal-document enablement and Production deployment remain out of scope.",
+    "Human/device UAT remains: camera/barcode and printer, separate-user transfer approval and receipt, shortage handling, cash refund and network-loss recovery.",
+    "Warehouse transactions require an authorized source-branch context; seed does not broaden staff permissions or reassign legacy shifts."
+  ],
+  "urls": {
+    "pos": "https://uat-retail.foodchainservice.com/retail/pos",
+    "report": "https://uat-retail.foodchainservice.com/retail/reports/skus",
+    "transfers": "https://uat-retail.foodchainservice.com/retail/transfers"
+  }
+}

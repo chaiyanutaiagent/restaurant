@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-14",
+  "source_commit": "6e6efbe",
+  "repository": "chaiyanutaiagent/restaurant",
+  "branch": "codex/recipe-quick-create",
+  "version": "0.1.0-uat.2",
+  "version_code": 10002,
+  "target": "UAT downloads only",
+  "server_directory": "/home/behappyaiagent/restaurant-uat-downloads/native-pos-0.1.0-uat.2",
+  "artifacts": [
+    {
+      "product": "Retail",
+      "url": "https://uat-retail.foodchainservice.com/downloads/native-pos-0.1.0-uat.2/foodchainservice-retail-0.1.0-uat.2.apk",
+      "sha256": "324025f3b4425eed1846daac91e6702330a4c0785a441f93e1713efbe6edab4d",
+      "bytes": 4859626,
+      "public_http_status": 200,
+      "download_checksum_matches_local": true
+    },
+    {
+      "product": "Restaurant",
+      "url": "https://uat-pos.foodchainservice.com/downloads/native-pos-0.1.0-uat.2/foodchainservice-restaurant-0.1.0-uat.2.apk",
+      "sha256": "ac7cd925a18fc3c917d02f9ab0099d320f75f3b7728d1391af51b6eba856c571",
+      "bytes": 4992220,
+      "public_http_status": 200,
+      "download_checksum_matches_local": true
+    }
+  ],
+  "publication": "Copied APKs and manifests into a new staging directory, checked server SHA256, then atomically renamed to the versioned download directory. No existing APK or latest pointer replaced.",
+  "checks": {
+    "both_uat_health_endpoints": "status ok",
+    "signature_v1_v2": "verified in build",
+    "same_certificate_as_uat1": true,
+    "physical_android_installation": "pending",
+    "database_migration": "none",
+    "containers_restarted": false,
+    "web_frontend_redeployed": false,
+    "production_changed": false,
+    "takeaway_downloads_changed": false
+  },
+  "rollback": "Withdraw only the new versioned download directory if necessary; old downloads and running server images remain unchanged. For installed devices reconcile pending transactions first; do not uninstall or clear app data. Use a same-certificate higher-versionCode forward rollback after acceptance.",
+  "release_status": "Debug-signed UAT candidate; Production and physical acceptance gates remain HOLD"
+}

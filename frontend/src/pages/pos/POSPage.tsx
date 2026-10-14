@@ -67,6 +67,8 @@ import { wapApi, type WapOrder } from "@/lib/wapApi";
 import { openConfiguredCashDrawer, printConfiguredSaleReceipt, printConfiguredWapOrderSlip } from "@/lib/takeawayPrinter";
 import { useAuthStore } from "@/stores/auth.store";
 import { useDeviceStore } from "@/stores/device.store";
+import { nativeProduct } from "@/native-pos/config";
+import { nativeScope, readNativeCart, writeNativeCart } from '@/native-pos/storage';
 import type { BranchReplacementRule, BranchSettings } from "@/types/admin";
 import type { ProductListItem, RetailLookupProduct, RetailLookupVariant } from "@/types/product";
 import type { Customer, CustomerSearchResult, LoyaltySettings } from "@/types/crm";
@@ -387,14 +389,15 @@ export default function POSPage(): JSX.Element {
   const user = useAuthStore((state) => state.user);
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const isRetailMode = businessType === "retail_pos";
+  const mobilePosLayout = isRetailMode || Boolean(nativeProduct);
   const [mobileStep, setMobileStep] = useState<"catalog" | "cart" | "payment">("catalog");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileStepHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    if (!isRetailMode || !window.matchMedia("(max-width: 767px)").matches) return;
+    if (!mobilePosLayout || !window.matchMedia("(max-width: 767px)").matches) return;
     window.scrollTo({ top: 0, behavior: "instant" });
     mobileStepHeading.current?.focus({ preventScroll: true });
-  }, [mobileStep, isRetailMode]);
+  }, [mobileStep, mobilePosLayout]);
   const isTakeawayMode = !isRetailMode && new URLSearchParams(location.search).get("channel") === "takeaway";
   const retailContextValid = !isRetailMode || Boolean(companyId && brandId && branchId && targetDatabase === "retail_pos");
   const catalogScope = isRetailMode ? "retail_sale" as const : "restaurant_menu" as const;
@@ -515,6 +518,42 @@ export default function POSPage(): JSX.Element {
   const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
   const checkoutIdRef = useRef(generateClientOrderId());
   const openShiftIdempotencyRef = useRef(`shift-open:${generateClientOrderId()}`);
+  const nativeCartScope = `${nativeScope()}:${isTakeawayMode ? 'takeaway' : 'counter'}`;
+  const [nativeCartReady, setNativeCartReady] = useState(!nativeProduct);
+  const restoredNativeScope = useRef('');
+  useEffect(() => {
+    if (!nativeProduct) return;
+    let active = true;
+    setNativeCartReady(false);
+    void readNativeCart(nativeCartScope).then(saved => {
+      if (!active) return;
+      resetActiveSale();
+      if (saved) {
+        setCartItems(saved.cartItems ?? []); setOrderDiscount(saved.orderDiscount ?? 0);
+        setCustomerName(saved.customerName ?? ''); setCustomerPhone(saved.customerPhone ?? '');
+        setCustomerTaxId(saved.customerTaxId ?? ''); setSelectedCustomer(saved.selectedCustomer ?? null);
+        setNote(saved.note ?? ''); setResumedHoldDraft(saved.resumedHoldDraft ?? null);
+        setExchangeContext(saved.exchangeContext ?? null); setLoyaltyDiscount(saved.loyaltyDiscount ?? 0);
+      }
+      restoredNativeScope.current = nativeCartScope;
+      setNativeCartReady(true);
+    }).catch(() => window.dispatchEvent(new Event('native-pos-storage-error')));
+    return () => { active = false; };
+  }, [nativeCartScope]);
+  useEffect(() => {
+    if (!nativeProduct || !nativeCartReady || restoredNativeScope.current !== nativeCartScope) return;
+    // Payment amounts/approval tokens are deliberately not restored: server prices,
+    // payment and approval must be revalidated when the employee resumes the cart.
+    void writeNativeCart(nativeCartScope, { cartItems, orderDiscount, customerName, customerPhone,
+      customerTaxId, selectedCustomer, note, resumedHoldDraft, exchangeContext, loyaltyDiscount }).catch(() => undefined);
+  }, [nativeCartScope, nativeCartReady, cartItems, orderDiscount, customerName, customerPhone,
+    customerTaxId, selectedCustomer, note, resumedHoldDraft, exchangeContext, loyaltyDiscount]);
+  useEffect(() => {
+    if (!nativeProduct) return;
+    const settled = (event: Event) => { if ((event as CustomEvent).detail === nativeCartScope) resetActiveSale(); };
+    window.addEventListener('native-pos-cart-settled', settled);
+    return () => window.removeEventListener('native-pos-cart-settled', settled);
+  }, [nativeCartScope]);
 
   const scannerStreamRef = useRef<MediaStream | null>(null);
   const scannerFrameRef = useRef<number | null>(null);
@@ -2307,6 +2346,12 @@ export default function POSPage(): JSX.Element {
       }
       setLastOrder(order);
       setShowReceipt(true);
+      if (nativeProduct) {
+        const journal = await import('@/native-pos/transactionJournal');
+        // Re-read provider status when applicable; never clear a pending payment.
+        await journal.recoverNativeTransaction((await import('@/lib/api')).default);
+        await journal.acknowledgeNativeTransaction();
+      }
       await openCashDrawerAfterPayment(checkoutPayments);
       resetActiveSale();
       await db.completedOrders.put({ ...order, synced_at: Date.now() });
@@ -2386,6 +2431,10 @@ export default function POSPage(): JSX.Element {
   }
 
   async function handleCheckout(): Promise<void> {
+    if (nativeProduct && !navigator.onLine) {
+      toast({ title: "ต้องออนไลน์ก่อนรับชำระเงิน", description: "ตะกร้ายังอยู่ กรุณาเชื่อมต่อแล้วตรวจรายการก่อนทำต่อ", variant: "destructive" });
+      return;
+    }
     if (!currentShift || cart.items.length === 0) {
       return;
     }
@@ -2638,6 +2687,7 @@ export default function POSPage(): JSX.Element {
   }, [centralReplacementRuleMap, exchangeContext, products, replacementRuleMap, stockByProduct]);
 
   function openWorkspace(path: string, label: string): void {
+    if (nativeProduct && ['/devices/uat-readiness', '/retail/offline-sync', '/restaurant/offline-sync'].includes(path)) path = '/native/device';
     if (cart.items.length > 0 && !window.confirm(`มีสินค้าอยู่ในตะกร้า กรุณาพักบิลก่อนออกจากหน้าขาย\nต้องการไปที่ ${label} ต่อหรือไม่`)) {
       return;
     }
@@ -2647,8 +2697,10 @@ export default function POSPage(): JSX.Element {
     navigate(path);
   }
 
+  if (nativeProduct && !nativeCartReady) return <main role="status" className="p-6">กำลังกู้คืนตะกร้าของพนักงานและสาขานี้…</main>;
+
   return (
-    <div data-pos-touch-surface data-retail-mobile-step={isRetailMode ? mobileStep : undefined} data-retail-menu-open={mobileMenuOpen} className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] md:h-screen">
+    <div data-pos-touch-surface data-retail-mobile-step={mobilePosLayout ? mobileStep : undefined} data-retail-menu-open={mobileMenuOpen} className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.16),_transparent_28%),linear-gradient(180deg,_#fffaf0_0%,_#f8fafc_42%,_#eef2ff_100%)] md:h-screen">
       <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
         {/* Tablet v2: compact identity and health header */}
         <div className="border-b border-slate-200/80 bg-white/90 px-4 py-2.5 backdrop-blur">
@@ -2659,7 +2711,7 @@ export default function POSPage(): JSX.Element {
               <span className="hidden h-7 w-px bg-slate-200 xl:block" aria-hidden="true" />
               <span className="whitespace-nowrap text-base font-black text-slate-900">{isRetailMode ? "Retail POS" : "ขายหน้าร้าน"}</span>
             </div>
-            {isRetailMode && <Button variant="outline" className="ml-auto md:hidden" aria-expanded={mobileMenuOpen} aria-controls="retail-header-actions retail-navigation" onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen ? "ปิดเมนู" : "เมนูเพิ่มเติม"}</Button>}
+            {mobilePosLayout && <Button variant="outline" className="ml-auto md:hidden" aria-expanded={mobileMenuOpen} aria-controls="retail-header-actions retail-navigation" onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen ? "ปิดเมนู" : "เมนูเพิ่มเติม"}</Button>}
             <div data-retail-identity-context className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto text-xs">
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-700">{branchName}</span>
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-slate-600">
@@ -2749,7 +2801,7 @@ export default function POSPage(): JSX.Element {
         />
         </div>
 
-        {isRetailMode && mobileStep !== "catalog" && (
+        {mobilePosLayout && mobileStep !== "catalog" && (
           <div className="sticky top-0 z-30 flex items-center gap-3 border-b bg-white p-3 md:hidden">
             <Button variant="outline" disabled={isSubmitting} onClick={() => setMobileStep(mobileStep === "payment" ? "cart" : "catalog")}>
               <ArrowLeft className="mr-1 h-4 w-4" />{mobileStep === "payment" ? "กลับตะกร้า" : "เลือกสินค้าเพิ่ม"}
@@ -3698,7 +3750,7 @@ export default function POSPage(): JSX.Element {
             </div>
           </aside>
         </div>
-        {isRetailMode && mobileStep !== "payment" && (
+        {mobilePosLayout && mobileStep !== "payment" && (
           <div data-testid="retail-mobile-footer" className="fixed inset-x-0 bottom-0 z-30 border-t bg-white px-3 pt-3 shadow-lg md:hidden" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
             <Button className="min-h-14 w-full justify-between gap-3 text-base" disabled={mobileStep === "cart" && (cart.items.length === 0 || !currentShift)} onClick={() => {setMobileMenuOpen(false);setMobileStep(mobileStep === "catalog" ? "cart" : "payment");}}>
               <span>{mobileStep === "catalog" ? `ดูตะกร้า (${cart.items.reduce((total, item) => total + item.qty, 0)})` : "ไปรับชำระเงิน"}</span>

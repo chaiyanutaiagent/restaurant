@@ -50,3 +50,7 @@ logs/
 uploads/
 backend/uploads/
 frontend/dist-mobile-store/
+frontend/dist-native-retail/
+frontend/dist-native-restaurant/
+*.jks
+*.keystore

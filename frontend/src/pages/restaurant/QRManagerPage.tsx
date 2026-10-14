@@ -30,7 +30,7 @@ export default function QRManagerPage(): JSX.Element {
   // Generate QR image เมื่อมี token
   useEffect(() => {
     if (hasTables || !settings?.fb_qs_qr_token) { setQsQrDataUrl(""); return; }
-    const url = `${window.location.origin}/order/${settings.fb_qs_qr_token}`;
+    const url = `${import.meta.env.VITE_NATIVE_POS_PRODUCT ? import.meta.env.VITE_API_BASE_URL : window.location.origin}/order/${settings.fb_qs_qr_token}`;
     QRCode.toDataURL(url, { width: 300, margin: 2, color: { dark: "#1e293b" } })
       .then(setQsQrDataUrl)
       .catch(() => setQsQrDataUrl(""));
@@ -110,7 +110,7 @@ export default function QRManagerPage(): JSX.Element {
               <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 <p className="font-medium">URL:</p>
                 <p className="mt-1 break-all text-xs font-mono text-blue-600">
-                  {window.location.origin}/order/{settingsQuery.data?.fb_qs_qr_token}
+                  {import.meta.env.VITE_NATIVE_POS_PRODUCT ? import.meta.env.VITE_API_BASE_URL : window.location.origin}/order/{settingsQuery.data?.fb_qs_qr_token}
                 </p>
               </div>
             </>

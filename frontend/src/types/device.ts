@@ -10,8 +10,8 @@ export interface DeviceContext {
   name: string;
   device_type: DeviceType;
   station_key: string | null;
-  business_type: "restaurant";
-  target_database: "restaurant";
+  business_type: "restaurant" | "retail_pos" | "takeaway";
+  target_database: "restaurant" | "retail_pos" | "takeaway";
   credential_version: number;
   paired_at: string;
   last_seen_at: string;

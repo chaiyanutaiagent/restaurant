@@ -1,0 +1,59 @@
+{
+  "date": "2026-10-14",
+  "version": "0.1.0-uat.2",
+  "overall": "UAT candidates implemented; physical acceptance and Production gate remain open",
+  "repository": "chaiyanutaiagent/restaurant",
+  "server_changed": false,
+  "committed_or_pushed": false,
+  "production_enabled": false,
+  "takeaway_android_source_changed": false,
+  "work_items": [
+    {"id": 1, "name": "Separate Android apps", "status": "implemented_uat", "evidence": "Dedicated Retail/Restaurant entry points, Android projects, application IDs, fixed HTTPS UAT origins, product icons; shared original Takeaway default retained. Production tasks intentionally refused."},
+    {"id": 2, "name": "Employee, company, branch and device", "status": "implemented_pending_live_acceptance", "evidence": "Business-code login, encrypted native credentials, server-signed product/branch context, role-based routes, branch switching and scoped Counter pairing. No automatic UAT admin login."},
+    {"id": 3, "name": "Retail workflows", "status": "integrated_pending_transaction_acceptance", "evidence": "Existing sale/variant/barcode/intake/category/photo/hold/refund/shift/transfer/SKU report and CRM routes reused, preserving backend price/permission/stock rules. No Retail source or transaction flags changed."},
+    {"id": 4, "name": "Restaurant workflows", "status": "integrated_pending_transaction_acceptance", "evidence": "POS, takeaway, tables/customer QR, order/session checkout, legacy order staff, shift close, KDS/pickup, CRM. Customer QR uses public UAT origin. Branch administration intentionally opens the authenticated web back office."},
+    {"id": 5, "name": "Phone, tablet and peripherals", "status": "implemented_pending_physical_acceptance", "evidence": "Phone catalog/cart/payment steps for both products, tablet layout, existing camera scanner, scoped image origins, Bluetooth selection/test/Thai raster receipt, Android print-service fallback for HTML bills; no claim of physical printer success."},
+    {"id": 6, "name": "Network interruption and recovery", "status": "implemented_with_conservative_operator_hold", "evidence": "Encrypted scoped cart restore; online-only writes; exact durable request replay for idempotent POS financial endpoints and Restaurant paid orders; wrong scope/changed payload/new writes blocked while pending; pending provider payment cannot be dismissed. Ambiguous dining checkout is queried, never blindly replayed. If no authoritative outcome is available, manager/server reconciliation is required; no destructive discard."},
+    {"id": 7, "name": "Build, verification and UAT delivery", "status": "local_apks_ready_pending_install", "evidence": "VersionCode 10002, debug APK builds, TypeScript, native/web builds, targeted mock-browser checks, Gradle unit task/lint, signature verification, generated SHA256 manifests. APKs remain local, not uploaded or installed."},
+    {"id": 8, "name": "Production preparation", "status": "checklist_prepared_not_approved", "evidence": "Per-product release gate and update/rollback procedure below. Production signing key provisioning, backup verification, physical acceptance and rollout authorization remain required. Release build guard is intentionally active."}
+  ],
+  "verification": {
+    "mock_browser": "Restaurant 7 passed; Retail 5 passed with 2 Restaurant-only skips. Targeted recovery/cart/context cases rechecked after integration fixes.",
+    "coverage": ["real-login-only and signed branch selection", "restore secure session", "deny QA/superadmin/wrong-product/offline writes", "390/820/1280 viewport containment", "actual POS cart UI restore after reload", "lost response exact request replay after reload", "Counter header in recovery screen", "separate-scope cart preservation", "pending provider payment cannot be acknowledged", "public image URL mapping", "dining checkout does not retry on unknown outcome"],
+    "limits": "Mock HTTP tests do not prove live payment, stock, permissions or Android hardware acceptance. Generated Android unit tests are compilation checks, not business acceptance.",
+    "android_devices": "adb devices -l returned no connected device",
+    "known_build_warnings": "Existing large bundle, flatDir/deprecation and v1 META-INF signature metadata warnings; v2 APK signature verifies."
+  },
+  "uat_install": [
+    "Choose only the APK for the selected product; manifests are beside APKs in releases/uat/native-pos-0.1.0-uat.2.",
+    "Compare SHA256 and signing certificate against the operator's approved release. Install over the existing same-package UAT app; do not uninstall or clear data to bypass a certificate mismatch.",
+    "Use the company's real scoped test employee and Counter PIN. Confirm branch before transactions; do not use Platform/Super Admin.",
+    "If a pending transaction banner appears, restore the original employee/branch and inspect the existing result before accepting any new money.",
+    "A print error is not a payment failure. Reprint the existing sale, never create a replacement sale to obtain a receipt."
+  ],
+  "physical_gate_per_product": [
+    {"check": "Install and update from uat.1 without losing encrypted session/cart or pending transaction", "status": "pending", "evidence": null},
+    {"check": "Actual employee permissions, cross-company and cross-branch denial, Counter pairing/renewal/revocation", "status": "pending", "evidence": null},
+    {"check": "Retail exact barcode/variant, product/category/photo, stock intake/transfer, hold/resume, price changes, sale/refund/shift totals", "status": "pending", "evidence": null},
+    {"check": "Restaurant tables/QR order, KDS, takeaway, cancel approval, checkout/refund and receipt totals", "status": "pending", "evidence": null},
+    {"check": "Phone/tablet orientation, keyboard, Back/background, camera denial/retry and external scanner", "status": "pending", "evidence": null},
+    {"check": "Thai 80mm receipt, QR bill/Android Print Service, paper out, Bluetooth revoke/reconnect and cash drawer", "status": "pending", "evidence": null},
+    {"check": "Network cut before send/after server commit, force-close/relaunch, exact retry without duplicate sale/stock/payment", "status": "pending", "evidence": null},
+    {"check": "Provider test PromptPay confirmation/expiry, unresolved payment and refund; compare backend evidence rather than UI success alone", "status": "pending", "evidence": null}
+  ],
+  "production_gate": {
+    "decision": "HOLD",
+    "independent_product_rollout": true,
+    "reserved_application_ids": ["com.foodchainservice.retail", "com.foodchainservice.restaurant"],
+    "required": ["Accept physical gate separately for each product", "Assign release signing owner; create production key outside repository with protected offline backup and recovery proof", "Approve Production origin and server readiness; never reuse UAT data/credentials automatically", "Implement and audit the separately authorized Production build configuration", "Approve data backup and restore evidence, payment/provider live configuration, staff permissions and per-branch rollout", "Record owner approval, APK/AAB hash, certificate fingerprint, source commit and rollback candidate"],
+    "signing_key_created": false,
+    "production_build_configuration_approved": false,
+    "backup_restore_proven": false
+  },
+  "rollback": [
+    "Stop new transactions; retain app data and list every unresolved request with its original employee/branch/idempotency key.",
+    "Reconcile pending outcomes on the server before app replacement. Never clear a pending request solely because the UI timed out.",
+    "Use last-known-good source signed with the same application certificate and a higher versionCode (forward rollback). Do not uninstall or force downgrade over pending encrypted data.",
+    "Confirm schema/storage compatibility and perform a restore exercise before release. This native change introduces no database migration or server rollback step."
+  ]
+}

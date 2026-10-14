@@ -1,0 +1,29 @@
+// Shared UAT-only constraints. The original Takeaway Android project does not apply this file.
+android {
+    defaultConfig {
+        versionCode 10002
+        versionName "0.1.0-uat.2"
+    }
+    sourceSets.main.java.srcDir '../../native-pos-android'
+}
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.name.toLowerCase().contains('release') }) {
+        throw new GradleException('Retail/Restaurant Production signing and rollout remain on HOLD')
+    }
+}
+tasks.register('verifyNativePosBundle') {
+    doLast {
+        def parser = new groovy.json.JsonSlurper()
+        def config = parser.parse(file('src/main/assets/capacitor.config.json'))
+        def manifest = parser.parse(file('src/main/assets/public/native-pos-build.json'))
+        def origin = posProduct == 'retail' ? 'https://uat-retail.foodchainservice.com' : 'https://uat-pos.foodchainservice.com'
+        if (config.appId != "com.foodchainservice.${posProduct}.uat" || config.webDir != "dist-native-${posProduct}"
+            || config.server?.url || config.server?.cleartext != false || config.android?.allowMixedContent != false
+            || manifest.product != posProduct || manifest.environment != 'uat' || manifest.origin != origin
+            || manifest.version != '0.1.0-uat.2' || manifest.versionCode != 10002
+            || manifest.autoLogin != false || manifest.offlinePayments != false) {
+            throw new GradleException('Wrong product/environment/assets. Rebuild the dedicated UAT bundle.')
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn('verifyNativePosBundle') }

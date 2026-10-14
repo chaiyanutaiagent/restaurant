@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { clearOfflineEncryptionKeyWhenSafe } from "@/lib/secureOfflineStore";
 import { useAuthStore } from "@/stores/auth.store";
 import type { LoginRequest } from "@/types/auth";
+import { nativeProduct } from "@/native-pos/config";
 
 function getLoginErrorMessage(error: unknown): string | null {
   if (!error) return null;
@@ -91,6 +92,15 @@ export function useLogout(destination = "/login"): () => void {
 
   return () => {
     void (async () => {
+      const nativePending = nativeProduct ? await (await import('@/native-pos/transactionJournal')).readNativeTransaction() : null;
+      if (nativePending && nativePending.scope === (await import('@/native-pos/storage')).nativeScope()) {
+        window.alert('มีธุรกรรมเดิมรอตรวจสอบ เปิดหน้าตั้งค่าเครื่องขายก่อนออกจากระบบ');
+        return;
+      }
+      if (nativeProduct && await (await import("@/native-pos/paidOrderRecovery")).isPendingRestaurantBranchRestore(useAuthStore.getState().branchId ?? '')) {
+        window.alert("มีรายการรับเงินรอตรวจสอบ เปิดหน้าตั้งค่าเครื่องขายและกู้คืนรายการก่อนออกจากระบบ");
+        return;
+      }
       const [restaurantOrders, pendingSales] = await Promise.all([
         db.restaurantPendingOrders.toArray(),
         db.pendingSales.toArray(),

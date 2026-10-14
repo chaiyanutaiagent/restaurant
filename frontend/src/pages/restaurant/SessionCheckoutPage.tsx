@@ -16,6 +16,8 @@ import type { CashierShift } from "@/types/pos";
 import type { StockLocation } from "@/types/stock";
 import ManagerApprovalDialog from "@/components/approval/ManagerApprovalDialog";
 import { errorMessage } from "@/lib/approvalApi";
+import { nativeProduct } from '@/native-pos/config';
+import { printConfiguredSaleReceipt } from '@/lib/takeawayPrinter';
 
 type SessionItem = { id: string; product_name: string; qty: number; unit_price: number; special_request: string | null; status: string };
 type SessionOrder = { id: string; status: string; source?: string; order_number?: string; items: SessionItem[] };
@@ -47,6 +49,7 @@ export default function SessionCheckoutPage(): JSX.Element {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const branchId = useAuthStore((s) => s.branchId);
+  const employee = useAuthStore((s) => s.user);
   const hasPermission = useAuthStore((s) => s.hasPermission);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
@@ -152,7 +155,7 @@ export default function SessionCheckoutPage(): JSX.Element {
 
   useEffect(() => {
     if (
-      searchParams.get("printBill") !== "1"
+      nativeProduct || searchParams.get("printBill") !== "1"
       || autoPrintStartedRef.current
       || !session
       || !promptpayConfigured
@@ -318,7 +321,14 @@ export default function SessionCheckoutPage(): JSX.Element {
             </div>
 
             <div className="restaurant-print-actions mt-6 flex gap-3">
-              <Button variant="outline" className="flex-1" onClick={() => window.print()}>
+              <Button variant="outline" className="flex-1" onClick={async () => {
+                if (!nativeProduct) { window.print(); return; }
+                try {
+                  const order = (await posApi.getSale(checkoutResult.sale_order_id)).data.data;
+                  const branches = (await authApi.myBranches()).data.data;
+                  if (!await printConfiguredSaleReceipt(order, { name: branchSettingsQuery.data?.pos_receipt_header || 'Restaurant', logo_url: branchSettingsQuery.data?.receipt_show_logo ? branchSettingsQuery.data?.receipt_logo_url : null }, { name: branches.find(item => item.branch_id === branchId)?.branch_name ?? '' }, employee?.display_name ?? employee?.username ?? '')) throw new Error('เลือกเครื่องพิมพ์ Bluetooth ในหน้าตั้งค่าเครื่องขายก่อน');
+                } catch (error) { toast({ title: 'พิมพ์ใบเสร็จไม่สำเร็จ', description: error instanceof Error ? error.message : 'ตรวจการเชื่อมต่อเครื่องพิมพ์ ไม่ต้องรับเงินใหม่' }); }
+              }}>
                 <Printer className="mr-2 h-4 w-4" /> พิมพ์ใบเสร็จ
               </Button>
               <Button className="flex-1 bg-slate-950 hover:bg-slate-800" onClick={() => navigate(isDineIn ? "/restaurant/tables" : "/restaurant/orders")}>

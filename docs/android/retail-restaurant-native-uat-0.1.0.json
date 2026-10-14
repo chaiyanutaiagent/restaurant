@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-14",
+  "status": "local_foundation_candidates_not_full_acceptance",
+  "version": "0.1.0-uat.1",
+  "server_changed": false,
+  "production_enabled": false,
+  "github_committed": false,
+  "original_takeaway_native_project_changed": false,
+  "artifacts": [
+    {
+      "product": "Retail",
+      "application_id": "com.foodchainservice.retail.uat",
+      "file": "releases/uat/native-pos-0.1.0-uat.1/foodchainservice-retail-0.1.0-uat.1.apk",
+      "sha256": "426949e4776fb328e678932a78745430ae5a0099eadca80a1ff140b6661b307a",
+      "api_origin": "https://uat-retail.foodchainservice.com"
+    },
+    {
+      "product": "Restaurant",
+      "application_id": "com.foodchainservice.restaurant.uat",
+      "file": "releases/uat/native-pos-0.1.0-uat.1/foodchainservice-restaurant-0.1.0-uat.1.apk",
+      "sha256": "8abf0d4dc78ffd64b0c46d6fd696c66c3bdf0caaa84dc4cba9924d6d3478011b",
+      "api_origin": "https://uat-pos.foodchainservice.com"
+    }
+  ],
+  "build": {
+    "commands_from_frontend": ["npm run android:retail:uat", "npm run android:restaurant:uat"],
+    "prerequisites": "JDK 21, Android SDK platform/build tools 35; set JAVA_HOME and ANDROID_HOME. Existing package-lock dependencies retained.",
+    "signing": "Local debug signing only. APK signature verification passed (v1/v2). Not Play Store or Production distribution.",
+    "release_guard": "Shared Gradle UAT gate refuses release tasks and validates product, app id, HTTPS origin and embedded bundle manifest. Release dry-run correctly refused.",
+    "environment": "Dedicated native-uat build ignores environment files and does not embed company, business slug or auto-login. Original Takeaway is the unchanged default when FCS_POS_PRODUCT is absent."
+  },
+  "implemented": [
+    "Separate Android source directories and dedicated product entry points, not the shared ERP App router.",
+    "Employee business-code login, secure-storage session, signed branch selection, role-aware navigation; reject Super Admin, QA and wildcard-permission sessions.",
+    "Client product/context and offline-write guards supplement existing server authentication and permissions; no new server-enforced mobile-specific claims are claimed.",
+    "Retail routes reuse existing POS, barcode intake, transfer and SKU report screens with existing permissions.",
+    "Restaurant routes reuse POS, tables, customer QR, order center, session detail/checkout and kitchen screens with existing permissions.",
+    "Scoped Counter pairing and Bluetooth printer selection; native printer copy handles revoked permission explicitly without changing the original Takeaway plugin.",
+    "Restaurant customer QR uses public UAT origin rather than the local Android WebView origin.",
+    "Android Back minimizes only after confirmation; explicit navigation warns to park the active bill first.",
+    "Restaurant paid-order online recovery persists exact payload and client order id securely before sending; changed-payload retry, unrelated mutations, branch switch and logout blocked while unresolved. Existing server idempotency is reused; offline success is never inferred."
+  ],
+  "verification": {
+    "typescript": "passed",
+    "existing_web_build": "passed",
+    "both_native_web_builds": "passed",
+    "both_android_debug_assemble_unit_task_lint": "passed; generated unit tests are build checks, not transaction acceptance",
+    "targeted_mock_browser_cases": "Retail: 2 passed, Restaurant-only case skipped. Restaurant: 3 passed. Recovery case rechecked after pending-write guard change.",
+    "browser_scope": "Login without auto-login; signed product branch selection; reload session; forbidden routes; reject superuser; wrong-context and offline-write guards; 390/820/1280 viewport containment; lost-response retry uses identical client id.",
+    "uat_read_only_preflight": "Both API origins returned CORS allowance for https://localhost on login OPTIONS. No live login, sale or other business writes performed.",
+    "warnings": "Existing large web bundles and Android dependency/deprecation warnings remain. APK verifier reports v1 META-INF metadata warnings; v2 signature verifies.",
+    "physical_android": "not run"
+  },
+  "remaining_before_full_uat_acceptance": [
+    "Complete route/link audit of reused POS screens (customer management and legacy/admin destinations are intentionally not exposed yet); validate all role-based workflows, not only the app shell.",
+    "Test actual scoped employee accounts and Counter pairing against UAT, catalog/photo URLs and transaction round trips for both products.",
+    "Finish rejected/ambiguous payment operator resolution. Current recovery retains unresolved requests conservatively; no discard button or override is provided.",
+    "Verify native cart/hold persistence and generic POS, table checkout, refund, shift close recovery across force-close, timeout and restart. No full native transactional acceptance is claimed.",
+    "Approve printer models; physically test Thai receipt, paper-out, disconnect/reconnect, cash drawer, camera, scanner and Android Back/keyboard/orientation.",
+    "Finalize distinct branded icons/splash and app update distribution; current generated icons are placeholders.",
+    "Prepare backed-up release keystores, Production environment and per-product rollout approval after physical acceptance."
+  ],
+  "next_work": "Finish the remaining route and transaction-recovery integration, then distribute the UAT candidates for physical acceptance. Retail may pass its gate before Restaurant. Do not mark all eight planned work items complete based on these builds."
+}

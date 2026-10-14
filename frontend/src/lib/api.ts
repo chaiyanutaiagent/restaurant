@@ -5,6 +5,7 @@ import axios, {
 } from "axios";
 import { useAuthStore } from "@/stores/auth.store";
 import { useDeviceStore } from "@/stores/device.store";
+import { assertNativeRequest, nativeProduct } from "@/native-pos/config";
 import type { ApiResponse } from "@/types/api";
 import type { LoginRequest, MeResponse, QaPersona, TokenResponse } from "@/types/auth";
 import type { Branch, Permission, User, UserBranch } from "@/types/user";
@@ -50,6 +51,7 @@ const apiBaseUrl = configuredApiOrigin
 const api = axios.create({ baseURL: apiBaseUrl });
 
 api.interceptors.request.use((config) => {
+  if (nativeProduct) assertNativeRequest(config.url ?? "", config.method ?? "get", useAuthStore.getState(), navigator.onLine);
   const { accessToken, companyId, branchId } = useAuthStore.getState();
   const deviceState = useDeviceStore.getState();
 
@@ -64,7 +66,8 @@ api.interceptors.request.use((config) => {
   }
   if (
     (
-      window.location.pathname.startsWith("/counter")
+      Boolean(nativeProduct)
+      || window.location.pathname.startsWith("/counter")
       || window.location.pathname.startsWith("/pos")
       || window.location.pathname.startsWith("/restaurant/pos")
       || window.location.pathname.startsWith("/retail/pos")
@@ -72,6 +75,10 @@ api.interceptors.request.use((config) => {
     && deviceState.isAuthenticated()
     && deviceState.device?.device_type === "counter"
     && deviceState.device.branch_id === branchId
+    && (!nativeProduct || (deviceState.device.company_id === companyId
+      && deviceState.device.brand_id === useAuthStore.getState().brandId
+      && deviceState.device.business_type === useAuthStore.getState().businessType
+      && deviceState.device.target_database === useAuthStore.getState().targetDatabase))
   ) {
     config.headers["X-Device-Authorization"] = `Bearer ${deviceState.accessToken}`;
   }

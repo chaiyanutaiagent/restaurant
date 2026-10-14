@@ -5,6 +5,7 @@ import { decryptOfflineValue, encryptOfflineValue } from "@/lib/secureOfflineSto
 import { wapApi, type WapMenu, type WapOrder, type WapPaidOrderPayload } from "@/lib/wapApi";
 import { useAuthStore } from "@/stores/auth.store";
 import { useDeviceStore } from "@/stores/device.store";
+import { nativeProduct } from "@/native-pos/config";
 
 type RestaurantScope = { companyId: string; branchId: string; userId: string };
 type EncryptedOrderBundle = { payload: WapPaidOrderPayload; local_order: WapOrder; server_order?: WapOrder };
@@ -299,6 +300,10 @@ export async function queueRestaurantOrder(
   payload: WapPaidOrderPayload,
   menu: WapMenu,
 ): Promise<RestaurantQueuedOrderResult> {
+  if (nativeProduct) {
+    const { submitNativeRestaurantOrder } = await import("@/native-pos/paidOrderRecovery");
+    return submitNativeRestaurantOrder(brandSlug, payload, menu);
+  }
   const scope = currentScope();
   const device = useDeviceStore.getState().device;
   const clientOrderId = payload.client_order_id ?? `pos-${randomId()}`;

@@ -4,6 +4,8 @@
   "version": "1.1.0",
   "type": "module",
   "scripts": {
+    "android:retail:uat": "node ../scripts/build-native-pos.mjs retail --apk",
+    "android:restaurant:uat": "node ../scripts/build-native-pos.mjs restaurant --apk",
     "dev": "vite",
     "build": "vite build",
     "build:android": "npm run build:android:uat",

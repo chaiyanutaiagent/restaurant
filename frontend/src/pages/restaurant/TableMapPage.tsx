@@ -70,7 +70,7 @@ function getQrUrl(qrToken: string): string {
       // Fall back to the current web origin when the optional build-time URL is invalid.
     }
   }
-  return `${window.location.origin}/menu/${qrToken}`;
+  return `${import.meta.env.VITE_NATIVE_POS_PRODUCT ? import.meta.env.VITE_API_BASE_URL : window.location.origin}/menu/${qrToken}`;
 }
 
 export default function TableMapPage(): JSX.Element {

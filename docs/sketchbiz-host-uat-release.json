@@ -3,7 +3,14 @@
   "hostname": "sketchbiz.foodchainservice.com",
   "company_slug": "sketch-biz",
   "company_id": "1b8a1818-44d6-4d5f-9d22-e5e17b23c081",
-  "status": "UAT application deployed; public DNS/tunnel route pending Cloudflare sign-in",
+  "status": "UAT application deployed; public DNS, HTTPS and company login entry verified",
+  "cloudflare": {
+    "tunnel": "restaurant-uat",
+    "tunnel_id": "ff42cc73-6254-41df-9a2a-09776988815c",
+    "service": "http://nginx:80",
+    "dns": "CNAME sketchbiz.foodchainservice.com -> ff42cc73-6254-41df-9a2a-09776988815c.cfargotunnel.com",
+    "existing_routes": "Five existing UAT routes retained unchanged"
+  },
   "production": "HOLD; no Production configuration or containers changed",
   "login": "Explicit company credentials; no QA or automatic login on this alias",
   "scope": "Company staff entry; all three workspaces remain same-origin and use existing permissions",
@@ -22,7 +29,9 @@
     "origin_http": "6 checks passed with explicit Host header",
     "existing_public_uat_health": "200",
     "untouched_container_ids": "Production and UAT infrastructure unchanged",
-    "public_alias_dns_tls_login": "PENDING",
+    "public_alias_dns_tls_login": "HTTPS 200; browser root redirects to /sketch-biz/login?next=%2Fsketch-biz%2Fadmin; company name and UAT banner verified",
+    "public_alias_security": "Anonymous /auth/me 401; auto-login 404; different-company login 403; company lookup matches pinned ID",
+    "authenticated_staff_workflows": "Not exercised in this hostname smoke check; human UAT remains pending",
     "human_uat": "PENDING"
   },
   "rollback": {

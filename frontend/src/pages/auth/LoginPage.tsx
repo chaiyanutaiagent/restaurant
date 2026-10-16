@@ -15,6 +15,7 @@ import { useLogin, useUatAutoLogin } from "@/hooks/useAuth";
 import QaAccessPanel from "@/components/auth/QaAccessPanel";
 import { membershipApi } from "@/lib/api";
 import { PLATFORM_BRAND } from "@/config/platformBrand";
+import { tenantHost } from "@/config/tenantHost";
 
 const loginSchema = z.object({
   company_id: z.string().optional(),
@@ -27,7 +28,8 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 export default function LoginPage(): JSX.Element {
   const { businessSlug } = useParams();
-  const canonicalSlug = businessSlug?.toLowerCase();
+  const tenant = tenantHost(window.location.hostname);
+  const canonicalSlug = tenant?.slug ?? businessSlug?.toLowerCase();
   const isNativeApp = Capacitor.isNativePlatform();
   const business = useQuery({
     queryKey: ["public-business", canonicalSlug],
@@ -44,8 +46,8 @@ export default function LoginPage(): JSX.Element {
     window.location.hostname.startsWith("uat-")
     || ["localhost", "127.0.0.1"].includes(window.location.hostname)
   );
-  const isUatAutoLogin = isUatPublicHost
-    || (isNativeApp && import.meta.env.VITE_UAT_AUTO_LOGIN === "true");
+  const isUatAutoLogin = !tenant && (isUatPublicHost
+    || (isNativeApp && import.meta.env.VITE_UAT_AUTO_LOGIN === "true"));
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {

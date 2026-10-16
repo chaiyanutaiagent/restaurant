@@ -142,6 +142,7 @@ import { useEffect } from "react";
 import { useAuthStore } from "@/stores/auth.store";
 import QaModeBanner from "@/components/auth/QaModeBanner";
 import { HostEntryRedirect, LegacyPosRedirect } from "@/components/navigation/ProductEntryRedirect";
+import TenantHostBoundary from "@/components/auth/TenantHostBoundary";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } }
@@ -162,6 +163,7 @@ export default function App(): JSX.Element {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <TenantHostBoundary>
         <QaModeBanner />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
@@ -583,6 +585,7 @@ export default function App(): JSX.Element {
             </Route>
           </Route>
         </Routes>
+        </TenantHostBoundary>
       </BrowserRouter>
       <Toaster />
     </QueryClientProvider>

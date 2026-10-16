@@ -1,3 +1,5 @@
+import { tenantHost } from "./tenantHost";
+
 export type ProductWorkspace = "company" | "restaurant" | "retail" | "takeaway";
 
 export type ProductBusinessType = "restaurant" | "retail_pos" | "takeaway";
@@ -32,6 +34,8 @@ export function workspaceFromHostname(hostname: string): ProductWorkspace | null
 }
 
 export function workspaceHost(workspace: ProductWorkspace, hostname: string): string | null {
+  const tenant = tenantHost(hostname);
+  if (tenant) return tenant.hostname;
   const normalized = hostname.trim().toLowerCase().split(":", 1)[0];
   if (!normalized.endsWith(".foodchainservice.com")) return null;
   const isUat = normalized.startsWith("uat-");

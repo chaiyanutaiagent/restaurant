@@ -5,8 +5,11 @@ import {
   workspaceFromHostname,
 } from "@/config/productRouting";
 import { useAuthStore } from "@/stores/auth.store";
+import { tenantHost } from "@/config/tenantHost";
 
 export function HostEntryRedirect({ fallback }: { fallback: JSX.Element }): JSX.Element {
+  const tenant = tenantHost(window.location.hostname);
+  if (tenant) return <Navigate to={`/${tenant.slug}/admin`} replace />;
   const workspace = workspaceFromHostname(window.location.hostname);
   return workspace ? <Navigate to={PRODUCT_ENTRY_PATH[workspace]} replace /> : fallback;
 }

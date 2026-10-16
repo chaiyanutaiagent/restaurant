@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-16",
+  "hostname": "sketchbiz.foodchainservice.com",
+  "company_slug": "sketch-biz",
+  "company_id": "1b8a1818-44d6-4d5f-9d22-e5e17b23c081",
+  "status": "UAT application deployed; public DNS/tunnel route pending Cloudflare sign-in",
+  "production": "HOLD; no Production configuration or containers changed",
+  "login": "Explicit company credentials; no QA or automatic login on this alias",
+  "scope": "Company staff entry; all three workspaces remain same-origin and use existing permissions",
+  "public_qr_and_device_only_clients": "Keep existing UAT URLs; this alias requires staff access tokens outside login/refresh/business lookup",
+  "apk_urls": "Unchanged; no new APK build required for this web alias",
+  "database": "No migrations, seeds or data conversion performed",
+  "images": {
+    "backend": "restaurant-pos-backend:uat-sketchbiz-host-20261016-r1",
+    "frontend": "restaurant-pos-frontend:uat-sketchbiz-host-20261016-r1"
+  },
+  "checks": {
+    "typescript": "passed",
+    "frontend_build": "passed; existing bundle size warnings",
+    "host_routing": "7 assertions passed",
+    "backend_boundary": "6 tests passed using UAT runtime dependencies; no database access",
+    "origin_http": "6 checks passed with explicit Host header",
+    "existing_public_uat_health": "200",
+    "untouched_container_ids": "Production and UAT infrastructure unchanged",
+    "public_alias_dns_tls_login": "PENDING",
+    "human_uat": "PENDING"
+  },
+  "rollback": {
+    "environment_backup": "/home/behappyaiagent/restaurant-uat-deploy-backups/sketchbiz-host.gpICnd/env.uat",
+    "previous_backend": "restaurant-pos-backend:uat-retail-catalog-20261014-r2",
+    "previous_frontend": "restaurant-pos-frontend:uat-retail-catalog-20261014-r2",
+    "procedure": "Restore backed-up .env.uat in /home/behappyaiagent/restaurant-uat-releases/3760d60; recreate only backend/frontend with the same three compose files and project restaurant-pos-uat-drill; reload UAT nginx. No database rollback needed.",
+    "rehearsed": false
+  }
+}

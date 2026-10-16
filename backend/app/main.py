@@ -27,6 +27,7 @@ from app.database import (
 )
 from app.middleware.branch_context import BranchContextMiddleware
 from app.middleware.request_id import RequestIDMiddleware
+from app.middleware.tenant_host import TenantHostMiddleware
 from app.routers import accounting as accounting_router
 from app.routers import platform as platform_router
 from app.routers import api_mgmt, approvals, company_distribution, company_foundation, company_kitchen, device_workspaces, devices, incoming_webhook, physical_uat, public_api, storefront
@@ -244,6 +245,7 @@ app.add_middleware(
 )
 
 app.add_middleware(BranchContextMiddleware)
+app.add_middleware(TenantHostMiddleware)
 app.add_middleware(RequestIDMiddleware)
 
 os.makedirs(settings.upload_dir, exist_ok=True)

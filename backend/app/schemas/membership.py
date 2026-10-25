@@ -27,7 +27,7 @@ class SaasSignupRequest(BaseSchema):
     owner_display_name: str = Field(min_length=1, max_length=200)
     owner_email: str
     username: str
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     phone: str | None = Field(default=None, max_length=20)
     terms_accepted: bool
     privacy_accepted: bool
@@ -102,7 +102,7 @@ class SaasCredentialRequest(BaseSchema):
 
 
 class SaasPasswordResetConfirm(SaasCredentialRequest):
-    new_password: str = Field(min_length=12, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class SaasMembershipRead(BaseSchema):

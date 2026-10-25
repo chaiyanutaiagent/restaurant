@@ -267,7 +267,7 @@ class PlatformPasswordChangeRequest(BaseSchema):
 
 class PlatformCompanyOwnerCreate(BaseSchema):
     username: str
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     email: str | None = Field(default=None, max_length=255)
     display_name: str = Field(min_length=1, max_length=200)
 

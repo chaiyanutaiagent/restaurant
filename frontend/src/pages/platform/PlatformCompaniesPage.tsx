@@ -83,7 +83,7 @@ export default function PlatformCompaniesPage(): JSX.Element {
             <Field label="ชื่อ Company Owner *"><Input value={form.owner.display_name} onChange={(e) => setForm({ ...form, owner: { ...form.owner, display_name: e.target.value } })} required /></Field>
             <Field label="Username Owner *"><Input value={form.owner.username} onChange={(e) => setForm({ ...form, owner: { ...form.owner, username: e.target.value } })} required /></Field>
             <Field label="อีเมล Owner"><Input type="email" value={form.owner.email ?? ""} onChange={(e) => setForm({ ...form, owner: { ...form.owner, email: e.target.value } })} /></Field>
-            <Field label="รหัสผ่านชั่วคราว Owner (อย่างน้อย 12 ตัว) *"><Input type="password" minLength={12} value={form.owner.password} onChange={(e) => setForm({ ...form, owner: { ...form.owner, password: e.target.value } })} required /></Field>
+            <Field label="รหัสผ่านชั่วคราว Owner (อย่างน้อย 8 ตัว) *"><Input type="password" minLength={8} maxLength={128} value={form.owner.password} onChange={(e) => setForm({ ...form, owner: { ...form.owner, password: e.target.value } })} required /></Field>
             <Field label="Plan code"><Input value={form.plan_code} onChange={(e) => setForm({ ...form, plan_code: e.target.value })} required /></Field>
             <Field label="เหตุผลที่เปิด Company *"><Input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} required /></Field>
           </div>

@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-25",
+  "environment": "UAT only",
+  "status": "Completed on UAT; see theloft-separation-uat-release-20261025.json for applied migration, deployment, verification and recovery details. Remaining findings below are the pre-migration inventory.",
+  "source_company": {"name": "SKETCH BIZ CO., LTD.", "id": "1b8a1818-44d6-4d5f-9d22-e5e17b23c081", "slug": "sketch-biz"},
+  "target_company": {"name": "The Loft", "reserved_id_not_created": "9b766136-c10f-4ef4-856f-b2f95b943f5e", "slug": "theloft", "hostname": "theloft.foodchainservice.com", "legal_name": null, "tax_id": null, "tax_documents": "Do not copy Sketch Biz tax identity or enable real filing"},
+  "approved_scope": {
+    "move_brands": [
+      {"id": "3f8bdf47-885d-4a38-bac0-bccd6db9f8b3", "name": "The Loft Kitchen", "requested_display_name": "Loft Restaurant", "branch_id": "03bb1c3b-cfd3-4766-a7f7-26585192974a", "code": "TLK-01"},
+      {"id": "c8f9d7bc-9b45-44f5-b799-de12fb636d72", "name": "ครัวป่าปลาเขื่อน", "branch_id": "3b2249b2-7f2c-4750-8eec-6bb8a3e4a3c4", "code": "KPP-01"},
+      {"id": "7f87be6e-bd5e-40aa-bb94-b37e098281e1", "name": "The Loft Mini Mart", "branch_id": "dbbe2036-1cd0-4f15-b4c6-97c78c15fd43", "code": "TLM-01"}
+    ],
+    "retail_empty_warehouse": {"branch_id": "c14fea17-99de-54f4-b31f-917b1efae996", "code": "UAT-RTL-WH"},
+    "move_staff": ["pam.admin", "loft.admin"],
+    "retain_sketch_biz": ["superadmin", "Chambo", "Chambo BKK-01 โอโซนวัน", "Chambo recipes/central operations/franchise data", "Entire Restaurant central kitchen including raw inventory, recipes and completed history"],
+    "retail_data": "Use only current retail_ops_db. Products/sales/balances are zero. Never seed/import legacy Retail rows or restore an old dump into the target."
+  },
+  "pending_user_decisions": [],
+  "confirmed_user_decisions": [
+    "Cloudflare signed in; restaurant-uat tunnel verified Healthy with six existing routes",
+    "Keep the entire Restaurant central kitchen at Sketch Biz; move only the three storefronts",
+    "Unused pending production/distribution test documents may be deleted"
+  ],
+  "pending_fixture_cleanup": {
+    "status": "applied; successful transactional rehearsal before apply",
+    "removed": {"company_distribution_events": 1, "company_production_inputs": 2, "transfer_order_items": 1, "company_distribution_shipments": 1, "company_production_orders": 2, "company_distribution_demands": 1, "company_production_demands": 2, "transfer_orders": 1},
+    "archive_schema": "restaurant_uat_db.uat_theloft_pending_cleanup_20261025",
+    "protected_tables": 170,
+    "stock_unchanged": true,
+    "completed_orders_unchanged": true,
+    "latest_server_backup": "/home/behappyaiagent/restaurant-uat-deploy-backups/theloft-separation-20261025.bRCFqf",
+    "latest_mac_backup": "/Users/user/Projects/restaurant/tmp/theloft-separation-20261025/backup-before-cleanup",
+    "verification": "All five dumps fully decoded on server and all five downloaded SHA256 checks passed"
+  },
+  "findings": {
+    "restaurant_central_kitchen": {"id": "0f2d7377-29cf-5467-82a0-d6f07b6c6d43", "name": "ครัวกลาง Foodchainservice", "branch_id": "3b2249b2-7f2c-4750-8eec-6bb8a3e4a3c4", "raw_location_id": "1bbec9c3-87c8-5d29-8ed9-a4ca5bd89b4b", "shared_stock": "8 restaurant raw products plus unrelated WP45 fixture brands occupy the same central location"},
+    "restaurant_transfers": "Four original KPP -> TLK fixture transfers remain (approved/shipped/completed/cancelled). The draft UI-TO-2026-001 linked to the explicitly approved unused central shipment was archived and deleted. Other transfers were not altered.",
+    "shared_main_location": "KPP MAIN holds 41 balance rows (1538 on hand / 43 reserved) for 33 OTHER brands, including an obsolete Retail fixture. None may be imported by selecting branch alone. Central raw location has 12 balance rows (544 on hand / 12 reserved) and must stay at Sketch Biz.",
+    "brand_branch_overlap": "TLK branch has links to TLK and KPP brands; preserve/resolve explicitly",
+    "legacy_restaurant": "69 target-brand product rows; 7 recipes, 7 legacy registrations; 101 offline operations and 412 immutable offline audit events; 6 hold audits; cancellation audit; central production/distribution and payroll dependencies",
+    "retail": "Product/sales/stock reset remains empty in active retail database; archived older retail rows still exist in legacy DB and must not be imported",
+    "identity": "53 target-scoped staff assignments and 86 user_branch rows include inactive old accounts. Do not revive them; preserve active pam.admin/loft.admin password hashes, isolate roles, revoke obsolete sessions/device tokens on cutover.",
+    "password_setup": "SaasMembershipService.reset_password currently requires company membership. A new tenant provisioned only via PlatformTenantProfile cannot use this flow yet. Resolve using supported staff invitation/reset lifecycle; never fabricate legal consent or verified owner email.",
+    "global_owner": "Verify superadmin cross-company access through existing Platform support policy; do not grant tenant users platform permissions."
+  },
+  "backup": {
+    "server": "/home/behappyaiagent/restaurant-uat-deploy-backups/theloft-separation-20261025.wwD8Ut",
+    "mac": "/Users/user/Projects/restaurant/tmp/theloft-separation-20261025/backup",
+    "databases": ["restaurant_platform_core_db", "restaurant_uat_db", "restaurant_ops_db", "retail_ops_db", "takeaway_ops_db"],
+    "verified": "All five dumps fully decoded with pg_restore --file=/dev/null and all five Mac SHA256 checks passed"
+  },
+  "prepared_source": ["backend/app/middleware/tenant_host.py", "backend/tests/test_tenant_host.py", "frontend/src/config/tenantHost.ts", "frontend/src/components/auth/TenantHostBoundary.tsx"],
+  "backend_unit_tests": "8 passed against current UAT runtime in a separate Python process with staged middleware; no serving-code replacement",
+  "frontend_typecheck": "passed in isolated release source",
+  "isolated_frontend_source": "tmp/theloft-separation-20261025/source/frontend; excludes unreleased LINE OA changes, retains prior password/stock/QA-disable changes",
+  "production_changed": false,
+  "live_company_or_account_changed": true,
+  "dns_or_tunnel_changed": true,
+  "store_graph_probe": {"script": "scripts/tenant-separation/theloft_store_graph.py", "read_only": true, "latest_result": "No out-of-scope FK parents in the bounded candidate graph after following only owning-parent child relations. This is a candidate manifest, NOT an executable migration or permission to clone historical transactions.", "platform": "3 branches, 3 brands, 2 roles, 2 active staff assignments, 2 user_branch records; four referenced users include historical actors, only pam.admin and loft.admin may remain active", "restaurant": "2 branches, 60 menu product rows including soft-deleted records plus 8 referenced ingredient definitions; 4 menu recipes; shared stock excluded; central recipes excluded", "retail": "1 branch, 1 brand, 2 location definitions; active product/sales/stock data remains zero"},
+  "next": "Customer login/physical UAT at theloft.foodchainservice.com; supply The Loft legal identity and its own payment settings before real tax/payment use. No Production launch is authorized."
+}

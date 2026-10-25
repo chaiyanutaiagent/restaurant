@@ -13,10 +13,10 @@ export default function TenantHostBoundary({ children }: { children: ReactNode }
   const platformRoute = pathname === "/platform" || pathname.startsWith("/platform/");
   return <>
     <div role="status" className="sticky top-0 z-[110] bg-amber-200 px-3 py-2 text-center text-sm font-semibold text-amber-950">
-      SKETCH BIZ · UAT — ระบบทดสอบ บันทึกลงข้อมูลทดสอบเท่านั้น ยังไม่ใช่ Production
+      {tenant.displayName} · UAT — ระบบทดสอบ บันทึกลงข้อมูลทดสอบเท่านั้น ยังไม่ใช่ Production
     </div>
     {wrongCompany || platformRoute ? <main className="mx-auto max-w-lg space-y-4 p-8 text-center">
-      <h1 className="text-xl font-bold">โดเมนนี้สำหรับบริษัท สเก็ตช์ บีซ จำกัด เท่านั้น</h1>
+      <h1 className="text-xl font-bold">โดเมนนี้สำหรับ {tenant.displayName} เท่านั้น</h1>
       <p>กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานของบริษัท ไม่ใช่บัญชี Platform</p>
       <button className="rounded-lg bg-blue-600 px-4 py-2 text-white" onClick={() => {
         clearSession();

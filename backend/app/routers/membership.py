@@ -215,7 +215,7 @@ async def confirm_password_reset(
     return ok(
         SaasActionRead(
             message="Password reset; previous refresh sessions were revoked",
-            membership=service.read(membership),
+            membership=service.read(membership) if membership is not None else None,
         ).model_dump()
     )
 

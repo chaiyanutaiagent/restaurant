@@ -5,7 +5,7 @@ from unittest.mock import patch
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from app.middleware.tenant_host import COMPANY_ID, HOST, TenantHostMiddleware
+from app.middleware.tenant_host import COMPANY_ID, HOST, THE_LOFT_COMPANY_ID, TenantHostMiddleware
 from app.utils.security import create_access_token, create_refresh_token
 
 
@@ -63,3 +63,29 @@ class TenantHostTests(TestCase):
 
     def test_invalid_json_is_rejected(self):
         self.assertEqual(self.client.post('/api/v1/auth/login', content='{').status_code, 400)
+
+    def test_theloft_is_separate_from_sketchbiz(self):
+        host = {'Host': 'theloft.foodchainservice.com'}
+        body = {'company_id': THE_LOFT_COMPANY_ID, 'username': 'loft.admin', 'password': 'fixture'}
+        self.assertEqual(self.client.post('/api/v1/auth/login', json=body, headers=host).status_code, 200)
+        self.assertEqual(self.client.post('/api/v1/auth/login', json={**body, 'company_id': COMPANY_ID}, headers=host).status_code, 403)
+        self.assertEqual(self.client.post('/api/v1/auth/login', json=body).status_code, 403)
+        for company, expected in [(THE_LOFT_COMPANY_ID, 200), (COMPANY_ID, 403)]:
+            headers = {**host, 'Authorization': f'Bearer {self.token(company)}'}
+            self.assertEqual(self.client.get('/api/v1/company/overview', headers=headers).status_code, expected)
+            token = create_refresh_token('test-user', company)
+            self.assertEqual(self.client.post('/api/v1/auth/refresh', json={'refresh_token': token}, headers=host).status_code, expected)
+        self.assertEqual(self.client.get('/api/v1/membership/businesses/theloft', headers=host).status_code, 200)
+        self.assertEqual(self.client.get('/api/v1/membership/businesses/sketch-biz', headers=host).status_code, 401)
+        for path in ['/api/v1/platform/auth/login', '/api/v1/auth/uat/auto-login', '/api/v1/auth/qa/session']:
+            self.assertEqual(self.client.post(path, json={}, headers=host).status_code, 404)
+
+    def test_theloft_rejects_cross_company_device_and_qa_tokens(self):
+        host = {'Host': 'theloft.foodchainservice.com'}
+        headers = {**host, 'Authorization': f'Bearer {self.token(THE_LOFT_COMPANY_ID)}',
+                   'X-Device-Authorization': f'Bearer {self.token(COMPANY_ID)}'}
+        self.assertEqual(self.client.get('/api/v1/company/overview', headers=headers).status_code, 403)
+        headers = {**host, 'Authorization': f'Bearer {self.token(THE_LOFT_COMPANY_ID, qa_persona="owner")}'}
+        self.assertEqual(self.client.get('/api/v1/company/overview', headers=headers).status_code, 403)
+        with patch('app.middleware.tenant_host.settings', SimpleNamespace(environment='production', saas_public_base_url='https://app.foodchainservice.com')):
+            self.assertEqual(self.client.get('/health', headers=host).status_code, 404)

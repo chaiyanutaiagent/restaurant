@@ -27,6 +27,7 @@ from app.utils.security import hash_password
 from app.services.business_directory_service import allocate_business_slug
 from app.services.platform_reference_projection import enqueue_reference_event
 from app.services.saas_billing_service import ensure_starter_subscription
+from app.services.uat_owner_identity import revoke_linked_platform_sessions
 
 
 TERMS_VERSION = "2026-08-03"
@@ -297,7 +298,7 @@ class SaasMembershipService:
         *,
         ip_address: str | None,
         user_agent: str | None,
-    ) -> SaasTenantMembership:
+    ) -> SaasTenantMembership | None:
         credential = await self._valid_credential(raw_token, purpose="reset_password")
         membership = await self.db.scalar(
             select(SaasTenantMembership).where(
@@ -305,9 +306,26 @@ class SaasMembershipService:
             )
         )
         user = await self.db.get(User, credential.owner_user_id)
-        if membership is None or user is None:
+        if (user is None or not user.is_active or user.deleted_at is not None
+                or user.company_id != credential.company_id):
             raise self._invalid_credential()
-        if new_password.lower() in {user.username.lower(), membership.owner_email.lower()}:
+        company = await self.db.get(Company, credential.company_id)
+        if company is None or not company.is_active:
+            raise self._invalid_credential()
+        if membership is None:
+            # Platform-provisioned staff accounts do not fabricate SaaS signup
+            # consent. A valid, locked one-use credential plus an active tenant
+            # profile is required; this does not enable anonymous token issuance.
+            profile = await self.db.scalar(select(PlatformTenantProfile).where(
+                PlatformTenantProfile.company_id == credential.company_id))
+            if profile is None or profile.suspended_at is not None:
+                raise self._invalid_credential()
+        identifiers = {user.username.lower()}
+        if user.email:
+            identifiers.add(user.email.lower())
+        if membership is not None:
+            identifiers.add(membership.owner_email.lower())
+        if new_password.lower() in identifiers:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Password must not match account identifiers",
@@ -316,6 +334,8 @@ class SaasMembershipService:
         credential.used_at = now
         user.hashed_password = hash_password(new_password)
         user.password_changed_at = now
+        user.credential_version = getattr(user, "credential_version", 1) + 1
+        await revoke_linked_platform_sessions(self.db, user, now=now)
         await self.db.execute(
             update(RefreshToken)
             .where(
@@ -326,7 +346,7 @@ class SaasMembershipService:
         )
         self.db.add(
             AuditLog(
-                company_id=membership.company_id,
+                company_id=credential.company_id,
                 user_id=user.id,
                 action="saas.membership.password_reset",
                 resource="User",

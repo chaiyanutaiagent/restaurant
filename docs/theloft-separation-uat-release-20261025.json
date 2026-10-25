@@ -1,0 +1,59 @@
+{
+  "date": "2026-10-25",
+  "status": "Applied and HTTPS hostname opened on UAT",
+  "hostname": "https://theloft.foodchainservice.com",
+  "login": "https://theloft.foodchainservice.com/theloft/login",
+  "company_id": "9b766136-c10f-4ef4-856f-b2f95b943f5e",
+  "stores": [
+    {"name":"ครัวป่าปลาเขื่อน","code":"KPP-01","branch_id":"0b605c63-2d2c-5775-9561-e741c65286f7","brand_id":"a8fbcf55-66fa-58d2-aa36-adfc9e761aa3"},
+    {"name":"Loft Restaurant","code":"TLK-01","branch_id":"013edee1-c17c-54a6-8655-ce6027cfca86","brand_id":"d849ec10-8289-516b-a241-975a1802550e"},
+    {"name":"The Loft Mini Mart","code":"TLM-01","branch_id":"cc8e47e0-6e02-5783-8401-180c5061717c","brand_id":"05a7b62d-278e-51ff-a3db-675fe4d8b8ed"}
+  ],
+  "preserved_source": ["Sketch Biz legal identity","platform superadmin","Chambo and BKK-01 โอโซนวัน","Restaurant central kitchen, all central stock, central recipes and completed history"],
+  "central_branch": "Original KPP branch retained as ครัวกลาง Restaurant · Sketch Biz with warehouse flag and active business context. Original storefront disabled. Only storefront data cloned/moved to new branch ID.",
+  "accounts": {
+    "pam.admin":{"scope":"KPP-01 only","permissions":62,"password_hash_preserved":true},
+    "loft.admin":{"scope":"TLM-01 only","permissions":37,"password_hash_preserved":true},
+    "inactive_historical_actors":"Cloned inactive without platform/superuser access; old test users not revived",
+    "sessions":"Old pam/loft refresh tokens revoked; old branch devices revoked and must pair again",
+    "password_setup":"Existing one-use credentials now bound to The Loft; reset supports active Platform-provisioned tenants without fabricating membership consent. No customer reset token consumed in tests."
+  },
+  "retail":{"source":"retail_ops_db","products":0,"sales":0,"stock_balances":0,"stock_movements":0,"shifts":0,"legacy_test_data_imported":false},
+  "legal_and_payments":{"tax_id":null,"registered_legal_name_pending":true,"vat_registered":false,"currency":"THB","copied_sketch_tax_identity":false,"copied_promptpay_targets":false},
+  "backup":{
+    "server":"/home/behappyaiagent/restaurant-uat-deploy-backups/theloft-separation-20261025.IcflQv",
+    "mac":"/Users/user/Projects/restaurant/tmp/theloft-separation-20261025/backup-before-migration",
+    "verification":"All five custom dumps fully decoded on server; all five SHA256 verified on Mac",
+    "row_preimages":"uat_theloft_separation_20261025 schema in platform, active Restaurant and Retail databases"
+  },
+  "deployment":{
+    "release":"/home/behappyaiagent/restaurant-uat-releases/theloft-separation-20261025",
+    "backend":"restaurant-pos-backend:uat-theloft-20261025-r1",
+    "frontend":"restaurant-pos-frontend:uat-theloft-20261025-r1",
+    "frontend_asset":"index-DBA1syXb.js",
+    "backend_overlay_only":["middleware/tenant_host.py","services/saas_membership_service.py","routers/membership.py (reset response only)"],
+    "unrelated_line_oa_or_stripe_changes_deployed":false,
+    "production_changed":false,
+    "qa_bypass_enabled":false
+  },
+  "verification":{
+    "targeted_unit_tests":15,
+    "staged_commit_tests":"13 host-boundary and staff-reset tests passed against an isolated export of the Git index; unrelated working-tree changes excluded",
+    "frontend_typecheck_and_build":"passed",
+    "migration_rehearsal":"transaction rollback, isolated commit and scoped compensation passed",
+    "protected_original_tables":{"platform":44,"restaurant":170,"retail":47},
+    "reference_reconciliation":"Retail canonical parity passed; added only missing new Retail branch/brand/link reference rows for Company Shell reads in active legacy Restaurant DB. No catalog or transactional import.",
+    "authenticated_get_smoke":"pam: auth/me, company/context, menu catalog, tables, brand navigation; loft: auth/me, company/context, Retail catalog. All HTTP 200.",
+    "scope_checks":"Cross-company hostname and Chambo branch rejected; anonymous auth/me HTTP 401",
+    "browser":"Live HTTPS The Loft login and UAT banner visible",
+    "customer_password_or_physical_uat":"Not performed; customer passwords unchanged"
+  },
+  "cloudflare":{"tunnel":"restaurant-uat","route":"theloft.foodchainservice.com -> http://nginx:80","existing_six_routes_preserved":true,"dns_cname_created":true},
+  "recovery":{
+    "script":"scripts/tenant-separation/rollback_theloft.py",
+    "method":"Maintenance-only scoped compensation from preimages; retains revoked sessions/devices and deactivates new company. Immutable cloned audit history is not deleted. Review any subsequent customer writes before rollback. Reconcile canonical references after compensation, restore release env/compose image files, then restart UAT.",
+    "rehearsal":"Passed in three isolated restored databases before live cutover"
+  },
+  "customer_next":["Login again at The Loft using the same account/password","Pair any previously registered POS devices again","Enter The Loft legal name/tax identity and its own payment configuration before real tax/payment operation","Physical UAT remains customer-owned; still UAT, not Production"],
+  "git":"The Loft source, bounded migration/recovery scripts, required password-reset dependency and release evidence packaged separately from unrelated work. Database dumps, credentials, temporary files and APKs excluded."
+}

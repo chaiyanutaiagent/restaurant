@@ -163,6 +163,14 @@ export async function printConfiguredLongReceiptTest(): Promise<boolean> {
   return true;
 }
 
+export async function printConfiguredCutterTest(): Promise<boolean> {
+  const transport = await configuredTransport();
+  if (!transport) return false;
+  // Feed and cut only: no receipt, sale, payment or cash drawer operation.
+  await sendConfiguredBytes(new Uint8Array([0x1b, 0x40, 0x1b, 0x64, 0x04, 0x1d, 0x56, 0x41, 0x10]), transport);
+  return true;
+}
+
 export async function openConfiguredCashDrawer(drawer: 0 | 1 = 0): Promise<boolean> {
   const transport = await configuredTransport();
   if (!transport) return false;

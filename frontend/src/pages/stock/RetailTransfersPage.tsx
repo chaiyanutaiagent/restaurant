@@ -19,7 +19,8 @@ const key=(row:Stock)=>`${row.product_id}:${row.variant_id??"base"}`;
 const box="rounded-2xl border bg-white p-4 space-y-4";
 const selectStyle="h-12 w-full rounded-lg border bg-white px-3";
 
-function Workspace() {
+type TransferProps = { embedded?: boolean; onNavigationLock?: (locked: boolean) => void };
+function Workspace({embedded, onNavigationLock}: TransferProps) {
   const auth=useAuthStore();
   const online=useOnlineStatus();
   const cache=useQueryClient();
@@ -31,6 +32,7 @@ function Workspace() {
   const [busy,setBusy]=useState(false),[uncertain,setUncertain]=useState(false);
   const pending=useRef<Pending|null>(null),inFlight=useRef(false);
   const locked=busy||uncertain;
+  useEffect(()=>{onNavigationLock?.(locked);return()=>onNavigationLock?.(false);},[locked,onNavigationLock]);
   const canCreate=auth.hasPermission("inventory.transfer.create"),canApprove=auth.hasPermission("inventory.transfer.approve");
   const scope=["retail-transfers",auth.companyId,auth.brandId,auth.branchId];
   const get=async<T,>(path:string)=>(await api.get<{data:T}>(path)).data.data;
@@ -73,7 +75,7 @@ function Workspace() {
   const options=locations.data??[];
   const validPair=options.some(l=>l.id===source&&l.branch_id===auth.branchId)||options.some(l=>l.id===dest&&l.branch_id===auth.branchId);
   return <main data-pos-touch-surface className="min-h-screen bg-slate-50 p-3 sm:p-6"><div className="mx-auto max-w-6xl space-y-4">
-    <header className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm text-blue-700">Retail · บริษัท / แบรนด์ / สาขาที่เลือก</p><h1 className="text-2xl font-bold">โอนสินค้าคลังกลาง → ร้านค้า</h1></div>{!locked&&<Button variant="outline" asChild><Link to="/retail/pos">กลับหน้าขาย</Link></Button>}</header>
+    <header className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm text-blue-700">Retail · บริษัท / แบรนด์ / สาขาที่เลือก</p><h1 className="text-2xl font-bold">โอนสินค้าคลังกลาง → ร้านค้า</h1></div>{!locked&&!embedded&&<Button variant="outline" asChild><Link to="/retail/pos">กลับหน้าขาย</Link></Button>}</header>
     <p className="text-sm text-slate-600">ร่าง → ส่งอนุมัติ → คลังอนุมัติและส่งออก → ร้านรับจริง จึงเพิ่มสต๊อกร้าน • เฉพาะคลัง Retail ในแบรนด์เดียวกัน ไม่เชื่อมครัวกลาง</p>
     {!online&&<p role="alert" className="rounded-xl bg-amber-100 p-3">ต้องออนไลน์เพื่อยืนยันรายการโอน</p>}
     {error&&<p role="alert" className="rounded-xl bg-red-50 p-3 text-red-700">{error}</p>}
@@ -115,4 +117,4 @@ function Workspace() {
   </div></main>;
 }
 
-export default function RetailTransfersPage(){const auth=useAuthStore();return <Workspace key={`${auth.companyId}:${auth.brandId}:${auth.branchId}`}/>;}
+export default function RetailTransfersPage(props:TransferProps={}){const auth=useAuthStore();return <Workspace key={`${auth.companyId}:${auth.brandId}:${auth.branchId}`} {...props}/>;}

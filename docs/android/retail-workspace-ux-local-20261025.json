@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-25",
+  "status": "implemented-and-verified-locally",
+  "deployment": "NOT DEPLOYED; no APK, commit or push performed in this task",
+  "scope": "Retail web and native UI; no server, database, tenant data, pricing or stock policy changes",
+  "features": [
+    "Shared responsive navigation: Sale, Products/Stock, Bills/Shifts, Reports, Settings",
+    "Mobile bottom navigation with More above cart bar; tablet/desktop sidebar",
+    "No category creation, transfer or report buttons in sale search area",
+    "In-place product intake, receive-only flow, category list/create, transfers and reports keep POS cart mounted",
+    "Receipt retries block workspace navigation while response is uncertain and reuse request ID",
+    "Sale keyboard shortcuts disabled while using management workspaces",
+    "SKU sales and current stock report views use existing server data and filtered CSV columns",
+    "Role-filtered navigation and protected management-only entry points",
+    "Native Retail header removed to avoid duplicate navigation; Restaurant header preserved"
+  ],
+  "new_files": [
+    "frontend/src/components/pos/RetailWorkspaceNav.tsx",
+    "frontend/src/components/pos/RetailWorkspaceHub.tsx"
+  ],
+  "edited_files": [
+    "frontend/src/App.tsx",
+    "frontend/src/index.css",
+    "frontend/src/native-pos/RetailRoutes.tsx",
+    "frontend/src/native-pos/main.tsx",
+    "frontend/src/pages/pos/POSPage.tsx",
+    "frontend/src/pages/products/RetailProductIntakePage.tsx",
+    "frontend/src/pages/stock/RetailTransfersPage.tsx",
+    "frontend/src/pages/reports/RetailSkuReportPage.tsx",
+    "frontend/e2e/native-pos.spec.ts",
+    "frontend/e2e/retail-workspace.spec.ts"
+  ],
+  "checks": {
+    "typescript": "passed",
+    "web_build": "passed (bundle-size/dynamic-import warnings only)",
+    "native_retail_web_bundle": "passed (not an APK release)",
+    "native_retail_targeted_browser_tests": "2 passed: scoped-cart navigation/update safety; stock retry and management-only permissions",
+    "native_restaurant_regression": "1 passed: restored cart and phone/tablet checkout",
+    "retail_web_targeted_browser_tests": "2 passed after fixing More/cart stacking; category test passed again with slash-key regression",
+    "diff_check": "passed",
+    "test_data": "mock APIs only; no customer transactions created"
+  },
+  "release_notes": [
+    "Physical Android/tablet and printer acceptance still required; no new hardware printing behavior changed here",
+    "The design images are conceptual; no invented dashboard totals or unsupported payment options added",
+    "Existing working tree includes unrelated LINE OA and earlier uncommitted Android work. Do not bulk-stage or deploy the entire workspace",
+    "For UAT deployment, apply these scoped changes to the preserved live-baseline staging tree; App.tsx includes unrelated local changes",
+    "Next APK release needs a new versionCode, signed release metadata and publication; current local native bundle retains UAT.6 metadata and must not replace the published UAT.6 APK"
+  ]
+}

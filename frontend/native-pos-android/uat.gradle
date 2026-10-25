@@ -1,10 +1,12 @@
 // Shared UAT-only constraints. The original Takeaway Android project does not apply this file.
+def posRevision = posProduct == 'retail' ? 7 : 6
 android {
     defaultConfig {
-        versionCode 10002
-        versionName "0.1.0-uat.2"
+        versionCode 10000 + posRevision
+        versionName "0.1.0-uat.${posRevision}"
     }
     sourceSets.main.java.srcDir '../../native-pos-android'
+    sourceSets.test.java.srcDir '../../native-pos-android-tests'
 }
 gradle.taskGraph.whenReady { graph ->
     if (graph.allTasks.any { it.name.toLowerCase().contains('release') }) {
@@ -20,7 +22,7 @@ tasks.register('verifyNativePosBundle') {
         if (config.appId != "com.foodchainservice.${posProduct}.uat" || config.webDir != "dist-native-${posProduct}"
             || config.server?.url || config.server?.cleartext != false || config.android?.allowMixedContent != false
             || manifest.product != posProduct || manifest.environment != 'uat' || manifest.origin != origin
-            || manifest.version != '0.1.0-uat.2' || manifest.versionCode != 10002
+            || manifest.version != "0.1.0-uat.${posRevision}" || manifest.versionCode != 10000 + posRevision
             || manifest.autoLogin != false || manifest.offlinePayments != false) {
             throw new GradleException('Wrong product/environment/assets. Rebuild the dedicated UAT bundle.')
         }

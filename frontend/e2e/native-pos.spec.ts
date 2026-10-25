@@ -1,4 +1,24 @@
 import { test, expect, type Page } from '@playwright/test';
+import QRCode from 'qrcode';
+test('printer raster is split into bounded bands with one final feed and cut', async ({page}) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const modulePath='/src/lib/escPosPrinter.ts';
+    const {canvasToEscPosRaster}=await import(modulePath);
+    const canvas=document.createElement('canvas'); canvas.width=576; canvas.height=130;
+    const context=canvas.getContext('2d')!; context.fillStyle='black'; context.fillRect(0,0,576,130);
+    const bytes=canvasToEscPosRaster(canvas); let offset=2; const rows=[]; let pixelCount=0;
+    while(offset<bytes.length-7) {
+      if(bytes[offset]!==29||bytes[offset+1]!==118)throw Error('Bad raster header');
+      const width=bytes[offset+4]+256*bytes[offset+5], height=bytes[offset+6]+256*bytes[offset+7];
+      rows.push(height); const pixels=bytes.slice(offset+8,offset+8+width*height);
+      if(!pixels.every((b:number)=>b===255))throw Error('Raster data changed');
+      pixelCount+=pixels.length; offset+=8+width*height;
+    }
+    return {rows,pixelCount,tail:Array.from(bytes.slice(offset))};
+  });
+  expect(result).toEqual({rows:[64,64,2],pixelCount:72*130,tail:[27,100,4,29,86,65,16]});
+});
 const product=process.env.FCS_POS_PRODUCT!;
 const businessType=product==='retail'?'retail_pos':'restaurant';
 const origin=product==='retail'?'https://uat-retail.foodchainservice.com':'https://uat-pos.foodchainservice.com';
@@ -28,6 +48,38 @@ async function login(page:Page){
   await page.getByLabel('รหัสผ่าน',{exact:true}).fill('fixture-password');
   await page.getByRole('button',{name:'เข้าสู่ระบบ',exact:true}).click();
 }
+test('pairing QR image and app link require matching staff context and explicit confirmation', async ({page}) => {
+  await mocks(page);
+  let pairs = 0;
+  await page.route('**/api/v1/device-auth/pair', async route => {
+    pairs++;
+    expect(route.request().postDataJSON()).toMatchObject({company_id:company,device_code:'C-TEST123456',pairing_pin:'123456'});
+    await route.fulfill({json:{data:{access_token:'device-fixture',refresh_token:'device-refresh',expires_in:3600,
+      device:{device_id:company,company_id:company,branch_id:branch,brand_id:brand,device_code:'C-TEST123456',device_type:'counter',business_type:businessType,target_database:businessType}}}});
+  });
+  const query = new URLSearchParams({company_id:company,branch_id:branch,device_code:'C-TEST123456',pin:'123456',target_app:product,business_code:'test-business',expires_at:new Date(Date.now()+86400000).toISOString()});
+  const link = `https://uat-app.foodchainservice.com/device/pair/${product}?${query}`;
+  await page.goto('/');
+  await page.getByLabel('หรือเลือกภาพ QR').setInputFiles({name:'pair.png',mimeType:'image/png',buffer:await QRCode.toBuffer(link,{width:640})});
+  await expect(page.getByRole('status').filter({hasText:'อ่านรหัสเครื่อง C-TEST123456'})).toBeVisible();
+  await expect(page.getByLabel('รหัสธุรกิจ',{exact:true})).toHaveCount(0);
+  expect(pairs).toBe(0);
+  await page.getByLabel('ชื่อผู้ใช้',{exact:true}).fill('employee');
+  await page.getByLabel('รหัสผ่าน',{exact:true}).fill('fixture-password');
+  await page.getByRole('button',{name:'เข้าสู่ระบบ',exact:true}).click();
+  await expect(page.getByLabel('รหัสเครื่อง',{exact:true})).toHaveValue('C-TEST123456');
+  await page.evaluate(async link => {const path='/src/native-pos/pairing.ts';const {usePendingPairing}=await import(path);usePendingPairing.getState().receive(link);}, link.replace(company,'99999999-9999-4999-8999-999999999999'));
+  await page.getByRole('button',{name:'จับคู่เครื่อง',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('QR ไม่ตรงกับบริษัทหรือสาขา');
+  expect(pairs).toBe(0);
+  await page.evaluate(async link => {const path='/src/native-pos/pairing.ts';const {usePendingPairing}=await import(path);usePendingPairing.getState().receive(link);}, `foodchainservice-${product}-uat://pair?${query}`);
+  expect(pairs).toBe(0);
+  await page.getByRole('button',{name:'จับคู่เครื่อง',exact:true}).click();
+  await expect(page.getByText('จับคู่สำเร็จแล้ว กลับหน้าขายเพื่อเปิดกะได้')).toBeVisible();
+  expect(pairs).toBe(1);
+  await page.reload();
+  await expect(page.getByText('เครื่องปัจจุบัน: C-TEST123456')).toBeVisible();
+});
 test('real login only; signed product branch; restart restores session; phone/tablet layout',async({page})=>{
   const requests=await mocks(page,false,false);await page.goto('/');
   await expect(page.getByRole('heading',{name:`Foodchainservice ${product==='retail'?'Retail':'Restaurant'}`})).toBeVisible();
@@ -165,13 +217,103 @@ test('native POS restores a scoped cart and provides phone/tablet checkout navig
     const session=await import(sessionPath),storage=await import(storagePath);
     session.useAuthStore.getState().setSession(token,company); await session.flushNativeSession();
     await storage.writeNativeCart(`${storage.nativeScope()}:counter`,{cartItems:[{product_id:'water',variant_id:null,product_name:'น้ำดื่มกู้คืน',variant_name:null,sku:'WATER',unit_code:'PCS',qty:2,unit_price:10,original_price:10,discount_amount:0,discount_type:'amount',vat_type:'included',vat_rate:7,subtotal:20,vat_amount:1.31}]});
-  },{token:tokens(false,true,['pos.sale.create','pos.sale.view']),company});
+  },{token:tokens(false,true,['pos.sale.create','pos.sale.view','inventory.product.create','inventory.transfer.view','pos.report.view']),company});
   await page.goto(`/${product}/pos`);
+  if (product === 'retail') {
+    await expect(page.getByText('Foodchainservice Retail · UAT', {exact:true})).not.toBeVisible();
+    await expect(page.getByRole('button',{name:'สแกนเพิ่มสินค้า / รับสต๊อก',exact:true})).not.toBeVisible();
+    await expect(page.getByRole('button',{name:'+ เพิ่มหมวดสินค้า',exact:true})).toHaveCount(0);
+    const nav=page.getByRole('navigation',{name:'เมนูหลัก Retail'});
+    await nav.getByRole('button',{name:'สินค้าและสต๊อก',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'สินค้าและสต๊อก',exact:true})).toBeVisible();
+    await page.screenshot({path:'/private/tmp/retail-workspace-products-mobile.png',fullPage:true});
+    await page.getByRole('button',{name:/^หมวดหมู่สินค้า/}).click();
+    await expect(page.getByRole('button',{name:'+ เพิ่มหมวดสินค้า',exact:true})).toBeVisible();
+    await expect(page.getByText('ยังไม่มีหมวดสินค้า เริ่มสร้างหมวดแรกได้เลย')).toBeVisible();
+    page.once('dialog',dialog=>dialog.accept());
+    await nav.getByRole('button',{name:'ขาย',exact:true}).click();
+    await expect(page.getByRole('button',{name:/ดูตะกร้า \(2\)/})).toBeVisible();
+    await nav.getByRole('button',{name:'บิลและกะ',exact:true}).click();
+    await expect(page.getByRole('button',{name:/^ปิดกะและสรุปเงิน/})).toBeVisible();
+    await nav.getByRole('button',{name:'เพิ่มเติม',exact:true}).click();
+    await nav.getByRole('button',{name:'รายงาน',exact:true}).click();
+    await expect(page.getByRole('button',{name:/^รายงานขายตามสินค้า/})).toBeVisible();
+    await nav.getByRole('button',{name:'เพิ่มเติม',exact:true}).click();
+    await nav.getByRole('button',{name:'ตั้งค่า',exact:true}).click();
+    await expect(page.getByRole('button',{name:/^เครื่องขายและเครื่องพิมพ์/})).toBeVisible();
+    await nav.getByRole('button',{name:'ขาย',exact:true}).click();
+    await page.screenshot({path:'/private/tmp/retail-workspace-sale-mobile.png',fullPage:true});
+    const pairingLink = `https://uat-app.foodchainservice.com/device/pair/retail?company_id=${company}&branch_id=${branch}&device_code=C-TEST123456&pin=123456&target_app=retail`;
+    await page.getByPlaceholder('สแกนบาร์โค้ด / ค้นหาชื่อ / SKU').fill(pairingLink);
+    await page.getByPlaceholder('สแกนบาร์โค้ด / ค้นหาชื่อ / SKU').press('Enter');
+    await expect(page.getByText('QR จับคู่เครื่อง',{exact:true})).toBeVisible();
+    await expect(page.getByText(pairingLink,{exact:true})).toHaveCount(0);
+  }
   await expect(page.getByRole('button',{name:/ดูตะกร้า \(2\)/})).toBeVisible();
   await page.getByRole('button',{name:/ดูตะกร้า \(2\)/}).click();
   await expect(page.getByText('น้ำดื่มกู้คืน',{exact:true})).toBeVisible();
   for(const width of [390,820,1280]) { await page.setViewportSize({width,height:900}); expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true); }
+  if(product==='retail')await page.screenshot({path:'/private/tmp/retail-workspace-sale-desktop.png',fullPage:true});
   await page.reload(); await page.setViewportSize({width:390,height:844});
   await expect(page.getByRole('button',{name:/ดูตะกร้า \(2\)/})).toBeVisible();
   expect(errors).toEqual([]);
+  await page.evaluate(async product=>{
+    const modulePath='/src/native-pos/appUpdate.ts';
+    const {usePosUpdate}=await import(modulePath);
+    usePosUpdate.setState({installed:{packageId:`com.foodchainservice.${product}.uat`,versionCode:10006,versionName:'0.1.0-uat.6'},release:{package_id:`com.foodchainservice.${product}.uat`,version_code:10007,version_name:'0.1.0-uat.7'}});
+  },product);
+  await expect(page.getByRole('link',{name:'อัปเดตเมื่อพร้อม'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'ดาวน์โหลดและติดตั้ง',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:/ดูตะกร้า \(2\)/})).toBeVisible();
+  await page.getByRole('link',{name:'อัปเดตเมื่อพร้อม'}).click();
+  await expect(page.getByText('มีสินค้าในตะกร้า กรุณาพักบิลหรือทำรายการให้เสร็จก่อนอัปเดต',{exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:/ดูตะกร้า \(2\)/})).toBeVisible();
+  // Navigate through the normal settings path; install itself must recheck too.
+  await page.evaluate(()=>{history.pushState({},'', '/native/device');window.dispatchEvent(new PopStateEvent('popstate'));});
+  await page.getByRole('button',{name:'ดาวน์โหลดและติดตั้ง',exact:true}).click();
+  await expect(page.getByText('มีสินค้าในตะกร้า กรุณาพักบิลหรือทำรายการให้เสร็จก่อนอัปเดต',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'ตรวจอัปเดตแอป',exact:true}).click();
+  await expect(page.getByText('ตรวจอัปเดตได้ในแอป Android เท่านั้น',{exact:true})).toBeVisible();
+});
+
+test('Retail workspaces preserve stock receipt retry and respect management-only permissions', async ({page}) => {
+  test.skip(product !== 'retail');
+  await mocks(page);await page.goto('/');await login(page);
+  await expect(page.getByRole('heading',{name:'ตั้งค่าเครื่องขาย'})).toBeVisible();
+  const permissions=['pos.sale.create','pos.sale.view','inventory.product.create','inventory.stock.adjust','pos.report.view'];
+  await page.evaluate(async ({token,company})=>{const path='/src/native-pos/session.ts';const s=await import(path);s.useAuthStore.getState().setSession(token,company);await s.flushNativeSession();},{token:tokens(false,true,permissions),company});
+  await page.route('**/api/v1/pos/shifts/current',r=>r.fulfill({json:{data:{id:'shift-one',user_id:'44444444-4444-4444-8444-444444444444',branch_id:branch,location_id:'stock-one',shift_number:'TEST-001',status:'open',version:1,opening_cash:500}}}));
+  await page.route('**/api/v1/stock/locations**',r=>r.fulfill({json:{data:[{id:'stock-one',branch_id:branch,name:'คลังหน้าร้าน',code:'ST01',is_active:true}]}}));
+  await page.route('**/api/v1/system/branches/*/settings',r=>r.fulfill({json:{data:{allow_negative_stock:false}}}));
+  await page.route('**/api/v1/crm/settings',r=>r.fulfill({json:{data:{}}}));
+  await page.route('**/api/v1/products/retail/intake-lookup**',r=>r.fulfill({json:{data:{product:{id:'water',name:'น้ำดื่ม',barcode:'8851234567890',sku:'WATER',selling_price:'10',cost_price:'5'}}}}));
+  const requestIds:string[]=[];
+  await page.route('**/api/v1/products/retail/intake',r=>{
+    requestIds.push(r.request().postData()?.match(/"request_id":"([^"]+)"/)?.[1]??'');
+    return r.fulfill(requestIds.length===1?{status:500,json:{detail:'uncertain fixture'}}:{json:{data:{product_id:'water',name:'น้ำดื่ม',created:false,qty_received:'3',replayed:true}}});
+  });
+  await page.goto('/retail/pos?workspace=products');
+  await page.getByRole('button',{name:/^รับสต๊อกสินค้าเดิม/}).click();
+  await page.getByLabel('บาร์โค้ดสินค้า',{exact:true}).fill('8851234567890');
+  await page.getByRole('button',{name:'ตรวจบาร์โค้ด',exact:true}).click();
+  await expect(page.getByText('พบสินค้าเดิม — รับเพิ่ม',{exact:true})).toBeVisible();
+  await page.getByLabel('จำนวนรับเข้า',{exact:true}).fill('3');
+  await page.getByRole('combobox',{name:'คลังรับสินค้า',exact:true}).selectOption('stock-one');
+  await page.getByRole('button',{name:'ยืนยันรับสินค้าเดิมเพิ่ม',exact:true}).click();
+  await expect(page.getByRole('button',{name:'ลองบันทึกเดิมอีกครั้ง',exact:true})).toBeVisible();
+  const nav=page.getByRole('navigation',{name:'เมนูหลัก Retail'});
+  await expect(nav.getByRole('button',{name:'ขาย',exact:true})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'กลับเมนูสินค้าและสต๊อก',exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'ลองบันทึกเดิมอีกครั้ง',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'บันทึกเรียบร้อย'})).toBeVisible();
+  expect(requestIds).toHaveLength(2);expect(requestIds[0]).not.toBe('');expect(requestIds[1]).toBe(requestIds[0]);
+  await expect(nav.getByRole('button',{name:'ขาย',exact:true})).toBeEnabled();
+  // A product administrator need not have POS sale permission, and must not see reports.
+  await page.evaluate(async ({token,company})=>{const path='/src/native-pos/session.ts';const s=await import(path);s.useAuthStore.getState().setSession(token,company);await s.flushNativeSession();},{token:tokens(false,true,['inventory.product.create']),company});
+  await page.goto('/retail/workspace/products');
+  await expect(page.getByRole('button',{name:/^เพิ่มสินค้า/})).toBeVisible();
+  await expect(page.getByRole('button',{name:/^รับสต๊อกสินค้าเดิม/})).toHaveCount(0);
+  await expect(page.getByRole('navigation',{name:'เมนูหลัก Retail'}).getByRole('button',{name:'ขาย',exact:true})).toHaveCount(0);
+  await page.goto('/retail/workspace/reports');
+  await expect(page.getByRole('alert')).toContainText('ไม่มีสิทธิ์เข้าถึงส่วนนี้');
 });

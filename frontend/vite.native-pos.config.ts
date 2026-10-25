@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
   if (mode !== "native-uat" || !["retail", "restaurant"].includes(product ?? '')) throw new Error('Select retail/restaurant UAT explicitly');
   if (process.env.VITE_UAT_AUTO_LOGIN === 'true' || process.env.VITE_COMPANY_ID || process.env.VITE_BUSINESS_SLUG) throw new Error('Native POS must not embed tenant or auto-login');
   const origin = product === 'retail' ? 'https://uat-retail.foodchainservice.com' : 'https://uat-pos.foodchainservice.com';
+  const revision = product === 'retail' ? 7 : 6;
   return {
     // No environment file inheritance from the existing Takeaway or web builds.
     envDir: false,
@@ -22,7 +23,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), {
       name: 'native-pos-entry',
       transformIndexHtml: { order: 'pre', handler: (html: string) => html.replace('/src/main.tsx', '/src/native-pos/main.tsx') },
-      generateBundle() { this.emitFile({type:'asset', fileName:'native-pos-build.json', source:JSON.stringify({product, environment:'uat', origin, version:'0.1.0-uat.2', versionCode:10002, autoLogin:false, offlinePayments:false})}); },
+      generateBundle() { this.emitFile({type:'asset', fileName:'native-pos-build.json', source:JSON.stringify({product, environment:'uat', origin, version:`0.1.0-uat.${revision}`, versionCode:10000 + revision, autoLogin:false, offlinePayments:false})}); },
     }],
     resolve: { alias: [
       { find: '@/stores/auth.store', replacement: path.resolve(__dirname, 'src/native-pos/session.ts') },

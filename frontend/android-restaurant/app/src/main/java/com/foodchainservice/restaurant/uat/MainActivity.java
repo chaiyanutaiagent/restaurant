@@ -7,6 +7,7 @@ import com.foodchainservice.takeaway.TakeawayPrinterPlugin;
 public class MainActivity extends BridgeActivity {
     @Override public void onCreate(Bundle savedInstanceState) {
         registerPlugin(TakeawayPrinterPlugin.class);
+        registerPlugin(com.foodchainservice.nativepos.NativePosUpdaterPlugin.class);
         registerPlugin(com.foodchainservice.nativepos.NativeDocumentPrinter.class);
         super.onCreate(savedInstanceState);
     }

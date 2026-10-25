@@ -35,6 +35,8 @@ export default defineConfig({
         ]
       },
       workbox: {
+        // APK/file downloads must reach the server, never the SPA login fallback.
+        navigateFallbackDenylist: [/^\/downloads(?:\/|$)/, /^\/\.well-known(?:\/|$)/],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         runtimeCaching: [
           {

@@ -20,7 +20,8 @@ type Existing = {id:string;name:string;barcode:string;sku:string;selling_price:s
 type Receipt = {product_id:string;name:string;created:boolean;qty_received:string;replayed:boolean;variant_name?:string};
 const empty = {name:"",description:"",unit_id:"",category_id:"",selling_price:"0",cost_price:"0",qty:"0",location_id:"",vat_type:"included",vat_rate:"7"};
 
-function Workspace(): JSX.Element {
+type IntakeProps = { embedded?: boolean; mode?: 'create' | 'receive'; initialBarcode?: string; onNavigationLock?: (locked: boolean) => void };
+function Workspace({embedded, mode, initialBarcode, onNavigationLock}: IntakeProps): JSX.Element {
   const online = useOnlineStatus();
   const branchId = useAuthStore(s=>s.branchId);
   const companyId = useAuthStore(s=>s.companyId);
@@ -28,7 +29,7 @@ function Workspace(): JSX.Element {
   const hasPermission = useAuthStore(s=>s.hasPermission);
   const canReceive = ["inventory.stock.adjust","brand.store.stock.adjust"].some(hasPermission);
   const cache = useQueryClient();
-  const [barcode,setBarcode] = useState("");
+  const [barcode,setBarcode] = useState(initialBarcode ?? "");
   const [checked,setChecked] = useState("");
   const [existing,setExisting] = useState<Existing|null>(null);
   const [fields,setFields] = useState(empty);
@@ -41,6 +42,7 @@ function Workspace(): JSX.Element {
   const [locked,setLocked] = useState(false);
   const [error,setError] = useState("");
   const [receipt,setReceipt] = useState<Receipt|null>(null);
+  useEffect(()=>{onNavigationLock?.(busy||locked);return()=>onNavigationLock?.(false);},[busy,locked,onNavigationLock]);
   const pending = useRef<FormData|null>(null);
   const inFlight = useRef(false);
   const lookupSequence = useRef(0);
@@ -58,6 +60,7 @@ function Workspace(): JSX.Element {
     try {
       const result=(await api.get<ApiResponse<{product:Existing|null}>>("/products/retail/intake-lookup",{params:{barcode:normalized}})).data.data.product;
       if(sequence!==lookupSequence.current)return;
+      if(mode==='receive'&&!result){setError('ไม่พบสินค้าเดิม กรุณาไปเมนูเพิ่มสินค้าเพื่อสร้างสินค้าก่อนรับสต๊อก');return;}
       setExisting(result);setChecked(normalized);setImage(null);
       setOptions(emptyRetailOptions);
       setFields(result?{...empty,name:result.name,selling_price:result.selling_price,cost_price:result.cost_price,qty:"1"}:empty);
@@ -108,7 +111,7 @@ function Workspace(): JSX.Element {
   },[locked]);
   const field=(key:keyof typeof empty,value:string)=>setFields(previous=>({...previous,[key]:value}));
   return <main data-retail-intake data-pos-touch-surface className="min-h-screen bg-slate-50 p-4 md:p-8" style={{paddingBottom:"max(16px, env(safe-area-inset-bottom))"}}><div className="mx-auto max-w-5xl space-y-5">
-    <header className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm text-blue-700">Retail · บริษัท / แบรนด์ / สาขาที่เลือก</p><h1 className="text-2xl font-bold">สแกนเพิ่มสินค้า / รับสต๊อก</h1></div>{!locked&&<Button asChild variant="outline"><Link to="/retail/pos">กลับหน้าขาย</Link></Button>}</header>
+    <header className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm text-blue-700">Retail · บริษัท / แบรนด์ / สาขาที่เลือก</p><h1 className="text-2xl font-bold">{mode==='receive'?'รับสต๊อกสินค้าเดิม':mode==='create'?'เพิ่มสินค้า':'สแกนเพิ่มสินค้า / รับสต๊อก'}</h1></div>{!locked&&!embedded&&<Button asChild variant="outline"><Link to="/retail/pos">กลับหน้าขาย</Link></Button>}</header>
     <p className="text-sm text-slate-600">1 สแกนและตรวจสินค้า → 2 รายละเอียดและราคา → 3 คลังและจำนวน → 4 รูปสินค้า → บันทึก</p>
     {!online&&<p role="alert" className="rounded-xl bg-amber-100 p-4">ต้องออนไลน์เพื่อป้องกันสินค้าซ้ำและยืนยันยอดสต๊อก</p>}
     {error&&<p role="alert" className="rounded-xl bg-red-50 p-4 text-red-700">{error}</p>}
@@ -148,7 +151,7 @@ function Workspace(): JSX.Element {
   </div></main>;
 }
 
-export default function RetailProductIntakePage(): JSX.Element {
+export default function RetailProductIntakePage(props: IntakeProps = {}): JSX.Element {
   const identity=useAuthStore(s=>`${s.companyId}:${s.brandId}:${s.branchId}:${s.user?.id}`);
-  return <Workspace key={identity}/>;
+  return <Workspace key={`${identity}:${props.mode}`} {...props}/>;
 }

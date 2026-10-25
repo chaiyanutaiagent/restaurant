@@ -11,6 +11,8 @@ import { assertDeviceCredentialStorageAvailable } from "@/lib/deviceCredentialSt
 import { useDeviceStore } from "@/stores/device.store";
 import type { ApiResponse } from "@/types/api";
 import type { DevicePairResponse, DeviceType } from "@/types/device";
+import { androidPairingIntent } from "@/lib/devicePairingLink";
+import { pairingApps, pairingProduct } from "@/lib/pairingAppDownloads";
 
 const WORKSPACE_PATH: Record<DeviceType, string> = {
   counter: "/counter",
@@ -24,12 +26,19 @@ export default function DevicePairingPage(): JSX.Element {
   const setSession = useDeviceStore((state) => state.setSession);
   const clearSession = useDeviceStore((state) => state.clearSession);
   const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const product = pairingProduct(params.get("target_app"));
+  const android = /Android/i.test(navigator.userAgent);
+  const [useWeb, setUseWeb] = useState(!android);
+  const [now, setNow] = useState(Date.now());
+  const expires = params.get("expires_at");
+  const expired = Boolean(expires && (!Number.isFinite(Date.parse(expires)) || Date.parse(expires) <= now));
   const [companyId, setCompanyId] = useState(params.get("company_id") ?? import.meta.env.VITE_COMPANY_ID ?? localStorage.getItem("last_company_id") ?? "");
   const [deviceCode, setDeviceCode] = useState(params.get("device_code") ?? "");
   const [pin, setPin] = useState(params.get("pin") ?? "");
 
   const pairMutation = useMutation({
     mutationFn: async () => {
+      if (expires && Date.parse(expires) <= Date.now()) throw new Error("ลิงก์หมดอายุแล้ว กรุณาขอลิงก์ใหม่");
       await assertDeviceCredentialStorageAvailable();
       const response = await deviceApi.post<ApiResponse<DevicePairResponse>>("/device-auth/pair", {
         company_id: companyId.trim(),
@@ -59,6 +68,19 @@ export default function DevicePairingPage(): JSX.Element {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {expired && <p role="alert" className="mb-4 text-rose-300">ลิงก์หมดอายุแล้ว กรุณาขอ PIN ใหม่จากแอดมิน</p>}
+          {product && <div className="mb-5 space-y-3 rounded border border-emerald-500 p-4">
+            <p>ระบบ {pairingApps[product].name} · {params.get("business_code") || "บริษัท/สาขาจากลิงก์"}</p>
+            {android && <>
+              {!expired && <Button asChild className="w-full"><a href={androidPairingIntent(window.location.href, product)} onClick={() => setNow(Date.now())}>เปิดแอป {pairingApps[product].name} บน Android</a></Button>}
+              <Button asChild variant="outline" className="w-full text-slate-950"><a href={pairingApps[product].download} referrerPolicy="no-referrer">ยังไม่มีแอป / อัปเดต — ดาวน์โหลด {pairingApps[product].name}</a></Button>
+              <p className="text-sm text-slate-300">ติดตั้งแล้วกดลิงก์เดิมอีกครั้ง หากเปิดผ่าน LINE แล้วแอปไม่เปิด ให้เลือกเปิดใน Chrome ไม่ต้องลบแอปเดิมหรือล้างข้อมูล</p>
+              <button type="button" className="underline" onClick={() => setUseWeb(true)}>ใช้ผ่านเว็บแทน</button>
+            </>}
+            {!android && <p>ใช้งานผ่านเบราว์เซอร์บนเครื่องนี้ได้เลย ไม่ต้องติดตั้งแอป</p>}
+            {expires && <p className="text-sm">ใช้ครั้งเดียว · หมดอายุ {new Date(expires).toLocaleString("th-TH")}</p>}
+          </div>}
+          {(!product || useWeb) && <>
           <form
             className="space-y-5"
             onSubmit={(event) => {
@@ -83,7 +105,7 @@ export default function DevicePairingPage(): JSX.Element {
                 {deviceErrorMessage(pairMutation.error)}
               </div>
             ) : null}
-            <Button className="h-12 w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400" disabled={pairMutation.isPending || pin.length !== 6} type="submit">
+            <Button className="h-12 w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400" disabled={pairMutation.isPending || pin.length !== 6 || expired} type="submit">
               {pairMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <LockKeyhole className="h-5 w-5" />}
               จับคู่และเปิด Workspace
             </Button>
@@ -99,6 +121,7 @@ export default function DevicePairingPage(): JSX.Element {
               <Unplug className="h-4 w-4" /> ล้างข้อมูลเครื่องเดิม
             </button>
           </form>
+          </>}
         </CardContent>
       </Card>
     </div>

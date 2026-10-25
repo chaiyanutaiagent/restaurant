@@ -13,6 +13,9 @@ import { useLogout } from "@/hooks/useAuth";
 import { useDeviceStore } from "@/stores/device.store";
 import Login from "./Login";
 import Device from "./Device";
+import UpdateNotice from './UpdateNotice';
+import { RetailWorkspaceFrame } from '@/components/pos/RetailWorkspaceNav';
+import { usePendingPairing } from "./pairing";
 import { hasNativePaymentPending, isPendingRestaurantBranchRestore } from "./paidOrderRecovery";
 import { installNativeTransactionJournal, readNativeTransaction } from './transactionJournal';
 import { nativeAssetUrls } from './assets';
@@ -52,6 +55,16 @@ function NativeApp() {
   const session = useAuthStore();
   const logout = useLogout();
   const [pendingTransaction, setPendingTransaction] = useState(false);
+  const pendingPair = usePendingPairing(state => state.pending);
+  const pairingError = usePendingPairing(state => state.error);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let active = true;
+    const receive = (url: string) => { if (active) usePendingPairing.getState().receive(url); };
+    const listener = App.addListener('appUrlOpen', event => receive(event.url));
+    void App.getLaunchUrl().then(result => { if (result?.url) receive(result.url); }).catch(() => { if (active) usePendingPairing.setState({ error: "เปิดลิงก์ไม่สำเร็จ ให้สแกน QR หรือวางลิงก์ในแอป" }); });
+    return () => { active = false; void listener.then(handle => handle.remove()); };
+  }, []);
   useEffect(() => {
     const update = () => { void Promise.all([readNativeTransaction(), hasNativePaymentPending()]).then(([journal, wap]) => setPendingTransaction(Boolean(journal) || wap)).catch(() => setFatal('อ่านธุรกรรมค้างไม่ได้ กรุณาปิดและเปิดแอปใหม่')); };
     update(); window.addEventListener('native-pos-transaction', update);
@@ -69,11 +82,12 @@ function NativeApp() {
   }, []);
   useEffect(() => {queryClient.clear();}, [session.companyId, session.brandId, session.branchId, session.user?.id]);
   if (fatal || !ready) return <main role="status" className="p-8">{fatal || 'กำลังเปิดแอป…'}</main>;
-  if (!session.isAuthenticated()) return <Login/>;
+  if (!session.isAuthenticated()) return <><Login/><UpdateNotice/></>;
   const visible = navigation.filter(([, , permission]) => session.hasPermission(permission) || (permission === 'fb.kitchen.ticket.manage' && session.hasPermission('fb.kitchen.manage')));
-  const landing = visible[0]?.[0] ?? '/native/device';
+  const landing = pendingPair ? '/native/device' : visible[0]?.[0] ?? '/native/device';
   return <div className="native-safe-screen bg-slate-50">
-    <header className="flex flex-wrap items-center gap-3 border-b bg-white p-3 text-sm">
+    <UpdateNotice />
+    <header hidden={nativeProduct === 'retail'} className={nativeProduct === 'retail' ? 'hidden' : 'flex flex-wrap items-center gap-3 border-b bg-white p-3 text-sm'}>
       <strong>{nativeTitle} · UAT</strong>
       {visible.map(([path,label]) => <Link key={path} className="min-h-11 rounded border p-3" to={path} onClick={e => {if (!confirm('เปลี่ยนหน้างาน? กรุณาพักบิลก่อนหากมีสินค้าในตะกร้า')) e.preventDefault();}}>{label}</Link>)}
       <Link className="min-h-11 rounded border p-3" to="/native/device" onClick={e => {if (!confirm('เปิดตั้งค่าเครื่อง? กรุณาพักบิลก่อนหากมีสินค้าในตะกร้า')) e.preventDefault();}}>เครื่องขาย / พิมพ์</Link>
@@ -81,6 +95,8 @@ function NativeApp() {
       <button className="min-h-11 rounded border p-3" onClick={() => {if(confirm('ออกจากระบบ? กรุณาพักบิลหรือทำรายการให้เสร็จก่อน')) logout();}}>ออกจากระบบ</button>
     </header>
     {pendingTransaction && <aside role="alert" className="bg-amber-100 p-3">มีธุรกรรมรอตรวจสอบ ห้ามรับเงินซ้ำ · <Link className="underline" to="/native/device">ตรวจรายการเดิม</Link></aside>}
+    {pendingPair && <aside role="status" className="bg-blue-100 p-3">ได้รับ QR เครื่อง {pendingPair.deviceCode} · <Link className="underline" to="/native/device">ตรวจข้อมูลและยืนยันจับคู่</Link><button className="ml-4 underline" onClick={() => usePendingPairing.getState().clear()}>ยกเลิก</button></aside>}
+    {pairingError && <aside role="alert" className="bg-red-100 p-3">{pairingError}</aside>}
     <Routes>
       <Route path="/" element={<Navigate to={landing} replace/>}/>
       <Route path="/login" element={<Navigate to={landing} replace/>}/>
@@ -88,7 +104,7 @@ function NativeApp() {
       <Route path="/pos" element={<Navigate to={nativeHome} replace/>}/>
       <Route path="/admin" element={<Navigate to={landing} replace/>}/>
       <Route path="/branches/:id/settings" element={<main className="p-6">การตั้งค่าสาขาให้ผู้จัดการทำผ่านเว็บ · <a className="underline" href={`${import.meta.env.VITE_API_BASE_URL}/admin`} target="_blank" rel="noreferrer">เปิดหลังบ้าน UAT ในเบราว์เซอร์</a></main>}/>
-      <Route element={<ProductContextGuard businessType={nativeBusinessType}/>}>{productRoutes}<Route path="/native/device" element={<Device/>}/></Route>
+      <Route element={<ProductContextGuard businessType={nativeBusinessType}/>}>{productRoutes}<Route path="/native/device" element={nativeProduct === 'retail' ? <RetailWorkspaceFrame section="settings"><Device/></RetailWorkspaceFrame> : <Device/>}/></Route>
       <Route path="*" element={<main className="p-6"><h1>หน้านี้ไม่เปิดในแอป หรือไม่มีสิทธิ์ใช้งาน</h1><Link to={nativeHome}>กลับหน้าขาย</Link></main>}/>
     </Routes><Toaster/>
   </div>;

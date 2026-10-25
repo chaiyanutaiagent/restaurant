@@ -20,6 +20,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 import java.io.OutputStream;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @CapacitorPlugin(
     name = "TakeawayPrinter",
@@ -33,6 +34,7 @@ import java.util.UUID;
 public class TakeawayPrinterPlugin extends Plugin {
     private static final UUID SERIAL_PORT_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     private static final int MAX_PRINT_BYTES = 1024 * 1024;
+    private static final AtomicBoolean PRINTING = new AtomicBoolean(false);
 
     private boolean needsRuntimePermission() {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
@@ -116,6 +118,10 @@ public class TakeawayPrinterPlugin extends Plugin {
             call.reject("ข้อมูลพิมพ์มีขนาดไม่ถูกต้อง");
             return;
         }
+        if (!PRINTING.compareAndSet(false, true)) {
+            call.reject("กำลังพิมพ์ กรุณารอให้จบก่อน ห้ามส่งบิลซ้ำ");
+            return;
+        }
         new Thread(() -> {
             BluetoothSocket socket = null;
             try {
@@ -129,8 +135,7 @@ public class TakeawayPrinterPlugin extends Plugin {
                 adapter.cancelDiscovery();
                 socket.connect();
                 OutputStream output = socket.getOutputStream();
-                output.write(printBytes);
-                output.flush();
+                BluetoothPrintSpooler.send(printBytes, output, Thread::sleep);
                 call.resolve();
             } catch (SecurityException error) {
                 call.reject("สิทธิ์ Bluetooth ถูกปิด กรุณาอนุญาตใหม่ก่อนพิมพ์", error);
@@ -140,6 +145,7 @@ public class TakeawayPrinterPlugin extends Plugin {
                 if (socket != null) {
                     try { socket.close(); } catch (Exception ignored) { }
                 }
+                PRINTING.set(false);
             }
         }).start();
     }

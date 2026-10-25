@@ -239,10 +239,12 @@ test("Retail phone flow retains cart, validates payment, blocks offline and surf
   const footer=page.getByTestId("retail-mobile-footer");
   await expect(footer).toBeVisible();
   await expect(page.getByTestId("pos-cart-panel")).toBeHidden();
-  await expect(page.getByTestId("retail-pos-workspace-bar")).toBeHidden();
-  await page.getByRole("button",{name:"เมนูเพิ่มเติม",exact:true}).click();
-  await expect(page.getByTestId("retail-pos-workspace-bar")).toBeVisible();
-  await page.getByRole("button",{name:"ปิดเมนู",exact:true}).click();
+  const workspaceNav=page.getByRole('navigation',{name:'เมนูหลัก Retail'});
+  await expect(workspaceNav).toBeVisible();
+  await workspaceNav.getByRole('button',{name:'เพิ่มเติม',exact:true}).click();
+  await workspaceNav.getByRole('button',{name:'ตั้งค่า',exact:true}).click();
+  await expect(page.getByRole('button',{name:/^เครื่องขายและเครื่องพิมพ์/})).toBeVisible();
+  await workspaceNav.getByRole('button',{name:'ขาย',exact:true}).click();
   await page.getByTestId("pos-product-panel").getByRole("button",{name:/น้ำดื่มทดสอบมือถือ/}).click();
   await expect(footer).toContainText("ดูตะกร้า (1)");
   await footer.getByRole("button").click();
@@ -304,7 +306,7 @@ test("Retail small phone and tablet resize preserves cart and both desktop panel
   await expect(footer.getByRole("button")).toBeDisabled();
 });
 
-test("Retail storefront creates and displays an empty category without losing the mobile cart",async({page})=>{
+test("Retail product workspace creates and displays an empty category without losing the mobile cart",async({page})=>{
   await mobileCatalog(page);
   await page.addInitScript(()=>{
     const auth=JSON.parse(localStorage.getItem("erp-auth")!);
@@ -324,14 +326,26 @@ test("Retail storefront creates and displays an empty category without losing th
   await page.goto("/retail/pos");
   await page.getByTestId("pos-product-panel").getByRole("button",{name:/น้ำดื่มทดสอบมือถือ/}).click();
   await expect(page.getByTestId("retail-mobile-footer")).toContainText("ดูตะกร้า (1)");
+  await expect(page.getByRole('button',{name:'+ เพิ่มหมวดสินค้า',exact:true})).toHaveCount(0);
+  const workspaceNav=page.getByRole('navigation',{name:'เมนูหลัก Retail'});
+  await workspaceNav.getByRole('button',{name:'สินค้าและสต๊อก',exact:true}).click();
+  await page.getByRole('button',{name:/^หมวดหมู่สินค้า/}).click();
   await page.getByRole("button",{name:"+ เพิ่มหมวดสินค้า",exact:true}).click();
+  await page.getByLabel('ชื่อหมวดสินค้า',{exact:true}).pressSequentially('ขนม/ทดสอบ');
+  await expect(page.getByLabel('ชื่อหมวดสินค้า',{exact:true})).toHaveValue('ขนม/ทดสอบ');
   await page.getByLabel("ชื่อหมวดสินค้า",{exact:true}).fill("  ขนมทดสอบ  ");
   await page.getByRole("button",{name:"บันทึกหมวด",exact:true}).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator('[data-retail-workspace="products"]').getByText('ขนมทดสอบ',{exact:true})).toBeVisible();
+  page.once('dialog',dialog=>dialog.accept());
+  await workspaceNav.getByRole('button',{name:'ขาย',exact:true}).click();
   await expect(page.getByTestId("pos-category-panel").getByRole("button",{name:"ขนมทดสอบ",exact:true})).toBeVisible();
+  await page.getByTestId('pos-category-panel').getByRole('button',{name:'ขนมทดสอบ',exact:true}).click();
   await expect(page.getByText("หมวดนี้ยังไม่มีสินค้าตรงกับที่เลือก",{exact:true})).toBeVisible();
   await expect(page.getByTestId("retail-mobile-footer")).toContainText("ดูตะกร้า (1)");
   expect(creates).toBe(1);
+  await workspaceNav.getByRole('button',{name:'สินค้าและสต๊อก',exact:true}).click();
+  await page.getByRole('button',{name:/^หมวดหมู่สินค้า/}).click();
   await page.getByRole("button",{name:"+ เพิ่มหมวดสินค้า",exact:true}).click();
   await page.getByLabel("ชื่อหมวดสินค้า",{exact:true}).fill("ขนมทดสอบ");
   await page.getByRole("button",{name:"บันทึกหมวด",exact:true}).click();

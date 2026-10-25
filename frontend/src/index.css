@@ -194,6 +194,12 @@ a {
 /* Retail phone flow reuses the same cart and checkout. Tablet/desktop and
    Restaurant are intentionally outside this scope. */
 @media (max-width: 767px) {
+  [data-retail-grouped="true"][data-retail-mobile-step] {
+    padding-bottom: calc(170px + env(safe-area-inset-bottom));
+  }
+  [data-retail-grouped="true"][data-retail-mobile-step="payment"] {
+    padding-bottom: calc(80px + env(safe-area-inset-bottom));
+  }
   [data-retail-mobile-step] {
     min-height: 100dvh;
     padding-bottom: calc(92px + env(safe-area-inset-bottom));

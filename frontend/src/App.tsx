@@ -32,8 +32,8 @@ import CRMPage from "@/pages/crm/CRMPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 import PayablePage from "@/pages/payable/PayablePage";
 import POSPage from "@/pages/pos/POSPage";
-import RetailProductIntakePage from "@/pages/products/RetailProductIntakePage";
-import RetailTransfersPage from "@/pages/stock/RetailTransfersPage";
+import { RetailWorkspaceFrame } from '@/components/pos/RetailWorkspaceNav';
+import { RetailManagementPage, RetailWorkspacePage } from '@/components/pos/RetailWorkspaceHub';
 import RetailSkuReportPage from "@/pages/reports/RetailSkuReportPage";
 import POSAdminPage from "@/pages/pos/POSAdminPage";
 import OfflineSyncCenterPage from "@/pages/pos/OfflineSyncCenterPage";
@@ -195,6 +195,7 @@ export default function App(): JSX.Element {
             </Route>
           </Route>
           <Route path="/device/pair" element={<DevicePairingPage />} />
+          <Route path="/device/pair/:product" element={<DevicePairingPage />} />
           <Route element={<DeviceProtectedRoute type="counter" />}>
             <Route path="/counter" element={<CounterDevicePage />} />
             <Route element={<ProtectedRoute permission="fb.order.create" />}>
@@ -315,19 +316,20 @@ export default function App(): JSX.Element {
             <Route path="/pos/offline-sync" element={<LegacyPosRedirect offline />} />
           </Route>
           <Route element={<ProductContextGuard businessType="retail_pos" />}>
+            <Route element={<ProtectedRoute />}><Route path="/retail/workspace/:section" element={<RetailWorkspacePage />} /></Route>
             <Route path="/retail" element={<Navigate to="/retail/pos" replace />} />
             <Route element={<ProtectedRoute permission="inventory.product.create" />}>
-              <Route path="/retail/products/scan" element={<RetailProductIntakePage />} />
+              <Route path="/retail/products/scan" element={<RetailManagementPage task="intake" />} />
             </Route>
             <Route element={<ProtectedRoute permission="inventory.transfer.view" />}>
-              <Route path="/retail/transfers" element={<RetailTransfersPage />} />
+              <Route path="/retail/transfers" element={<RetailManagementPage task="transfer" />} />
             </Route>
             <Route element={<ProtectedRoute permission="pos.report.view" />}>
-              <Route path="/retail/reports/skus" element={<RetailSkuReportPage />} />
+              <Route path="/retail/reports/skus" element={<RetailWorkspaceFrame section="reports"><RetailSkuReportPage /></RetailWorkspaceFrame>} />
             </Route>
             <Route element={<ProtectedRoute permission="pos.sale.create" />}>
               <Route path="/retail/pos" element={<POSPage />} />
-              <Route path="/retail/offline-sync" element={<OfflineSyncCenterPage />} />
+              <Route path="/retail/offline-sync" element={<RetailWorkspaceFrame section="settings"><OfflineSyncCenterPage /></RetailWorkspaceFrame>} />
             </Route>
           </Route>
           <Route element={<ProductContextGuard businessType="restaurant" />}>

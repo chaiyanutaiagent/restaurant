@@ -3,6 +3,7 @@ import { BadgeCheck, Loader2, LogIn, MonitorSmartphone, ShieldCheck, Unplug } fr
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { deviceApi, deviceErrorMessage } from "@/lib/deviceApi";
+import { counterSalesTarget } from "@/lib/deviceWorkspace";
 import { useAuthStore } from "@/stores/auth.store";
 import { useDeviceStore } from "@/stores/device.store";
 import type { ApiResponse } from "@/types/api";
@@ -19,12 +20,15 @@ export default function CounterDevicePage(): JSX.Element {
     retry: false,
   });
   const bootstrap = bootstrapQuery.data;
+  const salesTarget = bootstrap ? counterSalesTarget(bootstrap.device) : null;
   const staffIdentifier = user?.employee_code?.trim() || user?.username || "-";
   const staffReady = Boolean(
     user
     && bootstrap
+    && user.company_id === bootstrap.device.company_id
     && userBranchId === bootstrap.branch.id
-    && hasPermission("fb.order.create"),
+    && salesTarget
+    && hasPermission(salesTarget.permission),
   );
 
   if (bootstrapQuery.isLoading) {
@@ -54,11 +58,11 @@ export default function CounterDevicePage(): JSX.Element {
             </section>
             <section className="flex flex-col justify-center rounded-[2rem] border border-slate-700 bg-slate-900 p-8">
               <p className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">Staff session</p>
-              <p className="mt-3 text-2xl font-black">{staffReady ? `พร้อมใช้งานโดย ${user?.display_name ?? user?.username}` : user ? "Branch ของพนักงานไม่ตรงกับเครื่อง" : "กรุณาลงชื่อพนักงาน"}</p>
+              <p className="mt-3 text-2xl font-black">{staffReady ? `พร้อมใช้งานโดย ${user?.display_name ?? user?.username}` : user ? "ตรวจสอบบริษัท สาขา และสิทธิ์ขายของพนักงานให้ตรงกับเครื่อง" : "กรุณาลงชื่อพนักงาน"}</p>
               {staffReady ? <p className="mt-2 font-mono text-sm font-semibold text-emerald-300">Employee ID: {staffIdentifier}</p> : null}
               <p className="mt-2 text-sm text-slate-400">ยอดขายจะใช้สิทธิ์และ Branch จากพนักงาน และต้องตรงกับ Branch ที่จับคู่เครื่องนี้</p>
               {staffReady ? (
-                <Button asChild className="mt-7 h-14 bg-emerald-500 text-lg font-black text-slate-950 hover:bg-emerald-400"><Link to="/counter/orders"><LogIn className="h-5 w-5" />เปิดหน้าขาย</Link></Button>
+                <Button asChild className="mt-7 h-14 bg-emerald-500 text-lg font-black text-slate-950 hover:bg-emerald-400"><Link to={salesTarget!.path}><LogIn className="h-5 w-5" />เปิดหน้าขาย</Link></Button>
               ) : (
                 <Button asChild className="mt-7 h-14 bg-white text-lg font-black text-slate-950 hover:bg-slate-200"><Link to="/login?next=/counter"><LogIn className="h-5 w-5" />ลงชื่อพนักงาน</Link></Button>
               )}

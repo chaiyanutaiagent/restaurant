@@ -657,16 +657,18 @@ export function canvasToEscPosRaster(canvas: HTMLCanvasElement): Uint8Array {
     }
   }
 
-  const header = new Uint8Array([
-    0x1d, 0x76, 0x30, 0x00,
-    bytesPerRow & 0xff, (bytesPerRow >> 8) & 0xff,
-    canvas.height & 0xff, (canvas.height >> 8) & 0xff,
-  ]);
-  const output = new Uint8Array(2 + header.length + raster.length + 7);
+  // Small raster bands avoid a single tall bitmap exhausting printer buffers.
+  const bandRows = 64;
+  const output = new Uint8Array(2 + Math.ceil(canvas.height / bandRows) * 8 + raster.length + 7);
   let offset = 0;
   output.set([0x1b, 0x40], offset); offset += 2;
-  output.set(header, offset); offset += header.length;
-  output.set(raster, offset); offset += raster.length;
+  for (let row = 0; row < canvas.height; row += bandRows) {
+    const rows = Math.min(bandRows, canvas.height - row);
+    output.set([0x1d, 0x76, 0x30, 0x00, bytesPerRow & 0xff, (bytesPerRow >> 8) & 0xff, rows, 0], offset);
+    offset += 8;
+    const band = raster.subarray(row * bytesPerRow, (row + rows) * bytesPerRow);
+    output.set(band, offset); offset += band.length;
+  }
   output.set([0x1b, 0x64, 0x04, 0x1d, 0x56, 0x41, 0x10], offset);
   return output;
 }

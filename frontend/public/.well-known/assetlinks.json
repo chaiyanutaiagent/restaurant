@@ -1,0 +1,14 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {"namespace": "android_app", "package_name": "com.foodchainservice.restaurant.uat", "sha256_cert_fingerprints": ["AC:FE:7C:06:38:C1:37:5C:E6:C0:41:D5:3F:99:ED:AC:94:67:DF:EC:64:F7:29:7E:E0:7F:34:36:70:40:15:B5"]}
+  },
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {"namespace": "android_app", "package_name": "com.foodchainservice.retail.uat", "sha256_cert_fingerprints": ["AC:FE:7C:06:38:C1:37:5C:E6:C0:41:D5:3F:99:ED:AC:94:67:DF:EC:64:F7:29:7E:E0:7F:34:36:70:40:15:B5"]}
+  },
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {"namespace": "android_app", "package_name": "com.foodchainservice.takeaway.uat", "sha256_cert_fingerprints": ["AC:FE:7C:06:38:C1:37:5C:E6:C0:41:D5:3F:99:ED:AC:94:67:DF:EC:64:F7:29:7E:E0:7F:34:36:70:40:15:B5"]}
+  }
+]

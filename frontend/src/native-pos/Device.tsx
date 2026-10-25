@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { deviceApi } from "@/lib/deviceApi";
 import { useDeviceStore } from "@/stores/device.store";
 import { useAuthStore, flushNativeSession } from "./session";
-import { pairedTakeawayPrinters, savedTakeawayPrinter, saveTakeawayPrinter, printConfiguredLongReceiptTest, type TakeawayPrinterDevice } from "@/lib/takeawayPrinter";
+import { pairedTakeawayPrinters, savedTakeawayPrinter, saveTakeawayPrinter, printConfiguredLongReceiptTest, printConfiguredCutterTest, type TakeawayPrinterDevice } from "@/lib/takeawayPrinter";
 import type { ApiResponse } from "@/types/api";
 import type { DevicePairResponse } from "@/types/device";
 import { nativeProduct, nativeBusinessType } from "./config";
@@ -11,14 +11,22 @@ import api, { authApi } from '@/lib/api';
 import type { UserBranch } from '@/types/user';
 import { acknowledgeNativeTransaction, readNativeTransaction, recoverNativeTransaction } from './transactionJournal';
 import { nativeScope } from './storage';
+import PairingScanner from './PairingScanner';
+import { usePendingPairing } from './pairing';
+import { checkPosUpdate, usePosUpdate } from './appUpdate';
 
 export default function Device() {
+  const checkingUpdate = usePosUpdate(state => state.checking);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [printers, setPrinters] = useState<TakeawayPrinterDevice[]>([]);
   const [printer, setPrinter] = useState(savedTakeawayPrinter());
   const device = useDeviceStore(state => state.device);
   const session = useAuthStore();
+  const pending = usePendingPairing(state => state.pending);
+  const [code, setCode] = useState("");
+  const [pin, setPin] = useState("");
+  useEffect(() => { setCode(pending?.deviceCode ?? ""); setPin(pending?.pin ?? ""); }, [pending]);
   const [branches, setBranches] = useState<UserBranch[]>([]);
   const [transaction, setTransaction] = useState<Awaited<ReturnType<typeof readNativeTransaction>>>(null);
   const [online, setOnline] = useState(navigator.onLine);
@@ -29,7 +37,8 @@ export default function Device() {
   }, []);
   return <main className="mx-auto max-w-xl space-y-5 p-5">
     <h1 className="text-2xl font-bold">ตั้งค่าเครื่องขาย</h1>
-    <p role="status">{online ? 'ออนไลน์' : 'ออฟไลน์ — หยุดบันทึก / รับเงิน'} · UAT 0.1.0-uat.2</p>
+    <button disabled={busy || checkingUpdate} className="min-h-12 rounded border p-3" onClick={()=>{void checkPosUpdate(true);}}>{checkingUpdate?'กำลังตรวจเวอร์ชัน…':'ตรวจอัปเดตแอป'}</button>
+    <p role="status">{online ? 'ออนไลน์' : 'ออฟไลน์ — หยุดบันทึก / รับเงิน'} · UAT {nativeProduct === 'retail' ? '0.1.0-uat.7' : '0.1.0-uat.6'}</p>
     <p className="break-all text-sm">บริษัท {session.businessSlug} · สาขา {session.branchId}</p>
     <button disabled={busy || !online} className="min-h-12 rounded border p-3" onClick={async () => {
       try { setBranches((await authApi.myBranches()).data.data.filter(item => item.business_type === nativeBusinessType && item.target_database === nativeBusinessType)); }
@@ -60,21 +69,28 @@ export default function Device() {
     </section>}
     {nativeProduct === 'restaurant' && <button disabled={busy} className="min-h-12 rounded border p-3" onClick={async () => {setBusy(true);try {const result=await recoverNativeRestaurantOrder();setError(`Server ยืนยันรายการเดิมแล้ว คิว ${result.order.queue_display ?? '—'} กรุณาตรวจบิลเดิมก่อนขายต่อ`);}catch(failure){setError(failure instanceof Error ? failure.message : 'ยังยืนยันรายการไม่ได้');}finally{setBusy(false);}}}>ตรวจ / กู้คืนรายการรับเงินเดิม</button>}
     <p>เครื่องปัจจุบัน: {device?.device_code ?? 'ยังไม่จับคู่'}</p>
+    <PairingScanner disabled={busy} />
     <p className="text-sm">ใช้รหัสและ PIN ของเครื่อง Counter ในสาขาที่เลือก จากผู้จัดการร้าน</p>
     <form className="space-y-4" onSubmit={async e => {
       e.preventDefault(); setBusy(true); setError('');
       const data = new FormData(e.currentTarget);
       try {
         if (!navigator.onLine) throw new Error('กรุณาเชื่อมต่ออินเทอร์เน็ต');
+        if (pending && (pending.companyId !== session.companyId || (pending.branchId && pending.branchId !== session.branchId))) throw new Error('QR ไม่ตรงกับบริษัทหรือสาขาที่เข้าสู่ระบบ');
+        if (pending?.expiresAt && pending.expiresAt <= Date.now()) throw new Error('QR หมดอายุแล้ว กรุณาขอ PIN ใหม่');
         if (await hasNativePaymentPending() || await readNativeTransaction()) throw new Error('ตรวจธุรกรรมค้างก่อนเปลี่ยนเครื่องขาย');
+        if (device && !confirm('เครื่องนี้จับคู่อยู่แล้ว ต้องการเปลี่ยน Counter ใช่หรือไม่?')) return;
         const result = (await deviceApi.post<ApiResponse<DevicePairResponse>>('/device-auth/pair', { company_id: session.companyId, device_code: String(data.get('code')).trim().toUpperCase(), pairing_pin: String(data.get('pin')) })).data.data;
         if (result.device.company_id !== session.companyId || result.device.branch_id !== session.branchId || result.device.brand_id !== session.brandId || result.device.business_type !== nativeBusinessType || result.device.target_database !== nativeBusinessType || result.device.device_type !== 'counter') throw new Error('เครื่องนี้ไม่ใช่ Counter ของสาขาและระบบที่เลือก');
         await useDeviceStore.getState().setSession(result);
+        usePendingPairing.getState().clear(); setCode(''); setPin('');
+        setError('จับคู่สำเร็จแล้ว กลับหน้าขายเพื่อเปิดกะได้');
       } catch (failure) { setError(failure instanceof Error ? failure.message : 'จับคู่ไม่ได้'); }
       finally { setBusy(false); }
     }}>
-      <label className="block">รหัสเครื่อง<input name="code" required disabled={busy} className="block min-h-12 w-full rounded border p-3"/></label>
-      <label className="block">PIN จับคู่<input name="pin" required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} disabled={busy} className="block min-h-12 w-full rounded border p-3"/></label>
+      <label className="block">รหัสเครื่อง<input name="code" value={code} readOnly={Boolean(pending)} onChange={event => setCode(event.target.value)} required disabled={busy} className="block min-h-12 w-full rounded border p-3"/></label>
+      <label className="block">PIN จับคู่<input name="pin" value={pin} readOnly={Boolean(pending)} onChange={event => setPin(event.target.value)} required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} disabled={busy} className="block min-h-12 w-full rounded border p-3"/></label>
+      {pending && <button type="button" disabled={busy} className="min-h-12 rounded border p-3" onClick={() => usePendingPairing.getState().clear()}>ล้าง QR เพื่อกรอกรหัสเอง</button>}
       <button disabled={busy} className="min-h-12 rounded bg-blue-700 p-3 text-white">จับคู่เครื่อง</button>
     </form>
     <h2 className="text-xl font-bold">เครื่องพิมพ์ Bluetooth</h2>
@@ -85,6 +101,14 @@ export default function Device() {
       setBusy(true); try { if (!await printConfiguredLongReceiptTest()) throw new Error('ยังไม่มีเครื่องพิมพ์'); setError('ส่งใบพิมพ์ทดสอบแล้ว กรุณาตรวจภาษาไทยและความกว้างกระดาษ'); }
       catch (failure) { setError(failure instanceof Error ? failure.message : 'พิมพ์ไม่ได้ ตรวจ Bluetooth และกระดาษ'); } finally { setBusy(false); }
     }}>พิมพ์ทดสอบภาษาไทย</button>
+    <button disabled={busy || !printer || !online} className="min-h-12 rounded border p-3" onClick={async () => {
+      setBusy(true); setError('');
+      try {
+        if (!await printConfiguredCutterTest()) throw new Error('ยังไม่ได้เลือกเครื่องพิมพ์');
+        setError('ส่งคำสั่งเลื่อนและตัดกระดาษแล้ว กรุณาตรวจที่เครื่องจริง หากไม่ตัด ห้ามสรุปว่าเครื่องพร้อมใช้งาน');
+      } catch (failure) { setError(failure instanceof Error ? failure.message : 'ส่งคำสั่งไม่ได้ อาจพิมพ์บางส่วนแล้ว กรุณาตรวจเครื่องก่อนลองอีกครั้ง'); }
+      finally { setBusy(false); }
+    }}>ทดสอบตัดกระดาษ</button>
     <p className="text-sm text-amber-800">ต้องทดสอบใบเสร็จภาษาไทย กระดาษหมด และเชื่อมต่อใหม่กับรุ่นเครื่องจริงก่อนเปิดใช้</p>
     {error && <p role="alert" className="text-red-700">{error}</p>}
   </main>;

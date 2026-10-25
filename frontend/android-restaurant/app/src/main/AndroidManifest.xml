@@ -23,6 +23,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="foodchainservice-restaurant-uat" android:host="pair" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="uat-app.foodchainservice.com" android:path="/device/pair/restaurant" />
+            </intent-filter>
         </activity>
 
         <provider
@@ -39,6 +51,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />

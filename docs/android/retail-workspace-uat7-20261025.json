@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-25",
+  "status": "deployed-to-UAT",
+  "source_commit": "6c1e92a",
+  "branch": "codex/recipe-quick-create",
+  "repository": "chaiyanutaiagent/restaurant",
+  "scope": "Retail web workspace navigation and Android UAT.7; preserved existing UAT baseline for other features",
+  "web": {
+    "url": "https://theloft.foodchainservice.com/retail/pos",
+    "also_verified": "https://uat-retail.foodchainservice.com/retail/pos",
+    "image": "restaurant-pos-frontend:uat-retail-workspace-20261025-r1",
+    "entry": "assets/index-BBZBzvMd.js",
+    "css": "assets/index-CC6fRg73.css"
+  },
+  "android": {
+    "product": "retail",
+    "version": "0.1.0-uat.7",
+    "versionCode": 10007,
+    "package": "com.foodchainservice.retail.uat",
+    "url": "https://uat-retail.foodchainservice.com/downloads/native-pos-0.1.0-uat.7/foodchainservice-retail-0.1.0-uat.7.apk",
+    "sha256": "ffa66ffed17733d61bda38f9170b97fc8829d49385a8c3a8267a7544b140aa4e",
+    "bytes": 4585548,
+    "signer_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5",
+    "registry": "https://uat-retail.foodchainservice.com/downloads/native-pos-updates/retail.json",
+    "install": "Install over the previous same-package UAT APK; do not uninstall or clear storage. UAT.6 can check the signed update channel; earlier versions may require this direct APK link. Finish or park the cart before updating.",
+    "physical_acceptance": "Pending real Android installer, sales workflow and Bluetooth printer checks"
+  },
+  "checks": {
+    "prior_ui_gate": "See retail-workspace-ux-local-20261025.json; no redundant full-suite rerun",
+    "isolated_release_typescript_and_web_build": "passed",
+    "android_build_unit_tests_lint": "passed; Gradle reused unchanged unit-test outputs",
+    "same_signing_certificate": "verified",
+    "isolated_release_browser_smoke": "1 passed: scoped cart and phone/tablet/desktop workspace navigation",
+    "signed_manifest_and_tamper_rejection": "passed",
+    "public_download": "Unauthenticated registry signature and APK SHA256 match the build",
+    "uat_gateway_index": "Matches deployed dist/index.html exactly",
+    "public_web_hosts": "Both hosts serve the new entry bundle",
+    "backend": "Unchanged, healthy: restaurant-pos-backend:uat-three-app-pairing-20261025-r1",
+    "production": "Unchanged frontend/backend; not deployed",
+    "restaurant_update_registry": "Unchanged SHA256 daac50b4fcc881f46ea277c0401051c858d5e9ba4fcde68b5f49d02c27a3f72e"
+  },
+  "rollback": {
+    "previous_frontend": "restaurant-pos-frontend:uat-native-updates-20261025-r1",
+    "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-workspace.IcbRAL",
+    "compose_directory": "/home/behappyaiagent/restaurant-uat-releases/3760d60",
+    "files": ["env.uat.rollback", "compose.rollback.yml", "retail.rollback.json"],
+    "method": "Restore the backed-up UAT env/compose and Retail update registry, recreate only UAT frontend with --no-deps --no-build, then reload UAT nginx. The deploy script has an error rollback trap; rollback was prepared, not deliberately exercised against customers.",
+    "android": "Installed APK cannot safely be downgraded. If needed, rebuild last-known-good source with a higher versionCode and same signer; reconcile pending transactions first. Keep all published APK URLs immutable."
+  },
+  "unchanged": ["Customer and tenant data", "Database and backend", "Restaurant APK UAT.6", "Takeaway APK UAT.16", "Production", "Unfinished LINE OA work"],
+  "remaining": ["Customer Android installation and on-device acceptance", "Physical Bluetooth printer/cutter verification"]
+}

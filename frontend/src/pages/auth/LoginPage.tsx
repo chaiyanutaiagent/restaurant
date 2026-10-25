@@ -12,7 +12,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLogin, useUatAutoLogin } from "@/hooks/useAuth";
-import QaAccessPanel from "@/components/auth/QaAccessPanel";
 import { membershipApi } from "@/lib/api";
 import { PLATFORM_BRAND } from "@/config/platformBrand";
 import { tenantHost } from "@/config/tenantHost";
@@ -126,7 +125,6 @@ export default function LoginPage(): JSX.Element {
               กำลังเข้าสู่ระบบทดสอบอัตโนมัติ...
             </div>
           ) : null}
-          {isUatPublicHost ? <QaAccessPanel defaultDestination={defaultDestination} /> : null}
           <form className="space-y-5" onSubmit={form.handleSubmit(onSubmit)}>
             {isNativeApp ? (
               <div className="space-y-2">

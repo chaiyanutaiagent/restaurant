@@ -9,7 +9,6 @@ import { Label } from "@/components/ui/label";
 import { platformApi, platformErrorMessage } from "@/lib/platformApi";
 import { usePlatformAuthStore } from "@/stores/platform-auth.store";
 import { PLATFORM_BRAND } from "@/config/platformBrand";
-import PlatformQaAccessPanel from "@/components/auth/PlatformQaAccessPanel";
 
 export default function PlatformLoginPage(): JSX.Element {
   const [username, setUsername] = useState("");
@@ -80,10 +79,6 @@ export default function PlatformLoginPage(): JSX.Element {
             กำลังเข้าสู่ Platform สำหรับระบบทดสอบอัตโนมัติ...
           </div>
         ) : null}
-        {(
-          window.location.hostname.startsWith("uat-")
-          || ["localhost", "127.0.0.1"].includes(window.location.hostname)
-        ) ? <PlatformQaAccessPanel /> : null}
         <form className="space-y-5" onSubmit={submit}>
           <div className="space-y-2">
             <Label htmlFor="platform-username" className="text-slate-200">ชื่อผู้ใช้</Label>

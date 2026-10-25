@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-25",
+  "environment": "UAT only",
+  "status": "deployed",
+  "request": "Remove QA Access entry points; use normal superadmin login instead",
+  "frontend_image": "restaurant-pos-frontend:uat-disable-qa-20261025-r1",
+  "previous_frontend_image": "restaurant-pos-frontend:uat-stock-target-20261025-r1",
+  "changes": [
+    "Remove QaAccessPanel import/render from Company LoginPage",
+    "Remove PlatformQaAccessPanel import/render from PlatformLoginPage"
+  ],
+  "backend": {
+    "image_unchanged": "restaurant-pos-backend:uat-stock-target-20261025-r1",
+    "qa_access_mode_enabled": false,
+    "uat_auth_bypass_enabled": false,
+    "uat_superadmin_all_logins_enabled": true,
+    "note": "QA endpoints and existing QA sessions already fail closed under this configuration; no backend restart required"
+  },
+  "verification": {
+    "release_baseline": "Rebuilt previous frontend entry asset and service worker match deployed stock-target-r1 bytes before applying the two-file change",
+    "isolated_frontend_typecheck": "passed",
+    "isolated_frontend_build": "passed; pre-existing chunk-size warnings",
+    "company_and_platform_qa_personas_api": "both HTTP 404",
+    "public_login": "HTTP 200",
+    "browser_company_login": "QA access key/persona panel absent; ordinary login form present",
+    "browser_platform_login": "QA persona panel absent; ordinary username/password form present",
+    "other_containers": "all container IDs unchanged",
+    "database_mutations": false,
+    "credentials_changed": false,
+    "line_oa_unreleased_work_deployed": false
+  },
+  "release_directory": "/home/behappyaiagent/restaurant-uat-releases/disable-qa-20261025",
+  "rollback": "Restore /home/behappyaiagent/restaurant-uat-deploy-backups/disable-qa-20261025/env.uat into release 3760d60/.env.uat, recreate only frontend with the same three Compose files, then reload UAT nginx. No DB restore required.",
+  "source_packaging": "Included in the 2026-10-25 scoped UAT source commits. Historical deployment evidence above; packaging does not redeploy services.",
+  "android_apks": "unchanged"
+}

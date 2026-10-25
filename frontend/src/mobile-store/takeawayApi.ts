@@ -21,6 +21,7 @@ export const takeawayApi = {
   updateFulfillmentOrder: (id: string, next: "preparing" | "ready") => api.post<ApiResponse<TakeawayRecord>>(`/takeaway/fulfillment/orders/${id}/${next}`),
   markPickedUp: (id: string) => api.post<ApiResponse<TakeawayRecord>>(`/takeaway/orders/${id}/picked-up`),
   stock: (id?: string) => api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/stock", { params: { location_id: id } }),
+  replenishmentSuggestions: (brandId: string, branchId: string) => api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/replenishment/suggestions", { params: { brand_id: brandId, branch_id: branchId } }),
   stockLocations: () => api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/stock/locations"),
   stockMovements: (id?: string) => api.get<ApiResponse<TakeawayRecord[]>>("/takeaway/stock/movements", { params: { location_id: id } }),
   stockMovement: (payload: Record<string, unknown>) => api.post<ApiResponse<TakeawayRecord>>("/takeaway/stock/movements", payload),

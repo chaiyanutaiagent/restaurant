@@ -244,6 +244,7 @@ class TakeawayReplenishmentPolicyUpsert(BaseSchema):
     branch_id: uuid.UUID
     item_id: uuid.UUID
     is_enabled: bool = True
+    target_stock_qty: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=4)
     safety_stock_percent: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=4)
     safety_stock_qty: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=4)
     pack_size: Decimal = Field(default=Decimal("1"), gt=0, decimal_places=4)

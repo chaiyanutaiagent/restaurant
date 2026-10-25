@@ -64,6 +64,20 @@ export default function TakeawayStoreCentralOrdersPage(): JSX.Element {
     enabled: Boolean(context?.branch_id),
     refetchInterval: 15_000,
   });
+  const suggestionsQuery = useQuery({
+    queryKey: ["takeaway", "replenishment-suggestions", context?.brand_id, context?.branch_id],
+    queryFn: async () => (await takeawayApi.replenishmentSuggestions(context!.brand_id!, context!.branch_id!)).data.data,
+    enabled: Boolean(context?.brand_id && context?.branch_id),
+    staleTime: 0,
+  });
+  const suggested = (suggestionsQuery.data ?? []).filter((row) => row.is_low_stock === true && Number(row.suggested_qty) > 0);
+  function addSuggestions(): void {
+    setLines((current) => [...current, ...suggested.filter((row) => !current.some((line) => line.catalog_item_id === row.item_id)).map((row) => ({
+      key: randomId(), catalog_item_id: String(row.item_id), sku: String(row.sku),
+      item_name: String(row.item_name), quantity: String(row.suggested_qty),
+      unit: String(row.unit), source_kind: "catalog" as const,
+    }))]);
+  }
   const catalogById = useMemo(
     () => new Map((catalogQuery.data ?? []).map((row) => [row.item.id, row])),
     [catalogQuery.data],
@@ -146,6 +160,15 @@ export default function TakeawayStoreCentralOrdersPage(): JSX.Element {
   const orders = (ordersQuery.data ?? []) as TakeawayCentralOrder[];
 
   return <div className="space-y-5">
+    <section className="rounded-2xl border bg-white p-4 shadow-sm">
+      <h2 className="font-black">รายการแนะนำสั่งเติม / หลังปิดร้าน</h2>
+      <p className="mt-1 text-sm text-slate-500">เฉพาะคงเหลือ ≤ 30% ของยอดเป้าหมาย หักสินค้าที่กำลังส่งแล้ว — ไม่ส่งใบสั่งอัตโนมัติ และสั่งเองด้านล่างได้ทุกเมื่อ</p>
+      {suggestionsQuery.isError ? <p className="mt-2 text-rose-700">โหลดรายการแนะนำไม่สำเร็จ กรุณารีเฟรช (ยังสั่งเองได้)</p> : suggestionsQuery.isLoading ? <p className="mt-2">กำลังตรวจสต๊อก…</p> : <>
+        <p className="mt-2 text-sm">แนะนำ {suggested.length} รายการ · ยังไม่กำหนดยอดเป้าหมาย {(suggestionsQuery.data ?? []).filter((row) => !row.target_configured).length} รายการ</p>
+        {suggested.map((row) => <p key={String(row.item_id)} className="mt-2 text-sm">{String(row.item_name)}: คงเหลือ {String(row.on_hand_qty)} / เป้าหมาย {String(row.target_stock_qty)} · แนะนำสั่ง {String(row.suggested_qty)} {String(row.unit)}</p>)}
+        <button disabled={!writesEnabled || !suggested.length} onClick={addSuggestions} className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white disabled:opacity-40">เพิ่มรายการแนะนำในใบสั่ง</button>
+      </>}
+    </section>
     <header className="flex flex-wrap items-end justify-between gap-3">
       <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">Store workspace</p><h1 className="mt-1 text-2xl font-black">สั่งสินค้าจากส่วนกลาง</h1><p className="mt-1 text-sm text-slate-500">ใบสั่งประจำ · ขอเพิ่ม · สินค้านอกแคตตาล็อก · ยืนยันรับเข้าสต๊อก</p></div>
       <button onClick={() => void ordersQuery.refetch()} className="flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold"><RefreshCw className="h-4 w-4" /> รีเฟรช</button>

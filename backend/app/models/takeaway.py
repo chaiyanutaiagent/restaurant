@@ -186,6 +186,7 @@ class TakeawayReplenishmentPolicy(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("brand_id", "branch_id", "item_id", name="uq_takeaway_replenishment_policy"),
         CheckConstraint("pack_size > 0", name="ck_takeaway_replenishment_pack_size"),
+        CheckConstraint("target_stock_qty IS NULL OR target_stock_qty > 0", name="ck_takeaway_replenishment_target"),
     )
 
     company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
@@ -193,6 +194,7 @@ class TakeawayReplenishmentPolicy(UUIDMixin, TimestampMixin, Base):
     branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    target_stock_qty: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
     safety_stock_percent: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("0"))
     safety_stock_qty: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("0"))
     pack_size: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False, server_default=text("1"))

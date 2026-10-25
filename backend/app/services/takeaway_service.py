@@ -83,7 +83,7 @@ from app.schemas.takeaway import (
 )
 from app.services.takeaway_central_policy import (
     recipe_cost_per_yield,
-    suggested_replenishment_quantity,
+    target_replenishment_state,
 )
 
 
@@ -609,7 +609,25 @@ class TakeawayService:
                 statement = statement.where(TakeawayStockLocation.location_type.in_(["store", "waste"]))
         if location_id is not None:
             statement = statement.where(TakeawayStockBalance.location_id == location_id)
-        return list(await self.db.scalars(statement.order_by(TakeawayStockBalance.item_id)))
+        balances = list(await self.db.scalars(statement.order_by(TakeawayStockBalance.item_id)))
+        states = {}
+        store_locations = set()
+        if self.current.brand_id is not None and self.current.branch_id is not None:
+            states = {row["item_id"]: row for row in await self.replenishment_suggestions(
+                brand_id=self.current.brand_id, branch_id=self.current.branch_id)}
+            store_locations = set(await self.db.scalars(select(TakeawayStockLocation.id).where(
+                TakeawayStockLocation.company_id == self.current.company_id,
+                TakeawayStockLocation.branch_id == self.current.branch_id,
+                TakeawayStockLocation.location_type == "store",
+                TakeawayStockLocation.is_active.is_(True))))
+        for balance in balances:
+            # Aggregate all store locations/lots: a nearly empty lot is not a low-stock alert.
+            state = states.get(balance.item_id, {}) if balance.location_id in store_locations else {}
+            balance.is_low_stock = state.get("is_low_stock", False)
+            balance.target_stock_qty = state.get("target_stock_qty")
+            balance.reorder_threshold_qty = state.get("reorder_threshold_qty")
+            balance.store_on_hand_qty = state.get("on_hand_qty")
+        return balances
 
     async def list_stock_movements(
         self,
@@ -1669,17 +1687,25 @@ class TakeawayService:
         self, data: TakeawayReplenishmentPolicyUpsert
     ) -> TakeawayReplenishmentPolicy:
         await self._validate_context(brand_id=data.brand_id, branch_id=data.branch_id)
+        item = await self.db.scalar(select(TakeawayCatalogItem).where(
+            TakeawayCatalogItem.id == data.item_id,
+            TakeawayCatalogItem.company_id == self.current.company_id,
+            TakeawayCatalogItem.brand_id == data.brand_id,
+            TakeawayCatalogItem.is_active.is_(True)))
+        if item is None:
+            raise HTTPException(status_code=404, detail="Takeaway catalog item not found")
+        values = data.model_dump()
+        # Older clients must not erase a configured target when updating another setting.
+        updates = {key: value for key, value in values.items() if key not in {"brand_id", "branch_id", "item_id"}}
+        if "target_stock_qty" not in data.model_fields_set:
+            updates.pop("target_stock_qty", None)
         row_id = (
             await self.db.execute(
                 insert(TakeawayReplenishmentPolicy)
                 .values(id=uuid.uuid4(), company_id=self.current.company_id, **data.model_dump())
                 .on_conflict_do_update(
                     constraint="uq_takeaway_replenishment_policy",
-                    set_={
-                        key: value
-                        for key, value in data.model_dump().items()
-                        if key not in {"brand_id", "branch_id", "item_id"}
-                    },
+                    set_=updates,
                 )
                 .returning(TakeawayReplenishmentPolicy.id)
             )
@@ -1782,7 +1808,7 @@ class TakeawayService:
                 select(
                     TakeawayCentralOrderItem.catalog_item_id,
                     func.coalesce(
-                        func.sum(func.coalesce(TakeawayCentralOrderItem.shipped_qty, TakeawayCentralOrderItem.approved_qty, TakeawayCentralOrderItem.quantity)),
+                        func.sum(func.greatest(func.coalesce(TakeawayCentralOrderItem.shipped_qty, TakeawayCentralOrderItem.approved_qty, TakeawayCentralOrderItem.quantity) - func.coalesce(TakeawayCentralOrderItem.received_qty, 0), 0)),
                         0,
                     ),
                 )
@@ -1801,23 +1827,25 @@ class TakeawayService:
         catalog = {
             row.id: row
             for row in await self.db.scalars(
-                select(TakeawayCatalogItem).where(TakeawayCatalogItem.id.in_(item_ids))
+                select(TakeawayCatalogItem).where(TakeawayCatalogItem.id.in_(item_ids),
+                    TakeawayCatalogItem.company_id == self.current.company_id,
+                    TakeawayCatalogItem.brand_id == brand_id,
+                    TakeawayCatalogItem.is_active.is_(True))
             )
         }
         result: list[dict[str, object]] = []
         for policy in policies:
             average = sold.get(policy.item_id, Decimal("0")) / Decimal(max(lookback_days, 1))
-            suggestion = suggested_replenishment_quantity(
-                average_daily_demand=average,
-                lead_time_days=policy.lead_time_days,
-                safety_stock_percent=Decimal(policy.safety_stock_percent),
-                safety_stock_qty=Decimal(policy.safety_stock_qty),
+            state = target_replenishment_state(
+                target_stock_qty=policy.target_stock_qty,
                 on_hand_qty=stock.get(policy.item_id, Decimal("0")),
                 confirmed_incoming_qty=incoming.get(policy.item_id, Decimal("0")),
                 pack_size=Decimal(policy.pack_size),
                 minimum_order_qty=Decimal(policy.minimum_order_qty),
             )
             item = catalog.get(policy.item_id)
+            if item is None:
+                continue
             result.append(
                 {
                     "policy_id": policy.id,
@@ -1828,7 +1856,7 @@ class TakeawayService:
                     "average_daily_demand": average.quantize(QUANTITY),
                     "on_hand_qty": stock.get(policy.item_id, Decimal("0")),
                     "incoming_qty": incoming.get(policy.item_id, Decimal("0")),
-                    "suggested_qty": suggestion,
+                    **state,
                 }
             )
         return result

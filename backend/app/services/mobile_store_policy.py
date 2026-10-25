@@ -19,6 +19,7 @@ STORE_ENTRY_PERMISSIONS = frozenset({
 # Explicit methods and full paths: central approvals, credit adjustments, user
 # administration and switching to a broader web session are never included.
 STORE_API_ROUTES = (
+    ("GET", r"/api/v1/takeaway/replenishment/suggestions"),
     ("GET", r"/api/v1/auth/me"),
     ("GET", r"/api/v1/takeaway/(status|catalog/categories|catalog/items|shifts|orders|stock|stock/locations|stock/movements|store/transfers)"),
     ("GET", r"/api/v1/takeaway/shifts/[0-9a-f-]+/summary"),

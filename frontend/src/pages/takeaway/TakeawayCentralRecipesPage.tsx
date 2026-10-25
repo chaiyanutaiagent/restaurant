@@ -23,6 +23,8 @@ export default function TakeawayCentralRecipesPage(): JSX.Element {
     yield_unit: "ชิ้น",
     loss_percent: "0",
     branch_id: "",
+    policy_item_id: "",
+    target_stock_qty: "",
     pack_size: "1",
     safety_stock_qty: "0",
     minimum_order_qty: "0",
@@ -84,11 +86,13 @@ export default function TakeawayCentralRecipesPage(): JSX.Element {
   const policyMutation = useMutation({
     mutationFn: async () => {
       if (!writesEnabled) throw new Error("การแก้กติกาเติมสินค้ายังถูกล็อกในช่วง Dark launch");
-      if (!context?.brand_id || !form.branch_id || !form.output_item_id) throw new Error("กรุณาระบุสาขาและสินค้า");
+      if (!context?.brand_id || !form.branch_id || !form.policy_item_id) throw new Error("กรุณาระบุสาขาและสินค้า/วัตถุดิบ");
+      if (!Number.isFinite(Number(form.target_stock_qty)) || Number(form.target_stock_qty) <= 0) throw new Error("กรุณากำหนดยอดเป้าหมายมากกว่า 0");
       return takeawayApi.setReplenishmentPolicy({
         brand_id: context.brand_id,
         branch_id: form.branch_id,
-        item_id: form.output_item_id,
+        item_id: form.policy_item_id,
+        target_stock_qty: form.target_stock_qty,
         safety_stock_percent: "0",
         safety_stock_qty: form.safety_stock_qty,
         pack_size: form.pack_size,
@@ -100,6 +104,8 @@ export default function TakeawayCentralRecipesPage(): JSX.Element {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["takeaway", "replenishment-policies"] });
+      await queryClient.invalidateQueries({ queryKey: ["takeaway", "replenishment-suggestions"] });
+      await queryClient.invalidateQueries({ queryKey: ["takeaway", "stock"] });
       toast({ title: "บันทึกกติกาเติมสินค้าแล้ว" });
     },
     onError: (error) => toast({ title: "บันทึกไม่สำเร็จ", description: error instanceof Error ? error.message : "ตรวจข้อมูล", variant: "destructive" }),
@@ -129,7 +135,18 @@ export default function TakeawayCentralRecipesPage(): JSX.Element {
       </section>
       <section className={`rounded-2xl border bg-white p-5 shadow-sm ${writesEnabled ? "" : "opacity-70"}`}>
         <h2 className="font-black">กติกาเติมสินค้ารายสาขา</h2>
+        <p className="mt-2 text-sm text-slate-500">เตือนเมื่อคงเหลือไม่เกิน 30% ของยอดเป้าหมาย แนะนำเติมถึงเป้าหมายโดยหักยอดที่กำลังส่งมา หน้าร้านยังสั่งเองได้ทุกเมื่อ</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="text-xs font-bold text-slate-600">สินค้า / วัตถุดิบ<select className={inputClass} value={form.policy_item_id} onChange={(event) => {
+            const existing = policiesQuery.data?.find((row) => row.item_id === event.target.value);
+            setForm((current) => ({ ...current, policy_item_id: event.target.value,
+              target_stock_qty: existing?.target_stock_qty == null ? "" : String(existing.target_stock_qty),
+              pack_size: String(existing?.pack_size ?? "1"),
+              safety_stock_qty: String(existing?.safety_stock_qty ?? "0"),
+              minimum_order_qty: String(existing?.minimum_order_qty ?? "0"),
+              lead_time_days: String(existing?.lead_time_days ?? "1") }));
+          }}><option value="">เลือกสินค้า / วัตถุดิบ</option>{catalog.map((row) => <option key={row.item.id} value={row.item.id}>{row.item.name} · {row.item.unit}</option>)}</select></label>
+          <label className="text-xs font-bold text-slate-600">ยอดเป้าหมาย (100%)<input type="number" min="0.0001" step="0.0001" className={inputClass} value={form.target_stock_qty} onChange={(event) => set("target_stock_qty", event.target.value)} /><span>แจ้งเตือนเมื่อเหลือ ≤ {Number(form.target_stock_qty) > 0 ? (Number(form.target_stock_qty) * 0.3).toLocaleString("th-TH", { maximumFractionDigits: 4 }) : "—"}</span></label>
           <label className="text-xs font-bold text-slate-600">รหัสสาขา<input className={inputClass} value={form.branch_id} onChange={(event) => set("branch_id", event.target.value)} placeholder="เลือกจาก workspace หรือวางรหัสสาขา" /></label>
           <label className="text-xs font-bold text-slate-600">Pack size<input type="number" min="0.0001" step="0.0001" className={inputClass} value={form.pack_size} onChange={(event) => set("pack_size", event.target.value)} /></label>
           <label className="text-xs font-bold text-slate-600">Safety stock<input type="number" min="0" step="0.0001" className={inputClass} value={form.safety_stock_qty} onChange={(event) => set("safety_stock_qty", event.target.value)} /></label>

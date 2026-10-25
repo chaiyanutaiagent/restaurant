@@ -4,6 +4,28 @@ from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 
 
 QUANTITY = Decimal("0.0001")
+REORDER_REMAINING_RATIO = Decimal("0.30")
+
+
+def target_replenishment_state(*, target_stock_qty: Decimal | None,
+        on_hand_qty: Decimal, confirmed_incoming_qty: Decimal = Decimal("0"),
+        pack_size: Decimal = Decimal("1"), minimum_order_qty: Decimal = Decimal("0")) -> dict:
+    """Alert at <=30% of a fixed target; incoming reduces the order, not the alert."""
+    target = Decimal(target_stock_qty) if target_stock_qty is not None else None
+    configured = target is not None and target > 0
+    threshold = target * REORDER_REMAINING_RATIO if configured else None
+    low = bool(configured and Decimal(on_hand_qty) <= threshold)
+    suggested = Decimal("0.0000")
+    if low:
+        shortage = max(target - Decimal(on_hand_qty) - max(Decimal(confirmed_incoming_qty), Decimal("0")), Decimal("0"))
+        if shortage > 0:
+            pack = Decimal(pack_size)
+            if pack <= 0:
+                raise ValueError("pack size must be greater than zero")
+            suggested = ((max(shortage, Decimal(minimum_order_qty)) / pack)
+                         .to_integral_value(rounding=ROUND_CEILING) * pack).quantize(QUANTITY)
+    return {"target_stock_qty": target, "reorder_threshold_qty": threshold,
+            "target_configured": configured, "is_low_stock": low, "suggested_qty": suggested}
 
 _UNIT_FAMILY: dict[str, tuple[str, Decimal]] = {
     "mg": ("weight", Decimal("0.001")),

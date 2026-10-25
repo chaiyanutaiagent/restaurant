@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Banknote, Clock3, Loader2, LockKeyhole, Play, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useToast } from "@/components/ui/use-toast";
 import { useTakeawayReleaseGate } from "@/hooks/useTakeawayReleaseGate";
 import { takeawayApi, type TakeawayRecord } from "@/lib/takeawayApi";
@@ -54,6 +55,7 @@ export default function TakeawayShiftPage(): JSX.Element {
     },
     onSuccess: async (_, action) => {
       await queryClient.invalidateQueries({ queryKey: ["takeaway", "shifts"] });
+      await queryClient.invalidateQueries({ queryKey: ["takeaway", "replenishment-suggestions"] });
       toast({ title: action === "open" ? "เปิดกะแล้ว" : "ปิดกะแล้ว" });
     },
     onError: (error) => toast({
@@ -65,6 +67,7 @@ export default function TakeawayShiftPage(): JSX.Element {
 
   return (
     <div className="space-y-5">
+      {!activeShift && rows.some((row) => row.status === "closed" && row.business_date === today()) ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">ปิดกะแล้ว — รายการแนะนำสั่งจะแสดงเฉพาะสินค้าที่เหลือไม่เกิน 30% ของยอดเป้าหมาย <Link className="font-bold underline" to="/takeaway/store/central-orders">ตรวจรายการแนะนำ / สั่งสินค้าเอง</Link></div> : null}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">Store workspace</p>

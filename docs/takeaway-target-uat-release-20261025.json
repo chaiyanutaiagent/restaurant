@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-25",
+  "environment": "UAT only",
+  "status": "deployed; versioned APK published for manual UAT installation",
+  "feature": "Alert at on-hand <=30% of a configured per-branch item target. Refill to target minus confirmed incoming, respecting minimum/pack. Manual orders remain independent. No guessed targets or automatic submission.",
+  "backend_image": "restaurant-pos-backend:uat-stock-target-20261025-r1",
+  "frontend_image": "restaurant-pos-frontend:uat-stock-target-20261025-r1",
+  "migration": "p6takeaway0010 -> p6takeaway0011",
+  "source_packaging": "Scoped 2026-10-25 source commit includes prerequisite migrations p6takeaway0009 and p6takeaway0010 from b200bc3, followed by p6takeaway0011. No database migration, deployment or APK rebuild is performed by this packaging step.",
+  "source_safety": {
+    "backend": "Five targeted files merged onto exact running owner-identity-r1 sources; newer catalog, counter, preparation print and owner identity code retained. Do not deploy the entire older local backend over this image.",
+    "web": "Current local web baseline plus stock-target UI, retaining password-policy edits.",
+    "android_base": "codex/takeaway-store-uat14 / b200bc3",
+    "android_changes": "Mobile suggestions API, stock page, central order suggestions, shift-close navigation, versionCode 10114 / uat.15. No native printer logic changes.",
+    "staged_source": "tmp/target-release-20261025",
+    "remote_release": "/home/behappyaiagent/restaurant-uat-releases/takeaway-target-20261025"
+  },
+  "apk": {
+    "version_name": "1.1.0-uat.15",
+    "version_code": 10114,
+    "package_id": "com.foodchainservice.takeaway.uat",
+    "url": "https://uat-takeaway.foodchainservice.com/downloads/takeaway-store/foodchainservice-takeaway-store-1.1.0-uat.15.apk",
+    "sha256": "b4a72160f43144e813a86b4b87b6bc364b47f76f082ba16082a490d898ed9aee",
+    "certificate_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5",
+    "same_certificate_as_uat14": true,
+    "automatic_update": "latest.json remains UAT13; prior physical printer acceptance gate not bypassed. No new signed update manifest published. Manual versioned download only."
+  },
+  "verification": {
+    "merged_backend_target_tests": "10 passed",
+    "web_typecheck_build": "passed; existing bundle warnings",
+    "android_typecheck_build": "passed; existing Gradle/bundle warnings",
+    "apk_boundary_package_signature": "passed",
+    "public_download_checksum": "matched",
+    "live_read_only_smoke": "2 branches checked, stock JSON fields present, migration verified",
+    "existing_target_policies": 0,
+    "web_http": 200,
+    "unauthenticated_api_http": 401,
+    "runtime_flags_and_other_containers": "unchanged",
+    "physical_android_install_printer": "not performed"
+  },
+  "backup": {
+    "directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/takeaway-target-20261025",
+    "database": "takeaway_ops_db custom-format dump; pg_restore list and full decode validated",
+    "sha256": "fc7c7d799b6d355237d1357edad1c149c05b8c72df27ebc160d741f783ff45d9",
+    "rollback": "Restore env.uat to .env.uat and superadmin.yml to docker-compose.uat-superadmin.yml in release 3760d60. Recreate only UAT backend/frontend with existing 3-compose-file stack, reload UAT nginx. Retain nullable additive target column and migration; do not delete stock/transactions or downgrade schema.",
+    "previous_backend": "restaurant-pos-backend:uat-owner-identity-20261025-r1",
+    "previous_frontend": "restaurant-pos-frontend:uat-password-policy-20261020-r1"
+  },
+  "next": "Configure target quantities per item/branch in central replenishment policies, then verify on a real Android device. Production untouched."
+}

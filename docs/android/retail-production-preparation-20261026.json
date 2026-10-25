@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-26",
+  "status": "uat-accepted-sales-reset-production-not-activated",
+  "scope": {
+    "company": "The Loft",
+    "company_id": "9b766136-c10f-4ef4-856f-b2f95b943f5e",
+    "branch": "The Loft Mini Mart / TLM-01",
+    "branch_id": "cc8e47e0-6e02-5783-8401-180c5061717c"
+  },
+  "authorization": {
+    "uat_acceptance": "Customer reported all functions passed",
+    "cleanup": "Delete Mini Mart sales and preserve current stock",
+    "release": "Prepare production; commit and push",
+    "production_cutover_performed": false
+  },
+  "accepted_release": {
+    "retail_apk": "0.1.0-uat.14 / 10014",
+    "apk_sha256": "8e4ebfc0198f3fe337406ae5902bacdcb962ab250eb8eb587de4784f109e8a34",
+    "frontend_image": "restaurant-pos-frontend:uat-retail-share-20261026-r1",
+    "backend_image": "restaurant-pos-backend:uat-retail-payments-20261026-r1",
+    "payment_scope": "Cash and manually confirmed bank transfer / scan only; not automatic bank confirmation",
+    "acceptance_source": "User statement; physical flows not rerun by agent"
+  },
+  "cleanup": {
+    "script": "scripts/tenant-separation/reset_minimart_test_sales_20261026.py",
+    "plan_signature": "3e90f3a6b3779a840ec6142de338b91fca661bf25a411101359cc7fc0ebd559b",
+    "deleted": {
+      "sale_orders": 3,
+      "sales_amount_thb": "125.00",
+      "sale_order_items": 4,
+      "payments": 3,
+      "operational_outbox_events": 3,
+      "closed_test_cashier_shifts": 1,
+      "platform_company_reporting_facts": 3
+    },
+    "postcheck_sales_and_reporting_facts": 0,
+    "stock_preserved": [
+      {"name": "มาม่าเจ", "qty": "26.0000"},
+      {"name": "เลย์สแตค", "qty": "19.0000"}
+    ],
+    "retained": [
+      "New empty open shift S20261026-001; no sales or balances altered",
+      "Products, images, categories, units, users, devices and company/branch settings",
+      "Stock movements unchanged: historic SaleOrder UUIDs remain resolvable in reset archive",
+      "Audit/pricing evidence and reporting processed-event receipts retained for provenance and replay protection",
+      "All unrelated rows in modified tables preserved by before/after fingerprints",
+      "Restaurant, Takeaway, Chambo, Sketch Biz and Production untouched"
+    ],
+    "archive_schema_in_both_databases": "uat_minimart_sales_reset_20261026",
+    "backup_server": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-sales-reset-20261026.Vw4uqO",
+    "backup_mac": "/Users/user/Projects/restaurant/backups/retail-sales-reset-20261026",
+    "backup_sha256": {
+      "retail_ops_db.dump": "f02592aeb74aa755f9206840cb77a604297e3e5268ea41265437347709ebba05",
+      "restaurant_platform_core_db.dump": "020fcb9ef294600987eda134fa77b2c6f8c7f43218dbeffdd77c56349561e3c3"
+    },
+    "backup_verification": "Both pg_restore lists readable; Mac hashes match Server. Full restore rehearsal not repeated.",
+    "rollback": "Use archived rows or restore dumps into isolated recovery DBs, then restore only reviewed scoped rows. Do not overwrite shared live DBs after new transactions. Restore the old closed shift, orders, items, payments, outbox and reporting facts together; stock was unchanged and must not be replayed. Backups contain private data and are not committed."
+  },
+  "production_gates_still_required": [
+    "Freeze a reproducible release from a clean checkout. Existing UAT stage script uses a preserved local baseline; do not treat this Git commit as a byte-identical live deployment.",
+    "Reconcile live backend overlays with repository: live payment router has no Stripe activation; repository retains older gated Stripe code. Live accounting rollback recovery captures order IDs before ORM rollback, unlike repository baseline. Validate only affected paths after reconciliation.",
+    "Create a separately signed Android production release, production API origin and update channel; current build and Gradle scripts intentionally enforce UAT/debug signing. Do not bypass these guards or rename UAT artifacts as production.",
+    "Confirm dedicated production tenant/data destination, legal entity/tax settings, backup/restore and rollback procedure. Do not migrate UAT audit/history blindly or copy other stores.",
+    "At cutover, close the currently open UAT shift and confirm opening cash/current stock. Explicitly preserve approved inventory balances without replaying removed test sales.",
+    "Keep login/tenant/branch permissions and device pairing enforced; do not re-enable QA access or login bypass.",
+    "Current supported go-live scope is online Retail, cash and cashier-confirmed transfers. Offline checkout, cards/provider settlement and non-cash refunds remain gated; do not advertise them as ready.",
+    "Obtain explicit cutover approval and perform one targeted production smoke check; do not repeat the entire already-accepted UAT suite."
+  ],
+  "commit_scope": "Retail UAT.8-14 implementation/tests/evidence plus this scoped cleanup and production preparation. Unfinished LINE OA and unrelated working-tree changes excluded."
+}

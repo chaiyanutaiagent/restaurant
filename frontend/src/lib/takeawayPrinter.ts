@@ -13,6 +13,7 @@ import {
   type EscPosReceiptCompany,
 } from "@/lib/escPosPrinter";
 import type { SaleOrder } from "@/types/pos";
+import { createPrinterQueue } from './printerQueue';
 
 export type TakeawayPrinterDevice = { name: string; address: string };
 
@@ -24,6 +25,7 @@ type TakeawayPrinterNative = {
 
 const nativePrinter = registerPlugin<TakeawayPrinterNative>("TakeawayPrinter");
 const PRINTER_KEY = "foodchainservice-takeaway-printer";
+const enqueueNativePrint = createPrinterQueue();
 
 export function isNativeTakeawayPrinterAvailable(): boolean {
   return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
@@ -59,7 +61,7 @@ function encodeBase64(bytes: Uint8Array): string {
 async function printNativeBytes(bytes: Uint8Array): Promise<boolean> {
   const printer = savedTakeawayPrinter();
   if (!printer || !isNativeTakeawayPrinterAvailable()) return false;
-  await nativePrinter.printBase64({ address: printer.address, data: encodeBase64(bytes) });
+  await enqueueNativePrint(() => nativePrinter.printBase64({ address: printer.address, data: encodeBase64(bytes) }));
   return true;
 }
 
@@ -114,7 +116,7 @@ export async function printTakeawayRaw(address: string, content: string): Promis
   bytes.set(init, 0);
   bytes.set(body, init.length);
   bytes.set(cut, init.length + body.length);
-  await nativePrinter.printBase64({ address, data: encodeBase64(bytes) });
+  await enqueueNativePrint(() => nativePrinter.printBase64({ address, data: encodeBase64(bytes) }));
 }
 
 export async function printTakeawayReceipt(

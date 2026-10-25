@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-25",
+  "status": "deployed-to-UAT",
+  "source": "Scoped working-tree changes over 612e568; not committed or pushed. Unrelated LINE OA changes excluded.",
+  "fix": "Retail Sale remains mounted while product management is embedded. Refresh its scoped IndexedDB catalog and branch stock when returning to Sale, not only React Query. Preserve the live cart; workspace navigation does not trigger pending-sale processing.",
+  "frontend_image": "restaurant-pos-frontend:uat-retail-catalog-20261025-r1",
+  "web_entry": "assets/index-BZvY5FlN.js",
+  "apk": {
+    "version": "0.1.0-uat.9",
+    "versionCode": 10009,
+    "package": "com.foodchainservice.retail.uat",
+    "url": "https://uat-retail.foodchainservice.com/downloads/native-pos-0.1.0-uat.9/foodchainservice-retail-0.1.0-uat.9.apk",
+    "sha256": "8472a4a6bc5b6bdf3d41534d7e263f591de05a2ed0061053e742f16de7bcb0d5",
+    "bytes": 4586758,
+    "signer_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5",
+    "installation": "Install over the existing Retail UAT app; do not uninstall or clear data. Same signer as UAT.8."
+  },
+  "verification": {
+    "typescript": "passed on isolated release source",
+    "targeted_regression": "Passed: create product, return to unfiltered Sale, receive stock, return again; updated stock status, original cart preserved, exactly two intake requests and no sales writes. Mock APIs only.",
+    "category_regression": "Passed: create/display category with retained cart",
+    "build": "Web and Android builds passed, including Gradle unit and lint tasks",
+    "release_signature": "Verified; six tamper/wrong-channel checks rejected",
+    "uat_gateway": "Serves exact deployed index.html",
+    "physical_device": "Customer installation/acceptance pending"
+  },
+  "rollback": {
+    "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-workspace.VOuzuz",
+    "previous_frontend": "restaurant-pos-frontend:uat-retail-intake-20261025-r1",
+    "files": ["env.uat.rollback", "compose.rollback.yml", "retail.rollback.json"],
+    "device_method": "Rebuild previous source with higher versionCode and same signer; do not uninstall/downgrade to force rollback",
+    "drill": "Backups and error trap prepared; no disruptive rollback drill performed"
+  },
+  "unchanged": ["Backend and databases", "Customer products and stock", "Restaurant and Takeaway APKs", "Production"]
+}

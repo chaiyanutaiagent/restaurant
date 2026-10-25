@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-26",
+  "status": "deployed-to-UAT",
+  "source": "Scoped working-tree release over 612e568; not committed/pushed. Unrelated LINE OA work excluded.",
+  "fixes": [
+    "Serialize native Bluetooth drawer and print commands; failed jobs are not retried automatically",
+    "Bound socket connect to 12 seconds and writes to payload-dependent drain time plus 15 seconds; close timed-out sockets and release native printing gate before resolving JS calls",
+    "Guard duplicate receipt clicks, show sending state, suppress automatic browser fallback after uncertain direct-print failures, preserve explicit reprint",
+    "Set Product.image_url on new intake photos, preserving existing variant-family cover",
+    "Read legacy primary attachments or active variant photos for missing Retail covers without migrating or rewriting customer rows"
+  ],
+  "frontend_image": "restaurant-pos-frontend:uat-retail-print-images-20261025-r1",
+  "backend_image": "restaurant-pos-backend:uat-retail-images-20261025-r1",
+  "web_entry": "assets/index-BbElJYrK.js",
+  "apk": {
+    "version": "0.1.0-uat.10",
+    "versionCode": 10010,
+    "package": "com.foodchainservice.retail.uat",
+    "url": "https://uat-retail.foodchainservice.com/downloads/native-pos-0.1.0-uat.10/foodchainservice-retail-0.1.0-uat.10.apk",
+    "sha256": "956070762b5c89447936efed4f608c141c8a855d5054c5b53ae04e5d076b6114",
+    "bytes": 4615055,
+    "signer_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5"
+  },
+  "verification": {
+    "typescript_web_android": "Passed, including Android unit tests and lint; existing bundle-size warnings remain",
+    "queue": "Passed: drawer before receipt, failure not replayed, next job proceeds",
+    "native_timeout": "3 unit tests passed: success, blocked transport abortion, disconnect without retry",
+    "backend": "10 unit tests passed in network-disabled disposable container; fixture data only",
+    "live_catalog": "Read-only endpoint-function check confirmed both The Loft products return their original stored photo URLs",
+    "public_release": "Signed update registry and unauthenticated APK SHA256 verified; public frontend serves new web entry",
+    "backend_readiness": "Passed after startup",
+    "physical_printer": "Pending customer Bluetooth printer test; no claim that paper actually printed/cut"
+  },
+  "rollback": {
+    "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-workspace.jSJ7nn",
+    "previous_frontend": "restaurant-pos-frontend:uat-retail-catalog-20261025-r1",
+    "previous_backend": "restaurant-pos-backend:uat-three-app-pairing-20261025-r1",
+    "files": ["env.uat.rollback", "compose.rollback.yml", "retail.rollback.json"],
+    "device_method": "Rebuild prior source with higher versionCode and same signer; do not uninstall/downgrade",
+    "drill": "Backups and rollback trap prepared; no disruptive rollback drill"
+  },
+  "unchanged": ["Customer data, stock and sales", "Database schema", "Restaurant and Takeaway APKs", "Production"]
+}

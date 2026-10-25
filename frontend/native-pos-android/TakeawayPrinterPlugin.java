@@ -124,29 +124,36 @@ public class TakeawayPrinterPlugin extends Plugin {
         }
         new Thread(() -> {
             BluetoothSocket socket = null;
+            Exception failure = null;
             try {
                 BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
                 if (adapter == null || !adapter.isEnabled()) {
-                    call.reject("Bluetooth ยังไม่พร้อมใช้งาน");
-                    return;
+                    throw new java.io.IOException("Bluetooth ยังไม่พร้อมใช้งาน");
                 }
                 BluetoothDevice device = adapter.getRemoteDevice(address);
                 socket = device.createRfcommSocketToServiceRecord(SERIAL_PORT_UUID);
+                final BluetoothSocket activeSocket = socket;
+                Runnable abort = () -> { try { activeSocket.close(); } catch (Exception ignored) { } };
                 adapter.cancelDiscovery();
-                socket.connect();
+                BluetoothPrintDeadline.run(12000, socket::connect, abort);
                 OutputStream output = socket.getOutputStream();
-                BluetoothPrintSpooler.send(printBytes, output, Thread::sleep);
-                call.resolve();
+                long sendDeadline = 15000L + ((printBytes.length + 511L) / 512L) * 60L;
+                BluetoothPrintDeadline.run(sendDeadline,
+                    () -> BluetoothPrintSpooler.send(printBytes, output, Thread::sleep), abort);
             } catch (SecurityException error) {
-                call.reject("สิทธิ์ Bluetooth ถูกปิด กรุณาอนุญาตใหม่ก่อนพิมพ์", error);
+                failure = error;
             } catch (Exception error) {
-                call.reject("พิมพ์ผ่าน Bluetooth ไม่สำเร็จ", error);
+                failure = error;
             } finally {
                 if (socket != null) {
                     try { socket.close(); } catch (Exception ignored) { }
                 }
                 PRINTING.set(false);
             }
+            // Release the socket and gate before JS can send the next queued job.
+            if (failure == null) call.resolve();
+            else if (failure instanceof SecurityException) call.reject("สิทธิ์ Bluetooth ถูกปิด กรุณาอนุญาตใหม่ก่อนพิมพ์", failure);
+            else call.reject("ส่งผ่าน Bluetooth ไม่สำเร็จหรือหมดเวลา อาจออกกระดาษบางส่วนแล้ว กรุณาตรวจเครื่องก่อนพิมพ์ซ้ำ", failure);
         }).start();
     }
 }

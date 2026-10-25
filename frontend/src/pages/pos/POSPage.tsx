@@ -562,6 +562,7 @@ export default function POSPage(): JSX.Element {
   const scannerStreamRef = useRef<MediaStream | null>(null);
   const scannerFrameRef = useRef<number | null>(null);
   const autoPrintedOrderRef = useRef<string | null>(null);
+  const receiptPrintingRef = useRef(false);
   const offlineProducts = useOfflineProducts(searchTerm, catalogRevision);
   const receiptPageHeightMm = useMemo(() => estimateReceiptPageHeightMm(lastOrder), [lastOrder]);
   const handleBrowserPrint = useReactToPrint({
@@ -771,15 +772,15 @@ export default function POSPage(): JSX.Element {
     }
   }, [currentShiftQuery.data, isRetailMode, retailWorkspace]);
 
+  // Management is embedded: returning to Sale does not remount this page.
+  // Refresh its IndexedDB catalog/stock, not just React Query, on each return.
+  const catalogWorkspace = isRetailMode ? retailWorkspace : 'sale';
   useEffect(() => {
     let active = true;
-    if (!isOnline || !retailContextValid) return () => { active = false; };
+    if (!isOnline || !retailContextValid || catalogWorkspace !== 'sale') return () => { active = false; };
     void Promise.all([
       syncProductCatalog(catalogScope, catalogIsolationKey),
       syncStockBalances(branchId ?? undefined),
-      companyId && branchId && user && (businessType === "restaurant" || businessType === "retail_pos")
-        ? syncPendingSales({ companyId, branchId, userId: user.id, businessType })
-        : Promise.resolve({ synced: 0, failed: 0 }),
     ]).then(() => {
       if (!active) return;
       setCatalogRevision((current) => current + 1);
@@ -790,7 +791,14 @@ export default function POSPage(): JSX.Element {
       setLastSyncAt(new Date());
     }).catch(() => undefined);
     return () => { active = false; };
-  }, [branchId, businessType, catalogIsolationKey, catalogScope, companyId, isOnline, queryClient, retailContextValid, user]);
+  }, [branchId, catalogIsolationKey, catalogScope, catalogWorkspace, isOnline, queryClient, retailContextValid]);
+
+  // Navigation only refreshes read models; do not replay pending sales on it.
+  useEffect(() => {
+    if (!isOnline || !retailContextValid || !companyId || !branchId || !user ||
+        (businessType !== 'restaurant' && businessType !== 'retail_pos')) return;
+    void syncPendingSales({ companyId, branchId, userId: user.id, businessType }).catch(() => undefined);
+  }, [branchId, businessType, companyId, isOnline, retailContextValid, user]);
 
   useEffect(() => {
     if (!isTakeawayMode) return;
@@ -1051,7 +1059,7 @@ export default function POSPage(): JSX.Element {
   useEffect(() => {
     if (!isRetailMode) return;
     setLoyaltyDiscount(0);
-    if (!stripePromptPayEnabled) setPaymentMethod("cash");
+    setPaymentMethod((method) => method === "bank_transfer" ? method : "cash");
     setSplitPaymentEnabled(false);
     setSecondaryPaymentAmount(0);
     setSecondaryPaymentReference("");
@@ -2208,6 +2216,7 @@ export default function POSPage(): JSX.Element {
         payment_method: paymentMethod,
         payments: checkoutPayments,
         payment_reference: paymentReference,
+        manual_transfer_confirmed: isRetailMode && paymentMethod === "bank_transfer",
         paid_amount: currentPaidAmount,
         customer_name: customerName || selectedCustomer?.display_name || [selectedCustomer?.first_name, selectedCustomer?.last_name].filter(Boolean).join(" ") || null,
         customer_phone: customerPhone || selectedCustomer?.phone || null,
@@ -2540,29 +2549,26 @@ export default function POSPage(): JSX.Element {
   const receiptCashier = user?.display_name ?? user?.username ?? "Cashier";
 
   const handleReceiptPrint = useCallback(async (order: SaleOrder | null = lastOrder) => {
-    if (!order) return;
-    try {
-      setEscPosPrinterStatus(await getEscPosPrinterStatus());
-    } catch {
-      setEscPosPrinterStatus({ supported: isEscPosUsbSupported(), paired: false, printer: null });
-    }
-
+    if (!order || receiptPrintingRef.current) return;
+    receiptPrintingRef.current = true;
+    autoPrintedOrderRef.current = order.id;
     setEscPosPrinterBusy("print");
     try {
       if (await printConfiguredSaleReceipt(order, receiptCompany, receiptBranch, receiptCashier)) {
-        toast({ title: "พิมพ์ใบเสร็จและตัดกระดาษแล้ว", description: "ความยาวกระดาษปรับตามจำนวนรายการอัตโนมัติ" });
+        toast({ title: "ส่งใบเสร็จและคำสั่งตัดกระดาษแล้ว", description: "กรุณาตรวจใบเสร็จที่เครื่องพิมพ์ก่อนพิมพ์ซ้ำ" });
         return;
       }
+      void handleBrowserPrint();
     } catch (error) {
       toast({
-        title: "ส่งตรงเข้าเครื่องพิมพ์ไม่สำเร็จ",
-        description: `${describeEscPosError(error)} — เปิดหน้าพิมพ์สำรองให้แทน`,
+        title: "ยังยืนยันผลพิมพ์ไม่ได้ — บิลขายบันทึกแล้ว",
+        description: `${describeEscPosError(error)} — ตรวจเครื่องและกระดาษก่อนกดพิมพ์ใหม่ ไม่ต้องขายซ้ำ`,
         variant: "destructive",
       });
     } finally {
+      receiptPrintingRef.current = false;
       setEscPosPrinterBusy(null);
     }
-    void handleBrowserPrint();
   }, [handleBrowserPrint, lastOrder, receiptBranch, receiptCashier, receiptCompany, toast]);
 
   const handleConnectEscPosPrinter = useCallback(async () => {
@@ -2595,9 +2601,8 @@ export default function POSPage(): JSX.Element {
     if (!showReceipt || !lastOrder || !autoPrintReceipt || autoPrintedOrderRef.current === lastOrder.id) {
       return;
     }
-    autoPrintedOrderRef.current = lastOrder.id;
     const timeout = window.setTimeout(() => {
-      void handleReceiptPrint(lastOrder);
+      if (autoPrintedOrderRef.current !== lastOrder.id) void handleReceiptPrint(lastOrder);
     }, 350);
     return () => window.clearTimeout(timeout);
   }, [autoPrintReceipt, handleReceiptPrint, lastOrder, showReceipt]);
@@ -3614,21 +3619,16 @@ export default function POSPage(): JSX.Element {
                 </div>
 
               <div className="grid grid-cols-2 gap-2">
-                {(["cash", "promptpay", "credit_card", "bank_transfer", "other"] as PaymentMethod[]).map((method) => {
-                  const retailBlocked = isRetailMode
-                    && method !== "cash"
-                    && !(method === "promptpay" && stripePromptPayEnabled);
+                {((isRetailMode ? ["cash", "bank_transfer"] : ["cash", "promptpay", "credit_card", "bank_transfer", "other"]) as PaymentMethod[]).map((method) => {
                   return (
                     <button
                       key={method}
                       type="button"
-                      disabled={retailBlocked}
-                      aria-describedby={retailBlocked ? `retail-payment-${method}` : undefined}
+                      aria-pressed={paymentMethod === method}
                       className={`min-h-16 rounded-xl border px-3 py-2 text-sm ${paymentMethod === method ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-300 bg-white text-slate-700"} disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
                       onClick={() => setPaymentMethod(method)}
                     >
-                      <span className="block font-semibold">{method === "cash" ? "เงินสด" : method === "promptpay" ? "PromptPay" : method === "credit_card" ? "บัตรเครดิต" : method === "bank_transfer" ? "โอนเงิน" : "อื่นๆ"}</span>
-                      {retailBlocked ? <span id={`retail-payment-${method}`} className="mt-1 block text-[10px]">รอ Provider/Policy UAT</span> : null}
+                      <span className="block font-semibold">{method === "cash" ? "เงินสด" : method === "promptpay" ? "PromptPay" : method === "credit_card" ? "บัตรเครดิต" : method === "bank_transfer" ? (isRetailMode ? "โอน/สแกน" : "โอนเงิน") : "อื่นๆ"}</span>
                       {method === "promptpay" && stripePromptPayEnabled ? <span className="mt-1 block text-[10px]">Stripe Test Mode</span> : null}
                     </button>
                   );
@@ -3637,7 +3637,7 @@ export default function POSPage(): JSX.Element {
               {/* end payment method card */}
               </div>
               {/* P7: Split Payment — toggle button */}
-              <div className="mt-3 rounded-2xl border border-slate-200">
+              {!isRetailMode && <div className="mt-3 rounded-2xl border border-slate-200">
                 <button
                   type="button"
                   disabled={isRetailMode}
@@ -3689,7 +3689,7 @@ export default function POSPage(): JSX.Element {
                     </div>
                   </div>
                 ) : null}
-              </div>
+              </div>}
 
               {paymentMethod === "cash" ? (
                 <div className="space-y-3 rounded-3xl border border-slate-200 bg-emerald-50/80 p-4">
@@ -3733,15 +3733,21 @@ export default function POSPage(): JSX.Element {
                 <input
                   type="text"
                   className="h-11 w-full rounded-xl border border-slate-300 px-3"
-                  placeholder={paymentMethod === "credit_card" ? "เลขอ้างอิงบัตร" : "เลขอ้างอิงการโอน"}
+                  placeholder={paymentMethod === "credit_card" ? "เลขอ้างอิงบัตร" : "เลขอ้างอิงการโอน (ถ้ามี)"}
                   value={creditRef}
                   onChange={(event) => setCreditRef(event.target.value)}
                 />
               ) : null}
 
+              {isRetailMode && paymentMethod === "bank_transfer" ? (
+                <div role="note" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  ให้ลูกค้าโอนหรือสแกน QR ของร้าน ตรวจยอดเงินเข้าบัญชีก่อนกดยืนยัน ระบบไม่ได้ตรวจยอดธนาคารอัตโนมัติ
+                </div>
+              ) : null}
+
               {isRetailMode ? (
                 <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-900">
-                  <div className="font-semibold">Cash Pilot · Server-authoritative</div>
+                  <div className="font-semibold">เงินสด / โอนเข้าบัญชีร้าน</div>
                   <div className="mt-1">ระบบจะตรวจ Pricing quote/version, สิทธิ์, Stock และ idempotency ก่อนบันทึก Sale</div>
                   <div className="mt-1 text-amber-800">เครื่องพิมพ์และลิ้นชักเงินสด: ยังไม่ยืนยัน Physical UAT</div>
                 </div>
@@ -3753,7 +3759,7 @@ export default function POSPage(): JSX.Element {
                   cart.items.length === 0 ||
                   !currentShift ||
                   (isRetailMode && (!isOnline || !retailContextValid || !catalogCacheTrusted)) ||
-                  (isRetailMode && paymentMethod !== "cash" && !(paymentMethod === "promptpay" && stripePromptPayEnabled)) ||
+                  (isRetailMode && paymentMethod !== "cash" && paymentMethod !== "bank_transfer") ||
                   (isTakeawayMode && !takeawayMenuQuery.data) ||
                   (paymentMethod === "cash" && currentPaidAmount < finalTotal) ||
                   isSubmitting
@@ -3761,7 +3767,7 @@ export default function POSPage(): JSX.Element {
                 onClick={() => void handleCheckout()}
               >
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {isTakeawayMode ? "รับเงินและออกคิว" : isRetailMode ? "ยืนยันรับเงิน" : "ชำระเงิน"} {formatThaiCurrency(finalTotal)}
+                {isTakeawayMode ? "รับเงินและออกคิว" : isRetailMode ? (paymentMethod === "bank_transfer" ? "ยืนยันเงินโอนเข้าบัญชีแล้ว" : "ยืนยันรับเงิน") : "ชำระเงิน"} {formatThaiCurrency(finalTotal)}
               </Button>
               {isRetailMode ? (
                 <div className="text-center text-xs text-slate-500">
@@ -4034,7 +4040,7 @@ export default function POSPage(): JSX.Element {
           <DialogFooter>
             <Button variant="outline" disabled={escPosPrinterBusy === "print"} onClick={() => void handleReceiptPrint()}>
               {escPosPrinterBusy === "print" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              พิมพ์
+              {escPosPrinterBusy === 'print' ? 'กำลังส่งพิมพ์… กรุณารอ' : 'พิมพ์'}
             </Button>
             <Button onClick={() => setShowReceipt(false)}>ขายต่อ</Button>
           </DialogFooter>

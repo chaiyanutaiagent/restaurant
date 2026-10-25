@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-25",
+  "status": "deployed-to-UAT",
+  "source": "Scoped working-tree changes over 612e568; not committed or pushed in this release task. Unfinished LINE OA excluded from deployment.",
+  "features": [
+    "Create and select a Retail unit inside product intake without accessing backoffice",
+    "Reuse existing unit names, reject inactive units, reconcile uncertain create responses by the same unique unit code",
+    "Count units as whole numbers or 3 decimal places without changing existing units",
+    "New variants start with one value input and default group แบบ; add groups or edit names optionally",
+    "Existing variant families retain their established option dimensions"
+  ],
+  "frontend_image": "restaurant-pos-frontend:uat-retail-intake-20261025-r1",
+  "web_entry": "assets/index-CsOwSRgq.js",
+  "apk": {
+    "version": "0.1.0-uat.8",
+    "versionCode": 10008,
+    "package": "com.foodchainservice.retail.uat",
+    "url": "https://uat-retail.foodchainservice.com/downloads/native-pos-0.1.0-uat.8/foodchainservice-retail-0.1.0-uat.8.apk",
+    "sha256": "73cacb3bb7acd7e609ecc9d4559d6eeee77d4f70245fa579707b3669fdffc5af",
+    "bytes": 4586812,
+    "signer_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5",
+    "installation": "Finish pending transactions, then update in place. Do not uninstall or clear application data. UAT.6+ can discover this release using the signed update channel."
+  },
+  "verification": {
+    "typescript": "passed on isolated release source",
+    "web_and_android_build": "passed; Android unit/lint tasks included, unchanged unit results reused",
+    "targeted_web_tests": "4 passed in preceding implementation turn: custom dimensions, append family, unit retry/deduplication, decimal/inactive unit",
+    "native_ui_test": "1 passed: create unit and save single-value variant using native session and routes; mocked APIs only",
+    "signed_release": "signature and six tamper/wrong-product cases passed",
+    "gateway": "serves the exact deployed index.html",
+    "physical_android": "Customer installation and device acceptance pending"
+  },
+  "rollback": {
+    "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-workspace.w7ZfpH",
+    "previous_frontend": "restaurant-pos-frontend:uat-retail-workspace-20261025-r1",
+    "files": ["env.uat.rollback", "compose.rollback.yml", "retail.rollback.json"],
+    "method": "Restore UAT env/compose and Retail registry; recreate only UAT frontend and reload UAT nginx. Existing APK URLs remain immutable. For devices already on UAT.8, rebuild prior source with a higher versionCode and the same signer rather than uninstalling/downgrading.",
+    "drill": "Backup and error rollback trap prepared; no disruptive rollback drill performed"
+  },
+  "unchanged": ["Backend and databases", "Customer stock and transactions", "Restaurant APK UAT.6 and update registry", "Takeaway APK UAT.16", "Production"]
+}

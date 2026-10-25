@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-26",
+  "status": "deployed-to-UAT",
+  "source": "Scoped staged Retail working tree; not committed or pushed. Unfinished LINE OA excluded.",
+  "fix": "Retail SKU CSV export uses Android ACTION_CREATE_DOCUMENT through the registered native document plugin instead of an unsupported WebView blob download.",
+  "behavior": [
+    "User chooses the file destination; no broad storage permission requested",
+    "Native write completion, cancellation and failure have separate visible outcomes",
+    "Double taps blocked, no silent fallback or automatic retry on write failure",
+    "UTF-8 BOM, Thai text, CSV quoting and existing formula-injection protection preserved",
+    "Browser export remains a normal download; current-page scope unchanged"
+  ],
+  "frontend_image": "restaurant-pos-frontend:uat-retail-csv-20261026-r1",
+  "backend_unchanged": "restaurant-pos-backend:uat-retail-payments-20261026-r1",
+  "web_entry": "assets/index-CxHx8k2N.js",
+  "apk": {
+    "version": "0.1.0-uat.12",
+    "versionCode": 10012,
+    "package": "com.foodchainservice.retail.uat",
+    "url": "https://uat-retail.foodchainservice.com/downloads/native-pos-0.1.0-uat.12/foodchainservice-retail-0.1.0-uat.12.apk",
+    "sha256": "48e2a5e9ea4e002d94c0973e61876e4b313226db7e869607eac761832a9c8e00",
+    "bytes": 4590652,
+    "signer_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5"
+  },
+  "verification": {
+    "typescript": "passed",
+    "native_dispatch_unit": "3 tests passed: UTF-8 BOM/content, cancelled, failure without fallback/retry",
+    "browser": "SKU report current-page CSV download test passed",
+    "build": "Web and Android build, Android unit tests and lint passed",
+    "publication": "Public signed registry and unauthenticated APK hash verified; public The Loft web entry matches release",
+    "physical": "Android file picker and saving to the customer's storage pending customer test"
+  },
+  "rollback_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-workspace.5YUucE",
+  "previous_frontend": "restaurant-pos-frontend:uat-retail-payments-20261026-r1",
+  "install": "Install over previous Retail UAT with same signer; do not uninstall or clear storage.",
+  "unchanged": ["Customer data", "Backend", "Database schema", "Restaurant/Takeaway APKs", "Production"]
+}

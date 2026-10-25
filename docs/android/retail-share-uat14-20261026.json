@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-26",
+  "status": "deployed-to-UAT",
+  "source": "Scoped staged Retail working-tree release; not committed or pushed; unrelated LINE OA excluded.",
+  "behavior": [
+    "Android SKU export button is Share CSV for current page",
+    "ACTION_SEND chooser opens with a CSV content URI and temporary read grant; user selects target application",
+    "Export uses app-private cache, not automatic Downloads writes; unique export folders prevent in-flight file replacement",
+    "Reports chooser opening only, never claims delivery or saving by target app",
+    "Thai UTF-8 BOM, CSV quoting and formula-injection protection retained; browser download unchanged",
+    "Share failure does not silently download or retry"
+  ],
+  "frontend_image": "restaurant-pos-frontend:uat-retail-share-20261026-r1",
+  "backend_unchanged": "restaurant-pos-backend:uat-retail-payments-20261026-r1",
+  "web_entry": "assets/index-6_dqbfc8.js",
+  "apk": {
+    "version": "0.1.0-uat.14",
+    "versionCode": 10014,
+    "package": "com.foodchainservice.retail.uat",
+    "url": "https://uat-retail.foodchainservice.com/downloads/native-pos-0.1.0-uat.14/foodchainservice-retail-0.1.0-uat.14.apk",
+    "sha256": "8e4ebfc0198f3fe337406ae5902bacdcb962ab250eb8eb587de4784f109e8a34",
+    "bytes": 4591973,
+    "signer_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5"
+  },
+  "verification": {
+    "typescript": "passed",
+    "share_dispatch": "3 tests passed: UTF-8 payload and share method, unopened menu rejection, failure without browser fallback/retry",
+    "build": "Web and Android build, Android unit tests and lint passed",
+    "publication": "Signed public registry and APK hash verified; public web serves new entry",
+    "physical": "Customer reported all functions passed after UAT.14 on 2026-10-26; physical testing was customer-reported, not independently witnessed by the agent"
+  },
+  "rollback_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-workspace.xuzdoV",
+  "previous_frontend": "restaurant-pos-frontend:uat-retail-photo-20261026-r1",
+  "install": "Install over existing Retail UAT; no uninstall or clearing app storage.",
+  "unchanged": ["Customer data", "Backend", "Database schema", "Restaurant/Takeaway APKs", "Production"]
+}

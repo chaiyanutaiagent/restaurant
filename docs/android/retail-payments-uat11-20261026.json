@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-26",
+  "status": "deployed-to-UAT",
+  "source": "Scoped working-tree release; not committed or pushed. Web uses preserved staged UAT baseline. Backend overlays only the manual payment changes onto the live UAT.10 source, preserving existing accounting recovery fixes and leaving the undeployed Stripe flow excluded.",
+  "behavior": [
+    "Retail checkout offers Cash and Transfer/Scan as immediately selectable buttons",
+    "Transfer/Scan records bank_transfer after explicit cashier confirmation of shop bank receipt; not automatic bank/provider verification",
+    "Manual confirmation recorded in sale audit; prior idempotency hashes preserved",
+    "Offline, mixed tender and unsupported provider payment guards remain closed",
+    "Legacy bills and payment labels retained"
+  ],
+  "frontend_image": "restaurant-pos-frontend:uat-retail-payments-20261026-r1",
+  "backend_image": "restaurant-pos-backend:uat-retail-payments-20261026-r1",
+  "web_entry": "assets/index-dGqKpetl.js",
+  "apk": {
+    "version": "0.1.0-uat.11",
+    "versionCode": 10011,
+    "package": "com.foodchainservice.retail.uat",
+    "url": "https://uat-retail.foodchainservice.com/downloads/native-pos-0.1.0-uat.11/foodchainservice-retail-0.1.0-uat.11.apk",
+    "sha256": "c8a0e09a4d569c9b323bc0d59833aef4ad2d8be62b3ae4d8c67494b0a3a87e9f",
+    "bytes": 4588413,
+    "signer_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5"
+  },
+  "verification": {
+    "local": "TypeScript plus 2 focused browser tests and 7 payment guard tests passed in prior implementation turn",
+    "build": "Web and Android build, Android unit tests and lint passed",
+    "release_backend": "4 guard tests passed in disposable network-disabled release container",
+    "public": "Unauthenticated download hash and signed update registry verified; The Loft web entry matches release",
+    "readiness": "UAT backend readiness passed and both containers running",
+    "physical": "Device installation and customer cash/manual transfer test pending; no live sales created during deployment"
+  },
+  "rollback": {
+    "backup_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-workspace.XykByF",
+    "previous_frontend": "restaurant-pos-frontend:uat-retail-print-images-20261025-r1",
+    "previous_backend": "restaurant-pos-backend:uat-retail-images-20261025-r1",
+    "files": ["env.uat.rollback", "compose.rollback.yml", "retail.rollback.json"],
+    "source_artifacts": "artifacts.tar.gz includes exact deployed source overlay, web and APK",
+    "device_method": "Install signed update over existing app; do not uninstall or clear data. Rollback by rebuilding prior source with higher versionCode.",
+    "drill": "Prepared backups and error rollback trap; no disruptive rollback drill"
+  },
+  "unchanged": ["Customer products, stock and sales", "Database schema", "Restaurant and Takeaway APKs", "Production"]
+}

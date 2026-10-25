@@ -81,9 +81,10 @@ test("retail custom options creates a product brand and color size SKU on mobile
   await expect(page.getByLabel("แบรนด์สินค้า",{exact:true})).toHaveValue(brand);
   await page.getByLabel("รูปแบบสินค้า",{exact:true}).selectOption("variant");
   await page.getByLabel("ชื่อสินค้า",{exact:true}).fill("เสื้อยืด");
+  await page.getByRole('button',{name:'กำหนดชื่อกลุ่ม',exact:true}).click();
   await page.getByLabel("ชื่อกลุ่มตัวเลือก 1",{exact:true}).fill("สี");
   await page.getByLabel("ค่าตัวเลือก 1",{exact:true}).fill("ดำ");
-  await page.getByRole("button",{name:"+ กลุ่มตัวเลือก",exact:true}).click();
+  await page.getByRole("button",{name:"+ เพิ่มตัวเลือก",exact:true}).click();
   await page.getByLabel("ชื่อกลุ่มตัวเลือก 2",{exact:true}).fill("ไซซ์");
   await page.getByLabel("ค่าตัวเลือก 2",{exact:true}).fill("M");
   await page.getByLabel("หน่วยสินค้า",{exact:true}).selectOption(unit);
@@ -109,7 +110,7 @@ test("retail custom options appends only to a selected family and uses its dimen
   await page.getByLabel("สินค้าหลัก",{exact:true}).selectOption(product);
   await expect(page.getByLabel("ชื่อสินค้า",{exact:true})).toBeDisabled();
   await expect(page.getByLabel("ชื่อสินค้า",{exact:true})).toHaveValue("รองเท้า");
-  await expect(page.getByLabel("ชื่อกลุ่มตัวเลือก 1",{exact:true})).toBeDisabled();
+  await expect(page.getByLabel("ชื่อกลุ่มตัวเลือก 1",{exact:true})).toHaveCount(0);
   await page.getByLabel("ค่าตัวเลือก 1",{exact:true}).fill("ขาว");
   await page.getByLabel("ค่าตัวเลือก 2",{exact:true}).fill("43");
   await page.getByLabel("ราคาขาย (บาท)",{exact:true}).fill("990");
@@ -149,6 +150,11 @@ test("retail intake mobile form supports photo and stock without horizontal over
   await page.getByLabel("จำนวนรับเข้า",{exact:true}).fill("2");
   await page.getByLabel("คลังรับสินค้า",{exact:true}).selectOption(location);
   await expect(page.getByLabel("ถ่ายรูป",{exact:true})).toHaveAttribute("capture","environment");
+  await expect(page.getByLabel("ถ่ายรูป",{exact:true})).toHaveAttribute("accept","image/*");
+  const chooser=page.waitForEvent('filechooser');
+  await page.getByRole('button',{name:'ถ่ายรูปสินค้า',exact:true}).click();
+  expect(await (await chooser).element().getAttribute('capture')).toBe('environment');
+  await expect(page.getByRole('button',{name:'เลือกรูปจากเครื่อง',exact:true})).toBeVisible();
   await page.getByLabel("ถ่ายรูป",{exact:true}).setInputFiles({name:"mobile.png",mimeType:"image/png",buffer:Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1V8AAAAASUVORK5CYII=","base64")});
   await page.screenshot({path:"/private/tmp/restaurant-retail-mobile-intake.png",fullPage:true});
   await page.getByRole("button",{name:"บันทึกสินค้าและสต๊อก",exact:true}).click();
@@ -199,4 +205,70 @@ test("retail intake scanner reads simulated camera and releases its stream",asyn
   await expect(page.getByRole("heading",{name:"สินค้าใหม่ — รายละเอียดและราคา"})).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(await page.evaluate(()=>(window as unknown as {testCameraStream:MediaStream}).testCameraStream.getTracks().every(track=>track.readyState==="ended"))).toBe(true);
+});
+
+test('single value option and inline unit creation preserve product draft',async({page,context})=>{
+  const submissions=await setup(page);
+  const rows:Record<string,unknown>[]=[];let creates=0;
+  const newUnit='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  await page.route('**/api/v1/units',route=>{
+    if(route.request().method()==='POST'){
+      creates++;const payload=route.request().postDataJSON();
+      expect(payload.code.length).toBeLessThanOrEqual(20);
+      rows.push({...payload,id:newUnit});
+      return route.fulfill({status:503,body:'lost response'});
+    }
+    return route.fulfill({json:{data:rows}});
+  });
+  await page.getByLabel('ชื่อสินค้า',{exact:true}).fill('เลย์');
+  await page.getByLabel('รูปแบบสินค้า',{exact:true}).selectOption('variant');
+  await expect(page.getByLabel(/^ค่าตัวเลือก/)).toHaveCount(1);
+  await expect(page.getByLabel(/^ชื่อกลุ่มตัวเลือก/)).toHaveCount(0);
+  await page.getByLabel('ค่าตัวเลือก 1',{exact:true}).fill('ซาวครีม');
+  await page.getByRole('button',{name:'+ เพิ่มตัวเลือก',exact:true}).click();
+  await expect(page.getByLabel(/^ค่าตัวเลือก/)).toHaveCount(2);
+  await page.getByRole('button',{name:'ลบกลุ่มสุดท้าย',exact:true}).click();
+  await page.getByRole('button',{name:'+ เพิ่มหน่วยสินค้า',exact:true}).click();
+  await page.getByLabel('ชื่อหน่วยสินค้าใหม่',{exact:true}).fill('ถุง');
+  await page.getByRole('button',{name:'บันทึกหน่วยและเลือกใช้',exact:true}).click();
+  await expect(page.getByLabel('ชื่อหน่วยสินค้าใหม่',{exact:true})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'ยกเลิก',exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'ตรวจผลหน่วยอีกครั้ง',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByLabel('หน่วยสินค้า',{exact:true})).toHaveValue(newUnit);
+  await expect(page.getByLabel('ชื่อสินค้า',{exact:true})).toHaveValue('เลย์');
+  expect(creates).toBe(1);
+  // Duplicate name reuses the same unit without another POST.
+  await page.getByRole('button',{name:'+ เพิ่มหน่วยสินค้า',exact:true}).click();
+  await page.getByLabel('ชื่อหน่วยสินค้าใหม่',{exact:true}).fill(' ถุง ');
+  await page.getByRole('button',{name:'บันทึกหน่วยและเลือกใช้',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);expect(creates).toBe(1);
+  await context.setOffline(true);
+  await expect(page.getByRole('button',{name:'+ เพิ่มหน่วยสินค้า',exact:true})).toBeDisabled();
+  await context.setOffline(false);
+  await page.getByRole('button',{name:'บันทึกสินค้าและสต๊อก',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'บันทึกเรียบร้อย'})).toBeVisible();
+  expect(submissions).toHaveLength(1);
+  expect(submissions[0]).toContain('"attributes":{"แบบ":"ซาวครีม"}');
+  expect(submissions[0]).toContain('"unit_id":"'+newUnit+'"');
+});
+
+test('inline unit creation selects decimal unit and refuses inactive duplicate',async({page})=>{
+  await setup(page);let creates=0;
+  await page.route('**/api/v1/units',route=>{
+    if(route.request().method()==='POST'){
+      creates++;expect(route.request().postDataJSON()).toMatchObject({name:'กิโลกรัม',decimal_places:3,is_active:true});
+      return route.fulfill({status:201,json:{data:{...route.request().postDataJSON(),id:unit}}});
+    }
+    return route.fulfill({json:{data:[{id:unit,code:'BAG',name:'ถุง',is_active:false}]}});
+  });
+  await page.getByRole('button',{name:'+ เพิ่มหน่วยสินค้า',exact:true}).click();
+  await page.getByLabel('ชื่อหน่วยสินค้าใหม่',{exact:true}).fill('ถุง');
+  await page.getByRole('button',{name:'บันทึกหน่วยและเลือกใช้',exact:true}).click();
+  await expect(page.getByRole('alert').filter({hasText:'ปิดใช้งาน'})).toBeVisible();expect(creates).toBe(0);
+  await page.getByLabel('ชื่อหน่วยสินค้าใหม่',{exact:true}).fill('กิโลกรัม');
+  await page.getByLabel('การนับจำนวน',{exact:true}).selectOption('3');
+  await page.getByRole('button',{name:'บันทึกหน่วยและเลือกใช้',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByLabel('หน่วยสินค้า',{exact:true})).toHaveValue(unit);expect(creates).toBe(1);
 });

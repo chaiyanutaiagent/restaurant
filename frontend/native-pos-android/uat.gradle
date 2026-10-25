@@ -1,5 +1,5 @@
 // Shared UAT-only constraints. The original Takeaway Android project does not apply this file.
-def posRevision = posProduct == 'retail' ? 7 : 6
+def posRevision = posProduct == 'retail' ? 14 : 6
 android {
     defaultConfig {
         versionCode 10000 + posRevision

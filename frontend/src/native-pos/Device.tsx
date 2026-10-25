@@ -38,7 +38,7 @@ export default function Device() {
   return <main className="mx-auto max-w-xl space-y-5 p-5">
     <h1 className="text-2xl font-bold">ตั้งค่าเครื่องขาย</h1>
     <button disabled={busy || checkingUpdate} className="min-h-12 rounded border p-3" onClick={()=>{void checkPosUpdate(true);}}>{checkingUpdate?'กำลังตรวจเวอร์ชัน…':'ตรวจอัปเดตแอป'}</button>
-    <p role="status">{online ? 'ออนไลน์' : 'ออฟไลน์ — หยุดบันทึก / รับเงิน'} · UAT {nativeProduct === 'retail' ? '0.1.0-uat.7' : '0.1.0-uat.6'}</p>
+    <p role="status">{online ? 'ออนไลน์' : 'ออฟไลน์ — หยุดบันทึก / รับเงิน'} · UAT {nativeProduct === 'retail' ? '0.1.0-uat.14' : '0.1.0-uat.6'}</p>
     <p className="break-all text-sm">บริษัท {session.businessSlug} · สาขา {session.branchId}</p>
     <button disabled={busy || !online} className="min-h-12 rounded border p-3" onClick={async () => {
       try { setBranches((await authApi.myBranches()).data.data.filter(item => item.business_type === nativeBusinessType && item.target_database === nativeBusinessType)); }

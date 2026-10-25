@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ProductBarcodeScanner from "@/components/products/ProductBarcodeScanner";
 import RetailCategoryCreateDialog from "@/components/products/RetailCategoryCreateDialog";
+import RetailUnitCreateDialog from "@/components/products/RetailUnitCreateDialog";
 import RetailProductOptions, { emptyRetailOptions, type RetailOptions } from "@/components/products/RetailProductOptions";
 import type { Category, Unit } from "@/types/product";
 import type { ApiResponse } from "@/types/api";
@@ -35,14 +36,17 @@ function Workspace({embedded, mode, initialBarcode, onNavigationLock}: IntakePro
   const [fields,setFields] = useState(empty);
   const [options,setOptions] = useState<RetailOptions>(emptyRetailOptions);
   const [image,setImage] = useState<File|null>(null);
+  const cameraInput=useRef<HTMLInputElement>(null),galleryInput=useRef<HTMLInputElement>(null);
   const [preview,setPreview] = useState("");
   const [scanning,setScanning] = useState(false);
   const [categoryCreateOpen,setCategoryCreateOpen] = useState(false);
+  const [unitCreateOpen,setUnitCreateOpen] = useState(false);
+  const [unitPending,setUnitPending] = useState(false);
   const [busy,setBusy] = useState(false);
   const [locked,setLocked] = useState(false);
   const [error,setError] = useState("");
   const [receipt,setReceipt] = useState<Receipt|null>(null);
-  useEffect(()=>{onNavigationLock?.(busy||locked);return()=>onNavigationLock?.(false);},[busy,locked,onNavigationLock]);
+  useEffect(()=>{onNavigationLock?.(busy||locked||unitPending);return()=>onNavigationLock?.(false);},[busy,locked,unitPending,onNavigationLock]);
   const pending = useRef<FormData|null>(null);
   const inFlight = useRef(false);
   const lookupSequence = useRef(0);
@@ -74,9 +78,9 @@ function Workspace({embedded, mode, initialBarcode, onNavigationLock}: IntakePro
   }
   async function save(event:React.FormEvent) {
     event.preventDefault();
-    if(inFlight.current||busy||!online||checked!==barcode.trim())return;
+    if(inFlight.current||busy||unitPending||!online||checked!==barcode.trim())return;
     if(!pending.current&&!existing&&options.mode!=="simple"){
-      const keys=options.attributes.map(row=>row.key.trim().replace(/\s+/g," ").toLocaleLowerCase());
+      const keys=options.attributes.map((row,index)=>(row.key.trim()||(index===0?'แบบ':`ตัวเลือก ${index+1}`)).replace(/\s+/g," ").toLocaleLowerCase());
       if(new Set(keys).size!==keys.length){setError("ชื่อกลุ่มตัวเลือกซ้ำกัน กรุณาแก้ไข");return;}
       if(options.mode==="append"&&!options.parent){setError("กรุณาเลือกสินค้าหลัก");return;}
     }
@@ -89,7 +93,7 @@ function Workspace({embedded, mode, initialBarcode, onNavigationLock}: IntakePro
         parent_product_id:!existing&&options.mode==="append"?options.parent?.id:null,
         product_brand_id:options.productBrandId||null,
         product_type:options.mode==="simple"?"simple":"variant",
-        attributes:!existing&&options.mode!=="simple"?Object.fromEntries(options.attributes.map(row=>[row.key.trim(),row.value.trim()])):{}}));
+        attributes:!existing&&options.mode!=="simple"?Object.fromEntries(options.attributes.map((row,index)=>[row.key.trim()||(index===0?'แบบ':`ตัวเลือก ${index+1}`),row.value.trim()])):{}}));
       if(image&&!existing)form.append("image",image);
       pending.current=form;
     }
@@ -129,6 +133,7 @@ function Workspace({embedded, mode, initialBarcode, onNavigationLock}: IntakePro
           {!existing&&options.mode!=="append"&&<><label className="block">รายละเอียด<Input value={fields.description} maxLength={2000} onChange={e=>field("description",e.target.value)}/></label>
           {hasPermission("inventory.product.create")&&<Button type="button" variant="outline" disabled={!online} onClick={()=>setCategoryCreateOpen(true)}>+ เพิ่มหมวดสินค้า</Button>}
           <label className="block">หน่วยสินค้า<select aria-label="หน่วยสินค้า" className="mt-1 h-12 w-full rounded border bg-white px-3" required value={fields.unit_id} onChange={e=>field("unit_id",e.target.value)}><option value="">เลือกหน่วย</option>{units.data?.data.filter(u=>u.is_active).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+          {hasPermission('inventory.product.create')&&<Button type="button" variant="outline" disabled={!online} onClick={()=>setUnitCreateOpen(true)}>+ เพิ่มหน่วยสินค้า</Button>}
           <label className="block">หมวดหมู่<select aria-label="หมวดหมู่" className="mt-1 h-12 w-full rounded border bg-white px-3" value={fields.category_id} onChange={e=>field("category_id",e.target.value)}><option value="">ไม่ระบุ</option>{categories.data?.data.filter(c=>c.is_active).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label></>}
           <label className="block">ราคาขาย (บาท)<Input type="number" min="0" step="0.0001" required value={fields.selling_price} disabled={!!existing} onChange={e=>field("selling_price",e.target.value)}/></label>
           {!existing&&options.mode!=="append"&&<><label className="block">รูปแบบ VAT<select className="mt-1 h-12 w-full rounded border bg-white px-3" value={fields.vat_type} onChange={e=>field("vat_type",e.target.value)}><option value="included">รวม VAT</option><option value="excluded">แยก VAT</option><option value="exempt">ยกเว้น VAT</option></select></label><label className="block">อัตรา VAT (%)<Input type="number" min="0" max="100" step="0.01" required value={fields.vat_rate} onChange={e=>field("vat_rate",e.target.value)}/></label></>}
@@ -139,11 +144,27 @@ function Workspace({embedded, mode, initialBarcode, onNavigationLock}: IntakePro
           {!canReceive&&<p className="text-sm text-amber-700">ไม่มีสิทธิ์รับเข้าคลัง สร้างสินค้าได้เฉพาะยอดเริ่มต้น 0</p>}
           {canReceive&&<label className="block">คลังรับสินค้า<select aria-label="คลังรับสินค้า" className="mt-1 h-12 w-full rounded border bg-white px-3" required={Number(fields.qty)>0} value={fields.location_id} onChange={e=>field("location_id",e.target.value)}><option value="">เลือกคลังในสาขานี้</option>{locations.data?.filter(l=>l.is_active&&l.branch_id===branchId).map(l=><option key={l.id} value={l.id}>{l.name} ({l.code})</option>)}</select></label>}
           {(units.isError||categories.isError||locations.isError)&&<p role="alert" className="text-red-600">โหลดหน่วย หมวดหมู่ หรือคลังไม่สำเร็จ กรุณาตรวจสิทธิ์และโหลดหน้าใหม่</p>}
-          {!existing&&<div className="space-y-3 border-t pt-4"><h2 className="font-bold">รูปสินค้า (ไม่บังคับ)</h2><label className="block">แนบรูป<input className="block w-full py-2" type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>selectImage(e.target.files?.[0])}/></label><label className="block"><Camera className="mr-2 inline h-4 w-4"/>ถ่ายรูป<input className="block w-full py-2" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={e=>selectImage(e.target.files?.[0])}/></label>{preview&&<><img src={preview} alt="รูปสินค้าก่อนบันทึก" className="h-40 w-40 rounded-xl object-contain"/><Button type="button" variant="outline" onClick={()=>setImage(null)}>นำรูปออก</Button></>}</div>}
+          {!existing&&<div className="space-y-3 border-t pt-4">
+            <h2 className="font-bold">รูปสินค้า (ไม่บังคับ)</h2>
+            <div className="flex flex-wrap gap-3">
+              <Button type="button" variant="outline" onClick={()=>cameraInput.current?.click()}><Camera className="mr-2 h-4 w-4"/>ถ่ายรูปสินค้า</Button>
+              <Button type="button" variant="outline" onClick={()=>galleryInput.current?.click()}>เลือกรูปจากเครื่อง</Button>
+            </div>
+            <input ref={galleryInput} aria-label="แนบรูป" className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>{selectImage(e.target.files?.[0]);e.target.value="";}}/>
+            {/* Capacitor's Android chooser requires image/* exactly to invoke the camera. */}
+            <input ref={cameraInput} aria-label="ถ่ายรูป" className="sr-only" type="file" accept="image/*" capture="environment" onChange={e=>{selectImage(e.target.files?.[0]);e.target.value="";}}/>
+            <p className="text-sm text-slate-500">ถ่ายรูป: อนุญาตกล้องเมื่อระบบถาม · รองรับ JPG, PNG, WebP ไม่เกิน 5 MB</p>
+            {preview&&<><img src={preview} alt="รูปสินค้าก่อนบันทึก" className="h-40 w-40 rounded-xl object-contain"/><Button type="button" variant="outline" onClick={()=>setImage(null)}>นำรูปออก</Button></>}
+          </div>}
         </section>
       </fieldset><Button className="h-14 w-full text-lg" disabled={busy||!online||(!canReceive&&!!existing)} type="submit">{busy?"กำลังบันทึก...":locked?"ลองบันทึกเดิมอีกครั้ง":existing?"ยืนยันรับสินค้าเดิมเพิ่ม":"บันทึกสินค้าและสต๊อก"}</Button></form>}
     </>}
     <ProductBarcodeScanner open={scanning} onClose={()=>setScanning(false)} onScan={code=>{setScanning(false);void lookup(code);}}/>
+    <RetailUnitCreateDialog open={unitCreateOpen} onOpenChange={setUnitCreateOpen} onPending={setUnitPending} onCreated={unit=>{
+      cache.setQueryData<ApiResponse<Unit[]>>(['retail-intake',companyId,brandId,branchId,'units'],previous=>({...previous!,data:[...(previous?.data??[]).filter(row=>row.id!==unit.id),unit]}));
+      field('unit_id',unit.id);
+      void cache.invalidateQueries({queryKey:['catalog','units']});
+    }}/>
     <RetailCategoryCreateDialog open={categoryCreateOpen} onOpenChange={setCategoryCreateOpen} onCreated={async(category)=>{
       cache.setQueryData<ApiResponse<Category[]>>(["retail-intake",companyId,brandId,branchId,"categories"], previous=>({...previous!,data:[...(previous?.data??[]).filter(row=>row.id!==category.id),category]}));
       field("category_id",category.id);

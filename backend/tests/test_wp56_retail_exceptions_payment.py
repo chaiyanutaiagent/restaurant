@@ -13,8 +13,9 @@ from app.cli.prepare_retail_uat_persona import require_bounded_uat as require_re
 from app.config import settings
 from app.dependencies import TokenData
 from app.routers.pos import _enforce_retail_payment_readiness, _enforce_retail_refund_readiness
-from app.routers.products import lookup_retail_product
 from app.schemas.pos import CreateSaleRequest
+from app.services.sale_service import sale_request_hash
+from app.services.pricing_service import canonical_hash
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,7 +48,16 @@ def _sale(method: str = "cash", *, offline: bool = False) -> CreateSaleRequest:
 
 
 class RetailPaymentReadinessTests(unittest.TestCase):
-    def test_retail_cash_is_the_only_enabled_pilot_payment(self) -> None:
+    def test_existing_sale_retry_hash_stays_unchanged(self) -> None:
+        payload = _sale("cash")
+        previous = payload.model_dump(mode="json", exclude={"approval_token", "price_override_approval_token", "manual_transfer_confirmed"}, exclude_none=True)
+        self.assertEqual(sale_request_hash(payload), canonical_hash(previous))
+        transfer = _sale("bank_transfer")
+        before = sale_request_hash(transfer)
+        transfer.manual_transfer_confirmed = True
+        self.assertNotEqual(sale_request_hash(transfer), before)
+
+    def test_retail_cash_and_provider_readiness(self) -> None:
         current = _current()
         _enforce_retail_payment_readiness(current, _sale("cash"))
 
@@ -63,6 +73,36 @@ class RetailPaymentReadinessTests(unittest.TestCase):
             stripe_pos_branch_allowlist=str(current.branch_id),
         ):
             _enforce_retail_payment_readiness(current, _sale("promptpay"))
+
+    def test_manual_transfer_requires_explicit_confirmation_and_signed_context(self) -> None:
+        payload = _sale("bank_transfer")
+        with self.assertRaises(HTTPException):
+            _enforce_retail_payment_readiness(_current(), payload)
+        payload.manual_transfer_confirmed = True
+        _enforce_retail_payment_readiness(_current(), payload)
+        current = _current()
+        current.branch_id = None
+        with self.assertRaises(HTTPException) as raised:
+            _enforce_retail_payment_readiness(current, payload)
+        self.assertEqual(raised.exception.detail["code"], "retail_context_required")
+
+    def test_manual_transfer_does_not_enable_offline_sync_cards_or_mixed_tender(self) -> None:
+        for method in ("credit_card", "other", "promptpay"):
+            payload = _sale(method)
+            payload.manual_transfer_confirmed = True
+            with self.subTest(method=method), self.assertRaises(HTTPException):
+                _enforce_retail_payment_readiness(_current(), payload)
+        payload = _sale("bank_transfer")
+        payload.manual_transfer_confirmed = True
+        for offline, sync in ((True, False), (False, True)):
+            payload.is_offline = offline
+            with self.assertRaises(HTTPException) as raised:
+                _enforce_retail_payment_readiness(_current(), payload, synchronized=sync)
+            self.assertEqual(raised.exception.detail["code"], "retail_offline_not_authorized")
+        payload.is_offline = False
+        payload.payments.append(_sale("cash").payments[0])
+        with self.assertRaises(HTTPException):
+            _enforce_retail_payment_readiness(_current(), payload)
 
     def test_retail_offline_and_sync_fail_closed(self) -> None:
         for payload, synchronized in ((_sale("cash", offline=True), False), (_sale("cash"), True)):
@@ -171,6 +211,8 @@ class RetailUatPersonaGuardTests(unittest.TestCase):
 
 class RetailLookupGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_lookup_rejects_unsigned_retail_context_before_database_access(self) -> None:
+        from app.routers.products import lookup_retail_product
+
         current = _current()
         current.brand_id = None
         with self.assertRaises(HTTPException) as raised:

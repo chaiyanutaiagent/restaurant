@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   if (mode !== "native-uat" || !["retail", "restaurant"].includes(product ?? '')) throw new Error('Select retail/restaurant UAT explicitly');
   if (process.env.VITE_UAT_AUTO_LOGIN === 'true' || process.env.VITE_COMPANY_ID || process.env.VITE_BUSINESS_SLUG) throw new Error('Native POS must not embed tenant or auto-login');
   const origin = product === 'retail' ? 'https://uat-retail.foodchainservice.com' : 'https://uat-pos.foodchainservice.com';
-  const revision = product === 'retail' ? 7 : 6;
+  const revision = product === 'retail' ? 14 : 6;
   return {
     // No environment file inheritance from the existing Takeaway or web builds.
     envDir: false,

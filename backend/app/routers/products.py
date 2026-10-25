@@ -235,8 +235,10 @@ async def list_products(
     data = [ProductListItem.model_validate(product).model_dump() for product in products]
     if catalog_scope == "retail_sale":
         names = await retail_catalog_service.brand_names(db, current.company_id, [p.id for p in products])
+        images = await retail_catalog_service.catalog_images(db, current.company_id, [p.id for p in products if not p.image_url])
         for row in data:
             row["product_brand_name"] = names.get(row["id"])
+            row["image_url"] = row["image_url"] or images.get(row["id"])
     return ok(data, meta={"total": total, "page": page, "limit": limit})
 
 

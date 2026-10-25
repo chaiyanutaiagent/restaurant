@@ -173,6 +173,10 @@ async def intake(db: AsyncSession, current: TokenData, payload: RetailIntakeRequ
         await db.flush()
     if created and image:
         image_url = await UploadService().save_image(image, "products", str(current.company_id))
+        # The catalog reads Product.image_url, not the attachment collection.
+        # Keep an existing family cover when appending a variant.
+        if not product.image_url:
+            product.image_url = image_url
         if variant:
             variant.image_url = image_url
         else:

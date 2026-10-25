@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import api from "@/lib/api";
@@ -6,6 +6,8 @@ import { useAuthStore } from "@/stores/auth.store";
 import { useOnlineStatus } from "@/lib/syncService";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { saveCsv } from "@/lib/saveCsv";
+import { Capacitor } from "@capacitor/core";
 
 type Row={product_id:string;variant_id:string|null;product_name:string;variant_name:string|null;sku:string;barcode:string|null;product_brand_name:string|null;active:boolean;on_hand:string;reserved:string;available:string;incoming:string;outgoing:string;sold:string;returned:string;net_quantity:string;line_subtotal:string;refund_amount:string};
 type Report={rows:Row[];page:number;total:number;generated_at:string};
@@ -14,15 +16,22 @@ const columns:[keyof Row,string][]=[["sku","SKU"],["product_name","สินค�
 export default function RetailSkuReportPage({view='all',embedded=false}:{view?:'all'|'sales'|'stock';embedded?:boolean}={}){
   const visibleColumns=columns.filter(([key])=>view==='all'||['sku','product_name','product_brand_name','variant_name','barcode'].includes(key)||(view==='stock'?['on_hand','reserved','available','incoming','outgoing']:['sold','returned','net_quantity','line_subtotal','refund_amount']).includes(key));
   const auth=useAuthStore(),online=useOnlineStatus();
+  const exportLock=useRef(false);
+  const [exporting,setExporting]=useState(false),[exportStatus,setExportStatus]=useState("");
   const [start,setStart]=useState(today),[end,setEnd]=useState(today),[search,setSearch]=useState(""),[page,setPage]=useState(1);
   const report=useQuery({queryKey:["retail-sku-report",auth.companyId,auth.brandId,auth.branchId,start,end,search,page],enabled:!!start&&!!end&&end>=start,
     queryFn:async()=>(await api.get<{data:Report}>("/retail/reports/skus",{params:{start,end,search,page}})).data.data});
-  function exportCsv(){
-    if(!report.data)return;
+  async function exportCsv(){
+    if(!report.data||exportLock.current)return;
+    exportLock.current=true;setExporting(true);setExportStatus("");
+    try {
     const safe=(v:unknown)=>{let s=String(v??"");if(/^[\s]*[=+\-@]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
     const csv=[visibleColumns.map(([,name])=>safe(name)).join(","),...report.data.rows.map(r=>visibleColumns.map(([key])=>safe(r[key])).join(","))].join("\r\n");
-    const url=URL.createObjectURL(new Blob(["\uFEFF",csv],{type:"text/csv;charset=utf-8"}));
-    const a=document.createElement("a");a.href=url;a.download=`retail-sku-${start}-${end}-page-${page}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    const result=await saveCsv(`retail-sku-${start}-${end}-page-${page}.csv`,csv);
+    setExportStatus(result==='share-opened'?'เปิดเมนูแชร์ CSV แล้ว เลือกแอปปลายทางหรือบันทึกไฟล์ได้เอง':'ส่งไฟล์ CSV ไปยังรายการดาวน์โหลดของเบราว์เซอร์แล้ว');
+    } catch {
+      setExportStatus('เปิดไฟล์ CSV ไม่สำเร็จ กรุณาลองอีกครั้ง หากใช้แอป Android ให้อัปเดตเป็น UAT.14 หรือใหม่กว่า');
+    } finally { exportLock.current=false;setExporting(false); }
   }
   return <main className="min-h-screen bg-slate-50 p-3 sm:p-6"><div className="mx-auto max-w-7xl space-y-4">
     <header className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-2xl font-bold">{view==='stock'?'สินค้าและสต๊อกปัจจุบัน':view==='sales'?'รายงานขายตามสินค้า / SKU':'รายงาน Retail แยก SKU / ตัวเลือก'}</h1>{!embedded&&<Button variant="outline" asChild><Link to="/retail/pos">กลับหน้าขาย</Link></Button>}</header>
@@ -32,7 +41,8 @@ export default function RetailSkuReportPage({view='all',embedded=false}:{view?:'
     {!online&&<p role="alert" className="bg-amber-100 p-3">ออฟไลน์ ข้อมูลที่แสดงอาจไม่เป็นปัจจุบัน</p>}
     {report.isError&&<p role="alert" className="bg-red-50 p-3">โหลดรายงานไม่ได้ ตรวจสิทธิ์และเลือกช่วงวันที่ไม่เกิน 367 วัน <Button variant="outline" disabled={!online} onClick={()=>void report.refetch()}>ลองใหม่</Button></p>}
     {report.isFetching&&<p role="status">กำลังโหลดรายงาน…</p>}
-    {report.data&&<><div className="flex flex-wrap items-center gap-3"><span>{report.data.total} SKU · อัปเดต {new Date(report.data.generated_at).toLocaleString("th-TH")}</span><Button variant="outline" disabled={!online||report.isFetching} onClick={()=>void report.refetch()}>รีเฟรช</Button><Button disabled={!online||report.isFetching||!report.data.rows.length} onClick={exportCsv}>ดาวน์โหลด CSV หน้านี้</Button></div>
+    {exportStatus&&<p role="status" className="rounded-xl border bg-white p-3">{exportStatus}</p>}
+    {report.data&&<><div className="flex flex-wrap items-center gap-3"><span>{report.data.total} SKU · อัปเดต {new Date(report.data.generated_at).toLocaleString("th-TH")}</span><Button variant="outline" disabled={!online||report.isFetching} onClick={()=>void report.refetch()}>รีเฟรช</Button><Button disabled={exporting||!online||report.isFetching||!report.data.rows.length} onClick={()=>void exportCsv()}>{exporting?'กำลังเตรียม CSV…':Capacitor.isNativePlatform()?'แชร์ CSV หน้านี้':'ดาวน์โหลด CSV หน้านี้'}</Button></div>
       {!report.data.rows.length?<p className="rounded-xl bg-white p-5">ไม่พบสินค้าตามคำค้นในสาขานี้</p>:<div className="max-w-full overflow-x-auto rounded-xl border bg-white"><table className="min-w-full text-sm"><thead className="bg-slate-100"><tr>{visibleColumns.map(([key,label])=><th key={key} className="whitespace-nowrap p-3 text-left">{label}</th>)}</tr></thead><tbody>{report.data.rows.map(r=><tr key={`${r.product_id}:${r.variant_id}`} className="border-t">{visibleColumns.map(([key])=><td key={key} className={`p-3 ${key==="sku"?"min-w-[170px] max-w-[200px] break-all font-mono text-xs":key==="product_name"?"min-w-[180px]":key==="variant_name"||key==="product_brand_name"?"min-w-[130px]":"whitespace-nowrap"}`}>{String(r[key]??"—")}{key==="product_name"&&!r.active&&<span className="block text-amber-700">ปิดใช้งาน</span>}</td>)}</tr>)}</tbody></table></div>}
       <div className="flex items-center gap-3"><Button variant="outline" disabled={page===1} onClick={()=>setPage(page-1)}>ก่อนหน้า</Button><span>หน้า {page} · สูงสุด 100 SKU ต่อหน้า</span><Button variant="outline" disabled={page*100>=report.data.total} onClick={()=>setPage(page+1)}>ถัดไป</Button></div></>}
   </div></main>;

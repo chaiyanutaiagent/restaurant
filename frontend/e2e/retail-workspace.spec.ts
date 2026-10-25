@@ -285,6 +285,41 @@ test("Retail phone flow retains cart, validates payment, blocks offline and surf
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
 });
 
+test("Retail payment shows only cash and manual transfer with immediate selection",async({page,context})=>{
+  const mock=await mobileCatalog(page);
+  await page.setViewportSize({width:390,height:844});
+  await page.goto("/retail/pos");
+  await page.getByTestId("pos-product-panel").getByRole("button",{name:/น้ำดื่มทดสอบมือถือ/}).click();
+  const footer=page.getByTestId("retail-mobile-footer");
+  await footer.getByRole("button").click();
+  await footer.getByRole("button").click();
+  const panel=page.getByTestId("pos-checkout-panel");
+  const transfer=panel.getByRole('button',{name:'โอน/สแกน',exact:true});
+  await expect(transfer).toBeEnabled();
+  for(const name of ['PromptPay','โอนเงิน','บัตรเครดิต','อื่นๆ']) {
+    await expect(panel.getByRole('button',{name,exact:true})).toHaveCount(0);
+  }
+  await expect(panel.getByRole('button',{name:/แยกชำระ/})).toHaveCount(0);
+  await transfer.click();
+  await expect(transfer).toHaveAttribute('aria-pressed','true');
+  await expect(panel.getByText(/ระบบไม่ได้ตรวจยอดธนาคารอัตโนมัติ/)).toBeVisible();
+  await expect(page.getByLabel('จำนวนเงินที่รับ',{exact:true})).toBeHidden();
+  await panel.getByPlaceholder('เลขอ้างอิงการโอน (ถ้ามี)').fill('TEST-TRANSFER');
+  const confirm=panel.getByRole('button',{name:/ยืนยันเงินโอนเข้าบัญชีแล้ว/});
+  await expect(confirm).toBeEnabled();
+  await context.setOffline(true);
+  await expect(confirm).toBeDisabled();
+  await context.setOffline(false);
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+  await expect(page.getByText('ชำระเงินไม่สำเร็จ',{exact:true})).toBeVisible();
+  expect(mock.sales).toHaveLength(1);
+  expect(mock.sales[0]).toMatchObject({payment_method:'bank_transfer',manual_transfer_confirmed:true,paid_amount:10,
+    payments:[{payment_method:'bank_transfer',amount:10,reference_no:'TEST-TRANSFER'}]});
+  await panel.getByRole('button',{name:'เงินสด',exact:true}).click();
+  await expect(page.getByLabel('จำนวนเงินที่รับ',{exact:true})).toBeVisible();
+});
+
 test("Retail small phone and tablet resize preserves cart and both desktop panels",async({page})=>{
   await mobileCatalog(page);
   await page.setViewportSize({width:320,height:740});
@@ -304,6 +339,68 @@ test("Retail small phone and tablet resize preserves cart and both desktop panel
   await expect(page.getByLabel("จำนวน น้ำดื่มทดสอบมือถือ",{exact:true})).toHaveValue("1");
   await page.getByRole("button",{name:"นำ น้ำดื่มทดสอบมือถือ ออกจากตะกร้า",exact:true}).click();
   await expect(footer.getByRole("button")).toBeDisabled();
+});
+
+test("Retail refreshes newly created products and received stock on return to sale without reload or cart loss",async({page})=>{
+  const {sales}=await mobileCatalog(page);
+  await page.addInitScript(()=>{
+    const auth=JSON.parse(localStorage.getItem('erp-auth')!);
+    auth.state.permissions.push('inventory.product.create','inventory.product.view','inventory.stock.adjust');
+    localStorage.setItem('erp-auth',JSON.stringify(auth));
+  });
+  const unitId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const added={id:unitId,company_id:companyId,brand_id:brandId,name:'ขนมเพิ่มใหม่',sku:'NEW-SNACK',barcode:'8851234567890',product_type:'simple',inventory_role:'store_local',selling_price:25,cost_price:10,vat_type:'included',vat_rate:7,is_active:true,is_for_sale:true,unit:{code:'PCS',name:'ชิ้น'},category_id:null};
+  let created=false,qty=0,posts=0,catalogReads=0;
+  await page.route('**/api/v1/units',route=>fulfill(route,[{id:unitId,name:'ชิ้น',is_active:true}]));
+  await page.route('**/api/v1/products?**',async route=>{
+    expect(new URL(route.request().url()).searchParams.get('catalog_scope')).toBe('retail_sale');
+    catalogReads++;
+    if(!created)return route.fallback();
+    return fulfill(route,[added],{total:1,page:1,limit:100});
+  });
+  await page.route('**/api/v1/stock/balances?**',route=>{
+    expect(new URL(route.request().url()).searchParams.get('branch_id')).toBe(branchId);
+    if(!created)return route.fallback();
+    return fulfill(route,[{id:unitId,product_id:added.id,branch_id:branchId,location_id:locationId,variant_id:null,qty_on_hand:qty,qty_available:qty,min_stock_qty:0}]);
+  });
+  await page.route('**/api/v1/products/retail/intake-lookup?**',route=>fulfill(route,{product:created?added:null}));
+  await page.route('**/api/v1/products/retail/intake',route=>{
+    posts++;const first=!created;created=true;if(!first)qty=3;
+    return fulfill(route,{product_id:added.id,name:added.name,created:first,qty_received:String(qty),replayed:false});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/retail/pos');
+  await page.getByTestId('pos-product-panel').getByRole('button',{name:/น้ำดื่มทดสอบมือถือ/}).click();
+  const footer=page.getByTestId('retail-mobile-footer');
+  await expect(footer).toContainText('ดูตะกร้า (1)');
+  const nav=page.getByRole('navigation',{name:'เมนูหลัก Retail'});
+  for(const receive of [false,true]){
+    await nav.getByRole('button',{name:'สินค้าและสต๊อก',exact:true}).click();
+    await page.getByRole('button',{name:receive?/^รับสต๊อกสินค้าเดิม/:/^เพิ่มสินค้า สแกน/}).click();
+    await page.getByLabel('บาร์โค้ดสินค้า',{exact:true}).fill(added.barcode);
+    await page.getByRole('button',{name:'ตรวจบาร์โค้ด',exact:true}).click();
+    if(!receive){
+      await page.getByLabel('ชื่อสินค้า',{exact:true}).fill(added.name);
+      await page.getByLabel('หน่วยสินค้า',{exact:true}).selectOption(unitId);
+      await page.getByLabel('ราคาขาย (บาท)',{exact:true}).fill('25');
+    }else{
+      await page.getByLabel('จำนวนรับเข้า',{exact:true}).fill('3');
+      await page.getByLabel('คลังรับสินค้า',{exact:true}).selectOption(locationId);
+    }
+    await page.getByRole('button',{name:receive?'ยืนยันรับสินค้าเดิมเพิ่ม':'บันทึกสินค้าและสต๊อก',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'บันทึกเรียบร้อย'})).toBeVisible();
+    const before=catalogReads;
+    page.once('dialog',dialog=>dialog.accept());
+    await nav.getByRole('button',{name:'ขาย',exact:true}).click();
+    const card=page.getByTestId('pos-product-panel').getByRole('button',{name:/ขนมเพิ่มใหม่/});
+    await expect(card).toBeVisible();
+    await expect(card.getByText(receive?'ใกล้หมด':'หมด',{exact:true})).toBeVisible();
+    expect(catalogReads).toBeGreaterThan(before);
+    await expect(page.getByPlaceholder('สแกนบาร์โค้ด / ค้นหาชื่อ / SKU')).toHaveValue('');
+    await expect(footer).toContainText('ดูตะกร้า (1)');
+    await expect(footer).toContainText('10.00');
+  }
+  expect(posts).toBe(2);expect(sales).toHaveLength(0);
 });
 
 test("Retail product workspace creates and displays an empty category without losing the mobile cart",async({page})=>{

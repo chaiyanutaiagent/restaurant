@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
 from app.models.audit import AuditLog
-from app.models.product import Product
+from app.models.product import Product, ProductImage, ProductVariant
 from app.models.retail_catalog import RetailProductBrand, RetailProductBrandLink
 from app.services.retail_intake_service import require_retail
 
@@ -46,6 +46,28 @@ async def brand_names(db, company_id, product_ids):
     ).where(RetailProductBrandLink.company_id == company_id, RetailProductBrand.company_id == company_id,
         RetailProductBrandLink.product_id.in_(product_ids), RetailProductBrand.deleted_at.is_(None)))
     return dict(rows.all())
+
+
+async def catalog_images(db, company_id, product_ids):
+    """Read old intake attachments without rewriting customer data."""
+    if not product_ids:
+        return {}
+    images = await db.scalars(select(ProductImage).where(
+        ProductImage.company_id == company_id, ProductImage.product_id.in_(product_ids),
+    ).order_by(ProductImage.is_primary.desc(), ProductImage.sort_order, ProductImage.created_at, ProductImage.id))
+    result = {}
+    for image in images:
+        result.setdefault(image.product_id, image.url)
+    missing = [identity for identity in product_ids if identity not in result]
+    if missing:
+        variants = await db.scalars(select(ProductVariant).where(
+            ProductVariant.company_id == company_id, ProductVariant.product_id.in_(missing),
+            ProductVariant.deleted_at.is_(None), ProductVariant.is_active.is_(True),
+            ProductVariant.image_url.is_not(None),
+        ).order_by(ProductVariant.sort_order, ProductVariant.created_at, ProductVariant.id))
+        for variant in variants:
+            result.setdefault(variant.product_id, variant.image_url)
+    return result
 
 
 async def parents(db, current, search):

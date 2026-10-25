@@ -132,10 +132,14 @@ def pricing_request_for_sale(data: CreateSaleRequest) -> PricingCalculateRequest
 
 
 def sale_request_hash(data: CreateSaleRequest) -> str:
+    excluded = {"approval_token", "price_override_approval_token"}
+    # Preserve pre-existing cash/provider idempotency hashes after adding this flag.
+    if not data.manual_transfer_confirmed:
+        excluded.add("manual_transfer_confirmed")
     return canonical_hash(
         data.model_dump(
             mode="json",
-            exclude={"approval_token", "price_override_approval_token"},
+            exclude=excluded,
             exclude_none=True,
         )
     )
@@ -1189,7 +1193,10 @@ class SaleService:
                         amount=q2(Decimal(payment.amount)),
                         reference_no=payment.reference_no,
                         currency="THB",
-                        settlement_state="settled" if payment.payment_method == "cash" else "unknown",
+                        settlement_state="settled" if (
+                            payment.payment_method == "cash"
+                            or (payment.payment_method == "bank_transfer" and data.manual_transfer_confirmed)
+                        ) else "unknown",
                         note=data.note,
                     )
                 )
@@ -1255,6 +1262,7 @@ class SaleService:
                     "total_amount": str(total_amount),
                     "discount_percentage": str(discount_percentage),
                     "pricing_calculation_hash": pricing.calculation_hash,
+                    "manual_transfer_confirmed": data.manual_transfer_confirmed,
                     "approval": (
                         approval_evidence.as_audit_value()
                         if approval_evidence is not None

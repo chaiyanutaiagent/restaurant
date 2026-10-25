@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-26",
+  "status": "deployed-to-UAT",
+  "source": "Scoped staged Retail working tree; not committed or pushed. Unrelated LINE OA excluded.",
+  "cause": "Capacitor Android camera chooser requires capture plus exact accept image/*; previous explicit MIME list selected file picker. IMAGE_CAPTURE package visibility query was also absent.",
+  "changes": [
+    "Separate photo capture and gallery buttons; native camera input uses image/* and environment capture",
+    "Retail Android manifest declares IMAGE_CAPTURE intent query so existing camera app can resolve",
+    "Existing camera permission flow retained; unsupported files and files above 5 MB still rejected",
+    "Preview and removal retained; inputs reset after selection to allow selecting same file again"
+  ],
+  "frontend_image": "restaurant-pos-frontend:uat-retail-photo-20261026-r1",
+  "backend_unchanged": "restaurant-pos-backend:uat-retail-payments-20261026-r1",
+  "web_entry": "assets/index-BNWgXy2E.js",
+  "apk": {
+    "version": "0.1.0-uat.13",
+    "versionCode": 10013,
+    "package": "com.foodchainservice.retail.uat",
+    "url": "https://uat-retail.foodchainservice.com/downloads/native-pos-0.1.0-uat.13/foodchainservice-retail-0.1.0-uat.13.apk",
+    "sha256": "04f9d962a41c72644b1fedcd5117c871a96932f7a3761e56d3d64bafa456760d",
+    "bytes": 4590723,
+    "signer_sha256": "acfe7c0638c1375ce6c041d53f99edac9467dfec64f7297ee07f3436704015b5"
+  },
+  "verification": {
+    "typescript": "passed",
+    "browser": "Focused mobile intake test passed: capture button launches correct input, image accepted and included in multipart save, mobile layout",
+    "build": "Web/Android build, Android unit tests and lint passed; merged manifest contains camera intent query",
+    "physical": "Actual Android camera launch, permission prompt and photo capture pending customer test"
+  },
+  "rollback_directory": "/home/behappyaiagent/restaurant-uat-deploy-backups/retail-workspace.t153Fc",
+  "previous_frontend": "restaurant-pos-frontend:uat-retail-csv-20261026-r1",
+  "install": "Install over existing Retail UAT; do not uninstall or clear app storage.",
+  "unchanged": ["Customer data", "Backend", "Database schema", "Restaurant/Takeaway APKs", "Production"]
+}

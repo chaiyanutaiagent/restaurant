@@ -151,6 +151,7 @@ class CreateSaleRequest(BaseSchema):
     payment_method: str
     payments: list[PaymentCreateRequest] = Field(default_factory=list)
     payment_reference: str | None = None
+    manual_transfer_confirmed: bool = False
     paid_amount: Decimal
     customer_name: str | None = None
     customer_phone: str | None = None

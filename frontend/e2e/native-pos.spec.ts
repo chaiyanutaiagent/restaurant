@@ -20,6 +20,35 @@ test('printer raster is split into bounded bands with one final feed and cut', a
   expect(result).toEqual({rows:[64,64,2],pixelCount:72*130,tail:[27,100,4,29,86,65,16]});
 });
 const product=process.env.FCS_POS_PRODUCT!;
+test('Retail native intake creates a unit inline and saves one option without backoffice', async ({page}) => {
+  test.skip(product!=='retail');
+  await mocks(page);await page.goto('/');await login(page);
+  await expect(page.getByRole('heading',{name:'ตั้งค่าเครื่องขาย'})).toBeVisible();
+  await page.evaluate(async ({token,company})=>{const path='/src/native-pos/session.ts';const s=await import(path);s.useAuthStore.getState().setSession(token,company);await s.flushNativeSession();},{token:tokens(false,true,['inventory.product.create','inventory.product.view']),company});
+  await page.route('**/api/v1/products/retail/intake-lookup**',r=>r.fulfill({json:{data:{product:null}}}));
+  const unitId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';let unitCreates=0;let body='';
+  await page.route('**/api/v1/units',r=>{
+    if(r.request().method()==='POST'){unitCreates++;return r.fulfill({status:201,json:{data:{...r.request().postDataJSON(),id:unitId}}});}
+    return r.fulfill({json:{data:[]}});
+  });
+  await page.route('**/api/v1/products/retail/intake',r=>{body=r.request().postData()??'';return r.fulfill({json:{data:{product_id:unitId,name:'เลย์',created:true,qty_received:'0'}}});});
+  await page.goto('/retail/products/scan');
+  await page.getByLabel('บาร์โค้ดสินค้า',{exact:true}).fill('8851234567890');
+  await page.getByRole('button',{name:'ตรวจบาร์โค้ด',exact:true}).click();
+  await page.getByLabel('ชื่อสินค้า',{exact:true}).fill('เลย์');
+  await page.getByLabel('รูปแบบสินค้า',{exact:true}).selectOption('variant');
+  await expect(page.getByLabel(/^ชื่อกลุ่มตัวเลือก/)).toHaveCount(0);
+  await page.getByLabel('ค่าตัวเลือก 1',{exact:true}).fill('ซาวครีม');
+  await page.getByRole('button',{name:'+ เพิ่มหน่วยสินค้า',exact:true}).click();
+  await page.getByLabel('ชื่อหน่วยสินค้าใหม่',{exact:true}).fill('ถุง');
+  await page.getByRole('button',{name:'บันทึกหน่วยและเลือกใช้',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByLabel('หน่วยสินค้า',{exact:true})).toHaveValue(unitId);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.getByRole('button',{name:'บันทึกสินค้าและสต๊อก',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'บันทึกเรียบร้อย'})).toBeVisible();
+  expect(unitCreates).toBe(1);expect(body).toContain('"attributes":{"แบบ":"ซาวครีม"}');expect(body).toContain('"unit_id":"'+unitId+'"');
+});
 const businessType=product==='retail'?'retail_pos':'restaurant';
 const origin=product==='retail'?'https://uat-retail.foodchainservice.com':'https://uat-pos.foodchainservice.com';
 const company='11111111-1111-4111-8111-111111111111';

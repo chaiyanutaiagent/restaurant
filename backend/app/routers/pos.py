@@ -411,11 +411,18 @@ def _enforce_retail_payment_readiness(
             branch_id=current.branch_id,
         )
     )
-    if methods != {"cash"} and not stripe_promptpay_ready:
+    # Manual shop-account transfers are cashier-confirmed, not provider-verified.
+    # Do not open card, mixed tender, or offline payment paths with this flag.
+    manual_transfer_ready = (
+        methods == {"bank_transfer"}
+        and payload.payment_method == "bank_transfer"
+        and payload.manual_transfer_confirmed
+    )
+    if methods != {"cash"} and not stripe_promptpay_ready and not manual_transfer_ready:
         raise pricing_error(
             status.HTTP_409_CONFLICT,
             "retail_provider_not_ready",
-            "Retail non-cash payment is disabled until Provider UAT and reconciliation are complete",
+            "Confirm receipt of a manual bank transfer; other provider payments require Provider UAT",
             payment_methods=sorted(methods),
         )
 

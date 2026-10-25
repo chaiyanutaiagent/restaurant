@@ -17,7 +17,7 @@ run('npx',['vite','build','--mode','native-uat','--config','vite.native-pos.conf
 run('npx',['cap','sync','android']);
 if(process.argv.includes('--apk')) {
   run('./gradlew',['assembleDebug','testDebugUnitTest','lintDebug'],path.join(frontend,`android-${product}`));
-  const revision=product==='retail'?7:6;
+  const revision=product==='retail'?14:6;
   const version=`0.1.0-uat.${revision}`;
   const apk=path.join(frontend,`android-${product}/app/build/outputs/apk/debug/app-debug.apk`);
   const sdk=process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;

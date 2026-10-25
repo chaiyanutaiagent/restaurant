@@ -1,6 +1,6 @@
-"""Revoke an explicitly linked UAT owner's Platform sessions on password reset.
+"""Explicit UAT-only link: one credential owner, two separately scoped profiles.
 
-No username-based linking and no Production identity linking are permitted.
+Never link accounts by username. Production retains fully separate identities.
 """
 from __future__ import annotations
 
@@ -13,7 +13,10 @@ from fastapi import HTTPException
 from sqlalchemy import update
 
 from app.config import settings
-from app.models.platform import PlatformOperator, PlatformSession
+from app.models.auth import RefreshToken
+from app.models.company import Company
+from app.models.platform import PlatformOperator, PlatformSession, SaasAccountCredential
+from app.models.user import User
 
 
 def owner_link() -> tuple[uuid.UUID, uuid.UUID] | None:
@@ -31,6 +34,24 @@ def owner_link() -> tuple[uuid.UUID, uuid.UUID] | None:
         raise HTTPException(503, "UAT owner identity configuration is invalid") from exc
 
 
+async def linked_owner_user(db, operator):
+    link = owner_link()
+    if link is None or operator.id != link[1]:
+        return None
+    user = await db.get(User, link[0])
+    company = await db.get(Company, user.company_id) if user else None
+    if (not operator.is_active or not user or not user.is_active
+            or user.deleted_at is not None or not user.is_superuser
+            or not company or not company.is_active):
+        raise HTTPException(401, "Owner identity is inactive")
+    return user
+
+
+async def platform_password_hash(db, operator):
+    user = await linked_owner_user(db, operator)
+    return user.hashed_password if user is not None else operator.hashed_password
+
+
 async def revoke_linked_platform_sessions(db, user, *, now=None):
     link = owner_link()
     if link is None or user.id != link[0]:
@@ -44,3 +65,20 @@ async def revoke_linked_platform_sessions(db, user, *, now=None):
         PlatformSession.operator_id == operator.id,
         PlatformSession.revoked_at.is_(None),
     ).values(revoked_at=operator.password_changed_at, revocation_reason="owner-password-changed"))
+
+
+async def change_linked_owner_password(db, operator, password_hash, now):
+    user = await linked_owner_user(db, operator)
+    if user is None:
+        return False
+    user.hashed_password = password_hash
+    user.password_changed_at = now
+    user.credential_version += 1
+    await db.execute(update(RefreshToken).where(
+        RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None),
+    ).values(revoked_at=now))
+    await db.execute(update(SaasAccountCredential).where(
+        SaasAccountCredential.owner_user_id == user.id,
+        SaasAccountCredential.used_at.is_(None),
+    ).values(used_at=now))
+    return True

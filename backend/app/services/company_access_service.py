@@ -21,6 +21,7 @@ from app.schemas.company_access import (
     CompanyTenantSessionRead,
 )
 from app.services.company_owner_policy import CompanyOwnerPolicy
+from app.services.uat_owner_identity import revoke_linked_platform_sessions
 
 
 HIGH_RISK_PERMISSIONS = {
@@ -57,6 +58,7 @@ async def invalidate_user_access(
 ) -> int:
     revoked_at = now or datetime.now(timezone.utc)
     user.credential_version = getattr(user, "credential_version", 1) + 1
+    await revoke_linked_platform_sessions(db, user, now=revoked_at)
     result = await db.execute(
         update(RefreshToken)
         .where(

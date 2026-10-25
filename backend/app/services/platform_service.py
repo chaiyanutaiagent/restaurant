@@ -72,6 +72,9 @@ from app.utils.platform_security import (
     matching_totp_step,
 )
 from app.utils.security import create_platform_access_token, decode_token, hash_password, verify_password
+from app.services.uat_owner_identity import (
+    platform_password_hash, linked_owner_user, change_linked_owner_password,
+)
 
 
 DEFAULT_FEATURE_FLAGS = {"restaurant": True, "retail_pos": False, "takeaway": False}
@@ -109,7 +112,7 @@ class PlatformAuthService:
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Platform login is temporarily locked",
             )
-        if operator is None or not verify_password(password, operator.hashed_password):
+        if operator is None or not verify_password(password, await platform_password_hash(self.db, operator)):
             await self._record_failed_login(operator, now)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -310,6 +313,7 @@ class PlatformAuthService:
                 detail="Platform operator credential is no longer valid",
             )
 
+        await linked_owner_user(self.db, operator)
         refresh_token = generate_opaque_credential()
         next_csrf_token = generate_opaque_credential()
         session.refresh_token_hash = hash_opaque_credential(refresh_token)
@@ -505,7 +509,7 @@ class PlatformAuthService:
         operator = await self._operator(operator_id)
         if (
             not operator.mfa_enabled
-            or not verify_password(password, operator.hashed_password)
+            or not verify_password(password, await platform_password_hash(self.db, operator))
             or not self._consume_mfa_code(operator, code)
         ):
             raise HTTPException(
@@ -544,7 +548,7 @@ class PlatformAuthService:
         mfa_code: str | None,
     ) -> None:
         operator = await self._operator(operator_id)
-        if not verify_password(current_password, operator.hashed_password):
+        if not verify_password(current_password, await platform_password_hash(self.db, operator)):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Current password is invalid",
@@ -556,8 +560,12 @@ class PlatformAuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="MFA verification failed",
             )
-        operator.hashed_password = hash_password(new_password)
-        operator.password_changed_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        password_hash = hash_password(new_password)
+        linked = await change_linked_owner_password(self.db, operator, password_hash, now)
+        if not linked:
+            operator.hashed_password = password_hash
+        operator.password_changed_at = now
         operator.credential_version += 1
         await self.db.execute(
             update(PlatformSession)

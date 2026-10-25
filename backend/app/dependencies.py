@@ -32,6 +32,7 @@ from app.services.business_context_service import (
 from app.services.staff_scope_policy import normalized_station_key
 from app.services.tenant_control_policy import TenantControlPolicy
 from app.services.platform_access_service import effective_platform_access, platform_environment
+from app.services.uat_owner_identity import linked_owner_user
 from app.utils.security import decode_token
 from app.services.mobile_store_policy import MOBILE_STORE_SURFACE, enforce_store_request, store_permissions
 
@@ -251,6 +252,7 @@ async def get_current_platform_operator(
             detail="Platform session is inactive or no longer exists",
         )
     operator, session = row
+    await linked_owner_user(db, operator)
     if operator.mfa_enabled and session.mfa_verified_at is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

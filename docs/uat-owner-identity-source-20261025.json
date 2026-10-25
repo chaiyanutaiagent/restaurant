@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-25",
+  "purpose": "Package the existing UAT owner identity bridge separately from unrelated work",
+  "behavior": [
+    "Use the explicitly mapped tenant owner's password for the linked platform operator",
+    "Check active company, active owner and superuser entitlement before platform access",
+    "Revoke linked platform sessions when the tenant owner's access is invalidated",
+    "Update the canonical owner credential and revoke its sessions when changing the linked platform password",
+    "Fail closed outside the permitted UAT environment or for incomplete identity mapping"
+  ],
+  "scripts": "scripts/uat-owner-identity contains historical one-shot preparation and consolidation scripts, not a routine deployment command. Do not rerun consolidation after The Loft migration; company membership has changed.",
+  "packaging_verification": "10 owner identity unit tests passed from the isolated Git-index snapshot, alongside password and Takeaway tests (22 total)",
+  "live_changes_this_packaging": {
+    "deployment": false,
+    "database_mutation": false,
+    "password_or_setup_link_rotation": false,
+    "production": false
+  }
+}
